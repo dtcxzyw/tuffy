@@ -43,14 +43,31 @@ The first milestone is `rustc_codegen_tuffy`, a codegen backend for rustc as an 
 - A single `int` type with infinite precision — no fixed bitwidth (no i8/i32/i64).
 - No overflow: arithmetic operations are mathematical (e.g., add is true addition).
 - Range constraints via assert nodes: e.g., `assertsext(val, 32)` constrains a value to the 32-bit signed range, producing poison if violated.
-- Signedness and minimum required bitwidth are derived at use sites.
 - `zext`/`sext`/`trunc` instructions are eliminated from the IR.
 - Bitwise operations (and/or/xor/shift) are also defined on infinite precision integers.
-- Instruction selection in the final stage derives concrete machine types from at-use analysis.
 
-**Representation form (under discussion):**
-- Candidates: SSA CFG, Sea of Nodes, E-graph, RVSDG
-- E-graph and Sea of Nodes may be better fits given the infinite precision integer model and formal verification goals
+**At-use bit-level analysis (encoded in IR):**
+- Each use edge carries bit-level annotations: which bits are demanded, and which bits are known to be 0 or 1.
+- UB constraints (from assert nodes, memory operations, ABI boundaries) propagate backward through the IR, refining known bits on upstream values.
+- This is analogous to LLVM's `KnownBits` and `DemandedBits` analyses, but promoted to first-class IR constructs rather than side analyses.
+- Follows the "analysis is also a transformation" principle: analysis results are encoded directly into the IR, not stored in external tables.
+- Instruction selection in the final stage derives concrete machine types from these at-use annotations.
+
+**Representation form:**
+- Hierarchical CFG with nested SESE regions. Loops and branches are explicitly represented as regions, not inferred from CFG back-edges.
+- Region internals use traditional SSA basic blocks with fixed instruction ordering.
+- Translation from rustc MIR requires control flow structuralization to recover nested regions from the flat CFG.
+- Enables early loop optimizations (vectorization, LICM, unrolling) by preserving loop structure in the IR.
+- Inspired by LLVM VPlan's hierarchical CFG and recipe-based transformation model.
+
+**Memory model:**
+- Abstract pointer model: pointer = allocation ID + offset, preserving full provenance.
+- Two ptr-to-int instructions with distinct semantics:
+  - `ptrtoint`: converts pointer to integer, capturing provenance. `inttoptr(ptrtoint(p))` is a safe roundtrip.
+  - `ptrtoaddr`: extracts only the address portion, discarding provenance.
+- Four-state byte representation: `Bits(u8) | PtrFragment(Pointer, n) | Uninit | Poison`. Each byte in memory is one of these states.
+- Uninitialized memory (`Uninit`) is a distinct abstract state, not "random bits". Any operation on uninit values is UB (produces poison).
+- Poison can exist at the byte level in memory, aligned with the per-byte poison tracking of the byte type.
 
 ### Testing Strategy
 
