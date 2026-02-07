@@ -3,12 +3,11 @@ An experimental optimizing compiler written by LLM
 
 > **Note:** This project is currently in an experimental stage. External pull requests are not accepted at this time.
 
-## Goals
+## Experiments
 
-Tuffy aims to be a production-grade, language-agnostic optimizing compiler backend.
+Tuffy explores several unconventional compiler design ideas:
 
-- **Multi-language backend** — Serve as a codegen backend for multiple programming languages, not just Rust
-- **Custom IR** — Design and implement a custom intermediate representation with optimization passes
-- **Multi-platform** — Support multiple target architectures from the ground up
-- **Balanced optimization** — Pursue both fast compilation and competitive runtime performance
-- **Formal verification** — Provide formal correctness guarantees for optimization passes
+- **Infinite precision integers** (idea by [inclyc](https://github.com/inclyc)) — The IR uses a single `int` type with no fixed bitwidth. Arithmetic operates on mathematical integers; signedness and minimum required bits are derived at use sites. This eliminates zext/sext/trunc noise and lets optimization passes focus on mathematical equivalence.
+- **Analysis is also a transformation** (idea by [inclyc](https://github.com/inclyc)) — Static analyses are not separate passes that feed information to optimizations. Instead, analyses are expressed as transformations on the IR itself, unifying the two and reducing phase ordering problems.
+- **Formal-first** — Correctness of optimization passes is backed by formal verification from the start, not bolted on after the fact. The IR semantics are designed to be amenable to automated reasoning.
+- **Hardware-friendly IR** — Explore IR representations that are more cache-friendly and suitable for modern hardware, reducing pointer chasing and improving data locality during compilation.
