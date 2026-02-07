@@ -8,7 +8,9 @@ When the user provides a common instruction or policy that applies broadly to fu
 
 ## Language Policy
 
-Always use English when editing files (code, comments, documentation). When interacting with the user, match the language they are using.
+**IMPORTANT:** When interacting with the user, you MUST match the language they are using. If the user writes in Chinese, respond in Chinese. If the user writes in English, respond in English.
+
+Always use English when editing files (code, comments, documentation).
 
 ## Project Overview
 
@@ -19,6 +21,20 @@ Tuffy is an experimental optimizing compiler written in Rust, developed with LLM
 Development uses VS Code dev containers built on `mcr.microsoft.com/devcontainers/rust:latest`. The container includes cmake, ninja-build, gdb/gdbserver, and mounts the workspace at `/tuffy`. Cargo cache is persisted via a Docker volume.
 
 To open the dev container, use the VS Code "Reopen in Container" command.
+
+## Commit Convention
+
+Use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) format:
+
+```
+<type>[optional scope]: <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+Common types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`. Append `!` before the colon for breaking changes.
 
 ## Build Commands
 
