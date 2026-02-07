@@ -133,6 +133,15 @@ Each transform pass declares whether it performs **equivalence-preserving** or *
 
 This declaration is manual, but the formal verification / proof framework can verify its correctness.
 
+### Other pipeline aspects
+
+The following aspects follow LLVM's established approach and are not novel to tuffy:
+
+- **Legalization**: progressive lowering of target-illegal operations to target-legal forms, following LLVM's legalization model.
+- **Pass manager**: pass registration, scheduling, and region-aware execution follow LLVM's new pass manager design.
+- **Interprocedural optimization**: inlining, cross-function analysis, and call graph management follow LLVM's approach.
+- **Verification passes**: IR invariant checks inserted between passes in debug builds, following LLVM's verifier model.
+
 ## Reference-level explanation
 
 ### Origin representation
