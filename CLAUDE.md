@@ -38,6 +38,8 @@ Use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) forma
 
 Common types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`. Append `!` before the colon for breaking changes.
 
+Commit messages must include a body explaining what was changed and why. Do not write title-only commits.
+
 ## Build Commands
 
 ```
@@ -62,6 +64,8 @@ Task documents must additionally include: title, task description, and affected 
 Templates are available for reference:
 - `docs/tasks/template.md` — task document template
 - `docs/RFCs/template.md` — RFC document template (based on Rust RFC format)
+
+When the user provides reference documents, categorize and add them to `docs/references.md`. Download a local copy to `scratch/` when possible. Each reference entry should include a brief summary of key conclusions and their relevance to tuffy.
 
 ## Architecture
 
