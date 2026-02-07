@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Maintaining CLAUDE.md
+
+When the user provides a common instruction or policy that applies broadly to future work in this repository, update this file to capture it. This ensures future sessions inherit the instruction without the user needing to repeat it.
+
 ## Language Policy
 
 Always use English when editing files (code, comments, documentation). When interacting with the user, match the language they are using.
@@ -28,6 +32,21 @@ cargo clippy             # Lint
 cargo fmt                # Format code
 ```
 
+## Documentation
+
+- `docs/tasks/` — task tracking documents
+- `docs/RFCs/` — design proposals and RFCs
+
+Documents are archived by year-month under their respective directories, written in Markdown. Each document must include: current status, created time, and completed time. Example path: `docs/tasks/202602/init.md`.
+
+Task documents must additionally include: title, task description, and affected modules (modules expected to be modified).
+
+Templates are available for reference:
+- `docs/tasks/template.md` — task document template
+- `docs/RFCs/template.md` — RFC document template (based on Rust RFC format)
+
 ## Architecture
 
 The project is in early stages. The Rust project structure (Cargo.toml, src/) has not yet been initialized.
+
+Source code architecture overviews are documented in the `README.md` within each component's directory.
