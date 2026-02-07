@@ -1,0 +1,388 @@
+# Feature Name: `tuffy_ir`
+
+- Status: Draft
+- Created: 2026-02-07
+- Completed: N/A
+
+## Summary
+
+This RFC defines the intermediate representation (IR) for the tuffy compiler. The IR uses a single data structure across all compilation stages with stage-dependent normalization, infinite precision integers with at-use bit-level analysis, a four-state byte memory model, and a hierarchical CFG with nested SESE regions.
+
+## Motivation
+
+Existing compiler IRs (LLVM IR, Cranelift CLIF) carry historical design baggage that limits optimization potential and complicates formal verification:
+
+- **Fixed-width integers** force premature commitment to bit widths, introducing zext/sext/trunc noise that obscures mathematical equivalences.
+- **undef/poison duality** in LLVM creates well-documented semantic confusion and miscompilation bugs. Approximately 18% of detected LLVM miscompilations stem from `undef` alone.
+- **Flat CFGs** lose structural information (loops, branches) that must be expensively recovered for high-level optimizations.
+- **Side-table analyses** (KnownBits, DemandedBits) are disconnected from the IR, creating phase ordering problems and stale analysis results.
+- **Multiple IR layers** (LLVM IR → SelectionDAG → MachineIR) require costly translations with potential information loss at each boundary.
+
+Tuffy's IR addresses these issues from first principles, designed for formal verification, efficient compilation, and clean semantics.
+
+## Guide-level explanation
+
+### Type system
+
+Tuffy IR has a minimal type system:
+
+- **`int`** — Infinite precision integer. No bit width, no signedness. Arithmetic is mathematical: `add(3, 5)` is `8`, period. There is no overflow.
+- **`b<N>`** — Byte type representing raw memory data, where N is a multiple of 8. Distinct from integers; preserves pointer fragments and per-byte poison tracking.
+- **`ptr<AS>`** — Pointer type carrying provenance (allocation ID + offset) in address space AS. Default address space is 0. Different address spaces may have different pointer sizes and semantics.
+- **`float`** / **`double`** — IEEE 754 floating point types.
+- **`vec<vscale x N x T>`** — Scalable vector type. `vscale` is a runtime constant determined by hardware; `N` is the minimum number of elements; `T` is the element type (`int`, `float`, `double`, `b<N>`, `ptr<AS>`). Fixed-width vectors are represented as `vscale=1` (e.g., `vec<1 x 4 x b32>` is a 128-bit fixed vector of 4 x 32-bit elements). When the element type is `int`, the actual vector width is unknown until instruction selection, since `int` has no fixed bit width; the element count is determined by the IR, but the physical vector register mapping is deferred.
+
+### Infinite precision integers
+
+Instead of `i32` or `i64`, all integer values are simply `int`. Range constraints are expressed via assert nodes:
+
+```
+%raw = load b32, ptr %p         // load 32 bits of raw bytes from memory
+%x = bytecast %raw to int       // cast to int, no sext/zext decision yet
+%y = add %x, 1                  // mathematical addition, no overflow
+assertsext(%y, 32)              // asserts %y fits in signed 32-bit range; poison if not
+%out = bytecast %y to b32       // cast back to bytes for storing
+store b32 %out, ptr %q
+```
+
+Loads always operate on byte types (`b<N>`). The byte type carries the bit width; integers do not. The decision of sign-extension vs zero-extension, and whether to use a GPR or FPR, is deferred entirely to instruction selection based on at-use analysis.
+
+There are no `zext`, `sext`, or `trunc` instructions. Bitwise operations (and, or, xor, shift) are defined on infinite precision integers.
+
+### At-use bit-level analysis
+
+Analysis results are encoded directly into the IR on use edges (not in side tables):
+
+- **Demanded bits**: which bits of a value are actually needed at each use site.
+- **Known bits**: which bits are provably 0 or 1, derived from UB backward propagation through assert nodes, memory operations, and ABI boundaries.
+
+This follows the "analysis is also a transformation" principle. When an analysis pass discovers that bits [8:31] of a value are always zero, this fact is recorded on the use edges in the IR itself.
+
+### Hierarchical CFG
+
+The IR uses a hierarchical control flow graph:
+
+```
+function @example(%arg: int) -> int {
+  region.loop {                    // loop is an explicit region
+    bb0:
+      %i = phi [0, bb0], [%i.next, bb1]
+      %cond = cmp.lt %i, %arg
+      br %cond, bb1, exit
+
+    bb1:
+      %i.next = add %i, 1
+      br bb0
+  }
+  exit:
+    ret %i
+}
+```
+
+Loops and branches are explicitly represented as nested SESE (Single-Entry Single-Exit) regions. Inside each region, instructions are organized in traditional SSA basic blocks with fixed ordering.
+
+### Memory model
+
+Pointers are abstract values with provenance:
+
+```
+%p = alloca int              // %p has provenance tied to this allocation
+%addr = ptrtoaddr %p         // extracts address only, discards provenance
+%bits = ptrtoint %p          // converts to integer, captures provenance
+%q = inttoptr %bits          // safe roundtrip: recovers provenance
+```
+
+Each byte in memory is one of four states:
+
+- **Bits(u8)**: a concrete byte value (0–255)
+- **PtrFragment(Pointer, n)**: the nth byte of an abstract pointer
+- **Uninit**: uninitialized memory (not "random bits"; a distinct abstract state)
+- **Poison**: a poisoned byte
+
+### Memory SSA
+
+Memory dependencies are encoded directly into the IR as Memory SSA (MemSSA). Each memory operation (load, store, call) carries a memory version token representing the memory state it depends on or produces.
+
+```
+%mem0 = entry_mem                    // initial memory state
+%mem1 = store b32 %v, ptr %p, %mem0 // store produces new memory version
+%raw = load b32, ptr %q, %mem1      // load depends on memory version
+```
+
+MemSSA supports progressive refinement: initially a conservative single memory chain, then split into finer-grained versions as alias analysis improves. This follows the "analysis is also a transformation" principle — memory dependency information lives in the IR, not in side tables.
+
+### Atomic operations
+
+Atomic memory operations are regular load/store/rmw/cmpxchg instructions annotated with a memory ordering:
+
+```
+%raw = load.atomic b32, ptr %p, ordering=acquire, %mem0
+%mem1 = store.atomic b32 %v, ptr %p, ordering=release, %mem0
+%old = rmw.add b32, ptr %p, %delta, ordering=seqcst, %mem0
+%res, %ok = cmpxchg b32, ptr %p, %expected, %desired, success=acqrel, failure=acquire, %mem0
+```
+
+Supported orderings: `relaxed`, `acquire`, `release`, `acqrel`, `seqcst`. Fence instructions are also supported as standalone operations.
+
+Atomic operations participate in MemSSA like any other memory operation, with ordering constraints restricting reordering during optimization.
+
+### UB model
+
+The IR uses only `poison` for undefined behavior. There is no `undef`.
+
+- Operations with UB (e.g., division by zero) produce `poison`.
+- Assert nodes (`assertsext`, `assertzext`) produce `poison` when the constraint is violated.
+- Any operation on `Uninit` memory produces `poison`.
+- `poison` propagates through computations but is only UB when "observed" (e.g., used as a branch condition, stored to observable memory).
+
+### Single data structure, multiple stages
+
+The IR uses one data structure throughout compilation. Different stages impose different normalization constraints:
+
+1. **High-level**: close to MIR translation, high-level operations allowed (e.g., aggregate operations, generic intrinsics).
+2. **Optimized**: after optimization passes, IR is normalized but still target-independent.
+3. **Legalized**: operations are lowered to target-legal forms (e.g., 64-bit multiply on 32-bit targets becomes a sequence of 32-bit operations).
+4. **Pre-emission**: fully scheduled, register-allocated, ready for machine code emission.
+
+No separate SDAG or MachineIR. The same graph structure is progressively constrained.
+
+## Reference-level explanation
+
+### Type system details
+
+| Type | Description |
+|------|-------------|
+| `int` | Infinite precision integer, no fixed bit width |
+| `b<N>` | Byte type, N must be a multiple of 8 |
+| `ptr` | Pointer with provenance (allocation ID + offset) |
+| `float` | IEEE 754 single precision |
+| `double` | IEEE 754 double precision |
+| `vec<vscale x N x T>` | Scalable vector, vscale is runtime constant, N is min element count, T is element type |
+
+### Integer operations
+
+All integer arithmetic operates on mathematical integers:
+
+| Operation | Semantics |
+|-----------|-----------|
+| `add %a, %b` | Mathematical addition |
+| `sub %a, %b` | Mathematical subtraction |
+| `mul %a, %b` | Mathematical multiplication |
+| `sdiv %a, %b` | Signed division (poison if %b == 0) |
+| `udiv %a, %b` | Unsigned division (poison if %b == 0) |
+| `and %a, %b` | Bitwise AND on infinite precision |
+| `or %a, %b` | Bitwise OR on infinite precision |
+| `xor %a, %b` | Bitwise XOR on infinite precision |
+| `shl %a, %b` | Left shift |
+| `lshr %a, %b` | Logical right shift |
+| `ashr %a, %b` | Arithmetic right shift |
+
+### Assert nodes
+
+| Node | Semantics |
+|------|-----------|
+| `assertsext(%v, N)` | Poison if %v is outside signed N-bit range [-2^(N-1), 2^(N-1)-1] |
+| `assertzext(%v, N)` | Poison if %v is outside unsigned N-bit range [0, 2^N-1] |
+
+### Pointer operations
+
+| Operation | Semantics |
+|-----------|-----------|
+| `ptrtoint %p` | Convert pointer to integer, capturing provenance |
+| `ptrtoaddr %p` | Extract address only, discard provenance |
+| `inttoptr %i` | Convert integer to pointer, recovering captured provenance |
+| `getelementptr %p, %offset` | Pointer arithmetic within an allocation |
+
+### Byte type operations
+
+| Operation | Semantics |
+|-----------|-----------|
+| `bytecast %v to b<N>` | Type-punning conversion between byte type and other types |
+| `load b<N>, ptr %p` | Load raw bytes from memory |
+| `store b<N> %v, ptr %p` | Store raw bytes to memory |
+
+### Vector operations
+
+All vector operations work on `vec<vscale x N x T>` types. A mask operand (`vec<vscale x N x int>`) is optional on most operations to support predicated execution (SVE/RVV style).
+
+**Elementwise arithmetic:**
+
+| Operation | Semantics |
+|-----------|-----------|
+| `vec.add %a, %b` | Elementwise addition |
+| `vec.sub %a, %b` | Elementwise subtraction |
+| `vec.mul %a, %b` | Elementwise multiplication |
+| `vec.sdiv %a, %b` | Elementwise signed division |
+| `vec.udiv %a, %b` | Elementwise unsigned division |
+| `vec.and %a, %b` | Elementwise bitwise AND |
+| `vec.or %a, %b` | Elementwise bitwise OR |
+| `vec.xor %a, %b` | Elementwise bitwise XOR |
+| `vec.shl %a, %b` | Elementwise left shift |
+| `vec.lshr %a, %b` | Elementwise logical right shift |
+| `vec.ashr %a, %b` | Elementwise arithmetic right shift |
+| `vec.fadd %a, %b` | Elementwise floating point addition |
+| `vec.fmul %a, %b` | Elementwise floating point multiplication |
+
+**Horizontal reductions:**
+
+| Operation | Semantics |
+|-----------|-----------|
+| `vec.reduce.add %v` | Sum all elements |
+| `vec.reduce.mul %v` | Multiply all elements |
+| `vec.reduce.smin %v` | Signed minimum across elements |
+| `vec.reduce.smax %v` | Signed maximum across elements |
+| `vec.reduce.umin %v` | Unsigned minimum across elements |
+| `vec.reduce.umax %v` | Unsigned maximum across elements |
+| `vec.reduce.and %v` | Bitwise AND across elements |
+| `vec.reduce.or %v` | Bitwise OR across elements |
+| `vec.reduce.xor %v` | Bitwise XOR across elements |
+| `vec.reduce.fadd %v` | Floating point sum (ordered or unordered via flag) |
+| `vec.reduce.fmin %v` | Floating point minimum across elements |
+| `vec.reduce.fmax %v` | Floating point maximum across elements |
+
+**Scatter/gather (indexed vector memory access):**
+
+| Operation | Semantics |
+|-----------|-----------|
+| `vec.gather %base, %indices, %mask, %mem` | Load elements from `base + indices[i]` for each lane where mask is true; produces vector + memory token |
+| `vec.scatter %v, %base, %indices, %mask, %mem` | Store elements to `base + indices[i]` for each lane where mask is true; produces memory token |
+
+**Masking/predication:**
+
+| Operation | Semantics |
+|-----------|-----------|
+| `vec.select %mask, %a, %b` | Per-lane select: `mask[i] ? a[i] : b[i]` |
+| `vec.compress %v, %mask` | Pack active lanes (mask=true) to front |
+| `vec.expand %v, %mask` | Scatter contiguous elements to active lanes |
+
+**Lane manipulation:**
+
+| Operation | Semantics |
+|-----------|-----------|
+| `vec.splat %scalar` | Broadcast scalar to all lanes |
+| `vec.extract %v, %idx` | Extract scalar from lane |
+| `vec.insert %v, %scalar, %idx` | Insert scalar into lane |
+| `vec.shuffle %a, %b, %indices` | Permute lanes from two vectors |
+
+**Contiguous vector memory access:**
+
+| Operation | Semantics |
+|-----------|-----------|
+| `vec.load %ptr, %mask, %mem` | Masked contiguous load |
+| `vec.store %v, %ptr, %mask, %mem` | Masked contiguous store |
+
+**Platform intrinsics:**
+
+Platform-specific intrinsics (e.g., `std::arch::x86_64::*`) support two modes, selectable via compiler flag or function-level attribute:
+
+- **Map mode** (default): recognized intrinsics are mapped to tuffy vector operations, enabling further optimization by the compiler.
+- **Passthrough mode**: intrinsics are preserved as opaque target-specific calls (`target.intrinsic "x86.avx2.add.ps" %a, %b`), emitted as-is during instruction selection. Suitable for hand-tuned SIMD code where the user wants exact instruction control.
+
+Unrecognized intrinsics always use passthrough mode.
+
+### Memory byte states
+
+Each byte in the abstract memory is represented as:
+
+```
+enum AbstractByte {
+    Bits(u8),                    // concrete value 0-255
+    PtrFragment(AllocId, usize), // nth byte of a pointer
+    Uninit,                      // uninitialized
+    Poison,                      // poisoned
+}
+```
+
+### Hierarchical CFG structure
+
+```
+enum CfgNode {
+    BasicBlock(Vec<Instruction>, Terminator),
+    Region(RegionKind, Vec<CfgNode>),
+}
+
+enum RegionKind {
+    Loop { header: BasicBlockId },
+    Branch { condition: Value, then_region: RegionId, else_region: RegionId },
+    Sequence,
+}
+```
+
+Regions are always SESE. Translation from rustc MIR requires control flow structuralization.
+
+### At-use annotations
+
+Each use edge carries:
+
+```
+struct UseAnnotation {
+    demanded_bits: BitSet,   // which bits are needed
+    known_zeros: BitSet,     // bits proven to be 0
+    known_ones: BitSet,      // bits proven to be 1
+}
+```
+
+These annotations are populated by analysis passes that transform the IR in-place, following the "analysis is also a transformation" principle.
+
+## Drawbacks
+
+- **Infinite precision integers** add complexity to instruction selection. The final stage must derive concrete bit widths from at-use annotations, which is a non-trivial analysis.
+- **Hierarchical CFG** requires control flow structuralization from MIR, which may introduce extra blocks for irreducible control flow.
+- **At-use annotations on every edge** increase memory footprint of the IR.
+- **Single data structure** means late-stage IR carries fields irrelevant to early stages and vice versa, potentially wasting memory.
+- **Novel design** means less existing tooling and literature to draw from compared to traditional SSA CFG.
+
+## Rationale and alternatives
+
+### Why infinite precision integers?
+
+Traditional fixed-width integers force every optimization pass to reason about overflow, bit widths, and sign extension. This creates a large surface area for bugs (LLVM's InstCombine is notoriously buggy) and obscures mathematical equivalences. Infinite precision eliminates this entire class of problems, deferring bit-width concerns to instruction selection where they belong.
+
+**Alternative: arbitrary-width integers (LLVM-style).** Rejected because they still require zext/sext/trunc and overflow reasoning in every pass.
+
+**Alternative: fixed set of widths (Cranelift-style).** Simpler but still carries the same fundamental problems.
+
+### Why hierarchical CFG?
+
+Flat CFGs lose loop structure, requiring expensive loop detection passes. Since tuffy aims to perform loop optimizations early, preserving this structure in the IR is essential.
+
+**Alternative: flat SSA CFG.** Rejected because loop detection is expensive and error-prone.
+
+**Alternative: Sea of Nodes.** Considered seriously. Advantages for strongly-typed languages (Cliff Click's arguments), but engineering complexity (scheduling, debugging, cache locality) outweighs benefits. V8's experience is cautionary even if their problems were partly JS-specific.
+
+**Alternative: E-graph.** Attractive for formal verification but immature for handling side effects and control flow at scale.
+
+### Why four-state bytes?
+
+The `Uninit` state (separate from `Poison`) correctly models uninitialized memory as an abstract concept rather than "random bits." The `PtrFragment` state preserves pointer provenance through byte-level memory operations like `memcpy`. `Poison` at the byte level enables per-byte poison tracking aligned with the byte type design.
+
+### Why ptrtoint captures provenance?
+
+This enables safe `inttoptr(ptrtoint(p))` roundtrips while `ptrtoaddr` provides a provenance-stripping alternative. This avoids the LLVM problem where three individually-correct optimizations produce wrong results when combined (Ralf Jung, 2020).
+
+## Prior art
+
+- **LLVM IR**: SSA CFG with fixed-width integers, undef/poison duality, flat CFG. Tuffy's IR addresses known LLVM pain points (undef removal, byte type, phase ordering).
+- **Cranelift CLIF**: Single IR with stage-dependent legalization. Tuffy adopts this "single data structure" approach but adds hierarchical CFG and infinite precision integers.
+- **LLVM VPlan**: Hierarchical CFG with SESE regions for vectorization. Inspires tuffy's region-based structure.
+- **V8 TurboFan / Turboshaft**: Sea of Nodes abandoned in favor of CFG after 10 years. Informs tuffy's decision to use SSA basic blocks inside regions.
+- **Cliff Click's Sea of Nodes**: Strong typing (Java, Rust) mitigates many of V8's problems. Tuffy acknowledges this but prioritizes engineering simplicity.
+- **Alive2**: Poison-only UB model, byte type proposal. Directly informs tuffy's UB and type design.
+- **Miri**: Abstract pointer model (allocation ID + offset), abstract byte representation. Informs tuffy's memory model.
+
+## Unresolved questions
+
+- **Floating point semantics**: How should NaN payloads and denormals be handled? Are there opportunities for infinite-precision-like simplification?
+- **SIMD/vector types**: How do vector operations fit into the type system and hierarchical CFG?
+- **Aggregate types**: Should structs/arrays exist in the IR or be fully decomposed into scalar operations?
+- **Exception handling**: How do Rust panics and unwinding interact with SESE regions?
+- **Concurrency model**: How are atomic operations and memory ordering represented?
+- **Exact at-use annotation format**: The bit-level annotation scheme needs detailed specification for variable-width values.
+
+## Future possibilities
+
+- **E-graph integration**: Equality saturation could be applied as an optimization strategy on subgraphs within the hierarchical CFG, without replacing the core IR representation.
+- **Superoptimizer**: The formal-first design and rewrite path tracing make it natural to integrate solver-based optimization discovery (Souper-style).
+- **Multi-language frontend**: The IR is designed to be language-agnostic. Future frontends for other languages can target the same IR.
+- **JIT compilation**: The single data structure with stage-dependent normalization could support a JIT mode that skips late-stage optimizations for faster compilation.
+- **Translation validation**: Rewrite path traces provide the foundation for end-to-end translation validation of the compilation pipeline.
