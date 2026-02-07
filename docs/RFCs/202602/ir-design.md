@@ -146,6 +146,26 @@ The IR uses one data structure throughout compilation. Different stages impose d
 
 No separate SDAG or MachineIR. The same graph structure is progressively constrained.
 
+### MIR translation
+
+Translation from rustc MIR to tuffy IR involves:
+
+- **Control flow structuralization**: attempt to normalize to natural loops and promote to SESE regions. Irreducible control flow is left as flat CFG within a region.
+- **mem2reg**: MIR uses mutable `Place` values (not pure SSA). A mem2reg pass promotes stack allocations to SSA values where possible.
+- **Drop/unwind**: Rust's drop glue and panic unwind edges are preserved in CFG form, not promoted to SESE regions. Unwind paths remain as explicit CFG edges.
+- **Aggregate scalarization**: structs, enums, arrays, and tuples are fully decomposed into scalar operations (analogous to LLVM's SROA). No aggregate types exist in tuffy IR.
+- **Type translation**: MIR fixed-width integers (`u8`, `i32`, `u64`, etc.) are translated to `int` with corresponding `assertzext`/`assertsext` constraints at definition points.
+
+### Machine code lowering
+
+Lowering from tuffy IR to machine code:
+
+- **ABI**: a dedicated ABI library maps `int` parameters/returns to concrete register classes and calling conventions based on the target triple.
+- **Stack frame layout**: derived from the target triple; alloca sizes are resolved after instruction selection determines concrete bit widths.
+- **Instruction selection**: at-use bit-level annotations determine concrete types; the instruction selector chooses sext/zext and GPR/FPR placement.
+- **Debug info**: DWARF generation follows LLVM's approach.
+- **Unwind tables**: exception handling table generation follows LLVM's approach.
+
 ## Reference-level explanation
 
 ### Type system details
