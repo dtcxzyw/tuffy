@@ -16,6 +16,8 @@ Always use English when editing files (code, comments, documentation).
 
 Tuffy is an experimental optimizing compiler written in Rust, developed with LLM assistance.
 
+Short-term goals and milestones belong in `docs/tasks/`, not in `README.md`. `README.md` should only contain long-term vision and project-level information.
+
 ## Development Environment
 
 Development uses VS Code dev containers built on `mcr.microsoft.com/devcontainers/rust:latest`. The container includes cmake, ninja-build, gdb/gdbserver, and mounts the workspace at `/tuffy`. Cargo cache is persisted via a Docker volume.
@@ -63,6 +65,8 @@ Templates are available for reference:
 
 ## Architecture
 
-The project is in early stages. The Rust project structure (Cargo.toml, src/) has not yet been initialized.
+The project is in the initial stage. The Rust project structure (Cargo.toml, src/) has not yet been initialized.
+
+Project-related design discussions should be synced to `docs/initial.md`.
 
 Source code architecture overviews are documented in the `README.md` within each component's directory.
