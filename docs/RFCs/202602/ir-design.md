@@ -356,9 +356,15 @@ These annotations are populated by analysis passes that transform the IR in-plac
 
 ### Why infinite precision integers?
 
-Traditional fixed-width integers force every optimization pass to reason about overflow, bit widths, and sign extension. This creates a large surface area for bugs (LLVM's InstCombine is notoriously buggy) and obscures mathematical equivalences. Infinite precision eliminates this entire class of problems, deferring bit-width concerns to instruction selection where they belong.
+Two equally important motivations:
 
-**Alternative: arbitrary-width integers (LLVM-style).** Rejected because they still require zext/sext/trunc and overflow reasoning in every pass.
+1. **Formal verification**: Infinite precision integers are mathematical integers — exactly what theorem provers (Lean 4, Mathlib) natively support. Rewrite rule proofs operate on standard integer arithmetic with induction, algebraic properties, and equivalences available out of the box. Fixed-width integers would require every proof to reason about overflow, wrapping semantics, and sign extension, dramatically increasing proof complexity.
+
+2. **Pattern recognition**: Source languages (especially C) introduce redundant integer conversions due to implicit promotion rules (e.g., C's integer promotion widens `char` and `short` to `int`). In LLVM IR, these become chains of zext/sext/trunc that obscure the underlying mathematical equivalence. Pattern matching in optimization passes fails to see through the conversion noise, causing missed optimizations. Infinite precision integers eliminate this noise entirely — the mathematical structure is directly visible in the IR.
+
+Together, these make both the proof side and the optimization side simpler and more effective.
+
+**Alternative: arbitrary-width integers (LLVM-style).** Rejected because they still require zext/sext/trunc and overflow reasoning in every pass and every proof.
 
 **Alternative: fixed set of widths (Cranelift-style).** Simpler but still carries the same fundamental problems.
 
