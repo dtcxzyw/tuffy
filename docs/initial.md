@@ -25,6 +25,32 @@ The first milestone is `rustc_codegen_tuffy`, a codegen backend for rustc as an 
 1. **Target platform**: Multi-platform architecture from the start, with x86-64 as the initial implementation target
 2. **Optimization direction**: Balance between compilation speed and runtime performance (not exclusively pursuing either)
 3. **IR design**: Custom IR — build our own intermediate representation, perform optimizations on it, then lower to machine code (rather than translating directly from rustc MIR)
+4. **IR interpreter**: Implement a tuffy IR interpreter for testing and validation, similar to Miri
+
+### IR Design
+
+**Structure:**
+- Single data structure for all stages — no separate SDAG/MIR like LLVM. Different stages have different normalization (legalization) constraints on the same IR, progressively lowering toward machine code.
+
+**UB model (following Alive2):**
+- Only `poison` — no `undef`. Simplifies semantics and avoids the well-known undef/poison confusion in LLVM.
+- Uninitialized memory is allowed at the memory level, but values are either concrete or poison.
+
+**Byte type (`b<N>`):**
+- Introduced from the start, based on the LLVM byte type RFC. Represents raw memory data distinct from integers, with per-byte poison tracking. Enables sound memcpy lowering and load merging.
+
+**Integer type:**
+- A single `int` type with infinite precision — no fixed bitwidth (no i8/i32/i64).
+- No overflow: arithmetic operations are mathematical (e.g., add is true addition).
+- Range constraints via assert nodes: e.g., `assertsext(val, 32)` constrains a value to the 32-bit signed range, producing poison if violated.
+- Signedness and minimum required bitwidth are derived at use sites.
+- `zext`/`sext`/`trunc` instructions are eliminated from the IR.
+- Bitwise operations (and/or/xor/shift) are also defined on infinite precision integers.
+- Instruction selection in the final stage derives concrete machine types from at-use analysis.
+
+**Representation form (under discussion):**
+- Candidates: SSA CFG, Sea of Nodes, E-graph, RVSDG
+- E-graph and Sea of Nodes may be better fits given the infinite precision integer model and formal verification goals
 
 ### Testing Strategy
 

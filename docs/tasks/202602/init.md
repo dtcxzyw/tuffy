@@ -15,6 +15,7 @@ Key goals:
 - Establish multi-platform target abstraction from the start
 - Define the custom IR skeleton (to be detailed in a follow-up RFC)
 - Ensure the backend can be loaded by rustc via `-Z codegen-backend`
+- Implement a tuffy IR interpreter for testing and validation, similar to Miri
 
 ## Affected Modules
 
