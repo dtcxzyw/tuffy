@@ -6,7 +6,7 @@
 
 ## Summary
 
-This RFC defines the compilation pipeline design for the tuffy compiler, focusing on three core constraints: value-level analysis encoded as IR transformations, automatic debug info preservation via origin chains, and automatic profiling info preservation with merging semantics.
+This RFC defines the compilation pipeline design for the tuffy compiler, focusing on four core aspects: value-level analysis encoded as IR transformations, automatic debug info preservation via origin chains, automatic profiling info preservation with merging semantics, and a hybrid pass ordering strategy with fine-grained user control.
 
 ## Motivation
 
@@ -84,6 +84,54 @@ MIR translation
 ```
 
 Value-level analysis passes can be scheduled at any point. Since they are transforms (they modify the IR), the pass manager treats them identically to optimization passes.
+
+### Pass ordering
+
+Tuffy uses a **hybrid** pass ordering strategy: a fixed high-level framework with local iteration, combined with fine-grained user control to prevent performance regressions.
+
+**High-level framework**: The pipeline has a fixed sequence of major phases (MIR translation → optimization → legalization → instruction selection → register allocation → emission). Within the optimization phase, passes are grouped into stages (e.g., early simplification, loop optimization, late cleanup), each stage iterating locally until the IR stabilizes or an iteration limit is reached.
+
+**User control granularity**:
+
+| Level | Mechanism | Example |
+|-------|-----------|---------|
+| Version lock | Pin entire pipeline to a versioned strategy | `--opt-policy=v1.2.3` |
+| Preset profile | Select a predefined pipeline | `-O2`, `-Os`, `-Ofast` |
+| Pass-level | Enable/disable individual passes | `--disable-pass=loop-unroll` |
+| Iteration control | Cap local iteration counts | `--max-instcombine-iterations=3` |
+| Function-level | Per-function attribute overrides | `#[tuffy::opt_policy("v1.2.3")]` |
+
+Function-level control enables mixed strategies within a single compilation unit:
+
+```
+#[tuffy::opt_policy("v1.2.3")]      // lock to specific version
+fn stable_hot_path() { ... }
+
+#[tuffy::opt_level("aggressive")]   // aggressive optimization
+fn compute_kernel() { ... }
+
+#[tuffy::opt_level("fast-compile")] // minimal passes, fast compilation
+fn cold_error_handler() { ... }
+```
+
+### Dirty bit mechanism
+
+Value-level analyses (KnownBits, DemandedBits, MemSSA) are scheduled **on demand** using a dirty bit protocol:
+
+1. When an optimization pass modifies an instruction, the infrastructure automatically marks affected use edges as **dirty**.
+2. When an optimization pass performs a **lossy transform** (refinement, not equivalence), downstream annotations are also marked dirty — the existing annotations may be overly precise and no longer sound.
+3. A subsequent pass that reads a dirty annotation triggers lazy recomputation on that annotation only. Clean annotations are never recomputed.
+
+This is incremental lazy evaluation: mark dirty on write, recompute on read.
+
+### Transform equivalence declaration
+
+Each transform pass declares whether it performs **equivalence-preserving** or **lossy** (refinement) transformations:
+
+- **Equivalence**: the transform preserves all semantic properties (e.g., strength reduction `mul %x, 2` → `shl %x, 1`). Existing value-level annotations remain sound; no dirty marking needed beyond modified instructions.
+- **Lossy refinement**: the transform narrows behavior (e.g., range narrowing, speculative execution). Downstream annotations may be invalidated and must be marked dirty.
+
+This declaration is manual, but the formal verification / proof framework can verify its correctness.
 
 ## Reference-level explanation
 
@@ -163,11 +211,99 @@ fn run_known_bits_analysis(func: &mut Function) {
 
 This is registered in the pass manager as a regular transform pass. The pass manager does not distinguish it from an optimization pass.
 
+### Dirty bit protocol
+
+Each use-edge annotation carries a dirty flag:
+
+```
+struct UseAnnotation {
+    demanded_bits: BitSet,
+    known_zeros: BitSet,
+    known_ones: BitSet,
+    dirty: bool,
+}
+```
+
+The infrastructure manages dirty flags automatically:
+
+```
+impl Function {
+    /// Called by infrastructure when an instruction is modified
+    fn mark_uses_dirty(&mut self, inst: InstructionId) {
+        for use_edge in self.uses_of(inst) {
+            use_edge.annotation.dirty = true;
+        }
+    }
+
+    /// Called by infrastructure for lossy transforms
+    fn mark_downstream_dirty(&mut self, inst: InstructionId) {
+        // Transitively marks all downstream use edges dirty
+        let mut worklist = vec![inst];
+        while let Some(id) = worklist.pop() {
+            for user in self.users_of(id) {
+                for use_edge in self.uses_of(user) {
+                    if !use_edge.annotation.dirty {
+                        use_edge.annotation.dirty = true;
+                        worklist.push(user);
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+### Transform equivalence declaration
+
+Each pass declares its transform category via a trait:
+
+```
+enum TransformKind {
+    Equivalence,
+    Refinement,
+}
+
+trait Pass {
+    fn name(&self) -> &str;
+    fn transform_kind(&self) -> TransformKind;
+    fn run(&self, func: &mut Function);
+}
+```
+
+The pass manager uses `transform_kind()` to determine dirty propagation scope after each pass runs. The proof framework can verify that a pass declared as `Equivalence` does not perform lossy transforms.
+
+### Pass ordering configuration
+
+Pipeline configuration is a serializable data structure:
+
+```
+struct PipelineConfig {
+    version: String,
+    stages: Vec<Stage>,
+}
+
+struct Stage {
+    name: String,
+    passes: Vec<PassConfig>,
+    max_iterations: u32,
+}
+
+struct PassConfig {
+    name: String,
+    enabled: bool,
+    params: HashMap<String, String>,
+}
+```
+
+Users can export, modify, and lock pipeline configurations. Function-level attributes override the global config for specific functions.
+
 ## Drawbacks
 
 - **Origin overhead**: Every instruction carries an origin reference. For single-origin instructions this is one `InstructionId` (typically 4 bytes), but merged instructions allocate. In practice, most instructions have single origins, so the overhead is modest.
 - **Debug info derivation cost**: Computing debug info on demand (rather than storing it per-instruction) adds cost at debug info emission time. This is acceptable because debug info emission happens once at the end of compilation.
 - **Profile merging heuristics**: Automatically merging profile data during transforms may produce inaccurate estimates. However, this is no worse than the status quo (where profile data is often silently dropped), and the merged data is still useful for code generation heuristics.
+- **Dirty bit propagation cost**: Lossy transforms trigger transitive downstream dirty marking, which in the worst case touches a large portion of the IR. In practice, most transforms are equivalence-preserving, limiting the frequency of transitive propagation.
+- **Transform declaration burden**: Pass authors must correctly declare equivalence vs refinement. Incorrect declarations compromise soundness (under-marking) or efficiency (over-marking). The proof framework mitigates this but adds verification overhead.
 
 ## Rationale and alternatives
 
@@ -197,8 +333,9 @@ Profile data is inherently approximate (sampled, potentially stale). Merging dur
 ## Unresolved questions
 
 - **Origin chain compression**: Long optimization pipelines may create deep origin chains. Should origins be transitively compressed (point directly to the original MIR instruction) or kept as a full chain?
-- **Pass ordering strategy**: How should the pass manager decide when to schedule value-level analysis passes? Fixed schedule, or demand-driven?
 - **Profile data merging policy**: What specific merging rules apply for different transform types (block merging, loop unrolling, function inlining)?
+- **Dirty bit granularity**: Should dirty marking be per-use-edge (current design) or per-instruction? Per-instruction is coarser but cheaper to maintain.
+- **Pipeline config format**: What serialization format for pipeline configurations? TOML, JSON, or a custom DSL?
 
 ## Future possibilities
 
