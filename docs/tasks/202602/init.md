@@ -16,6 +16,7 @@ Key goals:
 - Define the custom IR skeleton (to be detailed in a follow-up RFC)
 - Ensure the backend can be loaded by rustc via `-Z codegen-backend`
 - Implement a tuffy IR interpreter for testing and validation, similar to Miri
+- Support rewrite path tracing (optional, enabled via compiler flag): each IR transformation should emit a trace recording the optimization proof (correctness justification) and heuristic decisions made. Must impose minimal overhead when disabled.
 
 ## Affected Modules
 
