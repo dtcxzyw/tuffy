@@ -1,4 +1,11 @@
 from mcr.microsoft.com/devcontainers/rust:latest
 
 RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
-    && apt-get -y install --no-install-recommends build-essential
+    && apt-get -y install --no-install-recommends \
+       build-essential \
+       cmake \
+       ninja-build \
+       gdb \
+       gdbserver \
+       vim \
+       tmux
