@@ -44,7 +44,7 @@ Common types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build
 
 Commit messages must include a body explaining what was changed and why. Do not write title-only commits.
 
-Before committing, ensure `cargo test`, `cargo clippy`, and `tests/run-ui-tests.sh` pass without errors.
+Before committing, ensure `cargo test` and `cargo clippy` pass without errors. `tests/run-ui-tests.sh` is only run in CI — do not run it before committing.
 
 Changes to different components must be committed separately. Each individual commit must pass all existing tests (`cargo test`, `cargo clippy`, `tests/run-ui-tests.sh`). Do not bundle unrelated component changes into a single commit.
 
