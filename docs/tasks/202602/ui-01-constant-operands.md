@@ -1,8 +1,8 @@
 # Support Constant Operands in MIR Translation
 
-- Status: Draft
+- Status: Completed
 - Created: 2026-02-08
-- Completed: N/A
+- Completed: 2026-02-08
 - Parent: docs/tasks/202602/ui-tests.md
 
 ## Description
