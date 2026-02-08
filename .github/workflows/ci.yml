@@ -34,6 +34,41 @@ jobs:
       - name: Test
         run: cargo test --all-targets --all-features
 
+  ui-tests:
+    name: UI Tests
+    runs-on: ubuntu-latest
+    needs: rust
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustc-dev, llvm-tools-preview
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            rustc_codegen_tuffy/target
+          key: ${{ runner.os }}-cargo-ui-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build codegen backend (release)
+        run: cd rustc_codegen_tuffy && cargo build --release
+
+      - name: Clone rustc UI tests
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/rust-lang/rust.git scratch/rust
+          cd scratch/rust && git sparse-checkout set tests/ui
+
+      - name: Run UI tests
+        run: |
+          chmod +x tests/run-ui-tests.sh
+          tests/run-ui-tests.sh
+
   lean:
     name: Lean 4 CI
     runs-on: ubuntu-latest
