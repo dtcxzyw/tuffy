@@ -46,6 +46,8 @@ Commit messages must include a body explaining what was changed and why. Do not 
 
 Before committing, ensure `cargo test`, `cargo clippy`, and `tests/run-ui-tests.sh` pass without errors.
 
+Changes to different components must be committed separately. Each individual commit must pass all existing tests (`cargo test`, `cargo clippy`, `tests/run-ui-tests.sh`). Do not bundle unrelated component changes into a single commit.
+
 Automatically decide when to commit based on logical units of work. Do not ask the user for permission to commit — just commit when a coherent change is complete.
 
 ## Build Commands
@@ -85,6 +87,10 @@ Templates are available for reference:
 - `docs/RFCs/template.md` — RFC document template (based on Rust RFC format)
 
 When the user provides reference documents, categorize and add them to `docs/references.md`. Download a local copy to `scratch/` when possible. Each reference entry should include a brief summary of key conclusions and their relevance to tuffy.
+
+## Tool Output Policy
+
+When outputting content using tools, output in multiple smaller segments rather than one large block. Avoid writing excessively large amounts of content in a single tool call.
 
 ## Architecture
 
