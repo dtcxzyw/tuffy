@@ -39,6 +39,7 @@ Key design principles:
   - [Comparison](#comparison)
   - [Value Annotations](#value-annotations)
   - [Memory Operations](#memory-operations)
+  - [Atomic Operations](#atomic-operations)
   - [Type Conversion](#type-conversion)
   - [Pointer Operations](#pointer-operations)
   - [Function Calls](#function-calls)
@@ -495,6 +496,83 @@ vN = stack_slot <bytes>
 
 Allocate `bytes` bytes on the stack. Returns a `ptr(0)` to the allocated memory.
 
+### Atomic Operations
+
+Atomic operations provide thread-safe memory access with explicit memory ordering
+constraints. The formal semantics in Lean define sequential-only behavior; a formal
+concurrency model (e.g., based on C11) is TBD.
+
+#### Enumerations
+
+**MemoryOrdering** — memory ordering constraints for atomic operations:
+
+| Ordering | Description |
+|----------|-------------|
+| `relaxed` | No ordering constraints |
+| `acquire` | Subsequent reads see writes from the releasing thread |
+| `release` | Prior writes are visible to the acquiring thread |
+| `acqrel` | Combined acquire + release |
+| `seqcst` | Sequentially consistent total order |
+
+**AtomicRmwOp** — read-modify-write operation kinds:
+
+| Op | Description |
+|----|-------------|
+| `xchg` | Exchange (swap) |
+| `add` | Integer addition |
+| `sub` | Integer subtraction |
+| `and` | Bitwise AND |
+| `or` | Bitwise OR |
+| `xor` | Bitwise XOR |
+
+#### `load.atomic`
+
+```
+vN = load.atomic.<ordering> vPtr
+```
+
+Atomic load from pointer `vPtr` with the specified memory ordering.
+**Semantics**: Sequentially equivalent to `evalLoad`.
+
+#### `store.atomic`
+
+```
+store.atomic.<ordering> vVal, vPtr
+```
+
+Atomic store of `vVal` to pointer `vPtr` with the specified memory ordering.
+Does not produce a meaningful result value.
+**Semantics**: Sequentially equivalent to `evalStore`.
+
+#### `rmw`
+
+```
+vN = rmw.<op>.<ordering> vPtr, vVal
+```
+
+Atomic read-modify-write. Atomically reads the value at `vPtr`, applies `<op>`
+with `vVal`, writes the result back, and returns the original value.
+
+#### `cmpxchg`
+
+```
+vN = cmpxchg.<success_ord>.<failure_ord> vPtr, vExpected, vDesired
+```
+
+Atomic compare-and-exchange. Atomically compares the value at `vPtr` with
+`vExpected`; if equal, writes `vDesired`. Returns the old value regardless of
+success. The caller uses `icmp` to determine whether the exchange succeeded.
+`<success_ord>` applies on successful exchange; `<failure_ord>` applies on failure.
+
+#### `fence`
+
+```
+fence.<ordering>
+```
+
+Memory fence. Establishes ordering constraints without accessing memory.
+Does not produce a meaningful result value.
+
 ### Type Conversion
 
 #### `bitcast`
@@ -741,8 +819,10 @@ operations, enabling progressive refinement as alias analysis improves.
 
 ### Atomic Operations
 
-Atomic load/store/rmw/cmpxchg with memory ordering annotations (`relaxed`, `acquire`,
-`release`, `acqrel`, `seqcst`). Fence instructions as standalone operations.
+Atomic operations (`load.atomic`, `store.atomic`, `rmw`, `cmpxchg`, `fence`) are
+implemented with `MemoryOrdering` and `AtomicRmwOp` enumerations. See
+[Atomic Operations](#atomic-operations). The formal concurrency model is TBD — current
+Lean semantics define sequential behavior only.
 
 ### Control Flow Structuralization
 
