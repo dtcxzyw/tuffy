@@ -211,6 +211,23 @@ fn fmt_inst(
         Op::Bitcast(src) => format!("{v} = bitcast {}", ctx.fmt_operand(src)),
         Op::Sext(src, bits) => format!("{v} = sext {}, {bits}", ctx.fmt_operand(src)),
         Op::Zext(src, bits) => format!("{v} = zext {}, {bits}", ctx.fmt_operand(src)),
+        Op::PtrAdd(ptr, offset) => {
+            format!(
+                "{v} = ptradd {}, {}",
+                ctx.fmt_operand(ptr),
+                ctx.fmt_operand(offset)
+            )
+        }
+        Op::PtrDiff(a, b) => {
+            format!(
+                "{v} = ptrdiff {}, {}",
+                ctx.fmt_operand(a),
+                ctx.fmt_operand(b)
+            )
+        }
+        Op::PtrToInt(ptr) => format!("{v} = ptrtoint {}", ctx.fmt_operand(ptr)),
+        Op::PtrToAddr(ptr) => format!("{v} = ptrtoaddr {}", ctx.fmt_operand(ptr)),
+        Op::IntToPtr(val) => format!("{v} = inttoptr {}", ctx.fmt_operand(val)),
         Op::Ret(val) => match val {
             Some(o) => format!("ret {}", ctx.fmt_operand(o)),
             None => "ret".to_string(),

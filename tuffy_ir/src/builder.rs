@@ -337,6 +337,39 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::Zext(val, bits), Type::Int, origin, None)
     }
 
+    // ── Pointer operations ──
+
+    /// Pointer addition (preserves provenance).
+    pub fn ptradd(
+        &mut self,
+        ptr: Operand,
+        offset: Operand,
+        addr_space: u32,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::PtrAdd(ptr, offset), Type::Ptr(addr_space), origin, None)
+    }
+
+    /// Pointer difference (same allocation).
+    pub fn ptrdiff(&mut self, a: Operand, b: Operand, origin: Origin) -> ValueRef {
+        self.push_inst(Op::PtrDiff(a, b), Type::Int, origin, None)
+    }
+
+    /// Pointer to integer with provenance capture.
+    pub fn ptrtoint(&mut self, ptr: Operand, origin: Origin) -> ValueRef {
+        self.push_inst(Op::PtrToInt(ptr), Type::Int, origin, None)
+    }
+
+    /// Pointer to address (discard provenance).
+    pub fn ptrtoaddr(&mut self, ptr: Operand, origin: Origin) -> ValueRef {
+        self.push_inst(Op::PtrToAddr(ptr), Type::Int, origin, None)
+    }
+
+    /// Integer to pointer (no valid provenance).
+    pub fn inttoptr(&mut self, val: Operand, addr_space: u32, origin: Origin) -> ValueRef {
+        self.push_inst(Op::IntToPtr(val), Type::Ptr(addr_space), origin, None)
+    }
+
     // ── Terminators ──
 
     /// Return from function.

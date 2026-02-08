@@ -135,6 +135,18 @@ pub enum Op {
     /// Zero-extend to n bits (for lowering).
     Zext(Operand, u32),
 
+    // -- Pointer operations --
+    /// Pointer addition: ptradd ptr, offset → ptr (preserves provenance).
+    PtrAdd(Operand, Operand),
+    /// Pointer difference: ptrdiff ptr_a, ptr_b → int (same allocation).
+    PtrDiff(Operand, Operand),
+    /// Pointer to integer with provenance capture.
+    PtrToInt(Operand),
+    /// Pointer to address (discard provenance).
+    PtrToAddr(Operand),
+    /// Integer to pointer (no valid provenance).
+    IntToPtr(Operand),
+
     // -- Terminators (by convention, placed last in a basic block) --
     /// Return value from function.
     Ret(Option<Operand>),

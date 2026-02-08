@@ -342,3 +342,75 @@ fn display_division_ops() {
          }"
     );
 }
+
+#[test]
+fn build_ptradd() {
+    let mut func = Function::new(
+        "ptr_arith",
+        vec![Type::Ptr(0), Type::Int],
+        vec![],
+        Some(Type::Ptr(0)),
+        None,
+    );
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+    let entry = builder.create_block();
+    builder.switch_to_block(entry);
+
+    let ptr = builder.param(0, Type::Ptr(0), None, Origin::synthetic());
+    let off = builder.param(1, Type::Int, None, Origin::synthetic());
+    let result = builder.ptradd(ptr.into(), off.into(), 0, Origin::synthetic());
+    builder.ret(Some(result.into()), Origin::synthetic());
+    builder.exit_region();
+
+    assert_eq!(func.instructions.len(), 4);
+    assert!(matches!(func.instructions[2].op, Op::PtrAdd(_, _)));
+    assert_eq!(func.instructions[2].ty, Type::Ptr(0));
+}
+
+#[test]
+fn display_pointer_ops() {
+    let mut func = Function::new(
+        "ptr_ops",
+        vec![Type::Ptr(0), Type::Ptr(0), Type::Int],
+        vec![],
+        Some(Type::Int),
+        None,
+    );
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+    let entry = builder.create_block();
+    builder.switch_to_block(entry);
+
+    let p1 = builder.param(0, Type::Ptr(0), None, Origin::synthetic());
+    let p2 = builder.param(1, Type::Ptr(0), None, Origin::synthetic());
+    let i = builder.param(2, Type::Int, None, Origin::synthetic());
+    let _pa = builder.ptradd(p1.into(), i.into(), 0, Origin::synthetic());
+    let _pd = builder.ptrdiff(p1.into(), p2.into(), Origin::synthetic());
+    let _pi = builder.ptrtoint(p1.into(), Origin::synthetic());
+    let _addr = builder.ptrtoaddr(p2.into(), Origin::synthetic());
+    let _ip = builder.inttoptr(i.into(), 0, Origin::synthetic());
+    builder.ret(Some(_pi.into()), Origin::synthetic());
+    builder.exit_region();
+
+    let output = format!("{func}");
+    assert_eq!(
+        output,
+        "func @ptr_ops(ptr, ptr, int) -> int {\n\
+         \x20\x20bb0:\n\
+         \x20\x20\x20\x20v0 = param 0\n\
+         \x20\x20\x20\x20v1 = param 1\n\
+         \x20\x20\x20\x20v2 = param 2\n\
+         \x20\x20\x20\x20v3 = ptradd v0, v2\n\
+         \x20\x20\x20\x20v4 = ptrdiff v0, v1\n\
+         \x20\x20\x20\x20v5 = ptrtoint v0\n\
+         \x20\x20\x20\x20v6 = ptrtoaddr v1\n\
+         \x20\x20\x20\x20v7 = inttoptr v2\n\
+         \x20\x20\x20\x20ret v5\n\
+         }"
+    );
+}
