@@ -61,14 +61,16 @@ Each rule specifies:
 
 The development workflow for a new optimization:
 
-1. **Define the rewrite rule** in the declarative format
-2. **Prove correctness in Lean 4** against the formal IR semantics
-3. **Generate Rust code** from the verified rule via codegen
+1. **Define the rewrite rule and prove correctness in Lean 4** — the rule definition and its proof live together in the same Lean file, against the formal IR semantics. This ensures the proof and the rule are always consistent.
+2. **Lean exports declarative transform description** — Lean generates a machine-readable description (JSON) of the verified rule, including pattern, replacement, preconditions, and transform kind.
+3. **Codegen generator produces Rust code** from the exported description via codegen.
 4. **Generated code** uses the builder API (origin, dirty bit handled automatically by Rust type system)
 5. **Alive2-style verifier** cross-checks the rule for additional confidence
 6. **Fuzzer** exercises the rule on diverse inputs
 
 Steps 1–3 are mandatory. Steps 5–6 are recommended but not gating.
+
+The key insight: by having Lean own both the rule definition and the proof, there is no possibility of the proof and the implementation diverging. The codegen generator only reads what Lean exports.
 
 ### Trust boundary
 
