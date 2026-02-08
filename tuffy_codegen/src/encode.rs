@@ -13,17 +13,36 @@ struct JumpFixup {
     target_label: u32,
 }
 
+/// A relocation for an external symbol reference (e.g., CALL).
+#[derive(Debug, Clone)]
+pub struct Relocation {
+    /// Byte offset in the code buffer where the rel32 displacement starts.
+    pub offset: usize,
+    /// The symbol name this relocation targets.
+    pub symbol: String,
+}
+
+/// Result of encoding a function.
+pub struct EncodeResult {
+    /// Encoded machine code bytes.
+    pub code: Vec<u8>,
+    /// Relocations for external symbol references.
+    pub relocations: Vec<Relocation>,
+}
+
 /// Encode a sequence of machine instructions into bytes.
 ///
 /// Uses a two-pass approach: first pass emits code with placeholder jump
 /// offsets, second pass patches the actual relative displacements.
-pub fn encode_function(insts: &[MInst]) -> Vec<u8> {
+/// External call relocations are returned separately for the ELF emitter.
+pub fn encode_function(insts: &[MInst]) -> EncodeResult {
     let mut buf = Vec::new();
     let mut labels: HashMap<u32, usize> = HashMap::new();
     let mut fixups: Vec<JumpFixup> = Vec::new();
+    let mut relocations: Vec<Relocation> = Vec::new();
 
     for inst in insts {
-        encode_inst(inst, &mut buf, &mut labels, &mut fixups);
+        encode_inst(inst, &mut buf, &mut labels, &mut fixups, &mut relocations);
     }
 
     // Patch jump offsets.
@@ -35,7 +54,10 @@ pub fn encode_function(insts: &[MInst]) -> Vec<u8> {
         buf[fixup.patch_offset..fixup.patch_offset + 4].copy_from_slice(&bytes);
     }
 
-    buf
+    EncodeResult {
+        code: buf,
+        relocations,
+    }
 }
 
 fn encode_inst(
@@ -43,6 +65,7 @@ fn encode_inst(
     buf: &mut Vec<u8>,
     labels: &mut HashMap<u32, usize>,
     fixups: &mut Vec<JumpFixup>,
+    relocations: &mut Vec<Relocation>,
 ) {
     match inst {
         MInst::MovRR { size, dst, src } => encode_mov_rr(*size, *dst, *src, buf),
@@ -55,34 +78,51 @@ fn encode_inst(
             labels.insert(*id, buf.len());
         }
         MInst::Jmp { target } => {
-            // JMP rel32: 0xE9 cd
             buf.push(0xe9);
             fixups.push(JumpFixup {
                 patch_offset: buf.len(),
                 target_label: *target,
             });
-            buf.extend_from_slice(&[0; 4]); // placeholder
+            buf.extend_from_slice(&[0; 4]);
         }
         MInst::Jcc { cc, target } => {
-            // Jcc rel32: 0x0F 0x80+cc cd
             buf.push(0x0f);
             buf.push(0x80 + cc.encoding());
             fixups.push(JumpFixup {
                 patch_offset: buf.len(),
                 target_label: *target,
             });
-            buf.extend_from_slice(&[0; 4]); // placeholder
+            buf.extend_from_slice(&[0; 4]);
         }
         MInst::CmpRR { size, src1, src2 } => {
-            // CMP r/m, r: 0x39 /r (src2 is reg field, src1 is rm field)
             emit_rex_and_opcode(*size, *src2, *src1, 0x39, buf);
         }
         MInst::CmpRI { size, src, imm } => {
             encode_cmp_ri(*size, *src, *imm, buf);
         }
         MInst::TestRR { size, src1, src2 } => {
-            // TEST r/m, r: 0x85 /r (src2 is reg field, src1 is rm field)
             emit_rex_and_opcode(*size, *src2, *src1, 0x85, buf);
+        }
+        MInst::CallSym { name } => {
+            // CALL rel32: 0xE8 cd
+            buf.push(0xe8);
+            relocations.push(Relocation {
+                offset: buf.len(),
+                symbol: name.clone(),
+            });
+            buf.extend_from_slice(&[0; 4]); // placeholder for linker
+        }
+        MInst::Push { reg } => {
+            encode_push(*reg, buf);
+        }
+        MInst::Pop { reg } => {
+            encode_pop(*reg, buf);
+        }
+        MInst::SubSPI { imm } => {
+            encode_rsp_imm(0xe8, *imm, buf); // SUB rsp, imm32
+        }
+        MInst::AddSPI { imm } => {
+            encode_rsp_imm(0xc0, *imm, buf); // ADD rsp, imm32
         }
     }
 }
@@ -156,5 +196,30 @@ fn encode_cmp_ri(size: OpSize, src: Gpr, imm: i32, buf: &mut Vec<u8>) {
     }
     buf.push(0x81);
     buf.push(modrm(7, src.encoding()));
+    buf.extend_from_slice(&imm.to_le_bytes());
+}
+
+fn encode_push(reg: Gpr, buf: &mut Vec<u8>) {
+    // PUSH r64: 0x50+rd (REX.B if extended register)
+    if reg.needs_rex() {
+        buf.push(0x41);
+    }
+    buf.push(0x50 + reg.encoding());
+}
+
+fn encode_pop(reg: Gpr, buf: &mut Vec<u8>) {
+    // POP r64: 0x58+rd (REX.B if extended register)
+    if reg.needs_rex() {
+        buf.push(0x41);
+    }
+    buf.push(0x58 + reg.encoding());
+}
+
+fn encode_rsp_imm(modrm_byte: u8, imm: i32, buf: &mut Vec<u8>) {
+    // REX.W + 0x81 /0 id (ADD) or /5 id (SUB) with rsp as rm
+    // modrm_byte: 0xc0 for ADD rsp, 0xe8 for SUB rsp
+    buf.push(0x48); // REX.W
+    buf.push(0x81);
+    buf.push(modrm_byte);
     buf.extend_from_slice(&imm.to_le_bytes());
 }

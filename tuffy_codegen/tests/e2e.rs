@@ -3,6 +3,8 @@
 use std::fs;
 use std::process::Command;
 
+use std::collections::HashMap;
+
 use tuffy_codegen::{emit, encode, isel};
 use tuffy_ir::builder::Builder;
 use tuffy_ir::function::{Function, RegionKind};
@@ -46,9 +48,10 @@ fn build_add_func() -> Function {
 
 fn compile_add_func() -> Vec<u8> {
     let func = build_add_func();
-    let result = isel::isel(&func).expect("isel should succeed for add");
-    let code = encode::encode_function(&result.insts);
-    emit::emit_elf(&result.name, &code)
+    let no_calls = HashMap::new();
+    let result = isel::isel(&func, &no_calls).expect("isel should succeed for add");
+    let enc = encode::encode_function(&result.insts);
+    emit::emit_elf(&result.name, &enc.code, &enc.relocations)
 }
 
 #[test]

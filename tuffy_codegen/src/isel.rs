@@ -1,5 +1,7 @@
 //! Instruction selection: lower tuffy IR to x86-64 machine instructions.
 
+use std::collections::HashMap;
+
 use tuffy_ir::function::{CfgNode, Function};
 use tuffy_ir::instruction::{ICmpOp, Op};
 use tuffy_ir::value::ValueRef;
@@ -63,7 +65,7 @@ const ARG_REGS: [Gpr; 6] = [Gpr::Rdi, Gpr::Rsi, Gpr::Rdx, Gpr::Rcx, Gpr::R8, Gpr
 /// machine instructions for each block.
 ///
 /// Returns None if the function contains unsupported IR ops.
-pub fn isel(func: &Function) -> Option<IselResult> {
+pub fn isel(func: &Function, call_targets: &HashMap<u32, String>) -> Option<IselResult> {
     let mut out = Vec::new();
     let mut regs = RegMap::new(func.instructions.len());
     let mut cmps = CmpMap::new(func.instructions.len());
@@ -75,7 +77,7 @@ pub fn isel(func: &Function) -> Option<IselResult> {
                 id: block_ref.index(),
             });
             for (vref, inst) in func.block_insts_with_values(*block_ref) {
-                select_inst(vref, &inst.op, &mut regs, &mut cmps, &mut out)?;
+                select_inst(vref, &inst.op, &mut regs, &mut cmps, call_targets, &mut out)?;
             }
         }
     }
@@ -91,6 +93,7 @@ fn select_inst(
     op: &Op,
     regs: &mut RegMap,
     cmps: &mut CmpMap,
+    call_targets: &HashMap<u32, String>,
     out: &mut Vec<MInst>,
 ) -> Option<()> {
     match op {
@@ -177,11 +180,36 @@ fn select_inst(
             out.push(MInst::Ret);
         }
 
+        Op::Call(_callee, args) => {
+            // Move arguments into System V ABI registers.
+            for (i, arg) in args.iter().enumerate() {
+                if i >= ARG_REGS.len() {
+                    // Stack args not yet supported.
+                    return None;
+                }
+                let src = regs.get(arg.value);
+                let dst = ARG_REGS[i];
+                if src != dst {
+                    out.push(MInst::MovRR {
+                        size: OpSize::S32,
+                        dst,
+                        src,
+                    });
+                }
+            }
+
+            // Look up the symbol name from call_targets.
+            let sym = call_targets.get(&vref.index())?;
+            out.push(MInst::CallSym { name: sym.clone() });
+
+            // Result is in rax per System V ABI.
+            regs.assign(vref, Gpr::Rax);
+        }
+
         // Ops not yet supported in isel
         Op::Load(_)
         | Op::Store(..)
         | Op::StackSlot(_)
-        | Op::Call(..)
         | Op::Bitcast(_)
         | Op::Sext(..)
         | Op::Zext(..)
