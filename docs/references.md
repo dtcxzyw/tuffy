@@ -5,6 +5,7 @@ A curated list of reference documents and resources for the tuffy project.
 ## Compiler Optimization
 
 - [Future Directions for Optimizing Compilers](https://arxiv.org/abs/1809.02161) — Nuno P. Lopes, John Regehr, 2018. Discusses challenges in making optimizing compilers faster, less buggy, and more capable.
+- [Cranelift: Using E-Graphs for Verified, Cooperating Middle-End Optimizations](https://github.com/bytecodealliance/rfcs/blob/main/accepted/cranelift-egraph.md) ([local](../scratch/cranelift-egraph.md)) — Chris Fallin, Bytecode Alliance. Proposes acyclic e-graphs (aegraphs) as a unified middle-end optimization framework for Cranelift, replacing separate GVN/LICM/constant-folding passes. Key ideas: pure nodes float above a side-effect skeleton (the original CFG), scoped elaboration naturally subsumes GVN and LICM, and ISLE-based declarative rewrite rules enable verifiable optimizations. Directly relevant to tuffy's declarative rewrite rules and "analysis is also a transformation" design.
 
 ## IR Design and Semantics
 
