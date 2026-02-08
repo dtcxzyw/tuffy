@@ -42,6 +42,8 @@ Commit messages must include a body explaining what was changed and why. Do not 
 
 Before committing, ensure `cargo test` and `cargo clippy` pass without errors.
 
+Automatically decide when to commit based on logical units of work. Do not ask the user for permission to commit — just commit when a coherent change is complete.
+
 ## Build Commands
 
 ```
