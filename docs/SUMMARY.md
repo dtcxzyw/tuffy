@@ -16,3 +16,8 @@
   - [Interpreter](RFCs/202602/interpreter.md)
   - [Rewrite Trace](RFCs/202602/rewrite-trace.md)
   - [Verification](RFCs/202602/verification.md)
+
+---
+
+- [SOPs]()
+  - [Modifying the IR](SOPs/ir-change.md)
