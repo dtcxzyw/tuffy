@@ -1,16 +1,16 @@
-//! Minimal MIR → tuffy IR translation.
+//! MIR → tuffy IR translation.
 //!
-//! Only handles the subset needed for:
-//!   fn add(a: i32, b: i32) -> i32 { a + b }
+//! Translates rustc MIR into tuffy IR, supporting basic arithmetic,
+//! control flow (branches, SwitchInt), and comparison operations.
 
-use rustc_middle::mir::{self, BinOp, Operand, Rvalue, StatementKind, TerminatorKind};
+use rustc_middle::mir::{self, BasicBlock, BinOp, Operand, Rvalue, StatementKind, TerminatorKind};
 use rustc_middle::ty::{self, Instance, TyCtxt};
 
 use tuffy_ir::builder::Builder;
 use tuffy_ir::function::{Function, RegionKind};
-use tuffy_ir::instruction::Origin;
+use tuffy_ir::instruction::{ICmpOp, Origin};
 use tuffy_ir::types::{Annotation, Type};
-use tuffy_ir::value::ValueRef;
+use tuffy_ir::value::{BlockRef, ValueRef};
 
 /// Translate a single MIR function instance to tuffy IR.
 pub fn translate_function<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> Option<Function> {
@@ -49,11 +49,31 @@ pub fn translate_function<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> 
     let root = builder.create_region(RegionKind::Function);
     builder.enter_region(root);
 
-    let entry = builder.create_block();
-    builder.switch_to_block(entry);
+    // Create IR blocks for all MIR basic blocks upfront so branches can
+    // reference target blocks before they are translated.
+    let mut block_map = BlockMap::new(mir.basic_blocks.len());
+    for (bb, _) in mir.basic_blocks.iter_enumerated() {
+        let ir_block = builder.create_block();
+        block_map.set(bb, ir_block);
+    }
 
+    // Emit params into the entry block.
+    let entry = block_map.get(BasicBlock::from_u32(0));
+    builder.switch_to_block(entry);
     translate_params(mir, &mut builder, &mut locals);
-    translate_body(mir, &mut builder, &mut locals);
+
+    // Translate each basic block.
+    for (bb, bb_data) in mir.basic_blocks.iter_enumerated() {
+        let ir_block = block_map.get(bb);
+        builder.switch_to_block(ir_block);
+
+        for stmt in &bb_data.statements {
+            translate_statement(stmt, &mut builder, &mut locals);
+        }
+        if let Some(ref term) = bb_data.terminator {
+            translate_terminator(term, &mut builder, &mut locals, &block_map);
+        }
+    }
 
     builder.exit_region();
 
@@ -105,14 +125,24 @@ fn translate_params(mir: &mir::Body<'_>, builder: &mut Builder<'_>, locals: &mut
     }
 }
 
-fn translate_body(mir: &mir::Body<'_>, builder: &mut Builder<'_>, locals: &mut LocalMap) {
-    for (_bb_idx, bb_data) in mir.basic_blocks.iter_enumerated() {
-        for stmt in &bb_data.statements {
-            translate_statement(stmt, builder, locals);
+/// Map from MIR BasicBlock to IR BlockRef.
+struct BlockMap {
+    blocks: Vec<Option<BlockRef>>,
+}
+
+impl BlockMap {
+    fn new(count: usize) -> Self {
+        Self {
+            blocks: vec![None; count],
         }
-        if let Some(ref term) = bb_data.terminator {
-            translate_terminator(term, builder, locals);
-        }
+    }
+
+    fn set(&mut self, bb: BasicBlock, block: BlockRef) {
+        self.blocks[bb.as_usize()] = Some(block);
+    }
+
+    fn get(&self, bb: BasicBlock) -> BlockRef {
+        self.blocks[bb.as_usize()].expect("block not mapped")
     }
 }
 
@@ -138,6 +168,7 @@ fn translate_terminator(
     term: &mir::Terminator<'_>,
     builder: &mut Builder<'_>,
     locals: &mut LocalMap,
+    block_map: &BlockMap,
 ) {
     match &term.kind {
         TerminatorKind::Return => {
@@ -145,8 +176,92 @@ fn translate_terminator(
             let val = locals.values[ret_local.as_usize()];
             builder.ret(val.map(|v| v.into()), Origin::synthetic());
         }
-        TerminatorKind::Goto { .. } => {}
+        TerminatorKind::Goto { target } => {
+            let target_block = block_map.get(*target);
+            builder.br(target_block, vec![], Origin::synthetic());
+        }
+        TerminatorKind::SwitchInt { discr, targets } => {
+            translate_switch_int(discr, targets, builder, locals, block_map);
+        }
+        TerminatorKind::Assert {
+            cond,
+            expected,
+            target,
+            ..
+        } => {
+            // Assert: if cond != expected, panic. For now, just branch to
+            // the success target unconditionally (we'll add panic support later).
+            let _ = (cond, expected);
+            let target_block = block_map.get(*target);
+            builder.br(target_block, vec![], Origin::synthetic());
+        }
+        TerminatorKind::Unreachable => {
+            // Emit a trap-like return for now.
+            builder.ret(None, Origin::synthetic());
+        }
         _ => {}
+    }
+}
+
+fn translate_switch_int(
+    discr: &Operand<'_>,
+    targets: &mir::SwitchTargets,
+    builder: &mut Builder<'_>,
+    locals: &mut LocalMap,
+    block_map: &BlockMap,
+) {
+    let discr_val = match translate_operand(discr, builder, locals) {
+        Some(v) => v,
+        None => return,
+    };
+
+    let all_targets: Vec<_> = targets.iter().collect();
+    let otherwise = targets.otherwise();
+
+    if all_targets.len() == 1 {
+        // Two-way branch: compare discriminant with the single value.
+        let (test_val, target_bb) = all_targets[0];
+        let const_val = builder.iconst(test_val as i64, Origin::synthetic());
+        let cmp = builder.icmp(
+            ICmpOp::Eq,
+            discr_val.into(),
+            const_val.into(),
+            Origin::synthetic(),
+        );
+        let then_block = block_map.get(target_bb);
+        let else_block = block_map.get(otherwise);
+        builder.brif(
+            cmp.into(),
+            then_block,
+            vec![],
+            else_block,
+            vec![],
+            Origin::synthetic(),
+        );
+    } else {
+        // Multi-way: chain of brif comparisons, fallthrough to otherwise.
+        for (test_val, target_bb) in &all_targets {
+            let const_val = builder.iconst(*test_val as i64, Origin::synthetic());
+            let cmp = builder.icmp(
+                ICmpOp::Eq,
+                discr_val.into(),
+                const_val.into(),
+                Origin::synthetic(),
+            );
+            let then_block = block_map.get(*target_bb);
+            let otherwise_block = block_map.get(otherwise);
+            builder.brif(
+                cmp.into(),
+                then_block,
+                vec![],
+                otherwise_block,
+                vec![],
+                Origin::synthetic(),
+            );
+        }
+        // Final fallthrough to otherwise.
+        let otherwise_block = block_map.get(otherwise);
+        builder.br(otherwise_block, vec![], Origin::synthetic());
     }
 }
 
@@ -169,6 +284,12 @@ fn translate_rvalue(
                 BinOp::Mul | BinOp::MulWithOverflow => {
                     builder.mul(l.into(), r.into(), None, Origin::synthetic())
                 }
+                BinOp::Eq => builder.icmp(ICmpOp::Eq, l.into(), r.into(), Origin::synthetic()),
+                BinOp::Ne => builder.icmp(ICmpOp::Ne, l.into(), r.into(), Origin::synthetic()),
+                BinOp::Lt => builder.icmp(ICmpOp::Slt, l.into(), r.into(), Origin::synthetic()),
+                BinOp::Le => builder.icmp(ICmpOp::Sle, l.into(), r.into(), Origin::synthetic()),
+                BinOp::Gt => builder.icmp(ICmpOp::Sgt, l.into(), r.into(), Origin::synthetic()),
+                BinOp::Ge => builder.icmp(ICmpOp::Sge, l.into(), r.into(), Origin::synthetic()),
                 _ => return None,
             };
             Some(val)
