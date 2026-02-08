@@ -16,6 +16,7 @@
   - [Interpreter](RFCs/202602/interpreter.md)
   - [Rewrite Trace](RFCs/202602/rewrite-trace.md)
   - [Verification](RFCs/202602/verification.md)
+  - [At-Use Annotations](RFCs/202602/at-use-annotations.md)
 
 ---
 
