@@ -26,6 +26,7 @@ The first milestone is `rustc_codegen_tuffy`, a codegen backend for rustc as an 
 2. **Optimization direction**: Balance between compilation speed and runtime performance (not exclusively pursuing either)
 3. **IR design**: Custom IR — build our own intermediate representation, perform optimizations on it, then lower to machine code (rather than translating directly from rustc MIR)
 4. **IR interpreter**: Implement a tuffy IR interpreter for testing and validation, similar to Miri
+5. **Backend strategy**: Implement `rustc_codegen_ssa` traits to reuse existing MIR lowering code (~10,000 lines). Builder generates tuffy IR instead of LLVM IR. Same approach as `rustc_codegen_cranelift`. May switch to direct MIR traversal later if more control is needed.
 
 ### IR Design
 
