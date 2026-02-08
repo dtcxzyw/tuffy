@@ -117,4 +117,35 @@ def applyAnnotation (v : Int) (ann : Annotation) : Value :=
   | .signed n => checkSignedRange v n
   | .unsigned n => checkUnsignedRange v n
 
+-- Memory load/store semantics
+
+/-- Load `size` bytes from memory starting at address `addr`.
+    Returns a `bytes` value containing the loaded abstract bytes. -/
+def evalLoad (mem : Memory) (addr : Int) (size : Nat) : Value :=
+  .bytes (List.ofFn (fun (i : Fin size) => mem.bytes (addr + i.val)))
+
+/-- Store a list of abstract bytes to memory starting at address `addr`.
+    Returns the updated memory. -/
+def evalStore (mem : Memory) (addr : Int) (bs : List AbstractByte) : Memory :=
+  { bytes := fun a =>
+      let offset := a - addr
+      if 0 ≤ offset ∧ offset < bs.length then
+        List.getD bs offset.toNat .uninit
+      else mem.bytes a }
+
+-- Atomic operation semantics (sequential model)
+-- NOTE: These define sequential semantics only. A formal concurrency model
+-- (e.g., based on C11 or a custom weak memory model) is TBD. Memory ordering
+-- parameters are accepted but have no effect in this sequential model.
+
+/-- Atomic load: sequentially equivalent to a regular load. -/
+def evalLoadAtomic (mem : Memory) (addr : Int) (size : Nat)
+    (_ordering : MemoryOrdering) : Value :=
+  evalLoad mem addr size
+
+/-- Atomic store: sequentially equivalent to a regular store. -/
+def evalStoreAtomic (mem : Memory) (addr : Int) (bs : List AbstractByte)
+    (_ordering : MemoryOrdering) : Memory :=
+  evalStore mem addr bs
+
 end TuffyLean.IR

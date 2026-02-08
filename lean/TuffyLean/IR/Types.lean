@@ -47,4 +47,27 @@ inductive Value where
   | poison
   deriving Repr
 
+/-- Memory: a map from addresses to abstract bytes -/
+structure Memory where
+  bytes : Int → AbstractByte
+
+/-- Memory ordering for atomic operations -/
+inductive MemoryOrdering where
+  | relaxed
+  | acquire
+  | release
+  | acqrel
+  | seqcst
+  deriving DecidableEq, Repr
+
+/-- Atomic read-modify-write operation kinds -/
+inductive AtomicRmwOp where
+  | xchg
+  | add
+  | sub
+  | and
+  | or
+  | xor
+  deriving DecidableEq, Repr
+
 end TuffyLean.IR
