@@ -2,12 +2,12 @@
 //!
 //! Output format:
 //! ```text
-//! func @name(int, int) -> int {
-//!   region function {
-//!     bb0(v0: int, v1: int):
-//!       v2 = add v0, v1
-//!       ret v2
-//!   }
+//! func @name(int:s32, int:s32) -> int:s32 {
+//!   bb0:
+//!     v0:s32 = param 0
+//!     v1:s32 = param 1
+//!     v2:s32 = add v0:s32, v1:s32
+//!     ret v2:s32
 //! }
 //! ```
 
@@ -15,8 +15,8 @@ use std::collections::HashMap;
 use std::fmt;
 
 use crate::function::{CfgNode, Function, RegionKind};
-use crate::instruction::{ICmpOp, Op};
-use crate::types::Type;
+use crate::instruction::{ICmpOp, Op, Operand};
+use crate::types::{Annotation, FloatType, Type};
 use crate::value::{BlockRef, RegionRef, ValueRef};
 
 /// Display context that tracks value numbering.
@@ -52,11 +52,26 @@ impl DisplayCtx {
         format!("v{}", self.name(vref))
     }
 
-    /// Format a comma-separated list of values.
-    fn fmt_vals(&self, vrefs: &[ValueRef]) -> String {
-        vrefs
-            .iter()
-            .map(|v| self.fmt_val(*v))
+    /// Format a value with an optional result-side annotation as "vN:s32".
+    fn fmt_val_ann(&self, vref: ValueRef, ann: &Option<Annotation>) -> String {
+        match ann {
+            Some(a) => format!("v{}{}", self.name(vref), fmt_annotation(a)),
+            None => format!("v{}", self.name(vref)),
+        }
+    }
+
+    /// Format an operand (value + optional use-side annotation).
+    fn fmt_operand(&self, op: &Operand) -> String {
+        match &op.annotation {
+            Some(a) => format!("v{}{}", self.name(op.value), fmt_annotation(a)),
+            None => format!("v{}", self.name(op.value)),
+        }
+    }
+
+    /// Format a comma-separated list of operands.
+    fn fmt_operands(&self, ops: &[Operand]) -> String {
+        ops.iter()
+            .map(|o| self.fmt_operand(o))
             .collect::<Vec<_>>()
             .join(", ")
     }
@@ -67,6 +82,19 @@ fn fmt_type(ty: &Type) -> &'static str {
         Type::Int => "int",
         Type::Byte(_) => "byte",
         Type::Ptr(_) => "ptr",
+        Type::Float(ft) => match ft {
+            FloatType::BF16 => "bf16",
+            FloatType::F16 => "f16",
+            FloatType::F32 => "f32",
+            FloatType::F64 => "f64",
+        },
+    }
+}
+
+fn fmt_annotation(ann: &Annotation) -> String {
+    match ann {
+        Annotation::Signed(n) => format!(":s{n}"),
+        Annotation::Unsigned(n) => format!(":u{n}"),
     }
 }
 
@@ -116,56 +144,62 @@ fn assign_values(func: &Function, region: RegionRef, ctx: &mut DisplayCtx) {
 }
 
 /// Format a single instruction. Returns the formatted string (without leading indent).
-fn fmt_inst(_func: &Function, vref: ValueRef, op: &Op, ctx: &DisplayCtx) -> String {
-    let v = ctx.fmt_val(vref);
+fn fmt_inst(
+    _func: &Function,
+    vref: ValueRef,
+    op: &Op,
+    result_ann: &Option<Annotation>,
+    ctx: &DisplayCtx,
+) -> String {
+    let v = ctx.fmt_val_ann(vref, result_ann);
     match op {
         Op::Param(idx) => format!("{v} = param {idx}"),
-        Op::Add(a, b) => format!("{v} = add {}, {}", ctx.fmt_val(*a), ctx.fmt_val(*b)),
-        Op::Sub(a, b) => format!("{v} = sub {}, {}", ctx.fmt_val(*a), ctx.fmt_val(*b)),
-        Op::Mul(a, b) => format!("{v} = mul {}, {}", ctx.fmt_val(*a), ctx.fmt_val(*b)),
-        Op::AssertSext(src, bits) => {
-            format!("{v} = assert_sext {}, {bits}", ctx.fmt_val(*src))
+        Op::Add(a, b) => {
+            format!("{v} = add {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
         }
-        Op::AssertZext(src, bits) => {
-            format!("{v} = assert_zext {}, {bits}", ctx.fmt_val(*src))
+        Op::Sub(a, b) => {
+            format!("{v} = sub {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+        }
+        Op::Mul(a, b) => {
+            format!("{v} = mul {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
         }
         Op::Const(imm) => format!("{v} = iconst {imm}"),
         Op::ICmp(cmp, a, b) => {
             format!(
                 "{v} = icmp.{} {}, {}",
                 fmt_icmp_op(cmp),
-                ctx.fmt_val(*a),
-                ctx.fmt_val(*b)
+                ctx.fmt_operand(a),
+                ctx.fmt_operand(b)
             )
         }
-        Op::Load(ptr) => format!("{v} = load {}", ctx.fmt_val(*ptr)),
+        Op::Load(ptr) => format!("{v} = load {}", ctx.fmt_operand(ptr)),
         Op::Store(val, ptr) => {
-            format!("store {}, {}", ctx.fmt_val(*val), ctx.fmt_val(*ptr))
+            format!("store {}, {}", ctx.fmt_operand(val), ctx.fmt_operand(ptr))
         }
         Op::StackSlot(bytes) => format!("{v} = stack_slot {bytes}"),
         Op::Call(callee, args) => {
             format!(
                 "{v} = call {}({})",
-                ctx.fmt_val(*callee),
-                ctx.fmt_vals(args)
+                ctx.fmt_operand(callee),
+                ctx.fmt_operands(args)
             )
         }
-        Op::Bitcast(src) => format!("{v} = bitcast {}", ctx.fmt_val(*src)),
-        Op::Sext(src, bits) => format!("{v} = sext {}, {bits}", ctx.fmt_val(*src)),
-        Op::Zext(src, bits) => format!("{v} = zext {}, {bits}", ctx.fmt_val(*src)),
+        Op::Bitcast(src) => format!("{v} = bitcast {}", ctx.fmt_operand(src)),
+        Op::Sext(src, bits) => format!("{v} = sext {}, {bits}", ctx.fmt_operand(src)),
+        Op::Zext(src, bits) => format!("{v} = zext {}, {bits}", ctx.fmt_operand(src)),
         Op::Ret(val) => match val {
-            Some(v) => format!("ret {}", ctx.fmt_val(*v)),
+            Some(o) => format!("ret {}", ctx.fmt_operand(o)),
             None => "ret".to_string(),
         },
         Op::Br(target, args) => {
             if args.is_empty() {
                 format!("br bb{}", target.index())
             } else {
-                format!("br bb{}({})", target.index(), ctx.fmt_vals(args))
+                format!("br bb{}({})", target.index(), ctx.fmt_operands(args))
             }
         }
         Op::BrIf(cond, then_bb, then_args, else_bb, else_args) => {
-            let cond_s = ctx.fmt_val(*cond);
+            let cond_s = ctx.fmt_operand(cond);
             let then_s = fmt_branch_target(*then_bb, then_args, ctx);
             let else_s = fmt_branch_target(*else_bb, else_args, ctx);
             format!("brif {cond_s}, {then_s}, {else_s}")
@@ -174,24 +208,24 @@ fn fmt_inst(_func: &Function, vref: ValueRef, op: &Op, ctx: &DisplayCtx) -> Stri
             if vals.is_empty() {
                 "continue".to_string()
             } else {
-                format!("continue {}", ctx.fmt_vals(vals))
+                format!("continue {}", ctx.fmt_operands(vals))
             }
         }
         Op::RegionYield(vals) => {
             if vals.is_empty() {
                 "region_yield".to_string()
             } else {
-                format!("region_yield {}", ctx.fmt_vals(vals))
+                format!("region_yield {}", ctx.fmt_operands(vals))
             }
         }
     }
 }
 
-fn fmt_branch_target(block: BlockRef, args: &[ValueRef], ctx: &DisplayCtx) -> String {
+fn fmt_branch_target(block: BlockRef, args: &[Operand], ctx: &DisplayCtx) -> String {
     if args.is_empty() {
         format!("bb{}", block.index())
     } else {
-        format!("bb{}({})", block.index(), ctx.fmt_vals(args))
+        format!("bb{}({})", block.index(), ctx.fmt_operands(args))
     }
 }
 
@@ -228,7 +262,11 @@ fn write_block(
     for i in 0..bb.inst_count {
         let vref = ValueRef::inst_result(bb.inst_start + i);
         let inst = func.inst(bb.inst_start + i);
-        writeln!(f, "{inst_pad}{}", fmt_inst(func, vref, &inst.op, ctx))?;
+        writeln!(
+            f,
+            "{inst_pad}{}",
+            fmt_inst(func, vref, &inst.op, &inst.result_annotation, ctx)
+        )?;
     }
     Ok(())
 }
@@ -265,22 +303,65 @@ fn write_region(
     writeln!(f, "{pad}}}")
 }
 
+/// Write the children of a region (blocks and nested regions) without the region wrapper.
+fn write_region_children(
+    f: &mut fmt::Formatter<'_>,
+    func: &Function,
+    rref: RegionRef,
+    ctx: &DisplayCtx,
+    indent: usize,
+) -> fmt::Result {
+    let reg = &func.regions[rref.index() as usize];
+    let mut first = true;
+    for child in &reg.children {
+        if !first {
+            writeln!(f)?;
+        }
+        first = false;
+        match child {
+            CfgNode::Block(bref) => {
+                write_block(f, func, *bref, ctx, indent)?;
+            }
+            CfgNode::Region(child_rref) => {
+                write_region(f, func, *child_rref, ctx, indent)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 impl fmt::Display for Function {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // First pass: assign value numbers
         let mut ctx = DisplayCtx::new();
         assign_values(self, self.root_region, &mut ctx);
 
-        // Function signature
-        let params: Vec<&str> = self.params.iter().map(fmt_type).collect();
+        // Function signature with annotations
+        let params: Vec<String> = self
+            .params
+            .iter()
+            .zip(self.param_annotations.iter())
+            .map(|(ty, ann)| {
+                let ty_s = fmt_type(ty);
+                match ann {
+                    Some(a) => format!("{ty_s}{}", fmt_annotation(a)),
+                    None => ty_s.to_string(),
+                }
+            })
+            .collect();
         write!(f, "func @{}({})", self.name, params.join(", "))?;
+
         if let Some(ref ret_ty) = self.ret_ty {
-            write!(f, " -> {}", fmt_type(ret_ty))?;
+            let ret_s = fmt_type(ret_ty);
+            match &self.ret_annotation {
+                Some(a) => write!(f, " -> {ret_s}{}", fmt_annotation(a))?,
+                None => write!(f, " -> {ret_s}")?,
+            }
         }
         writeln!(f, " {{")?;
 
-        // Root region
-        write_region(f, self, self.root_region, &ctx, 2)?;
+        // Elide top-level region function wrapper; write children directly
+        write_region_children(f, self, self.root_region, &ctx, 2)?;
 
         write!(f, "}}")
     }

@@ -61,14 +61,6 @@ fn select_inst(vref: ValueRef, op: &Op, regs: &mut RegMap, out: &mut Vec<MInst>)
             regs.assign(vref, *arg_reg);
         }
 
-        Op::AssertSext(src, _bits) => {
-            regs.assign(vref, regs.get(*src));
-        }
-
-        Op::AssertZext(src, _bits) => {
-            regs.assign(vref, regs.get(*src));
-        }
-
         Op::Const(imm) => {
             out.push(MInst::MovRI {
                 size: OpSize::S32,
@@ -79,8 +71,8 @@ fn select_inst(vref: ValueRef, op: &Op, regs: &mut RegMap, out: &mut Vec<MInst>)
         }
 
         Op::Add(lhs, rhs) => {
-            let lhs_reg = regs.get(*lhs);
-            let rhs_reg = regs.get(*rhs);
+            let lhs_reg = regs.get(lhs.value);
+            let rhs_reg = regs.get(rhs.value);
 
             if lhs_reg != Gpr::Rax {
                 out.push(MInst::MovRR {
@@ -98,8 +90,8 @@ fn select_inst(vref: ValueRef, op: &Op, regs: &mut RegMap, out: &mut Vec<MInst>)
         }
 
         Op::Sub(lhs, rhs) => {
-            let lhs_reg = regs.get(*lhs);
-            let rhs_reg = regs.get(*rhs);
+            let lhs_reg = regs.get(lhs.value);
+            let rhs_reg = regs.get(rhs.value);
 
             if lhs_reg != Gpr::Rax {
                 out.push(MInst::MovRR {
@@ -117,8 +109,8 @@ fn select_inst(vref: ValueRef, op: &Op, regs: &mut RegMap, out: &mut Vec<MInst>)
         }
 
         Op::Mul(lhs, rhs) => {
-            let lhs_reg = regs.get(*lhs);
-            let rhs_reg = regs.get(*rhs);
+            let lhs_reg = regs.get(lhs.value);
+            let rhs_reg = regs.get(rhs.value);
 
             if lhs_reg != Gpr::Rax {
                 out.push(MInst::MovRR {
@@ -137,7 +129,7 @@ fn select_inst(vref: ValueRef, op: &Op, regs: &mut RegMap, out: &mut Vec<MInst>)
 
         Op::Ret(val) => {
             if let Some(v) = val {
-                let src = regs.get(*v);
+                let src = regs.get(v.value);
                 if src != Gpr::Rax {
                     out.push(MInst::MovRR {
                         size: OpSize::S32,

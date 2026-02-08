@@ -5,7 +5,7 @@
 //! Cross-region value references use implicit capture (VPlan style).
 
 use crate::instruction::Instruction;
-use crate::types::Type;
+use crate::types::{Annotation, Type};
 use crate::value::{BlockRef, RegionRef, ValueRef};
 
 /// A block argument (replaces PHI nodes).
@@ -61,7 +61,11 @@ pub struct Region {
 pub struct Function {
     pub name: String,
     pub params: Vec<Type>,
+    /// Annotations on function parameters (ABI-level caller guarantees).
+    pub param_annotations: Vec<Option<Annotation>>,
     pub ret_ty: Option<Type>,
+    /// Annotation on the return type (ABI-level callee guarantee).
+    pub ret_annotation: Option<Annotation>,
     /// Instruction arena: contiguous storage.
     pub instructions: Vec<Instruction>,
     /// Basic blocks indexing into the instruction arena.
@@ -75,11 +79,23 @@ pub struct Function {
 }
 
 impl Function {
-    pub fn new(name: impl Into<String>, params: Vec<Type>, ret_ty: Option<Type>) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        params: Vec<Type>,
+        param_annotations: Vec<Option<Annotation>>,
+        ret_ty: Option<Type>,
+        ret_annotation: Option<Annotation>,
+    ) -> Self {
+        let param_count = params.len();
+        let mut param_anns = param_annotations;
+        // Pad with None if caller provided fewer annotations than params.
+        param_anns.resize(param_count, None);
         Self {
             name: name.into(),
             params,
+            param_annotations: param_anns,
             ret_ty,
+            ret_annotation,
             instructions: Vec::new(),
             blocks: Vec::new(),
             regions: Vec::new(),

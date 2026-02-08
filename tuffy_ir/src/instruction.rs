@@ -1,7 +1,38 @@
 //! Instruction definitions for tuffy IR.
 
-use crate::types::Type;
+use crate::types::{Annotation, Type};
 use crate::value::{BlockRef, ValueRef};
+
+/// An operand: a value reference with an optional use-side annotation.
+#[derive(Debug, Clone)]
+pub struct Operand {
+    pub value: ValueRef,
+    pub annotation: Option<Annotation>,
+}
+
+impl Operand {
+    /// Create an operand with no annotation.
+    pub fn new(value: ValueRef) -> Self {
+        Self {
+            value,
+            annotation: None,
+        }
+    }
+
+    /// Create an operand with an annotation.
+    pub fn annotated(value: ValueRef, annotation: Annotation) -> Self {
+        Self {
+            value,
+            annotation: Some(annotation),
+        }
+    }
+}
+
+impl From<ValueRef> for Operand {
+    fn from(value: ValueRef) -> Self {
+        Self::new(value)
+    }
+}
 
 /// Origin tracks where an instruction came from (for debug info / profiling).
 #[derive(Debug, Clone)]
@@ -28,6 +59,8 @@ pub struct Instruction {
     pub op: Op,
     pub ty: Type,
     pub origin: Origin,
+    /// Result-side annotation. Violation causes this instruction to produce poison.
+    pub result_annotation: Option<Annotation>,
 }
 
 /// Integer comparison predicates.
@@ -46,56 +79,55 @@ pub enum ICmpOp {
 }
 
 /// Instruction opcodes.
+///
+/// Data operands use `Operand` (value + optional use-side annotation).
+/// Block targets use `BlockRef` directly.
 #[derive(Debug, Clone)]
 pub enum Op {
     /// Function parameter. Index into the parameter list.
     Param(u32),
     /// Integer addition: add %a, %b
-    Add(ValueRef, ValueRef),
+    Add(Operand, Operand),
     /// Integer subtraction: sub %a, %b
-    Sub(ValueRef, ValueRef),
+    Sub(Operand, Operand),
     /// Integer multiplication: mul %a, %b
-    Mul(ValueRef, ValueRef),
-    /// Assert signed extension: produces poison if value doesn't fit in n-bit signed range.
-    AssertSext(ValueRef, u32),
-    /// Assert zero extension: produces poison if value doesn't fit in n-bit unsigned range.
-    AssertZext(ValueRef, u32),
+    Mul(Operand, Operand),
     /// Integer constant.
     Const(i64),
 
     // -- Comparison --
     /// Integer comparison.
-    ICmp(ICmpOp, ValueRef, ValueRef),
+    ICmp(ICmpOp, Operand, Operand),
 
     // -- Memory --
     /// Load from pointer.
-    Load(ValueRef),
+    Load(Operand),
     /// Store value to pointer: store val, ptr.
-    Store(ValueRef, ValueRef),
+    Store(Operand, Operand),
     /// Allocate n bytes on stack, returns pointer.
     StackSlot(u32),
 
     // -- Call --
     /// Call function with arguments.
-    Call(ValueRef, Vec<ValueRef>),
+    Call(Operand, Vec<Operand>),
 
     // -- Type conversion --
     /// Bitcast (reinterpret bits).
-    Bitcast(ValueRef),
+    Bitcast(Operand),
     /// Sign-extend to n bits (for lowering).
-    Sext(ValueRef, u32),
+    Sext(Operand, u32),
     /// Zero-extend to n bits (for lowering).
-    Zext(ValueRef, u32),
+    Zext(Operand, u32),
 
     // -- Terminators (by convention, placed last in a basic block) --
     /// Return value from function.
-    Ret(Option<ValueRef>),
+    Ret(Option<Operand>),
     /// Unconditional branch with block arguments.
-    Br(BlockRef, Vec<ValueRef>),
+    Br(BlockRef, Vec<Operand>),
     /// Conditional branch: brif cond, then_block(args...), else_block(args...).
-    BrIf(ValueRef, BlockRef, Vec<ValueRef>, BlockRef, Vec<ValueRef>),
+    BrIf(Operand, BlockRef, Vec<Operand>, BlockRef, Vec<Operand>),
     /// Loop backedge: continue with values fed back to loop header.
-    Continue(Vec<ValueRef>),
+    Continue(Vec<Operand>),
     /// Exit region with values.
-    RegionYield(Vec<ValueRef>),
+    RegionYield(Vec<Operand>),
 }

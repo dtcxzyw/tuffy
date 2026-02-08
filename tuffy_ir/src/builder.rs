@@ -3,8 +3,8 @@
 //! Origin is mandatory on every instruction — enforced at compile time.
 
 use crate::function::{BasicBlock, BlockArg, CfgNode, Function, Region, RegionKind};
-use crate::instruction::{ICmpOp, Instruction, Op, Origin};
-use crate::types::Type;
+use crate::instruction::{ICmpOp, Instruction, Op, Operand, Origin};
+use crate::types::{Annotation, Type};
 use crate::value::{BlockRef, RegionRef, ValueRef};
 
 /// Builder for constructing a function's IR.
@@ -117,9 +117,14 @@ impl<'a> Builder<'a> {
 
     // ── Instruction emission ──
 
-    fn push_inst(&mut self, inst: Instruction) -> ValueRef {
+    fn push_inst(&mut self, op: Op, ty: Type, origin: Origin, ann: Option<Annotation>) -> ValueRef {
         let idx = self.func.instructions.len() as u32;
-        self.func.instructions.push(inst);
+        self.func.instructions.push(Instruction {
+            op,
+            ty,
+            origin,
+            result_annotation: ann,
+        });
         if let Some(bb) = self.current_block {
             self.func.blocks[bb.index() as usize].inst_count += 1;
         }
@@ -129,106 +134,82 @@ impl<'a> Builder<'a> {
     // ── Existing ops ──
 
     /// Create a function parameter reference.
-    pub fn param(&mut self, index: u32, ty: Type, origin: Origin) -> ValueRef {
-        self.push_inst(Instruction {
-            op: Op::Param(index),
-            ty,
-            origin,
-        })
+    pub fn param(
+        &mut self,
+        index: u32,
+        ty: Type,
+        ann: Option<Annotation>,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::Param(index), ty, origin, ann)
     }
 
     /// Integer constant.
     pub fn iconst(&mut self, val: i64, origin: Origin) -> ValueRef {
-        self.push_inst(Instruction {
-            op: Op::Const(val),
-            ty: Type::Int,
-            origin,
-        })
+        self.push_inst(Op::Const(val), Type::Int, origin, None)
     }
 
     /// Integer addition.
-    pub fn add(&mut self, a: ValueRef, b: ValueRef, origin: Origin) -> ValueRef {
-        self.push_inst(Instruction {
-            op: Op::Add(a, b),
-            ty: Type::Int,
-            origin,
-        })
+    pub fn add(
+        &mut self,
+        a: Operand,
+        b: Operand,
+        ann: Option<Annotation>,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::Add(a, b), Type::Int, origin, ann)
     }
 
     /// Integer subtraction.
-    pub fn sub(&mut self, a: ValueRef, b: ValueRef, origin: Origin) -> ValueRef {
-        self.push_inst(Instruction {
-            op: Op::Sub(a, b),
-            ty: Type::Int,
-            origin,
-        })
+    pub fn sub(
+        &mut self,
+        a: Operand,
+        b: Operand,
+        ann: Option<Annotation>,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::Sub(a, b), Type::Int, origin, ann)
     }
 
     /// Integer multiplication.
-    pub fn mul(&mut self, a: ValueRef, b: ValueRef, origin: Origin) -> ValueRef {
-        self.push_inst(Instruction {
-            op: Op::Mul(a, b),
-            ty: Type::Int,
-            origin,
-        })
-    }
-
-    /// Assert signed extension constraint.
-    pub fn assert_sext(&mut self, val: ValueRef, bits: u32, origin: Origin) -> ValueRef {
-        self.push_inst(Instruction {
-            op: Op::AssertSext(val, bits),
-            ty: Type::Int,
-            origin,
-        })
-    }
-
-    /// Assert zero extension constraint.
-    pub fn assert_zext(&mut self, val: ValueRef, bits: u32, origin: Origin) -> ValueRef {
-        self.push_inst(Instruction {
-            op: Op::AssertZext(val, bits),
-            ty: Type::Int,
-            origin,
-        })
+    pub fn mul(
+        &mut self,
+        a: Operand,
+        b: Operand,
+        ann: Option<Annotation>,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::Mul(a, b), Type::Int, origin, ann)
     }
 
     // ── Comparison ──
 
     /// Integer comparison.
-    pub fn icmp(&mut self, op: ICmpOp, a: ValueRef, b: ValueRef, origin: Origin) -> ValueRef {
-        self.push_inst(Instruction {
-            op: Op::ICmp(op, a, b),
-            ty: Type::Int,
-            origin,
-        })
+    pub fn icmp(&mut self, op: ICmpOp, a: Operand, b: Operand, origin: Origin) -> ValueRef {
+        self.push_inst(Op::ICmp(op, a, b), Type::Int, origin, None)
     }
 
     // ── Memory ──
 
     /// Load from pointer.
-    pub fn load(&mut self, ptr: ValueRef, ty: Type, origin: Origin) -> ValueRef {
-        self.push_inst(Instruction {
-            op: Op::Load(ptr),
-            ty,
-            origin,
-        })
+    pub fn load(
+        &mut self,
+        ptr: Operand,
+        ty: Type,
+        ann: Option<Annotation>,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::Load(ptr), ty, origin, ann)
     }
 
     /// Store value to pointer.
-    pub fn store(&mut self, val: ValueRef, ptr: ValueRef, origin: Origin) -> ValueRef {
-        self.push_inst(Instruction {
-            op: Op::Store(val, ptr),
-            ty: Type::Int,
-            origin,
-        })
+    pub fn store(&mut self, val: Operand, ptr: Operand, origin: Origin) -> ValueRef {
+        self.push_inst(Op::Store(val, ptr), Type::Int, origin, None)
     }
 
     /// Allocate stack slot of n bytes.
     pub fn stack_slot(&mut self, bytes: u32, origin: Origin) -> ValueRef {
-        self.push_inst(Instruction {
-            op: Op::StackSlot(bytes),
-            ty: Type::Ptr(0),
-            origin,
-        })
+        self.push_inst(Op::StackSlot(bytes), Type::Ptr(0), origin, None)
     }
 
     // ── Call ──
@@ -236,100 +217,76 @@ impl<'a> Builder<'a> {
     /// Call function with arguments.
     pub fn call(
         &mut self,
-        callee: ValueRef,
-        args: Vec<ValueRef>,
+        callee: Operand,
+        args: Vec<Operand>,
         ret_ty: Type,
+        ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Instruction {
-            op: Op::Call(callee, args),
-            ty: ret_ty,
-            origin,
-        })
+        self.push_inst(Op::Call(callee, args), ret_ty, origin, ann)
     }
 
     // ── Type conversion ──
 
     /// Bitcast (reinterpret bits).
-    pub fn bitcast(&mut self, val: ValueRef, ty: Type, origin: Origin) -> ValueRef {
-        self.push_inst(Instruction {
-            op: Op::Bitcast(val),
-            ty,
-            origin,
-        })
+    pub fn bitcast(
+        &mut self,
+        val: Operand,
+        ty: Type,
+        ann: Option<Annotation>,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::Bitcast(val), ty, origin, ann)
     }
 
     /// Sign-extend to n bits.
-    pub fn sext(&mut self, val: ValueRef, bits: u32, origin: Origin) -> ValueRef {
-        self.push_inst(Instruction {
-            op: Op::Sext(val, bits),
-            ty: Type::Int,
-            origin,
-        })
+    pub fn sext(&mut self, val: Operand, bits: u32, origin: Origin) -> ValueRef {
+        self.push_inst(Op::Sext(val, bits), Type::Int, origin, None)
     }
 
     /// Zero-extend to n bits.
-    pub fn zext(&mut self, val: ValueRef, bits: u32, origin: Origin) -> ValueRef {
-        self.push_inst(Instruction {
-            op: Op::Zext(val, bits),
-            ty: Type::Int,
-            origin,
-        })
+    pub fn zext(&mut self, val: Operand, bits: u32, origin: Origin) -> ValueRef {
+        self.push_inst(Op::Zext(val, bits), Type::Int, origin, None)
     }
 
     // ── Terminators ──
 
     /// Return from function.
-    pub fn ret(&mut self, val: Option<ValueRef>, origin: Origin) -> ValueRef {
+    pub fn ret(&mut self, val: Option<Operand>, origin: Origin) -> ValueRef {
         let ty = self.func.ret_ty.clone().unwrap_or(Type::Int);
-        self.push_inst(Instruction {
-            op: Op::Ret(val),
-            ty,
-            origin,
-        })
+        self.push_inst(Op::Ret(val), ty, origin, None)
     }
 
     /// Unconditional branch with block arguments.
-    pub fn br(&mut self, target: BlockRef, args: Vec<ValueRef>, origin: Origin) -> ValueRef {
-        self.push_inst(Instruction {
-            op: Op::Br(target, args),
-            ty: Type::Int,
-            origin,
-        })
+    pub fn br(&mut self, target: BlockRef, args: Vec<Operand>, origin: Origin) -> ValueRef {
+        self.push_inst(Op::Br(target, args), Type::Int, origin, None)
     }
 
     /// Conditional branch.
     pub fn brif(
         &mut self,
-        cond: ValueRef,
+        cond: Operand,
         then_block: BlockRef,
-        then_args: Vec<ValueRef>,
+        then_args: Vec<Operand>,
         else_block: BlockRef,
-        else_args: Vec<ValueRef>,
+        else_args: Vec<Operand>,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Instruction {
-            op: Op::BrIf(cond, then_block, then_args, else_block, else_args),
-            ty: Type::Int,
+        self.push_inst(
+            Op::BrIf(cond, then_block, then_args, else_block, else_args),
+            Type::Int,
             origin,
-        })
+            None,
+        )
     }
 
     /// Loop backedge.
-    pub fn continue_(&mut self, values: Vec<ValueRef>, origin: Origin) -> ValueRef {
-        self.push_inst(Instruction {
-            op: Op::Continue(values),
-            ty: Type::Int,
-            origin,
-        })
+    pub fn continue_(&mut self, values: Vec<Operand>, origin: Origin) -> ValueRef {
+        self.push_inst(Op::Continue(values), Type::Int, origin, None)
     }
 
     /// Exit region with values.
-    pub fn region_yield(&mut self, values: Vec<ValueRef>, origin: Origin) -> ValueRef {
-        self.push_inst(Instruction {
-            op: Op::RegionYield(values),
-            ty: Type::Int,
-            origin,
-        })
+    pub fn region_yield(&mut self, values: Vec<Operand>, origin: Origin) -> ValueRef {
+        self.push_inst(Op::RegionYield(values), Type::Int, origin, None)
     }
 }

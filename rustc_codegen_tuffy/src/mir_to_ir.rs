@@ -9,7 +9,7 @@ use rustc_middle::ty::{self, Instance, TyCtxt};
 use tuffy_ir::builder::Builder;
 use tuffy_ir::function::{Function, RegionKind};
 use tuffy_ir::instruction::Origin;
-use tuffy_ir::types::Type;
+use tuffy_ir::types::{Annotation, Type};
 use tuffy_ir::value::ValueRef;
 
 /// Translate a single MIR function instance to tuffy IR.
@@ -34,9 +34,15 @@ pub fn translate_function<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> 
         .iter()
         .filter_map(|ty| translate_ty(*ty))
         .collect();
+    let param_anns: Vec<Option<Annotation>> = sig
+        .inputs()
+        .iter()
+        .filter_map(|ty| translate_ty(*ty).map(|_| translate_annotation(*ty)))
+        .collect();
     let ret_ty = translate_ty(sig.output());
+    let ret_ann = translate_annotation(sig.output());
 
-    let mut func = Function::new(&name, params, ret_ty);
+    let mut func = Function::new(&name, params, param_anns, ret_ty, ret_ann);
     let mut builder = Builder::new(&mut func);
     let mut locals = LocalMap::new(mir.local_decls.len());
 
@@ -81,9 +87,10 @@ fn translate_ty(ty: ty::Ty<'_>) -> Option<Type> {
     }
 }
 
-fn bit_width(ty: ty::Ty<'_>) -> Option<u32> {
+fn translate_annotation(ty: ty::Ty<'_>) -> Option<Annotation> {
     match ty.kind() {
-        ty::Int(ty::IntTy::I32) | ty::Uint(ty::UintTy::U32) => Some(32),
+        ty::Int(ty::IntTy::I32) => Some(Annotation::Signed(32)),
+        ty::Uint(ty::UintTy::U32) => Some(Annotation::Unsigned(32)),
         _ => None,
     }
 }
@@ -92,9 +99,8 @@ fn translate_params(mir: &mir::Body<'_>, builder: &mut Builder<'_>, locals: &mut
     for i in 0..mir.arg_count {
         let local = mir::Local::from_usize(i + 1);
         let ty = mir.local_decls[local].ty;
-        let val = builder.param(i as u32, Type::Int, Origin::synthetic());
-        let bits = bit_width(ty).unwrap_or(32);
-        let val = builder.assert_sext(val, bits, Origin::synthetic());
+        let ann = translate_annotation(ty);
+        let val = builder.param(i as u32, Type::Int, ann, Origin::synthetic());
         locals.set(local, val);
     }
 }
@@ -137,7 +143,7 @@ fn translate_terminator(
         TerminatorKind::Return => {
             let ret_local = mir::Local::from_usize(0);
             let val = locals.values[ret_local.as_usize()];
-            builder.ret(val, Origin::synthetic());
+            builder.ret(val.map(|v| v.into()), Origin::synthetic());
         }
         TerminatorKind::Goto { .. } => {}
         _ => {}
@@ -154,9 +160,15 @@ fn translate_rvalue(
             let l = translate_operand(lhs, builder, locals)?;
             let r = translate_operand(rhs, builder, locals)?;
             let val = match op {
-                BinOp::Add | BinOp::AddWithOverflow => builder.add(l, r, Origin::synthetic()),
-                BinOp::Sub | BinOp::SubWithOverflow => builder.sub(l, r, Origin::synthetic()),
-                BinOp::Mul | BinOp::MulWithOverflow => builder.mul(l, r, Origin::synthetic()),
+                BinOp::Add | BinOp::AddWithOverflow => {
+                    builder.add(l.into(), r.into(), None, Origin::synthetic())
+                }
+                BinOp::Sub | BinOp::SubWithOverflow => {
+                    builder.sub(l.into(), r.into(), None, Origin::synthetic())
+                }
+                BinOp::Mul | BinOp::MulWithOverflow => {
+                    builder.mul(l.into(), r.into(), None, Origin::synthetic())
+                }
                 _ => return None,
             };
             Some(val)

@@ -1,9 +1,23 @@
 //! Type system for tuffy IR.
 //!
-//! Minimal subset for the first end-to-end test:
+//! Types:
 //! - `int`: infinite precision integer
 //! - `Byte(n)`: raw memory data of n bytes
-//! - `Ptr`: pointer with address space
+//! - `Ptr(as)`: pointer with address space
+//! - `Float(ft)`: floating point type
+
+/// Floating point type variants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FloatType {
+    /// Brain floating point (bfloat16).
+    BF16,
+    /// IEEE 754 half precision.
+    F16,
+    /// IEEE 754 single precision.
+    F32,
+    /// IEEE 754 double precision.
+    F64,
+}
 
 /// A type in the tuffy IR.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -14,4 +28,18 @@ pub enum Type {
     Byte(u32),
     /// Pointer with address space.
     Ptr(u32),
+    /// Floating point type.
+    Float(FloatType),
+}
+
+/// Range annotation on a value definition (result-side) or use edge (use-side).
+///
+/// Result-side violation: the defining instruction produces poison.
+/// Use-side violation: the consuming instruction produces poison.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Annotation {
+    /// `:s<N>` — value must be in signed N-bit range `[-2^(N-1), 2^(N-1)-1]`.
+    Signed(u32),
+    /// `:u<N>` — value must be in unsigned N-bit range `[0, 2^N-1]`.
+    Unsigned(u32),
 }
