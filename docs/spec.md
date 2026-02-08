@@ -36,7 +36,7 @@ Key design principles:
   - [Constants](#constants)
   - [Arithmetic](#arithmetic)
   - [Comparison](#comparison)
-  - [Assert Nodes](#assert-nodes)
+  - [Value Annotations](#value-annotations)
   - [Memory Operations](#memory-operations)
   - [Type Conversion](#type-conversion)
   - [Function Calls](#function-calls)
@@ -54,9 +54,9 @@ decomposed into scalars before entering the IR.
 Infinite precision integer. No fixed bit width, no signedness. Arithmetic on `int` is
 mathematical: `add 3, 5` produces `8` with no possibility of overflow.
 
-Range constraints are expressed via [assert nodes](#assert-nodes) rather than the type
-itself. The decision of sign-extension vs zero-extension is deferred to instruction
-selection.
+Range constraints are expressed via [value annotations](#value-annotations) rather than
+the type itself. The decision of sign-extension vs zero-extension is deferred to
+instruction selection.
 
 ### `byte(N)`
 
@@ -107,16 +107,15 @@ an optional return type, and a body organized as a hierarchical CFG.
 
 ```
 func @name(param_types...) -> ret_type {
-  region function {
-    ...
-  }
+  ...
 }
 ```
 
 - **Name**: prefixed with `@` in text format.
 - **Parameters**: a list of types. Parameter values are created via `param` instructions.
 - **Return type**: optional. Functions with no return type return `void`.
-- **Body**: a single root region of kind `function`.
+- **Body**: blocks and nested regions directly inside the function braces. The implicit
+  top-level `function` region is not written in the text format.
 
 ## Regions
 
@@ -138,13 +137,13 @@ regions via implicit capture (VPlan style). There is no explicit capture list �
 live-in set is computed on demand.
 
 ```
-region function {
+func @example(int) -> int {
   bb0:
-    v0 = iconst 10       // v0 defined in outer region
+    v0 = iconst 10       // v0 defined in function body
 
   region loop {
     bb1(v1: int):
-      v2 = add v1, v0    // v0 captured implicitly from outer region
+      v2 = add v1, v0    // v0 captured implicitly from outer scope
       ...
   }
 }
@@ -267,35 +266,61 @@ Predicates:
 | `ugt` | Unsigned greater than |
 | `uge` | Unsigned greater than or equal |
 
-### Assert Nodes
+### Value Annotations
 
-Assert nodes express range constraints on infinite precision integers. They return the
-value unchanged if the constraint holds, or `poison` if violated. The formal semantics
-are defined in `TuffyLean.IR.Semantics`.
+Range constraints and bit-level facts are encoded as annotations on value definitions
+(result-side) and use edges (use-side), rather than as standalone instructions. See
+[RFC: at-use-annotations](RFCs/202602/at-use-annotations.md) for the full design.
 
-#### `assert_sext`
+#### Annotation types
+
+| Annotation | Meaning |
+|---|---|
+| `:s<N>` | Value is in signed N-bit range `[-2^(N-1), 2^(N-1)-1]` |
+| `:u<N>` | Value is in unsigned N-bit range `[0, 2^N-1]` |
+| `:known(<ternary>)` | Per-bit four-state constraint |
+| (none) | No constraint; unconstrained `int` |
+
+Annotations are composable: `:s32:known(...)` applies both constraints simultaneously.
+
+#### Known bits encoding
+
+Each bit in a `known` annotation is one of four states:
+
+| Symbol | Meaning |
+|---|---|
+| `0` | Bit is known to be 0 |
+| `1` | Bit is known to be 1 |
+| `?` | Unknown — bit is demanded but value not determined |
+| `x` | Don't-care — bit is not demanded |
+
+#### Result-side annotations
+
+Declared on the value produced by an instruction. Violation causes the instruction
+to produce `poison`.
 
 ```
-vN = assert_sext vA, <bits>
+v0:s32 = add v1, v2    // if true result outside [-2^31, 2^31-1], v0 is poison
 ```
 
-Asserts that `vA` fits in a signed `bits`-bit range.
+#### Use-side annotations
 
-**Semantics** (`assertSext`):
-- If `-2^(bits-1) <= vA <= 2^(bits-1) - 1`, returns `Value.int(vA)`
-- Otherwise, returns `Value.poison`
-
-#### `assert_zext`
+Declared on an operand of a consuming instruction. Violation causes the consuming
+instruction to produce `poison`. May be stronger than the result-side annotation.
 
 ```
-vN = assert_zext vA, <bits>
+v1 = foo v0:u8          // if v0 is outside [0, 255], foo produces poison
 ```
 
-Asserts that `vA` fits in an unsigned `bits`-bit range.
+#### Function signature annotations
 
-**Semantics** (`assertZext`):
-- If `0 <= vA < 2^bits`, returns `Value.int(vA)`
-- Otherwise, returns `Value.poison`
+Function signatures carry annotations as ABI-level contracts:
+
+```
+func @add_i32(int:s32, int:s32) -> int:s32 { ... }
+```
+
+Parameter annotations are caller guarantees; return annotations are callee guarantees.
 
 ### Memory Operations
 
@@ -431,7 +456,7 @@ Tuffy IR uses a Cranelift-inspired text format for human-readable output.
 | Functions | `@name` | `@add`, `@factorial` |
 | Values | `vN` | `v0`, `v1`, `v2` |
 | Blocks | `bbN` | `bb0`, `bb1` |
-| Regions | `region <kind>` | `region function`, `region loop` |
+| Regions | `region <kind>` | `region loop`, `region plain` |
 
 Values are numbered sequentially (v0, v1, v2, ...) in region tree order. Within each
 block, block arguments are numbered before instruction results.
@@ -439,18 +464,23 @@ block, block arguments are numbered before instruction results.
 ### Grammar
 
 ```
-function     ::= 'func' '@' name '(' type_list ')' ('->' type)? '{' region '}'
+function     ::= 'func' '@' name '(' param_list ')' ('->' type annotation)? '{' body '}'
+param_list   ::= (type annotation (',' type annotation)*)?
+body         ::= (block | region)*
 region       ::= 'region' region_kind '{' region_body '}'
-region_kind  ::= 'function' | 'loop' | 'plain'
+region_kind  ::= 'loop' | 'plain'
 region_body  ::= (block | region)*
 block        ::= block_header instruction*
 block_header ::= 'bb' N block_args? ':'
 block_args   ::= '(' block_arg (',' block_arg)* ')'
 block_arg    ::= value ':' type
-instruction  ::= (value '=')? opcode operands
+instruction  ::= (value annotation '=')? opcode operands
+operand      ::= value annotation
+annotation   ::= (':' range_ann)*
+range_ann    ::= 's' N | 'u' N | 'known' '(' ternary ')'
+ternary      ::= [01?x_]+
 value        ::= 'v' N
 type         ::= 'int' | 'byte' | 'ptr'
-type_list    ::= (type (',' type)*)?
 ```
 
 ### Complete Example
@@ -458,28 +488,26 @@ type_list    ::= (type (',' type)*)?
 A factorial function demonstrating nested regions, block arguments, and control flow:
 
 ```
-func @factorial(int) -> int {
-  region function {
-    bb0:
-      v0 = param 0
-      v1 = iconst 1
-      v2 = iconst 1
-      br bb1(v2, v1)
+func @factorial(int:s32) -> int:s32 {
+  bb0:
+    v0:s32 = param 0
+    v1 = iconst 1
+    v2 = iconst 1
+    br bb1(v2, v1)
 
-    region loop {
-      bb1(v4: int, v5: int):
-        v6 = icmp.sle v5, v0
-        brif v6, bb2, bb3
+  region loop {
+    bb1(v4: int, v5: int):
+      v6 = icmp.sle v5:s32, v0:s32
+      brif v6, bb2, bb3
 
-      bb2:
-        v8 = mul v4, v5
-        v9 = sub v5, v1
-        continue v8, v9
-    }
-
-    bb3:
-      ret v4
+    bb2:
+      v8 = mul v4, v5
+      v9 = sub v5, v1
+      continue v8, v9
   }
+
+  bb3:
+    ret v4:s32
 }
 ```
 
@@ -527,11 +555,6 @@ operations, enabling progressive refinement as alias analysis improves.
 
 Atomic load/store/rmw/cmpxchg with memory ordering annotations (`relaxed`, `acquire`,
 `release`, `acqrel`, `seqcst`). Fence instructions as standalone operations.
-
-### At-Use Bit-Level Annotations
-
-Demanded bits and known bits encoded on use edges in the IR, following the "analysis is
-also a transformation" principle.
 
 ### Control Flow Structuralization
 
