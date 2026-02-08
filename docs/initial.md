@@ -99,3 +99,24 @@ Validation and benchmarking will use the following targets (in progressive order
 - **Contiguous instruction storage**: instructions within the same basic block are stored contiguously in the arena. Iterating a BB's instructions is a linear memory scan, not pointer chasing.
 - **Tombstone + periodic compaction**: deleted instructions are marked as tombstones. Periodic compaction restores contiguity.
 - **No SOA**: struct-of-arrays layout rejected; standard AOS with contiguous storage is sufficient.
+
+## Crate Structure
+
+Tuffy is a language-agnostic compiler backend. `rustc_codegen_tuffy` is one frontend adapter; future language frontends reuse the entire optimization and backend stack.
+
+```
+tuffy/
+├── tuffy_ir/              — IR definition: types, instructions, CFG, memory model
+├── tuffy_ir_interp/       — IR interpreter (miri-like, UB-aware)
+├── tuffy_opt/             — optimization passes (generated from declarative rewrite rules)
+├── tuffy_target/          — target abstraction layer (trait + CLI override)
+├── tuffy_target_x86/      — x86 backend (i386 + x86-64)
+├── tuffy_codegen/         — instruction selection, register allocation, machine code emission
+├── tuffy_trace/           — rewrite path tracing
+├── tuffy_tv/              — translation validation (Alive2-style SMT verifier)
+├── rustc_codegen_tuffy/   — rustc frontend adapter (MIR → tuffy IR)
+```
+
+Dependencies: `tuffy_ir` is the bottom layer with no internal dependencies. All other crates depend on it directly or transitively.
+
+**Object file emission**: use the `object` crate (same as Cranelift and rustc) for writing ELF, Mach-O, COFF object files. No custom object file handling.
