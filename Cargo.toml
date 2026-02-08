@@ -9,6 +9,8 @@ members = [
     "tuffy_codegen",
     "tuffy_trace",
     "tuffy_tv",
+]
+exclude = [
     "rustc_codegen_tuffy",
 ]
 

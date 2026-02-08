@@ -61,17 +61,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rustc_codegen_tuffy"
-version = "0.1.0"
-dependencies = [
- "tuffy_codegen",
- "tuffy_ir",
- "tuffy_opt",
- "tuffy_target",
- "tuffy_trace",
-]
-
-[[package]]
 name = "ruzstd"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
