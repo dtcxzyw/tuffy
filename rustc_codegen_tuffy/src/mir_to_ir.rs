@@ -117,15 +117,38 @@ impl LocalMap {
 
 fn translate_ty(ty: ty::Ty<'_>) -> Option<Type> {
     match ty.kind() {
-        ty::Int(ty::IntTy::I32) | ty::Uint(ty::UintTy::U32) => Some(Type::Int),
+        ty::Int(ty::IntTy::I8) | ty::Uint(ty::UintTy::U8) | ty::Bool => Some(Type::Byte),
+        ty::Int(ty::IntTy::I16) | ty::Uint(ty::UintTy::U16) => Some(Type::Int),
+        ty::Int(ty::IntTy::I32) | ty::Uint(ty::UintTy::U32) | ty::Char => Some(Type::Int),
+        ty::Int(ty::IntTy::I64)
+        | ty::Uint(ty::UintTy::U64)
+        | ty::Int(ty::IntTy::I128)
+        | ty::Uint(ty::UintTy::U128)
+        | ty::Int(ty::IntTy::Isize)
+        | ty::Uint(ty::UintTy::Usize) => Some(Type::Int),
+        ty::RawPtr(..) | ty::Ref(..) | ty::FnPtr(..) => Some(Type::Ptr(0)),
+        ty::Tuple(fields) if fields.is_empty() => Some(Type::Int),
+        ty::FnDef(..) => Some(Type::Int),
+        ty::Never => Some(Type::Int),
+        ty::Adt(..) | ty::Tuple(..) | ty::Array(..) | ty::Slice(..) | ty::Str => Some(Type::Int),
         _ => None,
     }
 }
 
 fn translate_annotation(ty: ty::Ty<'_>) -> Option<Annotation> {
     match ty.kind() {
-        ty::Int(ty::IntTy::I32) => Some(Annotation::Signed(32)),
+        ty::Bool => Some(Annotation::Unsigned(8)),
+        ty::Int(ty::IntTy::I8) => Some(Annotation::Signed(8)),
+        ty::Uint(ty::UintTy::U8) => Some(Annotation::Unsigned(8)),
+        ty::Int(ty::IntTy::I16) => Some(Annotation::Signed(16)),
+        ty::Uint(ty::UintTy::U16) => Some(Annotation::Unsigned(16)),
+        ty::Int(ty::IntTy::I32) | ty::Char => Some(Annotation::Signed(32)),
         ty::Uint(ty::UintTy::U32) => Some(Annotation::Unsigned(32)),
+        ty::Int(ty::IntTy::I64) | ty::Int(ty::IntTy::Isize) => Some(Annotation::Signed(64)),
+        ty::Uint(ty::UintTy::U64) | ty::Uint(ty::UintTy::Usize) => Some(Annotation::Unsigned(64)),
+        ty::Int(ty::IntTy::I128) => Some(Annotation::Signed(128)),
+        ty::Uint(ty::UintTy::U128) => Some(Annotation::Unsigned(128)),
+        ty::RawPtr(..) | ty::Ref(..) | ty::FnPtr(..) => Some(Annotation::Unsigned(64)),
         _ => None,
     }
 }
@@ -356,6 +379,44 @@ fn translate_rvalue(
             Some(val)
         }
         Rvalue::Use(operand) => translate_operand(operand, builder, locals),
+        Rvalue::Cast(_kind, operand, _ty) => {
+            // For now, treat all casts as bitwise moves.
+            translate_operand(operand, builder, locals)
+        }
+        Rvalue::Ref(_, _, place) | Rvalue::RawPtr(_, place) => {
+            // Taking a reference or raw pointer to a local.
+            // Return the local's value (address) if available.
+            locals.get(place.local)
+        }
+        Rvalue::Aggregate(_, operands) => {
+            // For simple aggregates, just translate the first field.
+            // Full aggregate support requires stack allocation.
+            if operands.is_empty() {
+                Some(builder.iconst(0, Origin::synthetic()))
+            } else {
+                translate_operand(&operands[0], builder, locals)
+            }
+        }
+        Rvalue::UnaryOp(mir::UnOp::Neg, operand) => {
+            let v = translate_operand(operand, builder, locals)?;
+            let zero = builder.iconst(0, Origin::synthetic());
+            Some(builder.sub(zero.into(), v.into(), None, Origin::synthetic()))
+        }
+        Rvalue::UnaryOp(mir::UnOp::Not, operand) => {
+            let v = translate_operand(operand, builder, locals)?;
+            let ones = builder.iconst(-1, Origin::synthetic());
+            Some(builder.xor(v.into(), ones.into(), None, Origin::synthetic()))
+        }
+        Rvalue::Len(_) => {
+            // Placeholder: return 0 for now.
+            Some(builder.iconst(0, Origin::synthetic()))
+        }
+        Rvalue::Discriminant(place) => {
+            locals.get(place.local)
+        }
+        Rvalue::NullaryOp(_, _) => {
+            Some(builder.iconst(0, Origin::synthetic()))
+        }
         _ => None,
     }
 }
