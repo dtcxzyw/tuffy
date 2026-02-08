@@ -14,13 +14,18 @@ use tuffy_ir::value::ValueRef;
 
 /// Translate a single MIR function instance to tuffy IR.
 pub fn translate_function<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> Option<Function> {
-    let mir = tcx.optimized_mir(instance.def_id());
-    let name = tcx.symbol_name(instance).name.to_string();
+    let def_id = instance.def_id();
+    if !def_id.is_local() {
+        return None;
+    }
 
     let inst_ty = instance.ty(tcx, ty::TypingEnv::fully_monomorphized());
     if !inst_ty.is_fn() {
         return None;
     }
+
+    let mir = tcx.optimized_mir(def_id);
+    let name = tcx.symbol_name(instance).name.to_string();
     let sig = inst_ty.fn_sig(tcx);
     let sig = tcx.normalize_erasing_late_bound_regions(ty::TypingEnv::fully_monomorphized(), sig);
 
