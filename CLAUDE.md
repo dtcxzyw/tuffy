@@ -88,6 +88,10 @@ Templates are available for reference:
 
 When the user provides reference documents, categorize and add them to `docs/references.md`. Download a local copy to `scratch/` when possible. Each reference entry should include a brief summary of key conclusions and their relevance to tuffy.
 
+## Standard Operating Procedures
+
+Before starting a task, check `docs/SOPs/` for a matching SOP. If one exists, follow the procedure defined in it.
+
 ## Tool Output Policy
 
 When outputting content using tools, output in multiple smaller segments rather than one large block. Avoid writing excessively large amounts of content in a single tool call.
