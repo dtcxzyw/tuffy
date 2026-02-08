@@ -79,4 +79,14 @@ pub enum MInst {
     CmpRI { size: OpSize, src: Gpr, imm: i32 },
     /// test r/m, r (AND without storing, sets flags)
     TestRR { size: OpSize, src1: Gpr, src2: Gpr },
+    /// call to named symbol (uses relocation)
+    CallSym { name: String },
+    /// push reg onto stack
+    Push { reg: Gpr },
+    /// pop reg from stack
+    Pop { reg: Gpr },
+    /// sub rsp, imm32 (allocate stack space)
+    SubSPI { imm: i32 },
+    /// add rsp, imm32 (deallocate stack space)
+    AddSPI { imm: i32 },
 }
