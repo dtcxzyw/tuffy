@@ -7,4 +7,5 @@ license.workspace = true
 [dependencies]
 tuffy_ir = { path = "../tuffy_ir" }
 tuffy_target = { path = "../tuffy_target" }
-object = "0.36"
+tuffy_target_x86 = { path = "../tuffy_target_x86" }
+object = { version = "0.36", features = ["write"] }

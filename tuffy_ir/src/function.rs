@@ -2,7 +2,7 @@
 
 use crate::instruction::Instruction;
 use crate::types::Type;
-use crate::value::{BlockRef, InstRef};
+use crate::value::{BlockRef, InstRef, ValueRef};
 
 /// A basic block containing a sequence of instructions.
 #[derive(Debug)]
@@ -51,5 +51,23 @@ impl Function {
         let start = bb.inst_start as usize;
         let end = start + bb.inst_count as usize;
         &self.instructions[start..end]
+    }
+
+    /// Reference to the entry block (block 0).
+    pub fn entry_block(&self) -> BlockRef {
+        BlockRef(0)
+    }
+
+    /// Iterate (ValueRef, &Instruction) pairs in a basic block.
+    pub fn block_insts_with_values(
+        &self,
+        r: BlockRef,
+    ) -> impl Iterator<Item = (ValueRef, &Instruction)> {
+        let bb = &self.blocks[r.0 as usize];
+        let start = bb.inst_start;
+        self.block_insts(r)
+            .iter()
+            .enumerate()
+            .map(move |(i, inst)| (ValueRef(start + i as u32), inst))
     }
 }
