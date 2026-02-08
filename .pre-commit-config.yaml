@@ -23,3 +23,8 @@ repos:
       language: system
       types: [rust]
       pass_filenames: false
+    - id: cargo-deny
+      name: cargo deny
+      entry: cargo deny check
+      language: system
+      pass_filenames: false
