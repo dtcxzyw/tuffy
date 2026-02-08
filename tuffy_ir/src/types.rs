@@ -32,6 +32,23 @@ pub enum Type {
     Float(FloatType),
 }
 
+/// Memory ordering for atomic operations.
+///
+/// Mirrors `TuffyLean.IR.MemoryOrdering`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MemoryOrdering {
+    /// No ordering constraints.
+    Relaxed,
+    /// Acquire: reads after this load see writes from the releasing thread.
+    Acquire,
+    /// Release: writes before this store are visible to the acquiring thread.
+    Release,
+    /// Acquire + Release combined.
+    AcqRel,
+    /// Sequentially consistent: total order across all seqcst operations.
+    SeqCst,
+}
+
 /// Range annotation on a value definition (result-side) or use edge (use-side).
 ///
 /// Result-side violation: the defining instruction produces poison.

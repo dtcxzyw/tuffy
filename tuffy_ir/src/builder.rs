@@ -3,8 +3,8 @@
 //! Origin is mandatory on every instruction — enforced at compile time.
 
 use crate::function::{BasicBlock, BlockArg, CfgNode, Function, Region, RegionKind};
-use crate::instruction::{ICmpOp, Instruction, Op, Operand, Origin};
-use crate::types::{Annotation, Type};
+use crate::instruction::{AtomicRmwOp, ICmpOp, Instruction, Op, Operand, Origin};
+use crate::types::{Annotation, MemoryOrdering, Type};
 use crate::value::{BlockRef, RegionRef, ValueRef};
 
 /// Builder for constructing a function's IR.
@@ -335,6 +335,68 @@ impl<'a> Builder<'a> {
     /// Allocate stack slot of n bytes.
     pub fn stack_slot(&mut self, bytes: u32, origin: Origin) -> ValueRef {
         self.push_inst(Op::StackSlot(bytes), Type::Ptr(0), origin, None)
+    }
+
+    // ── Atomic memory operations ──
+
+    /// Atomic load from pointer.
+    pub fn load_atomic(
+        &mut self,
+        ptr: Operand,
+        ty: Type,
+        ordering: MemoryOrdering,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::LoadAtomic(ptr, ordering), ty, origin, None)
+    }
+
+    /// Atomic store value to pointer.
+    pub fn store_atomic(
+        &mut self,
+        val: Operand,
+        ptr: Operand,
+        ordering: MemoryOrdering,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::StoreAtomic(val, ptr, ordering), Type::Int, origin, None)
+    }
+
+    /// Atomic read-modify-write.
+    pub fn atomic_rmw(
+        &mut self,
+        op: AtomicRmwOp,
+        ptr: Operand,
+        val: Operand,
+        ty: Type,
+        ordering: MemoryOrdering,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::AtomicRmw(op, ptr, val, ordering), ty, origin, None)
+    }
+
+    /// Atomic compare-and-exchange. Returns the old value.
+    #[allow(clippy::too_many_arguments)]
+    pub fn atomic_cmpxchg(
+        &mut self,
+        ptr: Operand,
+        expected: Operand,
+        desired: Operand,
+        ty: Type,
+        success_ord: MemoryOrdering,
+        failure_ord: MemoryOrdering,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(
+            Op::AtomicCmpXchg(ptr, expected, desired, success_ord, failure_ord),
+            ty,
+            origin,
+            None,
+        )
+    }
+
+    /// Memory fence.
+    pub fn fence(&mut self, ordering: MemoryOrdering, origin: Origin) -> ValueRef {
+        self.push_inst(Op::Fence(ordering), Type::Int, origin, None)
     }
 
     // ── Call ──

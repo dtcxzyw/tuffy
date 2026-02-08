@@ -15,8 +15,8 @@ use std::collections::HashMap;
 use std::fmt;
 
 use crate::function::{CfgNode, Function, RegionKind};
-use crate::instruction::{ICmpOp, Op, Operand};
-use crate::types::{Annotation, FloatType, Type};
+use crate::instruction::{AtomicRmwOp, ICmpOp, Op, Operand};
+use crate::types::{Annotation, FloatType, MemoryOrdering, Type};
 use crate::value::{BlockRef, RegionRef, ValueRef};
 
 /// Display context that tracks value numbering.
@@ -110,6 +110,27 @@ fn fmt_icmp_op(op: &ICmpOp) -> &'static str {
         ICmpOp::Ule => "ule",
         ICmpOp::Ugt => "ugt",
         ICmpOp::Uge => "uge",
+    }
+}
+
+fn fmt_memory_ordering(ord: &MemoryOrdering) -> &'static str {
+    match ord {
+        MemoryOrdering::Relaxed => "relaxed",
+        MemoryOrdering::Acquire => "acquire",
+        MemoryOrdering::Release => "release",
+        MemoryOrdering::AcqRel => "acqrel",
+        MemoryOrdering::SeqCst => "seqcst",
+    }
+}
+
+fn fmt_atomic_rmw_op(op: &AtomicRmwOp) -> &'static str {
+    match op {
+        AtomicRmwOp::Xchg => "xchg",
+        AtomicRmwOp::Add => "add",
+        AtomicRmwOp::Sub => "sub",
+        AtomicRmwOp::And => "and",
+        AtomicRmwOp::Or => "or",
+        AtomicRmwOp::Xor => "xor",
     }
 }
 
@@ -222,6 +243,41 @@ fn fmt_inst(
             format!("store {}, {}", ctx.fmt_operand(val), ctx.fmt_operand(ptr))
         }
         Op::StackSlot(bytes) => format!("{v} = stack_slot {bytes}"),
+        Op::LoadAtomic(ptr, ord) => {
+            format!(
+                "{v} = load.atomic.{} {}",
+                fmt_memory_ordering(ord),
+                ctx.fmt_operand(ptr)
+            )
+        }
+        Op::StoreAtomic(val, ptr, ord) => {
+            format!(
+                "store.atomic.{} {}, {}",
+                fmt_memory_ordering(ord),
+                ctx.fmt_operand(val),
+                ctx.fmt_operand(ptr)
+            )
+        }
+        Op::AtomicRmw(rmw_op, ptr, val, ord) => {
+            format!(
+                "{v} = rmw.{}.{} {}, {}",
+                fmt_atomic_rmw_op(rmw_op),
+                fmt_memory_ordering(ord),
+                ctx.fmt_operand(ptr),
+                ctx.fmt_operand(val)
+            )
+        }
+        Op::AtomicCmpXchg(ptr, expected, desired, succ, fail) => {
+            format!(
+                "{v} = cmpxchg.{}.{} {}, {}, {}",
+                fmt_memory_ordering(succ),
+                fmt_memory_ordering(fail),
+                ctx.fmt_operand(ptr),
+                ctx.fmt_operand(expected),
+                ctx.fmt_operand(desired)
+            )
+        }
+        Op::Fence(ord) => format!("fence.{}", fmt_memory_ordering(ord)),
         Op::Call(callee, args) => {
             format!(
                 "{v} = call {}({})",

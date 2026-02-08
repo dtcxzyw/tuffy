@@ -1,6 +1,6 @@
 //! Instruction definitions for tuffy IR.
 
-use crate::types::{Annotation, Type};
+use crate::types::{Annotation, MemoryOrdering, Type};
 use crate::value::{BlockRef, ValueRef};
 
 /// An operand: a value reference with an optional use-side annotation.
@@ -78,6 +78,25 @@ pub enum ICmpOp {
     Uge,
 }
 
+/// Atomic read-modify-write operation kinds.
+///
+/// Mirrors `TuffyLean.IR.AtomicRmwOp`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AtomicRmwOp {
+    /// Exchange (swap).
+    Xchg,
+    /// Integer addition.
+    Add,
+    /// Integer subtraction.
+    Sub,
+    /// Bitwise AND.
+    And,
+    /// Bitwise OR.
+    Or,
+    /// Bitwise XOR.
+    Xor,
+}
+
 /// Instruction opcodes.
 ///
 /// Data operands use `Operand` (value + optional use-side annotation).
@@ -122,6 +141,19 @@ pub enum Op {
     Store(Operand, Operand),
     /// Allocate n bytes on stack, returns pointer.
     StackSlot(u32),
+
+    // -- Atomic memory operations --
+    /// Atomic load from pointer with memory ordering.
+    LoadAtomic(Operand, MemoryOrdering),
+    /// Atomic store value to pointer: store.atomic val, ptr, ordering.
+    StoreAtomic(Operand, Operand, MemoryOrdering),
+    /// Atomic read-modify-write: rmw op, ptr, val, ordering.
+    AtomicRmw(AtomicRmwOp, Operand, Operand, MemoryOrdering),
+    /// Atomic compare-and-exchange: cmpxchg ptr, expected, desired, success_ord, failure_ord.
+    /// Returns the old value; caller uses icmp to check success.
+    AtomicCmpXchg(Operand, Operand, Operand, MemoryOrdering, MemoryOrdering),
+    /// Memory fence with ordering.
+    Fence(MemoryOrdering),
 
     // -- Call --
     /// Call function with arguments.

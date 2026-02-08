@@ -2,8 +2,8 @@
 
 use crate::builder::Builder;
 use crate::function::{Function, RegionKind};
-use crate::instruction::{ICmpOp, Op, Operand, Origin};
-use crate::types::{Annotation, FloatType, Type};
+use crate::instruction::{AtomicRmwOp, ICmpOp, Op, Operand, Origin};
+use crate::types::{Annotation, FloatType, MemoryOrdering, Type};
 
 #[test]
 fn build_add_function() {
@@ -504,6 +504,137 @@ fn display_float_ops() {
          \x20\x20\x20\x20v7 = fabs v0\n\
          \x20\x20\x20\x20v8 = copysign v0, v1\n\
          \x20\x20\x20\x20ret v8\n\
+         }"
+    );
+}
+
+#[test]
+fn build_atomic_ops() {
+    let mut func = Function::new(
+        "atomic_test",
+        vec![Type::Ptr(0), Type::Int],
+        vec![],
+        Some(Type::Int),
+        None,
+    );
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+    let entry = builder.create_block();
+    builder.switch_to_block(entry);
+
+    let ptr = builder.param(0, Type::Ptr(0), None, Origin::synthetic());
+    let val = builder.param(1, Type::Int, None, Origin::synthetic());
+
+    let v_la = builder.load_atomic(
+        ptr.into(),
+        Type::Int,
+        MemoryOrdering::Acquire,
+        Origin::synthetic(),
+    );
+    builder.store_atomic(
+        val.into(),
+        ptr.into(),
+        MemoryOrdering::Release,
+        Origin::synthetic(),
+    );
+    let _v_rmw = builder.atomic_rmw(
+        AtomicRmwOp::Add,
+        ptr.into(),
+        val.into(),
+        Type::Int,
+        MemoryOrdering::SeqCst,
+        Origin::synthetic(),
+    );
+    let v_cx = builder.atomic_cmpxchg(
+        ptr.into(),
+        v_la.into(),
+        val.into(),
+        Type::Int,
+        MemoryOrdering::AcqRel,
+        MemoryOrdering::Acquire,
+        Origin::synthetic(),
+    );
+    builder.fence(MemoryOrdering::SeqCst, Origin::synthetic());
+    builder.ret(Some(v_cx.into()), Origin::synthetic());
+    builder.exit_region();
+
+    assert_eq!(func.instructions.len(), 8);
+    assert!(matches!(func.instructions[2].op, Op::LoadAtomic(_, _)));
+    assert!(matches!(func.instructions[3].op, Op::StoreAtomic(_, _, _)));
+    assert!(matches!(func.instructions[4].op, Op::AtomicRmw(_, _, _, _)));
+    assert!(matches!(
+        func.instructions[5].op,
+        Op::AtomicCmpXchg(_, _, _, _, _)
+    ));
+    assert!(matches!(func.instructions[6].op, Op::Fence(_)));
+}
+
+#[test]
+fn display_atomic_ops() {
+    let mut func = Function::new(
+        "atomic_ops",
+        vec![Type::Ptr(0), Type::Int],
+        vec![],
+        Some(Type::Int),
+        None,
+    );
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+    let entry = builder.create_block();
+    builder.switch_to_block(entry);
+
+    let ptr = builder.param(0, Type::Ptr(0), None, Origin::synthetic());
+    let val = builder.param(1, Type::Int, None, Origin::synthetic());
+    let _la = builder.load_atomic(
+        ptr.into(),
+        Type::Int,
+        MemoryOrdering::Acquire,
+        Origin::synthetic(),
+    );
+    builder.store_atomic(
+        val.into(),
+        ptr.into(),
+        MemoryOrdering::Release,
+        Origin::synthetic(),
+    );
+    let _rmw = builder.atomic_rmw(
+        AtomicRmwOp::Add,
+        ptr.into(),
+        val.into(),
+        Type::Int,
+        MemoryOrdering::SeqCst,
+        Origin::synthetic(),
+    );
+    let _cx = builder.atomic_cmpxchg(
+        ptr.into(),
+        _la.into(),
+        val.into(),
+        Type::Int,
+        MemoryOrdering::AcqRel,
+        MemoryOrdering::Acquire,
+        Origin::synthetic(),
+    );
+    builder.fence(MemoryOrdering::SeqCst, Origin::synthetic());
+    builder.ret(Some(_cx.into()), Origin::synthetic());
+    builder.exit_region();
+
+    let output = format!("{func}");
+    assert_eq!(
+        output,
+        "func @atomic_ops(ptr, int) -> int {\n\
+         \x20\x20bb0:\n\
+         \x20\x20\x20\x20v0 = param 0\n\
+         \x20\x20\x20\x20v1 = param 1\n\
+         \x20\x20\x20\x20v2 = load.atomic.acquire v0\n\
+         \x20\x20\x20\x20store.atomic.release v1, v0\n\
+         \x20\x20\x20\x20v4 = rmw.add.seqcst v0, v1\n\
+         \x20\x20\x20\x20v5 = cmpxchg.acqrel.acquire v0, v2, v1\n\
+         \x20\x20\x20\x20fence.seqcst\n\
+         \x20\x20\x20\x20ret v5\n\
          }"
     );
 }
