@@ -1,4 +1,6 @@
 # tuffy
+[![CI](https://github.com/dtcxzyw/tuffy/actions/workflows/ci.yml/badge.svg)](https://github.com/dtcxzyw/tuffy/actions/workflows/ci.yml)
+
 An experimental optimizing compiler written by LLM
 
 > **Note:** This project is currently in an experimental stage. External pull requests are not accepted at this time.
