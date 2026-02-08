@@ -5,6 +5,8 @@ use crate::reg::Gpr;
 /// Operand size for x86 instructions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpSize {
+    S8,
+    S16,
     S32,
     S64,
 }
@@ -89,4 +91,29 @@ pub enum MInst {
     SubSPI { imm: i32 },
     /// add rsp, imm32 (deallocate stack space)
     AddSPI { imm: i32 },
+    /// mov reg, [base+offset] (load from memory)
+    MovRM {
+        size: OpSize,
+        dst: Gpr,
+        base: Gpr,
+        offset: i32,
+    },
+    /// mov [base+offset], reg (store to memory)
+    MovMR {
+        size: OpSize,
+        base: Gpr,
+        offset: i32,
+        src: Gpr,
+    },
+    /// lea reg, [base+offset] (load effective address)
+    Lea { dst: Gpr, base: Gpr, offset: i32 },
+    /// mov reg, imm64 (64-bit immediate, REX.W + B8+rd io)
+    MovRI64 { dst: Gpr, imm: i64 },
+    /// mov [base+offset], imm32 (store immediate to memory)
+    MovMI {
+        size: OpSize,
+        base: Gpr,
+        offset: i32,
+        imm: i32,
+    },
 }
