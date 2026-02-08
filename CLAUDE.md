@@ -72,6 +72,8 @@ Documents are archived by year-month under their respective directories, written
 
 Task documents must additionally include: title, task description, and affected modules (modules expected to be modified).
 
+When starting work on a task, update its status to `In Progress`. When the task is completed, update its status to `Completed` and fill in the completed date.
+
 Templates are available for reference:
 - `docs/tasks/template.md` — task document template
 - `docs/RFCs/template.md` — RFC document template (based on Rust RFC format)
