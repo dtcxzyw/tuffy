@@ -1,6 +1,6 @@
 # Implement Linking
 
-- Status: Draft
+- Status: In Progress
 - Created: 2026-02-08
 - Completed: N/A
 - Parent: docs/tasks/202602/hello-world.md
