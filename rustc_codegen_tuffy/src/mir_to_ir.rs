@@ -3,6 +3,8 @@
 //! Translates rustc MIR into tuffy IR, supporting basic arithmetic,
 //! control flow (branches, SwitchInt), and comparison operations.
 
+use std::collections::HashMap;
+
 use rustc_middle::mir::{self, BasicBlock, BinOp, Operand, Rvalue, StatementKind, TerminatorKind};
 use rustc_middle::ty::{self, Instance, TyCtxt};
 
@@ -12,8 +14,15 @@ use tuffy_ir::instruction::{ICmpOp, Origin};
 use tuffy_ir::types::{Annotation, Type};
 use tuffy_ir::value::{BlockRef, ValueRef};
 
+/// Result of MIR → IR translation.
+pub struct TranslationResult {
+    pub func: Function,
+    /// Maps IR instruction index → callee symbol name for Call instructions.
+    pub call_targets: HashMap<u32, String>,
+}
+
 /// Translate a single MIR function instance to tuffy IR.
-pub fn translate_function<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> Option<Function> {
+pub fn translate_function<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> Option<TranslationResult> {
     let def_id = instance.def_id();
     if !def_id.is_local() {
         return None;
@@ -45,6 +54,7 @@ pub fn translate_function<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> 
     let mut func = Function::new(&name, params, param_anns, ret_ty, ret_ann);
     let mut builder = Builder::new(&mut func);
     let mut locals = LocalMap::new(mir.local_decls.len());
+    let mut call_targets: HashMap<u32, String> = HashMap::new();
 
     let root = builder.create_region(RegionKind::Function);
     builder.enter_region(root);
@@ -71,13 +81,18 @@ pub fn translate_function<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> 
             translate_statement(stmt, &mut builder, &mut locals);
         }
         if let Some(ref term) = bb_data.terminator {
-            translate_terminator(term, &mut builder, &mut locals, &block_map);
+            translate_terminator(
+                tcx, term, &mut builder, &mut locals, &block_map, &mut call_targets,
+            );
         }
     }
 
     builder.exit_region();
 
-    Some(func)
+    Some(TranslationResult {
+        func,
+        call_targets,
+    })
 }
 
 struct LocalMap {
@@ -164,11 +179,13 @@ fn translate_statement(
     }
 }
 
-fn translate_terminator(
-    term: &mir::Terminator<'_>,
+fn translate_terminator<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    term: &mir::Terminator<'tcx>,
     builder: &mut Builder<'_>,
     locals: &mut LocalMap,
     block_map: &BlockMap,
+    call_targets: &mut HashMap<u32, String>,
 ) {
     match &term.kind {
         TerminatorKind::Return => {
@@ -198,6 +215,50 @@ fn translate_terminator(
         TerminatorKind::Unreachable => {
             // Emit a trap-like return for now.
             builder.ret(None, Origin::synthetic());
+        }
+        TerminatorKind::Call {
+            func,
+            args,
+            destination,
+            target,
+            ..
+        } => {
+            // Resolve callee symbol name from the function operand's type.
+            let callee_sym = resolve_call_symbol(tcx, func);
+
+            // Translate arguments to IR operands.
+            let ir_args: Vec<tuffy_ir::instruction::Operand> = args
+                .iter()
+                .filter_map(|arg| {
+                    translate_operand(&arg.node, builder, locals)
+                        .map(|v| v.into())
+                })
+                .collect();
+
+            // Emit a Call IR instruction. The callee operand is a dummy const
+            // (the actual symbol is tracked in call_targets).
+            let callee_val = builder.iconst(0, Origin::synthetic());
+            let call_vref = builder.call(
+                callee_val.into(),
+                ir_args,
+                Type::Int,
+                None,
+                Origin::synthetic(),
+            );
+
+            // Record the mapping from instruction index to symbol name.
+            if let Some(sym) = callee_sym {
+                call_targets.insert(call_vref.index(), sym);
+            }
+
+            // Store result in destination local.
+            locals.set(destination.local, call_vref);
+
+            // Branch to the continuation block if present.
+            if let Some(target_bb) = target {
+                let target_block = block_map.get(*target_bb);
+                builder.br(target_block, vec![], Origin::synthetic());
+            }
         }
         _ => {}
     }
@@ -338,6 +399,29 @@ fn translate_const(constant: &mir::ConstOperand<'_>, builder: &mut Builder<'_>) 
             }
         }
         mir::ConstValue::ZeroSized => Some(builder.iconst(0, Origin::synthetic())),
+        _ => None,
+    }
+}
+
+/// Resolve the callee symbol name from a Call terminator's function operand.
+fn resolve_call_symbol<'tcx>(tcx: TyCtxt<'tcx>, func_op: &Operand<'tcx>) -> Option<String> {
+    let ty = match func_op {
+        Operand::Constant(c) => c.ty(),
+        Operand::Copy(place) | Operand::Move(place) => {
+            // Indirect call through a local — we can't resolve statically.
+            let _ = place;
+            return None;
+        }
+        _ => return None,
+    };
+    match ty.kind() {
+        ty::FnDef(def_id, args) => {
+            let instance =
+                Instance::resolve(tcx, ty::TypingEnv::fully_monomorphized(), *def_id, args)
+                    .ok()
+                    .flatten()?;
+            Some(tcx.symbol_name(instance).name.to_string())
+        }
         _ => None,
     }
 }

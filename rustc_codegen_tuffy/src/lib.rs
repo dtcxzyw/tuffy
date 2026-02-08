@@ -48,12 +48,15 @@ impl CodegenBackend for TuffyCodegenBackend {
 
             for (mono_item, _item_data) in &mono_items {
                 if let MonoItem::Fn(instance) = mono_item {
-                    if let Some(func) = mir_to_ir::translate_function(tcx, *instance) {
-                        if let Some(isel_result) = tuffy_codegen::isel::isel(&func) {
-                            let code =
+                    if let Some(result) = mir_to_ir::translate_function(tcx, *instance) {
+                        if let Some(isel_result) = tuffy_codegen::isel::isel(&result.func, &result.call_targets) {
+                            let enc =
                                 tuffy_codegen::encode::encode_function(&isel_result.insts);
-                            object_data =
-                                tuffy_codegen::emit::emit_elf(&isel_result.name, &code);
+                            object_data = tuffy_codegen::emit::emit_elf(
+                                &isel_result.name,
+                                &enc.code,
+                                &enc.relocations,
+                            );
                             has_functions = true;
                         }
                     }
