@@ -6,6 +6,20 @@ import Mathlib.Data.BitVec
 
 namespace TuffyLean.IR
 
+/-- Floating point type variants -/
+inductive FloatType where
+  | bf16   -- Brain floating point (bfloat16)
+  | f16    -- IEEE 754 half precision
+  | f32    -- IEEE 754 single precision
+  | f64    -- IEEE 754 double precision
+  deriving DecidableEq, Repr
+
+/-- Range annotation on a value definition or use edge -/
+inductive Annotation where
+  | signed (bits : Nat)    -- :s<N> — value in [-2^(N-1), 2^(N-1)-1]
+  | unsigned (bits : Nat)  -- :u<N> — value in [0, 2^N-1]
+  deriving DecidableEq, Repr
+
 /-- Abstract allocation identifier for pointer provenance -/
 structure AllocId where
   id : Nat
