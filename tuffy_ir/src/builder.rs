@@ -270,6 +270,43 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::Ashr(a, b), Type::Int, origin, ann)
     }
 
+    // ── Floating point arithmetic ──
+
+    /// Floating point addition.
+    pub fn fadd(&mut self, a: Operand, b: Operand, ty: Type, origin: Origin) -> ValueRef {
+        self.push_inst(Op::FAdd(a, b), ty, origin, None)
+    }
+
+    /// Floating point subtraction.
+    pub fn fsub(&mut self, a: Operand, b: Operand, ty: Type, origin: Origin) -> ValueRef {
+        self.push_inst(Op::FSub(a, b), ty, origin, None)
+    }
+
+    /// Floating point multiplication.
+    pub fn fmul(&mut self, a: Operand, b: Operand, ty: Type, origin: Origin) -> ValueRef {
+        self.push_inst(Op::FMul(a, b), ty, origin, None)
+    }
+
+    /// Floating point division.
+    pub fn fdiv(&mut self, a: Operand, b: Operand, ty: Type, origin: Origin) -> ValueRef {
+        self.push_inst(Op::FDiv(a, b), ty, origin, None)
+    }
+
+    /// Copy sign: magnitude from first operand, sign from second.
+    pub fn copysign(&mut self, mag: Operand, sign: Operand, ty: Type, origin: Origin) -> ValueRef {
+        self.push_inst(Op::CopySign(mag, sign), ty, origin, None)
+    }
+
+    /// Floating point negation.
+    pub fn fneg(&mut self, val: Operand, ty: Type, origin: Origin) -> ValueRef {
+        self.push_inst(Op::FNeg(val), ty, origin, None)
+    }
+
+    /// Floating point absolute value.
+    pub fn fabs(&mut self, val: Operand, ty: Type, origin: Origin) -> ValueRef {
+        self.push_inst(Op::FAbs(val), ty, origin, None)
+    }
+
     // ── Comparison ──
 
     /// Integer comparison.

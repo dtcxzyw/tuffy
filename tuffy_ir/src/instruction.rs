@@ -135,6 +135,22 @@ pub enum Op {
     /// Zero-extend to n bits (for lowering).
     Zext(Operand, u32),
 
+    // -- Floating point arithmetic --
+    /// Floating point addition: fadd %a, %b
+    FAdd(Operand, Operand),
+    /// Floating point subtraction: fsub %a, %b
+    FSub(Operand, Operand),
+    /// Floating point multiplication: fmul %a, %b
+    FMul(Operand, Operand),
+    /// Floating point division: fdiv %a, %b
+    FDiv(Operand, Operand),
+    /// Floating point negation: fneg %a
+    FNeg(Operand),
+    /// Floating point absolute value: fabs %a
+    FAbs(Operand),
+    /// Copy sign: copysign %mag, %sign
+    CopySign(Operand, Operand),
+
     // -- Pointer operations --
     /// Pointer addition: ptradd ptr, offset → ptr (preserves provenance).
     PtrAdd(Operand, Operand),

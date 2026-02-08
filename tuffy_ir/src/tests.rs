@@ -3,7 +3,7 @@
 use crate::builder::Builder;
 use crate::function::{Function, RegionKind};
 use crate::instruction::{ICmpOp, Op, Operand, Origin};
-use crate::types::{Annotation, Type};
+use crate::types::{Annotation, FloatType, Type};
 
 #[test]
 fn build_add_function() {
@@ -411,6 +411,99 @@ fn display_pointer_ops() {
          \x20\x20\x20\x20v6 = ptrtoaddr v1\n\
          \x20\x20\x20\x20v7 = inttoptr v2\n\
          \x20\x20\x20\x20ret v5\n\
+         }"
+    );
+}
+
+#[test]
+fn build_float_binary_ops() {
+    let f32_ty = Type::Float(FloatType::F32);
+    let mut func = Function::new(
+        "float_bin",
+        vec![f32_ty.clone(), f32_ty.clone()],
+        vec![],
+        Some(f32_ty.clone()),
+        None,
+    );
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+    let entry = builder.create_block();
+    builder.switch_to_block(entry);
+
+    let a = builder.param(0, f32_ty.clone(), None, Origin::synthetic());
+    let b = builder.param(1, f32_ty.clone(), None, Origin::synthetic());
+    let v_fadd = builder.fadd(a.into(), b.into(), f32_ty.clone(), Origin::synthetic());
+    let v_fsub = builder.fsub(a.into(), b.into(), f32_ty.clone(), Origin::synthetic());
+    let v_fmul = builder.fmul(
+        v_fadd.into(),
+        v_fsub.into(),
+        f32_ty.clone(),
+        Origin::synthetic(),
+    );
+    let v_fdiv = builder.fdiv(v_fmul.into(), b.into(), f32_ty.clone(), Origin::synthetic());
+    let v_csign = builder.copysign(v_fdiv.into(), a.into(), f32_ty.clone(), Origin::synthetic());
+    let v_neg = builder.fneg(v_csign.into(), f32_ty.clone(), Origin::synthetic());
+    let v_abs = builder.fabs(v_neg.into(), f32_ty.clone(), Origin::synthetic());
+    builder.ret(Some(v_abs.into()), Origin::synthetic());
+    builder.exit_region();
+
+    assert_eq!(func.instructions.len(), 10);
+    assert!(matches!(func.instructions[2].op, Op::FAdd(_, _)));
+    assert!(matches!(func.instructions[3].op, Op::FSub(_, _)));
+    assert!(matches!(func.instructions[4].op, Op::FMul(_, _)));
+    assert!(matches!(func.instructions[5].op, Op::FDiv(_, _)));
+    assert!(matches!(func.instructions[6].op, Op::CopySign(_, _)));
+    assert!(matches!(func.instructions[7].op, Op::FNeg(_)));
+    assert!(matches!(func.instructions[8].op, Op::FAbs(_)));
+    assert_eq!(func.instructions[2].ty, f32_ty);
+}
+
+#[test]
+fn display_float_ops() {
+    let f64_ty = Type::Float(FloatType::F64);
+    let mut func = Function::new(
+        "float_ops",
+        vec![f64_ty.clone(), f64_ty.clone()],
+        vec![],
+        Some(f64_ty.clone()),
+        None,
+    );
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+    let entry = builder.create_block();
+    builder.switch_to_block(entry);
+
+    let a = builder.param(0, f64_ty.clone(), None, Origin::synthetic());
+    let b = builder.param(1, f64_ty.clone(), None, Origin::synthetic());
+    let _v_fadd = builder.fadd(a.into(), b.into(), f64_ty.clone(), Origin::synthetic());
+    let _v_fsub = builder.fsub(a.into(), b.into(), f64_ty.clone(), Origin::synthetic());
+    let _v_fmul = builder.fmul(a.into(), b.into(), f64_ty.clone(), Origin::synthetic());
+    let _v_fdiv = builder.fdiv(a.into(), b.into(), f64_ty.clone(), Origin::synthetic());
+    let _v_neg = builder.fneg(a.into(), f64_ty.clone(), Origin::synthetic());
+    let _v_abs = builder.fabs(a.into(), f64_ty.clone(), Origin::synthetic());
+    let _v_cs = builder.copysign(a.into(), b.into(), f64_ty.clone(), Origin::synthetic());
+    builder.ret(Some(_v_cs.into()), Origin::synthetic());
+    builder.exit_region();
+
+    let output = format!("{func}");
+    assert_eq!(
+        output,
+        "func @float_ops(f64, f64) -> f64 {\n\
+         \x20\x20bb0:\n\
+         \x20\x20\x20\x20v0 = param 0\n\
+         \x20\x20\x20\x20v1 = param 1\n\
+         \x20\x20\x20\x20v2 = fadd v0, v1\n\
+         \x20\x20\x20\x20v3 = fsub v0, v1\n\
+         \x20\x20\x20\x20v4 = fmul v0, v1\n\
+         \x20\x20\x20\x20v5 = fdiv v0, v1\n\
+         \x20\x20\x20\x20v6 = fneg v0\n\
+         \x20\x20\x20\x20v7 = fabs v0\n\
+         \x20\x20\x20\x20v8 = copysign v0, v1\n\
+         \x20\x20\x20\x20ret v8\n\
          }"
     );
 }

@@ -187,6 +187,27 @@ fn fmt_inst(
         Op::Ashr(a, b) => {
             format!("{v} = ashr {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
         }
+        Op::FAdd(a, b) => {
+            format!("{v} = fadd {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+        }
+        Op::FSub(a, b) => {
+            format!("{v} = fsub {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+        }
+        Op::FMul(a, b) => {
+            format!("{v} = fmul {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+        }
+        Op::FDiv(a, b) => {
+            format!("{v} = fdiv {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+        }
+        Op::FNeg(a) => format!("{v} = fneg {}", ctx.fmt_operand(a)),
+        Op::FAbs(a) => format!("{v} = fabs {}", ctx.fmt_operand(a)),
+        Op::CopySign(mag, sign) => {
+            format!(
+                "{v} = copysign {}, {}",
+                ctx.fmt_operand(mag),
+                ctx.fmt_operand(sign)
+            )
+        }
         Op::Const(imm) => format!("{v} = iconst {imm}"),
         Op::ICmp(cmp, a, b) => {
             format!(
