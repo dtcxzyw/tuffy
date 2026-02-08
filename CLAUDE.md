@@ -40,6 +40,8 @@ Common types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build
 
 Commit messages must include a body explaining what was changed and why. Do not write title-only commits.
 
+Before committing, ensure `cargo test` and `cargo clippy` pass without errors.
+
 ## Build Commands
 
 ```

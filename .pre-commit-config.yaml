@@ -15,3 +15,11 @@ repos:
     - id: end-of-file-fixer
     - id: trailing-whitespace
     - id: check-yaml
+- repo: local
+  hooks:
+    - id: cargo-fmt
+      name: cargo fmt
+      entry: cargo fmt -- --check
+      language: system
+      types: [rust]
+      pass_filenames: false
