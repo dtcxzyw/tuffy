@@ -39,6 +39,7 @@ Key design principles:
   - [Value Annotations](#value-annotations)
   - [Memory Operations](#memory-operations)
   - [Type Conversion](#type-conversion)
+  - [Pointer Operations](#pointer-operations)
   - [Function Calls](#function-calls)
   - [Terminators](#terminators)
 - [Text Format](#text-format)
@@ -241,6 +242,80 @@ vN = mul vA, vB
 
 Integer multiplication. **Semantics**: `evalMul(a, b) = a * b`
 
+#### `sdiv`
+
+```
+vN = sdiv vA, vB
+```
+
+Signed integer division. Produces `poison` if `vB` is zero.
+**Semantics**: `evalSDiv(a, b) = if b = 0 then poison else a / b`
+
+#### `udiv`
+
+```
+vN = udiv vA, vB
+```
+
+Unsigned integer division. Produces `poison` if `vB` is zero. Operands are assumed
+non-negative (enforced by annotations).
+**Semantics**: `evalUDiv(a, b) = if b = 0 then poison else a / b`
+
+#### `and`
+
+```
+vN = and vA, vB
+```
+
+Bitwise AND on infinite precision two's complement integers.
+**Semantics**: `evalAnd(a, b) = Int.land a b`
+
+#### `or`
+
+```
+vN = or vA, vB
+```
+
+Bitwise OR on infinite precision two's complement integers.
+**Semantics**: `evalOr(a, b) = Int.lor a b`
+
+#### `xor`
+
+```
+vN = xor vA, vB
+```
+
+Bitwise XOR on infinite precision two's complement integers.
+**Semantics**: `evalXor(a, b) = Int.xor a b`
+
+#### `shl`
+
+```
+vN = shl vA, vB
+```
+
+Left shift. Produces `poison` if the shift amount `vB` is negative.
+**Semantics**: `evalShl(a, b) = if b < 0 then poison else a <<< b`
+
+#### `lshr`
+
+```
+vN = lshr vA, vB
+```
+
+Logical right shift. Produces `poison` if the shift amount `vB` is negative.
+Operand `vA` is assumed non-negative (enforced by annotations).
+**Semantics**: `evalLshr(a, b) = if b < 0 then poison else a >>> b`
+
+#### `ashr`
+
+```
+vN = ashr vA, vB
+```
+
+Arithmetic right shift. Produces `poison` if the shift amount `vB` is negative.
+**Semantics**: `evalAshr(a, b) = if b < 0 then poison else a >>> b`
+
 ### Comparison
 
 #### `icmp`
@@ -377,6 +452,61 @@ vN = zext vA, <bits>
 
 Zero-extend `vA` to `bits` bits. Used during lowering to make bit widths explicit
 for instruction selection.
+
+### Pointer Operations
+
+Pointer operations manipulate pointers with explicit provenance tracking. The formal
+semantics are defined in `TuffyLean.IR.Semantics`.
+
+#### `ptradd`
+
+```
+vN = ptradd vPtr, vOffset
+```
+
+Pointer addition. Offsets the pointer `vPtr` by `vOffset` bytes. The result preserves
+the provenance of the base pointer.
+**Semantics**: `evalPtrAdd(base, offset) = ptr { allocId = base.allocId, offset = base.offset + offset }`
+
+#### `ptrdiff`
+
+```
+vN = ptrdiff vA, vB
+```
+
+Pointer difference. Computes the byte offset between two pointers. Both pointers must
+belong to the same allocation; otherwise the result is `poison`.
+**Semantics**: `evalPtrDiff(a, b) = if a.allocId = b.allocId then a.offset - b.offset else poison`
+
+#### `ptrtoint`
+
+```
+vN = ptrtoint vPtr
+```
+
+Convert a pointer to an integer. The provenance is captured — the resulting integer
+retains knowledge that it came from a pointer.
+**Semantics**: `evalPtrToInt(p) = p.offset`
+
+#### `ptrtoaddr`
+
+```
+vN = ptrtoaddr vPtr
+```
+
+Extract the address from a pointer, discarding provenance. Returns a plain integer
+with no provenance information.
+**Semantics**: `evalPtrToAddr(p) = p.offset`
+
+#### `inttoptr`
+
+```
+vN = inttoptr vAddr
+```
+
+Create a pointer from an integer address. The resulting pointer has no valid
+provenance (wildcard provenance).
+**Semantics**: `evalIntToPtr(addr, allocId) = ptr { allocId, offset = addr }`
 
 ### Function Calls
 
@@ -527,20 +657,6 @@ Semantics for NaN payloads and denormals are still under discussion.
 determined by hardware, `N` is the minimum element count, and `T` is the element type.
 Fixed-width vectors use `vscale=1`. Vector operations include elementwise arithmetic,
 horizontal reductions, scatter/gather, masking/predication, and lane manipulation.
-
-### Additional Integer Operations
-
-- `sdiv` / `udiv` — signed and unsigned division (poison on division by zero; `sdiv`
-  is defined in Lean as `evalSDiv`)
-- `and`, `or`, `xor` — bitwise operations on infinite precision integers
-- `shl`, `lshr`, `ashr` — shift operations
-
-### Pointer Operations
-
-- `ptrtoint` / `inttoptr` — pointer-integer conversion with provenance capture
-- `ptrtoaddr` — extract address only, discard provenance
-- `ptradd` — provenance-preserving pointer arithmetic
-- `ptrdiff` — pointer difference within the same allocation
 
 ### Byte Type Operations
 
