@@ -10,6 +10,8 @@ A curated list of reference documents and resources for the tuffy project.
 
 ## IR Design and Semantics
 
+- [RVSDG: An Intermediate Representation for Optimizing Compilers](https://arxiv.org/abs/1912.05036) ([local](../scratch/rvsdg-paper.pdf)) — Nico Reissmann, Jan Christian Meyer, Helge Bahmann, Magnus Själander, 2019. Formalizes the Regionalized Value State Dependence Graph, a data-flow-centric IR where nodes represent computations, edges represent dependencies, and regions capture hierarchical program structure. Demonstrates Dead Node and Common Node Elimination on the representation. Directly relevant to tuffy's hierarchical CFG with SESE regions and the optir approach built on top of RVSDG.
+
 - [RFC: Add a New Byte Type to LLVM IR](https://discourse.llvm.org/t/rfc-add-a-new-byte-type-to-llvm-ir/89522) — Juneyoung Lee, Pedro Lobo, Nuno Lopes, George Mitenkov. Proposes `b<N>` byte type to represent raw memory data, enabling per-byte poison tracking and paving the way for undef removal.
 - [Leaving the Sea of Nodes](https://v8.dev/blog/leaving-the-sea-of-nodes) — V8 team. Post-mortem on 10 years of Sea of Nodes in TurboFan: effect chain complexity, poor cache locality, limited floating benefits for effectful operations, compilation speed issues. Replaced with CFG-based Turboshaft, halving compile time.
 - [A Simple Reply](https://github.com/SeaOfNodes/Simple/blob/main/ASimpleReply.md) — Cliff Click. Rebuttal to V8's SoN criticism: argues problems stem from JS's lack of strong typing, not SoN itself. Strong typing (Java, Rust) provides ECA naturally, simplifying effect management. Worklist algorithms solve visitation order. Dead code elimination is near-free with reference counting.
