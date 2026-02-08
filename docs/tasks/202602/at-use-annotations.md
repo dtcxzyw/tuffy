@@ -1,8 +1,8 @@
 # Implement At-Use Annotations
 
-- Status: In Progress
+- Status: Completed
 - Created: 2026-02-08
-- Completed: N/A
+- Completed: 2026-02-08
 - Parent: N/A
 
 ## Description
@@ -19,19 +19,20 @@ This task follows the [IR Modification SOP](../../SOPs/ir-change.md).
 
 Following the SOP checklist order:
 
-- [ ] **SOP Step 4: Update spec and RFC docs** — Update `docs/spec.md` and
+- [x] **SOP Step 4: Update spec and RFC docs** — Update `docs/spec.md` and
   `docs/RFCs/202602/ir-design.md` to reflect the new annotation design
-- [ ] **SOP Step 1: Lean 4 formal definitions** — Add annotation representation to
-  `lean/TuffyLean/IR/Types.lean`; update semantics in `Semantics.lean` to remove
-  `assertSext`/`assertZext` and define annotation violation semantics
-- [ ] **SOP Step 2: Rust `tuffy_ir`** — Remove `AssertSext`/`AssertZext` opcodes from
-  `instruction.rs`; add `Annotation` type; update `value.rs` with per-use annotation
-  storage; update `builder.rs` API; update `display.rs` to emit annotation syntax;
-  elide top-level `region function` in display
-- [ ] **SOP Step 3: Downstream crates** — Update interpreter (`tuffy_ir_interp`),
-  codegen (`tuffy_codegen` isel), optimizer (`tuffy_opt`), trace/tv
-- [ ] **SOP Step 5: Tests** — Update unit tests, interpreter tests, codegen tests,
-  UI tests for new annotation syntax
+- [x] **SOP Step 1: Lean 4 formal definitions** — Add `Annotation` and `FloatType`
+  to `Types.lean`; replace `assertSext`/`assertZext` with `checkSignedRange`/
+  `checkUnsignedRange`/`applyAnnotation` in `Semantics.lean`
+- [x] **SOP Step 2: Rust `tuffy_ir`** — Remove `AssertSext`/`AssertZext` opcodes;
+  add `Annotation`, `FloatType`, `Operand` types; add `result_annotation` to
+  `Instruction`; add `param_annotations`/`ret_annotation` to `Function`; update
+  `builder.rs` API; update `display.rs` to emit annotation syntax and elide
+  top-level `region function`
+- [x] **SOP Step 3: Downstream crates** — Update `tuffy_codegen` isel and tests,
+  `rustc_codegen_tuffy` MIR translation
+- [x] **SOP Step 5: Tests** — Update unit tests, codegen tests, e2e tests,
+  UI tests (4913 pass / 0 fail)
 
 ## Affected Modules
 
