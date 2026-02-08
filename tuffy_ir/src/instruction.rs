@@ -92,6 +92,22 @@ pub enum Op {
     Sub(Operand, Operand),
     /// Integer multiplication: mul %a, %b
     Mul(Operand, Operand),
+    /// Signed integer division: sdiv %a, %b (poison on div-by-zero)
+    SDiv(Operand, Operand),
+    /// Unsigned integer division: udiv %a, %b (poison on div-by-zero)
+    UDiv(Operand, Operand),
+    /// Bitwise AND: and %a, %b
+    And(Operand, Operand),
+    /// Bitwise OR: or %a, %b
+    Or(Operand, Operand),
+    /// Bitwise XOR: xor %a, %b
+    Xor(Operand, Operand),
+    /// Left shift: shl %a, %b (poison if shift amount < 0)
+    Shl(Operand, Operand),
+    /// Logical right shift: lshr %a, %b (poison if shift amount < 0)
+    Lshr(Operand, Operand),
+    /// Arithmetic right shift: ashr %a, %b (poison if shift amount < 0)
+    Ashr(Operand, Operand),
     /// Integer constant.
     Const(i64),
 

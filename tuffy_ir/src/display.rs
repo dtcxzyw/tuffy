@@ -163,6 +163,30 @@ fn fmt_inst(
         Op::Mul(a, b) => {
             format!("{v} = mul {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
         }
+        Op::SDiv(a, b) => {
+            format!("{v} = sdiv {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+        }
+        Op::UDiv(a, b) => {
+            format!("{v} = udiv {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+        }
+        Op::And(a, b) => {
+            format!("{v} = and {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+        }
+        Op::Or(a, b) => {
+            format!("{v} = or {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+        }
+        Op::Xor(a, b) => {
+            format!("{v} = xor {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+        }
+        Op::Shl(a, b) => {
+            format!("{v} = shl {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+        }
+        Op::Lshr(a, b) => {
+            format!("{v} = lshr {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+        }
+        Op::Ashr(a, b) => {
+            format!("{v} = ashr {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+        }
         Op::Const(imm) => format!("{v} = iconst {imm}"),
         Op::ICmp(cmp, a, b) => {
             format!(

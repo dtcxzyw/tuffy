@@ -182,6 +182,94 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::Mul(a, b), Type::Int, origin, ann)
     }
 
+    /// Signed integer division (poison on division by zero).
+    pub fn sdiv(
+        &mut self,
+        a: Operand,
+        b: Operand,
+        ann: Option<Annotation>,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::SDiv(a, b), Type::Int, origin, ann)
+    }
+
+    /// Unsigned integer division (poison on division by zero).
+    pub fn udiv(
+        &mut self,
+        a: Operand,
+        b: Operand,
+        ann: Option<Annotation>,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::UDiv(a, b), Type::Int, origin, ann)
+    }
+
+    /// Bitwise AND.
+    pub fn and(
+        &mut self,
+        a: Operand,
+        b: Operand,
+        ann: Option<Annotation>,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::And(a, b), Type::Int, origin, ann)
+    }
+
+    /// Bitwise OR.
+    pub fn or(
+        &mut self,
+        a: Operand,
+        b: Operand,
+        ann: Option<Annotation>,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::Or(a, b), Type::Int, origin, ann)
+    }
+
+    /// Bitwise XOR.
+    pub fn xor(
+        &mut self,
+        a: Operand,
+        b: Operand,
+        ann: Option<Annotation>,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::Xor(a, b), Type::Int, origin, ann)
+    }
+
+    /// Left shift (poison if shift amount is negative).
+    pub fn shl(
+        &mut self,
+        a: Operand,
+        b: Operand,
+        ann: Option<Annotation>,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::Shl(a, b), Type::Int, origin, ann)
+    }
+
+    /// Logical right shift (poison if shift amount is negative).
+    pub fn lshr(
+        &mut self,
+        a: Operand,
+        b: Operand,
+        ann: Option<Annotation>,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::Lshr(a, b), Type::Int, origin, ann)
+    }
+
+    /// Arithmetic right shift (poison if shift amount is negative).
+    pub fn ashr(
+        &mut self,
+        a: Operand,
+        b: Operand,
+        ann: Option<Annotation>,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::Ashr(a, b), Type::Int, origin, ann)
+    }
+
     // ── Comparison ──
 
     /// Integer comparison.

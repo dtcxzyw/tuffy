@@ -234,3 +234,111 @@ fn display_nested_loop_region() {
          }"
     );
 }
+
+#[test]
+fn build_bitwise_ops() {
+    let mut func = Function::new(
+        "bitwise",
+        vec![Type::Int, Type::Int],
+        vec![],
+        Some(Type::Int),
+        None,
+    );
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+    let entry = builder.create_block();
+    builder.switch_to_block(entry);
+
+    let a = builder.param(0, Type::Int, None, Origin::synthetic());
+    let b = builder.param(1, Type::Int, None, Origin::synthetic());
+    let v_and = builder.and(a.into(), b.into(), None, Origin::synthetic());
+    let v_or = builder.or(a.into(), b.into(), None, Origin::synthetic());
+    let v_xor = builder.xor(v_and.into(), v_or.into(), None, Origin::synthetic());
+    builder.ret(Some(v_xor.into()), Origin::synthetic());
+    builder.exit_region();
+
+    assert_eq!(func.instructions.len(), 6);
+    assert!(matches!(func.instructions[2].op, Op::And(_, _)));
+    assert!(matches!(func.instructions[3].op, Op::Or(_, _)));
+    assert!(matches!(func.instructions[4].op, Op::Xor(_, _)));
+}
+
+#[test]
+fn display_shift_ops() {
+    let mut func = Function::new(
+        "shifts",
+        vec![Type::Int, Type::Int],
+        vec![],
+        Some(Type::Int),
+        None,
+    );
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+    let entry = builder.create_block();
+    builder.switch_to_block(entry);
+
+    let a = builder.param(0, Type::Int, None, Origin::synthetic());
+    let b = builder.param(1, Type::Int, None, Origin::synthetic());
+    let v_shl = builder.shl(a.into(), b.into(), None, Origin::synthetic());
+    let v_lshr = builder.lshr(a.into(), b.into(), None, Origin::synthetic());
+    let v_ashr = builder.ashr(v_shl.into(), v_lshr.into(), None, Origin::synthetic());
+    builder.ret(Some(v_ashr.into()), Origin::synthetic());
+    builder.exit_region();
+
+    let output = format!("{func}");
+    assert_eq!(
+        output,
+        "func @shifts(int, int) -> int {\n\
+         \x20\x20bb0:\n\
+         \x20\x20\x20\x20v0 = param 0\n\
+         \x20\x20\x20\x20v1 = param 1\n\
+         \x20\x20\x20\x20v2 = shl v0, v1\n\
+         \x20\x20\x20\x20v3 = lshr v0, v1\n\
+         \x20\x20\x20\x20v4 = ashr v2, v3\n\
+         \x20\x20\x20\x20ret v4\n\
+         }"
+    );
+}
+
+#[test]
+fn display_division_ops() {
+    let mut func = Function::new(
+        "divs",
+        vec![Type::Int, Type::Int],
+        vec![],
+        Some(Type::Int),
+        None,
+    );
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+    let entry = builder.create_block();
+    builder.switch_to_block(entry);
+
+    let a = builder.param(0, Type::Int, None, Origin::synthetic());
+    let b = builder.param(1, Type::Int, None, Origin::synthetic());
+    let v_sdiv = builder.sdiv(a.into(), b.into(), None, Origin::synthetic());
+    let v_udiv = builder.udiv(a.into(), b.into(), None, Origin::synthetic());
+    let v_add = builder.add(v_sdiv.into(), v_udiv.into(), None, Origin::synthetic());
+    builder.ret(Some(v_add.into()), Origin::synthetic());
+    builder.exit_region();
+
+    let output = format!("{func}");
+    assert_eq!(
+        output,
+        "func @divs(int, int) -> int {\n\
+         \x20\x20bb0:\n\
+         \x20\x20\x20\x20v0 = param 0\n\
+         \x20\x20\x20\x20v1 = param 1\n\
+         \x20\x20\x20\x20v2 = sdiv v0, v1\n\
+         \x20\x20\x20\x20v3 = udiv v0, v1\n\
+         \x20\x20\x20\x20v4 = add v2, v3\n\
+         \x20\x20\x20\x20ret v4\n\
+         }"
+    );
+}
