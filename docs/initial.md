@@ -84,3 +84,10 @@ Validation and benchmarking will use the following targets (in progressive order
 
 - Self-hosting is not a separate goal since tuffy is written in Rust — once the backend can compile Rust, self-hosting follows naturally
 - JIT support and outperforming LLVM are not current goals but may be revisited later
+
+## Target Abstraction
+
+- Triple-based target identification, following LLVM's convention.
+- TargetLowering design follows LLVM's approach (legal types, operation lowering, register classes).
+- **Sub-method override via command-line**: individual TargetLowering properties (pointer size, legal integer widths, max vector width, etc.) can be overridden via `--target-override key=value` flags. This enables testing IR-level passes against specific target properties without implementing a full architecture backend.
+- Cost model: deferred, not yet designed.
