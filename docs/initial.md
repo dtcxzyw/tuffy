@@ -1,6 +1,7 @@
 # Initial Design Discussion
 
 - Created: 2026-02-07
+- Status: **Frozen** — This document is a historical record. Do not modify.
 
 ## Background
 
