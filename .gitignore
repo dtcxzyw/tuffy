@@ -232,3 +232,4 @@ marimo/_lsp/
 __marimo__/
 
 scratch/
+lean/.lake

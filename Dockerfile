@@ -8,4 +8,10 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
        gdb \
        gdbserver \
        vim \
-       tmux
+       tmux \
+       curl \
+       coreutils
+
+# Install elan (Lean 4 toolchain manager)
+RUN curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none
+ENV PATH="/root/.elan/bin:${PATH}"

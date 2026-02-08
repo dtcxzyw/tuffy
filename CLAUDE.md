@@ -52,6 +52,15 @@ cargo clippy             # Lint
 cargo fmt                # Format code
 ```
 
+### Lean 4 (formal verification)
+
+```
+cd lean && lake build    # Build Lean project
+cd lean && lake clean    # Clean build artifacts
+```
+
+Lean 4 is managed via elan (toolchain manager). The Lean project is under `lean/` with Mathlib dependency.
+
 ## Documentation
 
 - `docs/tasks/` — task tracking documents
