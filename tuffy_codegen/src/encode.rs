@@ -124,6 +124,36 @@ fn encode_inst(
         MInst::AddSPI { imm } => {
             encode_rsp_imm(0xc0, *imm, buf); // ADD rsp, imm32
         }
+        MInst::MovRM {
+            size,
+            dst,
+            base,
+            offset,
+        } => {
+            encode_mov_rm(*size, *dst, *base, *offset, buf);
+        }
+        MInst::MovMR {
+            size,
+            base,
+            offset,
+            src,
+        } => {
+            encode_mov_mr(*size, *base, *offset, *src, buf);
+        }
+        MInst::Lea { dst, base, offset } => {
+            encode_lea(*dst, *base, *offset, buf);
+        }
+        MInst::MovRI64 { dst, imm } => {
+            encode_mov_ri64(*dst, *imm, buf);
+        }
+        MInst::MovMI {
+            size,
+            base,
+            offset,
+            imm,
+        } => {
+            encode_mov_mi(*size, *base, *offset, *imm, buf);
+        }
     }
 }
 
@@ -221,5 +251,92 @@ fn encode_rsp_imm(modrm_byte: u8, imm: i32, buf: &mut Vec<u8>) {
     buf.push(0x48); // REX.W
     buf.push(0x81);
     buf.push(modrm_byte);
+    buf.extend_from_slice(&imm.to_le_bytes());
+}
+
+/// Encode ModR/M byte with [base+disp32] addressing (mod=10).
+/// Special-cases RSP (needs SIB byte) and RBP (always uses disp).
+fn modrm_mem(reg: u8, base: Gpr, offset: i32, buf: &mut Vec<u8>) {
+    if offset == 0 && base.encoding() != 5 && base != Gpr::R13 {
+        // mod=00: [base] with no displacement
+        buf.push((reg << 3) | base.encoding());
+        if base == Gpr::Rsp || base == Gpr::R12 {
+            buf.push(0x24); // SIB: scale=0, index=RSP(none), base=RSP
+        }
+    } else if (-128..=127).contains(&offset) {
+        // mod=01: [base+disp8]
+        buf.push(0x40 | (reg << 3) | base.encoding());
+        if base == Gpr::Rsp || base == Gpr::R12 {
+            buf.push(0x24); // SIB byte
+        }
+        buf.push(offset as u8);
+    } else {
+        // mod=10: [base+disp32]
+        buf.push(0x80 | (reg << 3) | base.encoding());
+        if base == Gpr::Rsp || base == Gpr::R12 {
+            buf.push(0x24); // SIB byte
+        }
+        buf.extend_from_slice(&offset.to_le_bytes());
+    }
+}
+
+fn rex_mem(w: bool, reg: Gpr, base: Gpr) -> Option<u8> {
+    let w_bit = if w { 0x08 } else { 0 };
+    let r_bit = if reg.needs_rex() { 0x04 } else { 0 };
+    let b_bit = if base.needs_rex() { 0x01 } else { 0 };
+    let bits = w_bit | r_bit | b_bit;
+    if bits != 0 { Some(0x40 | bits) } else { None }
+}
+
+fn encode_mov_rm(size: OpSize, dst: Gpr, base: Gpr, offset: i32, buf: &mut Vec<u8>) {
+    // MOV r, r/m: 0x8B /r with memory operand
+    let w = matches!(size, OpSize::S64);
+    if let Some(r) = rex_mem(w, dst, base) {
+        buf.push(r);
+    }
+    buf.push(0x8b);
+    modrm_mem(dst.encoding(), base, offset, buf);
+}
+
+fn encode_mov_mr(size: OpSize, base: Gpr, offset: i32, src: Gpr, buf: &mut Vec<u8>) {
+    // MOV r/m, r: 0x89 /r with memory operand
+    let w = matches!(size, OpSize::S64);
+    if let Some(r) = rex_mem(w, src, base) {
+        buf.push(r);
+    }
+    buf.push(0x89);
+    modrm_mem(src.encoding(), base, offset, buf);
+}
+
+fn encode_lea(dst: Gpr, base: Gpr, offset: i32, buf: &mut Vec<u8>) {
+    // LEA r64, [base+offset]: REX.W + 0x8D /r
+    if let Some(r) = rex_mem(true, dst, base) {
+        buf.push(r);
+    } else {
+        buf.push(0x48); // REX.W always needed for 64-bit LEA
+    }
+    buf.push(0x8d);
+    modrm_mem(dst.encoding(), base, offset, buf);
+}
+
+fn encode_mov_ri64(dst: Gpr, imm: i64, buf: &mut Vec<u8>) {
+    // MOV r64, imm64: REX.W + 0xB8+rd io
+    let b_bit = if dst.needs_rex() { 0x01 } else { 0 };
+    buf.push(0x48 | b_bit); // REX.W
+    buf.push(0xb8 + dst.encoding());
+    buf.extend_from_slice(&imm.to_le_bytes());
+}
+
+fn encode_mov_mi(size: OpSize, base: Gpr, offset: i32, imm: i32, buf: &mut Vec<u8>) {
+    // MOV r/m, imm32: 0xC7 /0 id with memory operand
+    let w = matches!(size, OpSize::S64);
+    let b_bit = if base.needs_rex() { 0x01 } else { 0 };
+    let w_bit = if w { 0x08 } else { 0 };
+    let rex_bits = w_bit | b_bit;
+    if rex_bits != 0 {
+        buf.push(0x40 | rex_bits);
+    }
+    buf.push(0xc7);
+    modrm_mem(0, base, offset, buf);
     buf.extend_from_slice(&imm.to_le_bytes());
 }

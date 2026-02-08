@@ -35,6 +35,37 @@ impl RegMap {
     }
 }
 
+/// Tracks stack slot allocations (offset from RBP).
+struct StackMap {
+    /// Maps IR value index → offset from RBP (negative).
+    slots: Vec<Option<i32>>,
+    /// Current stack frame size (grows downward).
+    frame_size: i32,
+}
+
+impl StackMap {
+    fn new(capacity: usize) -> Self {
+        Self {
+            slots: vec![None; capacity],
+            frame_size: 0,
+        }
+    }
+
+    fn alloc(&mut self, val: ValueRef, bytes: u32) -> i32 {
+        self.frame_size += bytes as i32;
+        // Align to natural alignment (at least 8 bytes for pointers).
+        let align = std::cmp::max(bytes as i32, 8);
+        self.frame_size = (self.frame_size + align - 1) & !(align - 1);
+        let offset = -self.frame_size;
+        self.slots[val.index() as usize] = Some(offset);
+        offset
+    }
+
+    fn get(&self, val: ValueRef) -> Option<i32> {
+        self.slots[val.index() as usize]
+    }
+}
+
 /// Tracks ICmp results so BrIf can emit Jcc directly.
 struct CmpMap {
     map: Vec<Option<CondCode>>,
@@ -66,20 +97,55 @@ const ARG_REGS: [Gpr; 6] = [Gpr::Rdi, Gpr::Rsi, Gpr::Rdx, Gpr::Rcx, Gpr::R8, Gpr
 ///
 /// Returns None if the function contains unsupported IR ops.
 pub fn isel(func: &Function, call_targets: &HashMap<u32, String>) -> Option<IselResult> {
-    let mut out = Vec::new();
+    let mut body = Vec::new();
     let mut regs = RegMap::new(func.instructions.len());
     let mut cmps = CmpMap::new(func.instructions.len());
+    let mut stack = StackMap::new(func.instructions.len());
 
     let root = &func.regions[func.root_region.index() as usize];
     for child in &root.children {
         if let CfgNode::Block(block_ref) = child {
-            out.push(MInst::Label {
+            body.push(MInst::Label {
                 id: block_ref.index(),
             });
             for (vref, inst) in func.block_insts_with_values(*block_ref) {
-                select_inst(vref, &inst.op, &mut regs, &mut cmps, call_targets, &mut out)?;
+                select_inst(
+                    vref,
+                    &inst.op,
+                    &mut regs,
+                    &mut cmps,
+                    &mut stack,
+                    call_targets,
+                    &mut body,
+                )?;
             }
         }
+    }
+
+    // Build final instruction sequence with prologue/epilogue.
+    let mut out = Vec::new();
+    let needs_frame = stack.frame_size > 0;
+
+    if needs_frame {
+        // Align frame size to 16 bytes (System V ABI requirement).
+        let aligned = (stack.frame_size + 15) & !15;
+        out.push(MInst::Push { reg: Gpr::Rbp });
+        out.push(MInst::MovRR {
+            size: OpSize::S64,
+            dst: Gpr::Rbp,
+            src: Gpr::Rsp,
+        });
+        out.push(MInst::SubSPI { imm: aligned });
+    }
+
+    // Insert body, replacing Ret with epilogue + ret.
+    for inst in body {
+        if matches!(inst, MInst::Ret) && needs_frame {
+            let aligned = (stack.frame_size + 15) & !15;
+            out.push(MInst::AddSPI { imm: aligned });
+            out.push(MInst::Pop { reg: Gpr::Rbp });
+        }
+        out.push(inst);
     }
 
     Some(IselResult {
@@ -93,6 +159,7 @@ fn select_inst(
     op: &Op,
     regs: &mut RegMap,
     cmps: &mut CmpMap,
+    stack: &mut StackMap,
     call_targets: &HashMap<u32, String>,
     out: &mut Vec<MInst>,
 ) -> Option<()> {
@@ -206,11 +273,56 @@ fn select_inst(
             regs.assign(vref, Gpr::Rax);
         }
 
+        Op::StackSlot(bytes) => {
+            let _offset = stack.alloc(vref, *bytes);
+            // The value of a StackSlot is the address (pointer).
+            // We use LEA to compute rbp+offset when needed.
+            // For now, just record it in the stack map; Load/Store will use it.
+        }
+
+        Op::Load(ptr) => {
+            // If the pointer comes from a StackSlot, load from [rbp+offset].
+            if let Some(offset) = stack.get(ptr.value) {
+                out.push(MInst::MovRM {
+                    size: OpSize::S64,
+                    dst: Gpr::Rax,
+                    base: Gpr::Rbp,
+                    offset,
+                });
+            } else {
+                let ptr_reg = regs.get(ptr.value);
+                out.push(MInst::MovRM {
+                    size: OpSize::S64,
+                    dst: Gpr::Rax,
+                    base: ptr_reg,
+                    offset: 0,
+                });
+            }
+            regs.assign(vref, Gpr::Rax);
+        }
+
+        Op::Store(val, ptr) => {
+            let val_reg = regs.get(val.value);
+            if let Some(offset) = stack.get(ptr.value) {
+                out.push(MInst::MovMR {
+                    size: OpSize::S64,
+                    base: Gpr::Rbp,
+                    offset,
+                    src: val_reg,
+                });
+            } else {
+                let ptr_reg = regs.get(ptr.value);
+                out.push(MInst::MovMR {
+                    size: OpSize::S64,
+                    base: ptr_reg,
+                    offset: 0,
+                    src: val_reg,
+                });
+            }
+        }
+
         // Ops not yet supported in isel
-        Op::Load(_)
-        | Op::Store(..)
-        | Op::StackSlot(_)
-        | Op::Bitcast(_)
+        Op::Bitcast(_)
         | Op::Sext(..)
         | Op::Zext(..)
         | Op::SDiv(..)
