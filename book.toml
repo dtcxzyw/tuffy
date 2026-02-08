@@ -11,3 +11,7 @@ create-missing = false
 [output.html]
 git-repository-url = "https://github.com/dtcxzyw/tuffy"
 edit-url-template = "https://github.com/dtcxzyw/tuffy/edit/main/{path}"
+
+[output.html.fold]
+enable = true
+level = 0
