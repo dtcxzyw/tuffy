@@ -91,3 +91,11 @@ Validation and benchmarking will use the following targets (in progressive order
 - TargetLowering design follows LLVM's approach (legal types, operation lowering, register classes).
 - **Sub-method override via command-line**: individual TargetLowering properties (pointer size, legal integer widths, max vector width, etc.) can be overridden via `--target-override key=value` flags. This enables testing IR-level passes against specific target properties without implementing a full architecture backend.
 - Cost model: deferred, not yet designed.
+
+## IR Memory Layout
+
+- **Encapsulation**: memory layout is an implementation detail, hidden behind a stable API. The rest of the compiler operates on opaque handles, not raw pointers. Layout can be changed without affecting pass code.
+- **Arena + index**: IR nodes are allocated in arenas. References are `u32` indices (opaque handles), not pointers. Reduces reference size and enables serialization.
+- **Contiguous instruction storage**: instructions within the same basic block are stored contiguously in the arena. Iterating a BB's instructions is a linear memory scan, not pointer chasing.
+- **Tombstone + periodic compaction**: deleted instructions are marked as tombstones. Periodic compaction restores contiguity.
+- **No SOA**: struct-of-arrays layout rejected; standard AOS with contiguous storage is sufficient.
