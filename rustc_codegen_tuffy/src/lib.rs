@@ -43,27 +43,28 @@ impl CodegenBackend for TuffyCodegenBackend {
             let cgu_name = cgu.name().to_string();
             let mono_items = cgu.items_in_deterministic_order(tcx);
 
-            let mut object_data: Vec<u8> = Vec::new();
-            let mut has_functions = false;
+            let mut compiled_funcs: Vec<tuffy_codegen::emit::CompiledFunction> = Vec::new();
 
             for (mono_item, _item_data) in &mono_items {
                 if let MonoItem::Fn(instance) = mono_item {
                     if let Some(result) = mir_to_ir::translate_function(tcx, *instance) {
-                        if let Some(isel_result) = tuffy_codegen::isel::isel(&result.func, &result.call_targets) {
+                        if let Some(isel_result) =
+                            tuffy_codegen::isel::isel(&result.func, &result.call_targets)
+                        {
                             let enc =
                                 tuffy_codegen::encode::encode_function(&isel_result.insts);
-                            object_data = tuffy_codegen::emit::emit_elf(
-                                &isel_result.name,
-                                &enc.code,
-                                &enc.relocations,
-                            );
-                            has_functions = true;
+                            compiled_funcs.push(tuffy_codegen::emit::CompiledFunction {
+                                name: isel_result.name,
+                                code: enc.code,
+                                relocations: enc.relocations,
+                            });
                         }
                     }
                 }
             }
 
-            if has_functions {
+            if !compiled_funcs.is_empty() {
+                let object_data = tuffy_codegen::emit::emit_elf_multi(&compiled_funcs);
                 let tmp = tcx.output_filenames(()).temp_path_for_cgu(
                     rustc_session::config::OutputType::Object,
                     &cgu_name,
@@ -84,9 +85,12 @@ impl CodegenBackend for TuffyCodegenBackend {
             }
         }
 
+        // Generate allocator shim if needed.
+        let allocator_module = generate_allocator_module(tcx);
+
         Box::new(CodegenResults {
             modules,
-            allocator_module: None,
+            allocator_module,
             crate_info: CrateInfo::new(tcx, "none".to_string()),
         })
     }
@@ -111,4 +115,64 @@ impl CodegenBackend for TuffyCodegenBackend {
 #[unsafe(no_mangle)]
 pub fn __rustc_codegen_backend() -> Box<dyn CodegenBackend> {
     Box::new(TuffyCodegenBackend)
+}
+
+/// Generate the allocator shim module if the crate needs one.
+///
+/// The allocator shim provides `__rust_alloc` etc. that forward to the
+/// default allocator (`__rdl_alloc` etc.). This is required for binary
+/// crates that use the standard library.
+fn generate_allocator_module(tcx: TyCtxt<'_>) -> Option<CompiledModule> {
+    // Only generate allocator shim for binary crates.
+    let dominated_by_std = tcx
+        .crates(())
+        .iter()
+        .any(|&cnum| tcx.crate_name(cnum).as_str() == "std");
+    if !dominated_by_std {
+        return None;
+    }
+
+    // Generate forwarding stubs: each __rust_alloc* calls __rdl_alloc*.
+    // These are simple jmp instructions (tail calls).
+    let alloc_pairs = [
+        ("__rust_alloc", "__rdl_alloc"),
+        ("__rust_dealloc", "__rdl_dealloc"),
+        ("__rust_realloc", "__rdl_realloc"),
+        ("__rust_alloc_zeroed", "__rdl_alloc_zeroed"),
+        ("__rust_alloc_error_handler", "__rdl_oom"),
+    ];
+
+    let mut funcs = Vec::new();
+    for (export_name, target_name) in &alloc_pairs {
+        // Emit a JMP rel32 to the target (will be resolved by linker).
+        let code = vec![0xe9, 0x00, 0x00, 0x00, 0x00]; // jmp rel32
+        let relocations = vec![tuffy_codegen::encode::Relocation {
+            offset: 1,
+            symbol: target_name.to_string(),
+        }];
+        funcs.push(tuffy_codegen::emit::CompiledFunction {
+            name: export_name.to_string(),
+            code,
+            relocations,
+        });
+    }
+
+    let object_data = tuffy_codegen::emit::emit_elf_multi(&funcs);
+    let tmp = tcx.output_filenames(()).temp_path_for_cgu(
+        rustc_session::config::OutputType::Object,
+        "allocator_shim",
+        tcx.sess.invocation_temp.as_deref(),
+    );
+    fs::write(&tmp, &object_data).expect("failed to write allocator shim");
+
+    Some(CompiledModule {
+        name: "allocator_shim".to_string(),
+        kind: ModuleKind::Allocator,
+        object: Some(tmp),
+        dwarf_object: None,
+        bytecode: None,
+        assembly: None,
+        llvm_ir: None,
+        links_from_incr_cache: vec![],
+    })
 }
