@@ -148,6 +148,20 @@ fn select_inst(vref: ValueRef, op: &Op, regs: &mut RegMap, out: &mut Vec<MInst>)
             }
             out.push(MInst::Ret);
         }
+
+        // New ops not yet supported in isel
+        Op::ICmp(..)
+        | Op::Load(_)
+        | Op::Store(..)
+        | Op::StackSlot(_)
+        | Op::Call(..)
+        | Op::Bitcast(_)
+        | Op::Sext(..)
+        | Op::Zext(..)
+        | Op::Br(..)
+        | Op::BrIf(..)
+        | Op::Continue(_)
+        | Op::RegionYield(_) => return None,
     }
     Some(())
 }

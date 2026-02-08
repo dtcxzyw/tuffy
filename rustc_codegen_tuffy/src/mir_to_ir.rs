@@ -7,7 +7,7 @@ use rustc_middle::mir::{self, BinOp, Operand, Rvalue, StatementKind, TerminatorK
 use rustc_middle::ty::{self, Instance, TyCtxt};
 
 use tuffy_ir::builder::Builder;
-use tuffy_ir::function::Function;
+use tuffy_ir::function::{Function, RegionKind};
 use tuffy_ir::instruction::Origin;
 use tuffy_ir::types::Type;
 use tuffy_ir::value::ValueRef;
@@ -40,11 +40,16 @@ pub fn translate_function<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> 
     let mut builder = Builder::new(&mut func);
     let mut locals = LocalMap::new(mir.local_decls.len());
 
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+
     let entry = builder.create_block();
     builder.switch_to_block(entry);
 
     translate_params(mir, &mut builder, &mut locals);
     translate_body(mir, &mut builder, &mut locals);
+
+    builder.exit_region();
 
     Some(func)
 }

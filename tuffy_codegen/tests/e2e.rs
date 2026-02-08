@@ -5,13 +5,16 @@ use std::process::Command;
 
 use tuffy_codegen::{emit, encode, isel};
 use tuffy_ir::builder::Builder;
-use tuffy_ir::function::Function;
+use tuffy_ir::function::{Function, RegionKind};
 use tuffy_ir::instruction::Origin;
 use tuffy_ir::types::Type;
 
 fn build_add_func() -> Function {
     let mut func = Function::new("add", vec![Type::Int, Type::Int], Some(Type::Int));
     let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
 
     let entry = builder.create_block();
     builder.switch_to_block(entry);
@@ -23,6 +26,8 @@ fn build_add_func() -> Function {
     let sum = builder.add(a32, b32, Origin::synthetic());
     let result = builder.assert_sext(sum, 32, Origin::synthetic());
     builder.ret(Some(result), Origin::synthetic());
+
+    builder.exit_region();
 
     func
 }
