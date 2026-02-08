@@ -35,6 +35,7 @@ Key design principles:
 - [Instructions](#instructions)
   - [Constants](#constants)
   - [Arithmetic](#arithmetic)
+  - [Floating Point Arithmetic](#floating-point-arithmetic)
   - [Comparison](#comparison)
   - [Value Annotations](#value-annotations)
   - [Memory Operations](#memory-operations)
@@ -72,6 +73,12 @@ instructions. Memory operations currently use `int` directly.*
 Pointer with address space AS. Address space 0 is the default. Pointers carry provenance
 (allocation ID + offset). Different address spaces may have different pointer sizes and
 semantics.
+
+### `float`
+
+IEEE 754 floating point type. Variants: `bf16` (bfloat16), `f16` (half), `f32` (single),
+`f64` (double). Floating point operations (`fadd`, `fsub`, etc.) operate on float-typed
+values. The result type of a float operation matches the operand float width.
 
 ## Values
 
@@ -315,6 +322,70 @@ vN = ashr vA, vB
 
 Arithmetic right shift. Produces `poison` if the shift amount `vB` is negative.
 **Semantics**: `evalAshr(a, b) = if b < 0 then poison else a >>> b`
+
+### Floating Point Arithmetic
+
+Floating point operations operate on values of `float` type (`bf16`, `f16`, `f32`, `f64`).
+The formal semantics use Lean 4's native `Float` type (IEEE 754 binary64) as a placeholder
+model. The formal float model will be refined when full NaN payload and denormal semantics
+are decided.
+
+#### `fadd`
+
+```
+vN = fadd vA, vB
+```
+
+Floating point addition. **Semantics**: `evalFAdd(a, b) = a + b`
+
+#### `fsub`
+
+```
+vN = fsub vA, vB
+```
+
+Floating point subtraction. **Semantics**: `evalFSub(a, b) = a - b`
+
+#### `fmul`
+
+```
+vN = fmul vA, vB
+```
+
+Floating point multiplication. **Semantics**: `evalFMul(a, b) = a * b`
+
+#### `fdiv`
+
+```
+vN = fdiv vA, vB
+```
+
+Floating point division. **Semantics**: `evalFDiv(a, b) = a / b`
+
+#### `fneg`
+
+```
+vN = fneg vA
+```
+
+Floating point negation. **Semantics**: `evalFNeg(a) = -a`
+
+#### `fabs`
+
+```
+vN = fabs vA
+```
+
+Floating point absolute value. **Semantics**: `evalFAbs(a) = Float.abs a`
+
+#### `copysign`
+
+```
+vN = copysign vMag, vSign
+```
+
+Produce a value with the magnitude of `vMag` and the sign bit of `vSign`.
+**Semantics**: `evalCopySign(mag, sign) = if sign < 0 then -(abs mag) else abs mag`
 
 ### Comparison
 
@@ -646,10 +717,11 @@ func @factorial(int:s32) -> int:s32 {
 The following features are described in the [IR Design RFC](RFCs/202602/ir-design.md) but
 are not yet implemented in the Rust codebase.
 
-### Floating Point Types
+### Floating Point Semantics
 
-`float` (IEEE 754 single precision) and `double` (IEEE 754 double precision) types.
-Semantics for NaN payloads and denormals are still under discussion.
+Basic floating point operations (`fadd`, `fsub`, `fmul`, `fdiv`, `fneg`, `fabs`,
+`copysign`) are implemented. Full NaN payload and denormal semantics are still under
+discussion — the current Lean model uses IEEE 754 binary64 as a placeholder.
 
 ### Scalable Vector Types
 
