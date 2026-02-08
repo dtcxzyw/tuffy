@@ -1,0 +1,9 @@
+[package]
+name = "tuffy_target_x86"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tuffy_ir = { path = "../tuffy_ir" }
+tuffy_target = { path = "../tuffy_target" }

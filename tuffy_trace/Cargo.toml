@@ -1,0 +1,8 @@
+[package]
+name = "tuffy_trace"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tuffy_ir = { path = "../tuffy_ir" }

@@ -1,0 +1,18 @@
+[workspace]
+resolver = "2"
+members = [
+    "tuffy_ir",
+    "tuffy_ir_interp",
+    "tuffy_opt",
+    "tuffy_target",
+    "tuffy_target_x86",
+    "tuffy_codegen",
+    "tuffy_trace",
+    "tuffy_tv",
+    "rustc_codegen_tuffy",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"

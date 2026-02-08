@@ -1,0 +1,10 @@
+[package]
+name = "tuffy_codegen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tuffy_ir = { path = "../tuffy_ir" }
+tuffy_target = { path = "../tuffy_target" }
+object = "0.36"
