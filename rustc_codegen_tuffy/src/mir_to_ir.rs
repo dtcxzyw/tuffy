@@ -17,7 +17,11 @@ pub fn translate_function<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> 
     let mir = tcx.optimized_mir(instance.def_id());
     let name = tcx.symbol_name(instance).name.to_string();
 
-    let sig = instance.ty(tcx, ty::TypingEnv::fully_monomorphized()).fn_sig(tcx);
+    let inst_ty = instance.ty(tcx, ty::TypingEnv::fully_monomorphized());
+    if !inst_ty.is_fn() {
+        return None;
+    }
+    let sig = inst_ty.fn_sig(tcx);
     let sig = tcx.normalize_erasing_late_bound_regions(ty::TypingEnv::fully_monomorphized(), sig);
 
     let params: Vec<Type> = sig
@@ -55,8 +59,8 @@ impl LocalMap {
         self.values[local.as_usize()] = Some(val);
     }
 
-    fn get(&self, local: mir::Local) -> ValueRef {
-        self.values[local.as_usize()].expect("local not yet defined")
+    fn get(&self, local: mir::Local) -> Option<ValueRef> {
+        self.values[local.as_usize()]
     }
 }
 
@@ -137,8 +141,8 @@ fn translate_rvalue(
 ) -> Option<ValueRef> {
     match rvalue {
         Rvalue::BinaryOp(op, box (lhs, rhs)) => {
-            let l = translate_operand(lhs, locals);
-            let r = translate_operand(rhs, locals);
+            let l = translate_operand(lhs, builder, locals)?;
+            let r = translate_operand(rhs, builder, locals)?;
             let val = match op {
                 BinOp::Add | BinOp::AddWithOverflow => builder.add(l, r, Origin::synthetic()),
                 BinOp::Sub | BinOp::SubWithOverflow => builder.sub(l, r, Origin::synthetic()),
@@ -147,16 +151,50 @@ fn translate_rvalue(
             };
             Some(val)
         }
-        Rvalue::Use(operand) => Some(translate_operand(operand, locals)),
+        Rvalue::Use(operand) => translate_operand(operand, builder, locals),
         _ => None,
     }
 }
 
-fn translate_operand(operand: &Operand<'_>, locals: &mut LocalMap) -> ValueRef {
+fn translate_operand(
+    operand: &Operand<'_>,
+    builder: &mut Builder<'_>,
+    locals: &mut LocalMap,
+) -> Option<ValueRef> {
     match operand {
         Operand::Copy(place) | Operand::Move(place) => locals.get(place.local),
-        _ => {
-            panic!("unsupported operand in MIR translation")
+        Operand::Constant(constant) => translate_const(constant, builder),
+        _ => None,
+    }
+}
+
+fn translate_const(constant: &mir::ConstOperand<'_>, builder: &mut Builder<'_>) -> Option<ValueRef> {
+    let mir::Const::Val(val, ty) = constant.const_ else {
+        return None;
+    };
+    match val {
+        mir::ConstValue::Scalar(scalar) => {
+            let mir::interpret::Scalar::Int(int) = scalar else {
+                return None;
+            };
+            let bits = int.to_bits(int.size());
+            match ty.kind() {
+                ty::Int(_) => {
+                    let val = bits as i128 as i64;
+                    Some(builder.iconst(val, Origin::synthetic()))
+                }
+                ty::Uint(_) => {
+                    let val = bits as i64;
+                    Some(builder.iconst(val, Origin::synthetic()))
+                }
+                ty::Bool => {
+                    let val = if bits != 0 { 1 } else { 0 };
+                    Some(builder.iconst(val, Origin::synthetic()))
+                }
+                _ => None,
+            }
         }
+        mir::ConstValue::ZeroSized => Some(builder.iconst(0, Origin::synthetic())),
+        _ => None,
     }
 }

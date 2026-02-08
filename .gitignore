@@ -233,3 +233,6 @@ __marimo__/
 
 scratch/
 lean/.lake
+
+# rustc ICE reports
+rustc-ice-*.txt

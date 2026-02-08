@@ -11,7 +11,7 @@ use crate::isel;
 #[test]
 fn isel_add_function() {
     let func = build_add_func();
-    let result = isel::isel(&func);
+    let result = isel::isel(&func).expect("isel should succeed for add");
 
     assert_eq!(result.name, "add");
     // Expected: mov eax, edi; add eax, esi; ret
@@ -21,7 +21,7 @@ fn isel_add_function() {
 #[test]
 fn encode_add_function() {
     let func = build_add_func();
-    let result = isel::isel(&func);
+    let result = isel::isel(&func).expect("isel should succeed for add");
     let code = encode::encode_function(&result.insts);
 
     // mov eax, edi  => 89 f8
@@ -33,7 +33,7 @@ fn encode_add_function() {
 #[test]
 fn emit_elf_valid() {
     let func = build_add_func();
-    let result = isel::isel(&func);
+    let result = isel::isel(&func).expect("isel should succeed for add");
     let code = encode::encode_function(&result.insts);
     let elf = crate::emit::emit_elf(&result.name, &code);
 

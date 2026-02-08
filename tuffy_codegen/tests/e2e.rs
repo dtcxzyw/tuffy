@@ -29,7 +29,7 @@ fn build_add_func() -> Function {
 
 fn compile_add_func() -> Vec<u8> {
     let func = build_add_func();
-    let result = isel::isel(&func);
+    let result = isel::isel(&func).expect("isel should succeed for add");
     let code = encode::encode_function(&result.insts);
     emit::emit_elf(&result.name, &code)
 }
