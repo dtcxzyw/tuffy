@@ -1,0 +1,13 @@
+[book]
+title = "Tuffy Documentation"
+authors = ["dtcxzyw"]
+language = "en"
+src = "docs"
+
+[build]
+build-dir = "book/output"
+create-missing = false
+
+[output.html]
+git-repository-url = "https://github.com/dtcxzyw/tuffy"
+edit-url-template = "https://github.com/dtcxzyw/tuffy/edit/main/{path}"
