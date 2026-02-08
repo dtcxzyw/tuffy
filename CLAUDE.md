@@ -24,6 +24,10 @@ Development uses VS Code dev containers built on `mcr.microsoft.com/devcontainer
 
 To open the dev container, use the VS Code "Reopen in Container" command.
 
+## Branching Strategy
+
+All development happens on the `main` branch. Keep a linear history (no merge commits). Use `git rebase` instead of `git merge` when needed.
+
 ## Commit Convention
 
 Use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) format:
