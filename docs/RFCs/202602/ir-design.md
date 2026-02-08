@@ -211,7 +211,8 @@ All integer arithmetic operates on mathematical integers:
 | `ptrtoint %p` | Convert pointer to integer, capturing provenance |
 | `ptrtoaddr %p` | Extract address only, discard provenance |
 | `inttoptr %i` | Convert integer to pointer, recovering captured provenance |
-| `getelementptr %p, %offset` | Pointer arithmetic within an allocation |
+| `ptradd %p, %offset` | Pointer arithmetic within an allocation (provenance-preserving offset addition) |
+| `ptrdiff %p, %q` | Pointer difference; returns `%p.offset - %q.offset` as int; poison if %p and %q do not belong to the same allocation |
 
 ### Byte type operations
 
