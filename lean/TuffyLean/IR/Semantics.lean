@@ -67,6 +67,34 @@ def evalPtrToAddr (p : Pointer) : Value := .int p.offset
 def evalIntToPtr (addr : Int) (allocId : AllocId) : Value :=
   .ptr { allocId := allocId, offset := addr }
 
+-- Floating point operation semantics
+-- These use Lean 4's native Float type (IEEE 754 binary64) as a placeholder
+-- model. The formal float model will be refined when full NaN/denormal
+-- semantics are decided.
+
+/-- Floating point addition. -/
+def evalFAdd (a b : Float) : Float := a + b
+
+/-- Floating point subtraction. -/
+def evalFSub (a b : Float) : Float := a - b
+
+/-- Floating point multiplication. -/
+def evalFMul (a b : Float) : Float := a * b
+
+/-- Floating point division. -/
+def evalFDiv (a b : Float) : Float := a / b
+
+/-- Floating point negation. -/
+def evalFNeg (a : Float) : Float := -a
+
+/-- Floating point absolute value. -/
+def evalFAbs (a : Float) : Float := Float.abs a
+
+/-- Copy sign: produce a value with the magnitude of `mag` and the sign of `sign`. -/
+def evalCopySign (mag sign : Float) : Float :=
+  let absMag := Float.abs mag
+  if sign < 0.0 then -absMag else absMag
+
 -- Annotation violation semantics: produce poison if constraint violated.
 -- These define the semantics of :s<N> and :u<N> annotations on value
 -- definitions (result-side) and use edges (use-side).
