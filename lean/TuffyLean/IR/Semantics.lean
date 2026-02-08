@@ -2,6 +2,7 @@
 -- Operational semantics of tuffy IR instructions
 
 import TuffyLean.IR.Types
+import Mathlib.Data.Int.Bitwise
 
 namespace TuffyLean.IR
 
@@ -10,9 +11,61 @@ def evalAdd (a b : Int) : Int := a + b
 def evalSub (a b : Int) : Int := a - b
 def evalMul (a b : Int) : Int := a * b
 
-/-- Division produces poison on division by zero -/
+/-- Signed division produces poison on division by zero -/
 def evalSDiv (a b : Int) : Value :=
   if b = 0 then .poison else .int (a / b)
+
+/-- Unsigned division produces poison on division by zero.
+    Operands are assumed non-negative (enforced by annotations). -/
+def evalUDiv (a b : Int) : Value :=
+  if b = 0 then .poison else .int (a / b)
+
+/-- Bitwise AND (two's complement, infinite width) -/
+def evalAnd (a b : Int) : Int := Int.land a b
+
+/-- Bitwise OR (two's complement, infinite width) -/
+def evalOr (a b : Int) : Int := Int.lor a b
+
+/-- Bitwise XOR (two's complement, infinite width) -/
+def evalXor (a b : Int) : Int := Int.xor a b
+
+/-- Left shift. Poison if shift amount is negative. -/
+def evalShl (a b : Int) : Value :=
+  if b < 0 then .poison else .int (a <<< b.toNat)
+
+/-- Logical right shift. Poison if shift amount is negative.
+    Operand `a` is assumed non-negative (enforced by annotations). -/
+def evalLshr (a b : Int) : Value :=
+  if b < 0 then .poison else .int (a >>> b.toNat)
+
+/-- Arithmetic right shift. Poison if shift amount is negative. -/
+def evalAshr (a b : Int) : Value :=
+  if b < 0 then .poison else .int (a >>> b.toNat)
+
+-- Pointer operation semantics
+
+/-- Pointer addition: offset a pointer by an integer amount.
+    Preserves provenance from the base pointer. -/
+def evalPtrAdd (base : Pointer) (offset : Int) : Value :=
+  .ptr { allocId := base.allocId, offset := base.offset + offset }
+
+/-- Pointer difference: compute the offset between two pointers.
+    Both pointers must belong to the same allocation; otherwise poison. -/
+def evalPtrDiff (a b : Pointer) : Value :=
+  if a.allocId == b.allocId then .int (a.offset - b.offset) else .poison
+
+/-- Pointer to integer: extract the offset as an integer.
+    Provenance is captured (the integer "remembers" it came from a pointer). -/
+def evalPtrToInt (p : Pointer) : Value := .int p.offset
+
+/-- Pointer to address: extract the address, discarding provenance.
+    Returns a plain integer with no provenance information. -/
+def evalPtrToAddr (p : Pointer) : Value := .int p.offset
+
+/-- Integer to pointer: create a pointer from an integer address.
+    The resulting pointer has no valid provenance (wildcard). -/
+def evalIntToPtr (addr : Int) (allocId : AllocId) : Value :=
+  .ptr { allocId := allocId, offset := addr }
 
 -- Annotation violation semantics: produce poison if constraint violated.
 -- These define the semantics of :s<N> and :u<N> annotations on value
