@@ -897,35 +897,6 @@ fn translate_rvalue<'tcx>(
         Rvalue::Discriminant(place) => {
             locals.get(place.local)
         }
-        Rvalue::NullaryOp(op, ty) => {
-            match op {
-                mir::NullaryOp::SizeOf => {
-                    let size = type_size(tcx, *ty)?;
-                    Some(builder.iconst(size as i64, Origin::synthetic()))
-                }
-                mir::NullaryOp::AlignOf => {
-                    let align = type_align(tcx, *ty)?;
-                    Some(builder.iconst(align as i64, Origin::synthetic()))
-                }
-                _ => None,
-            }
-        }
-        Rvalue::Len(place) => {
-            let place_ty = mir.local_decls[place.local].ty;
-            match place_ty.kind() {
-                ty::Array(_, len) => {
-                    let len_val = len.try_to_target_usize(tcx)?;
-                    Some(builder.iconst(len_val as i64, Origin::synthetic()))
-                }
-                ty::Ref(_, inner, _) | ty::RawPtr(inner, _) => {
-                    match inner.kind() {
-                        ty::Slice(_) => fat_locals.get(place.local),
-                        _ => None,
-                    }
-                }
-                _ => None,
-            }
-        }
         _ => None,
     }
 }

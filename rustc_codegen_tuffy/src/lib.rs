@@ -50,6 +50,12 @@ impl CodegenBackend for TuffyCodegenBackend {
 
             for (mono_item, _item_data) in &mono_items {
                 if let MonoItem::Fn(instance) = mono_item {
+                    // Skip lang_start — tuffy can't compile the trait object
+                    // construction it requires. We emit a hand-crafted version
+                    // in generate_entry_point instead.
+                    if Some(instance.def_id()) == tcx.lang_items().start_fn() {
+                        continue;
+                    }
                     if let Some(result) = mir_to_ir::translate_function(tcx, *instance) {
                         // Collect static data from this function.
                         for (sym, data) in &result.static_data {
@@ -216,10 +222,15 @@ fn generate_allocator_module(tcx: TyCtxt<'_>) -> Option<CompiledModule> {
     })
 }
 
-/// Generate the C `main` entry point that calls `lang_start`.
+/// Generate the C `main` entry point and a hand-crafted `lang_start`.
 ///
 /// The C runtime calls `main(argc, argv)`. This wrapper forwards to
 /// `std::rt::lang_start(rust_main, argc, argv, sigpipe=0)`.
+///
+/// We also emit a hand-crafted `lang_start` because tuffy cannot yet
+/// compile the real `lang_start` (it constructs a `&dyn Fn() -> i32`
+/// trait object, which requires vtable support). Our simplified version
+/// calls the user's main directly and returns 0.
 fn generate_entry_point(tcx: TyCtxt<'_>) -> Option<CompiledModule> {
     use rustc_middle::ty::{self, Instance};
 
@@ -245,45 +256,75 @@ fn generate_entry_point(tcx: TyCtxt<'_>) -> Option<CompiledModule> {
     .flatten()?;
     let start_sym = tcx.symbol_name(start_instance).name.to_string();
 
-    // Generate x86-64 machine code for the entry point that calls lang_start
-    // to initialize the Rust runtime before invoking the user's main:
+    // --- C `main` entry point ---
     //
     //   main(argc: i32 [edi], argv: **u8 [rsi]) -> i64
-    //     movsxd rax, edi           ; sign-extend argc (i32 → i64)
-    //     mov    rdx, rsi           ; argv → 3rd arg
-    //     mov    rsi, rax           ; argc → 2nd arg
-    //     lea    rdi, [rip+disp32]  ; user main fn ptr → 1st arg (PcRel reloc)
-    //     xor    ecx, ecx           ; sigpipe=0 → 4th arg
+    //     push   rbp                ; align stack to 16 bytes
+    //     movsxd rax, edi           ; sign-extend argc (i32 -> i64)
+    //     mov    rdx, rsi           ; argv -> 3rd arg
+    //     mov    rsi, rax           ; argc -> 2nd arg
+    //     lea    rdi, [rip+disp32]  ; user main fn ptr -> 1st arg (PcRel reloc)
+    //     xor    ecx, ecx           ; sigpipe=0 -> 4th arg
     //     call   lang_start         ; call reloc
+    //     pop    rbp                ; restore stack
     //     ret
-    let code = vec![
-        0x48, 0x63, 0xc7, // movsxd rax, edi
-        0x48, 0x89, 0xf2, // mov rdx, rsi
-        0x48, 0x89, 0xc6, // mov rsi, rax
-        0x48, 0x8d, 0x3d, 0x00, 0x00, 0x00, 0x00, // lea rdi, [rip+0]
-        0x31, 0xc9, // xor ecx, ecx
-        0xe8, 0x00, 0x00, 0x00, 0x00, // call lang_start
-        0xc3, // ret
+    let main_code = vec![
+        0x55,                                       // push rbp
+        0x48, 0x63, 0xc7,                           // movsxd rax, edi
+        0x48, 0x89, 0xf2,                           // mov rdx, rsi
+        0x48, 0x89, 0xc6,                           // mov rsi, rax
+        0x48, 0x8d, 0x3d, 0x00, 0x00, 0x00, 0x00,  // lea rdi, [rip+0]
+        0x31, 0xc9,                                 // xor ecx, ecx
+        0xe8, 0x00, 0x00, 0x00, 0x00,               // call lang_start
+        0x5d,                                       // pop rbp
+        0xc3,                                       // ret
     ];
-
-    let relocations = vec![
+    let main_relocs = vec![
         tuffy_target::reloc::Relocation {
-            offset: 12,
+            offset: 13,
             symbol: main_sym,
             kind: tuffy_target::reloc::RelocKind::PcRel,
         },
         tuffy_target::reloc::Relocation {
-            offset: 19,
-            symbol: start_sym,
+            offset: 20,
+            symbol: start_sym.clone(),
             kind: tuffy_target::reloc::RelocKind::Call,
         },
     ];
 
-    let funcs = vec![tuffy_target_x86::emit::CompiledFunction {
-        name: "main".to_string(),
-        code,
-        relocations,
-    }];
+    // --- Hand-crafted `lang_start` ---
+    //
+    // Simplified version that calls the user's main fn pointer directly
+    // and returns 0, bypassing trait object construction.
+    //
+    //   lang_start(main: fn() [rdi], argc [rsi], argv [rdx], sigpipe [rcx]) -> isize
+    //     push   rbp
+    //     mov    rbp, rsp
+    //     call   rdi           ; call user's main
+    //     xor    eax, eax      ; return 0
+    //     pop    rbp
+    //     ret
+    let start_code = vec![
+        0x55,                   // push rbp
+        0x48, 0x89, 0xe5,      // mov rbp, rsp
+        0xff, 0xd7,             // call rdi
+        0x31, 0xc0,             // xor eax, eax
+        0x5d,                   // pop rbp
+        0xc3,                   // ret
+    ];
+
+    let funcs = vec![
+        tuffy_target_x86::emit::CompiledFunction {
+            name: "main".to_string(),
+            code: main_code,
+            relocations: main_relocs,
+        },
+        tuffy_target_x86::emit::CompiledFunction {
+            name: start_sym,
+            code: start_code,
+            relocations: vec![],
+        },
+    ];
 
     let object_data = tuffy_target_x86::emit::emit_elf_multi(&funcs);
     let tmp = tcx.output_filenames(()).temp_path_for_cgu(
