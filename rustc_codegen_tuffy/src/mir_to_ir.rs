@@ -67,6 +67,12 @@ pub fn translate_function<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> 
     let mut rdx_captures: HashMap<u32, ()> = HashMap::new();
     let mut rdx_moves: HashMap<u32, u32> = HashMap::new();
 
+    // Detect whether this function returns a large struct via sret.
+    let ret_mir_ty = sig.output();
+    let use_sret = needs_indirect_return(tcx, ret_mir_ty);
+    // Will hold the original sret pointer passed by the caller (callee side).
+    let mut sret_ptr: Option<ValueRef> = None;
+
     let root = builder.create_region(RegionKind::Function);
     builder.enter_region(root);
 
@@ -81,7 +87,10 @@ pub fn translate_function<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> 
     // Emit params into the entry block.
     let entry = block_map.get(BasicBlock::from_u32(0));
     builder.switch_to_block(entry);
-    translate_params(mir, &mut builder, &mut locals, &mut fat_locals);
+    translate_params(
+        tcx, mir, &mut builder, &mut locals, &mut fat_locals,
+        &mut stack_locals, &mut sret_ptr, use_sret,
+    );
 
     // Translate each basic block.
     for (bb, bb_data) in mir.basic_blocks.iter_enumerated() {
@@ -100,6 +109,7 @@ pub fn translate_function<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> 
                 &mut stack_locals, &block_map, &mut call_targets,
                 &mut static_refs, &mut static_data,
                 &mut rdx_captures, &mut rdx_moves,
+                sret_ptr, use_sret,
             );
         }
     }
@@ -217,6 +227,15 @@ fn type_align<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> Option<u64> {
     Some(layout.align.abi.bytes())
 }
 
+/// Check if a type needs indirect return (sret) per System V AMD64 ABI.
+/// Types larger than 16 bytes are returned via a hidden pointer parameter.
+fn needs_indirect_return<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> bool {
+    if ty.is_unit() || ty.is_never() {
+        return false;
+    }
+    type_size(tcx, ty).map_or(false, |size| size > 16)
+}
+
 /// Check if a type is a signed integer type.
 fn is_signed_int(ty: ty::Ty<'_>) -> bool {
     matches!(ty.kind(), ty::Int(_))
@@ -258,13 +277,36 @@ impl StackLocalSet {
     }
 }
 
-fn translate_params(
-    mir: &mir::Body<'_>,
+fn translate_params<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    mir: &mir::Body<'tcx>,
     builder: &mut Builder<'_>,
     locals: &mut LocalMap,
     fat_locals: &mut FatLocalMap,
+    stack_locals: &mut StackLocalSet,
+    sret_ptr: &mut Option<ValueRef>,
+    use_sret: bool,
 ) {
     let mut abi_idx: u32 = 0;
+
+    // If the function returns a large struct, the caller passes a hidden
+    // pointer as the first argument (sret). We consume it here and use it
+    // as the storage for local _0.
+    if use_sret {
+        let ret_ty = mir.local_decls[mir::Local::from_usize(0)].ty;
+        let size = type_size(tcx, ret_ty).unwrap_or(8);
+        let hidden = builder.param(abi_idx, Type::Ptr(0), None, Origin::synthetic());
+        abi_idx += 1;
+
+        // Allocate a local stack slot for _0 so MIR stores go somewhere real.
+        let slot = builder.stack_slot(size as u32, Origin::synthetic());
+        locals.set(mir::Local::from_usize(0), slot);
+        stack_locals.mark(mir::Local::from_usize(0));
+
+        // Remember the caller-provided sret pointer for the Return terminator.
+        *sret_ptr = Some(hidden);
+    }
+
     for i in 0..mir.arg_count {
         let local = mir::Local::from_usize(i + 1);
         let ty = mir.local_decls[local].ty;
@@ -529,18 +571,54 @@ fn translate_terminator<'tcx>(
     static_data: &mut Vec<(String, Vec<u8>)>,
     rdx_captures: &mut HashMap<u32, ()>,
     rdx_moves: &mut HashMap<u32, u32>,
+    sret_ptr: Option<ValueRef>,
+    use_sret: bool,
 ) {
     match &term.kind {
         TerminatorKind::Return => {
             let ret_local = mir::Local::from_usize(0);
-            // If the return value has a fat component, emit a dummy iconst
-            // that tells isel to move the fat value into RDX before ret.
-            if let Some(fat_val) = fat_locals.get(ret_local) {
-                let dummy = builder.iconst(0, Origin::synthetic());
-                rdx_moves.insert(dummy.index(), fat_val.index());
+
+            if use_sret {
+                // Large struct return: copy _0's data to the caller's sret pointer,
+                // then return the sret pointer in RAX.
+                let sret = sret_ptr.expect("sret_ptr must be set when use_sret is true");
+                let src = locals.get(ret_local).expect("return local _0 must be set");
+                let ret_ty = mir.local_decls[ret_local].ty;
+                let size = type_size(tcx, ret_ty).unwrap_or(8);
+
+                // Word-by-word copy from local _0's stack slot to sret pointer.
+                let num_words = (size + 7) / 8;
+                for i in 0..num_words {
+                    let byte_off = i * 8;
+                    let load_addr = if byte_off == 0 {
+                        src
+                    } else {
+                        let off = builder.iconst(byte_off as i64, Origin::synthetic());
+                        builder.ptradd(src.into(), off.into(), 0, Origin::synthetic())
+                    };
+                    let word = builder.load(load_addr.into(), Type::Int, None, Origin::synthetic());
+                    let store_addr = if byte_off == 0 {
+                        sret
+                    } else {
+                        let off = builder.iconst(byte_off as i64, Origin::synthetic());
+                        builder.ptradd(sret.into(), off.into(), 0, Origin::synthetic())
+                    };
+                    builder.store(word.into(), store_addr.into(), Origin::synthetic());
+                }
+
+                // Return the sret pointer in RAX (System V convention).
+                builder.ret(Some(sret.into()), Origin::synthetic());
+            } else {
+                // Normal scalar return.
+                // If the return value has a fat component, emit a dummy iconst
+                // that tells isel to move the fat value into RDX before ret.
+                if let Some(fat_val) = fat_locals.get(ret_local) {
+                    let dummy = builder.iconst(0, Origin::synthetic());
+                    rdx_moves.insert(dummy.index(), fat_val.index());
+                }
+                let val = locals.values[ret_local.as_usize()];
+                builder.ret(val.map(|v| v.into()), Origin::synthetic());
             }
-            let val = locals.values[ret_local.as_usize()];
-            builder.ret(val.map(|v| v.into()), Origin::synthetic());
         }
         TerminatorKind::Goto { target } => {
             let target_block = block_map.get(*target);
@@ -590,8 +668,23 @@ fn translate_terminator<'tcx>(
             // Resolve callee symbol name from the function operand's type.
             let callee_sym = resolve_call_symbol(tcx, func);
 
+            // Check if the callee returns a large struct (needs sret on caller side).
+            let dest_ty = mir.local_decls[destination.local].ty;
+            let callee_sret = needs_indirect_return(tcx, dest_ty);
+
             // Translate arguments to IR operands, decomposing fat pointers.
             let mut ir_args: Vec<tuffy_ir::instruction::Operand> = Vec::new();
+
+            // If callee uses sret, allocate a stack slot and prepend as first arg.
+            let sret_slot = if callee_sret {
+                let size = type_size(tcx, dest_ty).unwrap_or(8);
+                let slot = builder.stack_slot(size as u32, Origin::synthetic());
+                ir_args.push(slot.into());
+                Some(slot)
+            } else {
+                None
+            };
+
             for arg in args {
                 if let Some(v) = translate_operand(
                     tcx, &arg.node, mir, builder, locals,
@@ -631,14 +724,22 @@ fn translate_terminator<'tcx>(
                 call_targets.insert(call_vref.index(), sym);
             }
 
-            // Store result in destination local.
-            locals.set(destination.local, call_vref);
+            if callee_sret {
+                // For sret calls, the result is in the stack slot we allocated.
+                // The destination local becomes a pointer to that slot.
+                let slot = sret_slot.unwrap();
+                locals.set(destination.local, slot);
+                stack_locals.mark(destination.local);
+                // No RDX capture needed for sret calls.
+            } else {
+                // Store result in destination local.
+                locals.set(destination.local, call_vref);
 
-            // Capture RDX (second return value) for fat pointer returns.
-            // Many std functions return two-register structs (e.g., fmt::Arguments).
-            let rdx_val = builder.iconst(0, Origin::synthetic());
-            rdx_captures.insert(rdx_val.index(), ());
-            fat_locals.set(destination.local, rdx_val);
+                // Capture RDX (second return value) for fat pointer returns.
+                let rdx_val = builder.iconst(0, Origin::synthetic());
+                rdx_captures.insert(rdx_val.index(), ());
+                fat_locals.set(destination.local, rdx_val);
+            }
 
             // Branch to the continuation block if present.
             if let Some(target_bb) = target {
