@@ -90,6 +90,38 @@ impl CmpMap {
 /// System V AMD64 ABI: first 6 integer args in rdi, rsi, rdx, rcx, r8, r9.
 const ARG_REGS: [Gpr; 6] = [Gpr::Rdi, Gpr::Rsi, Gpr::Rdx, Gpr::Rcx, Gpr::R8, Gpr::R9];
 
+/// Pool of caller-saved registers for general allocation.
+/// Excludes RSP and RBP (frame), and argument registers are included
+/// but may be overwritten by calls.
+const ALLOC_REGS: [Gpr; 9] = [
+    Gpr::Rax,
+    Gpr::Rcx,
+    Gpr::Rdx,
+    Gpr::R8,
+    Gpr::R9,
+    Gpr::R10,
+    Gpr::R11,
+    Gpr::Rsi,
+    Gpr::Rdi,
+];
+
+/// Simple round-robin register allocator.
+struct RegAlloc {
+    next: usize,
+}
+
+impl RegAlloc {
+    fn new() -> Self {
+        Self { next: 0 }
+    }
+
+    fn alloc(&mut self) -> Gpr {
+        let reg = ALLOC_REGS[self.next % ALLOC_REGS.len()];
+        self.next += 1;
+        reg
+    }
+}
+
 /// Perform instruction selection on a tuffy IR function.
 ///
 /// Iterates all basic blocks in the root region, emitting labels and
@@ -101,6 +133,7 @@ pub fn isel(func: &Function, call_targets: &HashMap<u32, String>) -> Option<Isel
     let mut regs = RegMap::new(func.instructions.len());
     let mut cmps = CmpMap::new(func.instructions.len());
     let mut stack = StackMap::new(func.instructions.len());
+    let mut alloc = RegAlloc::new();
 
     let root = &func.regions[func.root_region.index() as usize];
     for child in &root.children {
@@ -115,6 +148,7 @@ pub fn isel(func: &Function, call_targets: &HashMap<u32, String>) -> Option<Isel
                     &mut regs,
                     &mut cmps,
                     &mut stack,
+                    &mut alloc,
                     call_targets,
                     &mut body,
                 )?;
@@ -154,12 +188,14 @@ pub fn isel(func: &Function, call_targets: &HashMap<u32, String>) -> Option<Isel
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn select_inst(
     vref: ValueRef,
     op: &Op,
     regs: &mut RegMap,
     cmps: &mut CmpMap,
     stack: &mut StackMap,
+    alloc: &mut RegAlloc,
     call_targets: &HashMap<u32, String>,
     out: &mut Vec<MInst>,
 ) -> Option<()> {
@@ -170,24 +206,25 @@ fn select_inst(
         }
 
         Op::Const(imm) => {
+            let dst = alloc.alloc();
             out.push(MInst::MovRI {
                 size: OpSize::S32,
-                dst: Gpr::Rax,
+                dst,
                 imm: *imm,
             });
-            regs.assign(vref, Gpr::Rax);
+            regs.assign(vref, dst);
         }
 
         Op::Add(lhs, rhs) => {
-            select_binop_rr(vref, lhs.value, rhs.value, BinOp::Add, regs, out);
+            select_binop_rr(vref, lhs.value, rhs.value, BinOp::Add, regs, alloc, out);
         }
 
         Op::Sub(lhs, rhs) => {
-            select_binop_rr(vref, lhs.value, rhs.value, BinOp::Sub, regs, out);
+            select_binop_rr(vref, lhs.value, rhs.value, BinOp::Sub, regs, alloc, out);
         }
 
         Op::Mul(lhs, rhs) => {
-            select_binop_rr(vref, lhs.value, rhs.value, BinOp::Mul, regs, out);
+            select_binop_rr(vref, lhs.value, rhs.value, BinOp::Mul, regs, alloc, out);
         }
 
         Op::ICmp(cmp_op, lhs, rhs) => {
@@ -281,11 +318,12 @@ fn select_inst(
         }
 
         Op::Load(ptr) => {
+            let dst = alloc.alloc();
             // If the pointer comes from a StackSlot, load from [rbp+offset].
             if let Some(offset) = stack.get(ptr.value) {
                 out.push(MInst::MovRM {
                     size: OpSize::S64,
-                    dst: Gpr::Rax,
+                    dst,
                     base: Gpr::Rbp,
                     offset,
                 });
@@ -293,12 +331,12 @@ fn select_inst(
                 let ptr_reg = regs.get(ptr.value);
                 out.push(MInst::MovRM {
                     size: OpSize::S64,
-                    dst: Gpr::Rax,
+                    dst,
                     base: ptr_reg,
                     offset: 0,
                 });
             }
-            regs.assign(vref, Gpr::Rax);
+            regs.assign(vref, dst);
         }
 
         Op::Store(val, ptr) => {
@@ -369,37 +407,40 @@ fn select_binop_rr(
     rhs: ValueRef,
     op: BinOp,
     regs: &mut RegMap,
+    alloc: &mut RegAlloc,
     out: &mut Vec<MInst>,
 ) {
     let lhs_reg = regs.get(lhs);
     let rhs_reg = regs.get(rhs);
+    let dst = alloc.alloc();
 
-    if lhs_reg != Gpr::Rax {
+    // Move lhs into dst.
+    if lhs_reg != dst {
         out.push(MInst::MovRR {
             size: OpSize::S32,
-            dst: Gpr::Rax,
+            dst,
             src: lhs_reg,
         });
     }
     let inst = match op {
         BinOp::Add => MInst::AddRR {
             size: OpSize::S32,
-            dst: Gpr::Rax,
+            dst,
             src: rhs_reg,
         },
         BinOp::Sub => MInst::SubRR {
             size: OpSize::S32,
-            dst: Gpr::Rax,
+            dst,
             src: rhs_reg,
         },
         BinOp::Mul => MInst::ImulRR {
             size: OpSize::S32,
-            dst: Gpr::Rax,
+            dst,
             src: rhs_reg,
         },
     };
     out.push(inst);
-    regs.assign(vref, Gpr::Rax);
+    regs.assign(vref, dst);
 }
 
 fn icmp_to_cc(op: ICmpOp) -> CondCode {
