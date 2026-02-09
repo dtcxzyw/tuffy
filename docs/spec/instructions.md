@@ -216,7 +216,8 @@ Produce a value with the magnitude of `vMag` and the sign bit of `vSign`.
 vN = icmp.<pred> vA, vB
 ```
 
-Integer comparison. Returns an `int` value: 1 if the comparison is true, 0 otherwise.
+Integer comparison. Returns a `bool` value: `true` if the comparison holds, `false`
+otherwise.
 
 Predicates:
 
@@ -228,6 +229,29 @@ Predicates:
 | `le` | Less than or equal (signedness from annotation) |
 | `gt` | Greater than (signedness from annotation) |
 | `ge` | Greater than or equal (signedness from annotation) |
+
+**Semantics**: `evalICmp(op, a, b) = bool(op(a, b))`
+
+### `select`
+
+```
+vN = select vCond, vTrue, vFalse
+```
+
+Conditional select. If `vCond` is `true`, produces `vTrue`; otherwise produces `vFalse`.
+The condition must be of type `bool`. The result type matches the type of `vTrue`/`vFalse`.
+
+**Semantics**: `evalSelect(cond, tv, fv) = if cond then tv else fv`
+
+### `bool_to_int`
+
+```
+vN = bool_to_int vA
+```
+
+Convert a `bool` to an `int`: `true` → 1, `false` → 0.
+
+**Semantics**: `evalBoolToInt(b) = if b then 1 else 0`
 
 ## Value Annotations
 
@@ -588,8 +612,8 @@ brif vCond, bbThen(args...), bbElse(args...)
 brif vCond, bbThen, bbElse
 ```
 
-Conditional branch. If `vCond` is nonzero, branches to `bbThen`; otherwise branches
-to `bbElse`. Each target may receive block arguments.
+Conditional branch. The condition `vCond` must be of type `bool`. If `true`, branches
+to `bbThen`; otherwise branches to `bbElse`. Each target may receive block arguments.
 
 ### `continue`
 

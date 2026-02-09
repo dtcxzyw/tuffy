@@ -1,10 +1,11 @@
 # Values
 
-A value in tuffy IR is one of four kinds, as defined in Lean (`TuffyLean.IR.Value`):
+A value in tuffy IR is one of five kinds, as defined in Lean (`TuffyLean.IR.Value`):
 
 | Kind | Description |
 |------|-------------|
 | `int(v)` | An infinite precision integer with mathematical value `v` |
+| `bool(v)` | A boolean value (`true` or `false`) |
 | `bytes(bs)` | A sequence of [abstract bytes](#abstract-bytes) |
 | `ptr(p)` | A pointer with provenance (allocation ID + offset) |
 | `poison` | A poison value — the result of undefined behavior |

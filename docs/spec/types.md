@@ -12,6 +12,15 @@ Range constraints are expressed via [value annotations](instructions.md#value-an
 the type itself. The decision of sign-extension vs zero-extension is deferred to
 instruction selection.
 
+## `bool`
+
+Boolean type with two values: `true` and `false`. Distinct from integers — boolean
+logic is not conflated with integer arithmetic. Comparison instructions (`icmp`) return
+`bool`, and control flow instructions (`brif`, `select`) require `bool` conditions.
+
+To convert between `bool` and `int`, use `bool_to_int` (true → 1, false → 0). The
+reverse conversion uses `icmp.ne val, 0`.
+
 ## `byte(N)`
 
 Raw memory data of N bytes. Distinct from integers. The byte type preserves pointer
