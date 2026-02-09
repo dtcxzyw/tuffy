@@ -174,10 +174,10 @@ fn generate_allocator_module(tcx: TyCtxt<'_>) -> Option<CompiledModule> {
         let mangled_target = mangle(target_name);
         // Emit a JMP rel32 to the target (will be resolved by linker).
         let code = vec![0xe9, 0x00, 0x00, 0x00, 0x00]; // jmp rel32
-        let relocations = vec![tuffy_target_x86::encode::Relocation {
+        let relocations = vec![tuffy_target::reloc::Relocation {
             offset: 1,
             symbol: mangled_target,
-            kind: tuffy_target_x86::encode::RelocKind::Call,
+            kind: tuffy_target::reloc::RelocKind::Call,
         }];
         funcs.push(tuffy_target_x86::emit::CompiledFunction {
             name: mangled_export,
@@ -260,10 +260,10 @@ fn generate_entry_point(tcx: TyCtxt<'_>) -> Option<CompiledModule> {
     ];
 
     let relocations = vec![
-        tuffy_target_x86::encode::Relocation {
+        tuffy_target::reloc::Relocation {
             offset: 1,
             symbol: main_sym,
-            kind: tuffy_target_x86::encode::RelocKind::Call,
+            kind: tuffy_target::reloc::RelocKind::Call,
         },
     ];
 

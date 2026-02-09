@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use rustc_middle::mir::{self, BasicBlock, BinOp, Operand, Rvalue, StatementKind, TerminatorKind};
+use rustc_middle::mir::{self, BasicBlock, BinOp, Operand, Place, PlaceElem, Rvalue, StatementKind, TerminatorKind};
 use rustc_middle::ty::{self, Instance, TyCtxt};
 
 use tuffy_ir::builder::Builder;
@@ -60,6 +60,7 @@ pub fn translate_function<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> 
     let mut builder = Builder::new(&mut func);
     let mut locals = LocalMap::new(mir.local_decls.len());
     let mut fat_locals = FatLocalMap::new();
+    let mut stack_locals = StackLocalSet::new(mir.local_decls.len());
     let mut call_targets: HashMap<u32, String> = HashMap::new();
     let mut static_refs: HashMap<u32, String> = HashMap::new();
     let mut static_data: Vec<(String, Vec<u8>)> = Vec::new();
@@ -89,14 +90,15 @@ pub fn translate_function<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> 
 
         for stmt in &bb_data.statements {
             translate_statement(
-                tcx, stmt, &mut builder, &mut locals, &mut fat_locals,
-                &mut static_refs, &mut static_data,
+                tcx, stmt, mir, &mut builder, &mut locals, &mut fat_locals,
+                &mut stack_locals, &mut static_refs, &mut static_data,
             );
         }
         if let Some(ref term) = bb_data.terminator {
             translate_terminator(
-                tcx, term, &mut builder, &mut locals, &mut fat_locals,
-                &block_map, &mut call_targets, &mut static_refs, &mut static_data,
+                tcx, term, mir, &mut builder, &mut locals, &mut fat_locals,
+                &mut stack_locals, &block_map, &mut call_targets,
+                &mut static_refs, &mut static_data,
                 &mut rdx_captures, &mut rdx_moves,
             );
         }
@@ -194,6 +196,42 @@ fn translate_annotation(ty: ty::Ty<'_>) -> Option<Annotation> {
     }
 }
 
+/// Query the byte offset of field `field_idx` within type `ty`.
+fn field_offset<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>, field_idx: usize) -> Option<u64> {
+    let typing_env = ty::TypingEnv::fully_monomorphized();
+    let layout = tcx.layout_of(typing_env.as_query_input(ty)).ok()?;
+    Some(layout.fields.offset(field_idx).bytes())
+}
+
+/// Query the total byte size of type `ty`.
+fn type_size<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> Option<u64> {
+    let typing_env = ty::TypingEnv::fully_monomorphized();
+    let layout = tcx.layout_of(typing_env.as_query_input(ty)).ok()?;
+    Some(layout.size.bytes())
+}
+
+/// Tracks which MIR locals hold stack slot addresses (aggregate/spilled values)
+/// rather than scalar values in registers.
+struct StackLocalSet {
+    is_stack: Vec<bool>,
+}
+
+impl StackLocalSet {
+    fn new(count: usize) -> Self {
+        Self {
+            is_stack: vec![false; count],
+        }
+    }
+
+    fn mark(&mut self, local: mir::Local) {
+        self.is_stack[local.as_usize()] = true;
+    }
+
+    fn is_stack(&self, local: mir::Local) -> bool {
+        self.is_stack[local.as_usize()]
+    }
+}
+
 fn translate_params(
     mir: &mir::Body<'_>,
     builder: &mut Builder<'_>,
@@ -249,27 +287,150 @@ impl BlockMap {
     }
 }
 
+/// Compute the address of a Place (base + projections).
+///
+/// Walks the projection chain and returns a ValueRef representing the pointer
+/// to the final memory location. For locals with no projections that are
+/// stack-allocated, returns the local's value directly (which is already a pointer).
+fn translate_place_to_addr<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    place: &Place<'tcx>,
+    mir: &mir::Body<'tcx>,
+    builder: &mut Builder<'_>,
+    locals: &LocalMap,
+    stack_locals: &StackLocalSet,
+) -> Option<ValueRef> {
+    let mut addr = locals.get(place.local)?;
+    let mut cur_ty = mir.local_decls[place.local].ty;
+
+    // If the base local is not stack-allocated and has projections starting
+    // with something other than Deref, we need to spill it first.
+    // But for now, we handle each projection element in sequence.
+
+    for elem in place.projection.iter() {
+        match elem {
+            PlaceElem::Deref => {
+                // The current value is a pointer; load through it to get the
+                // pointee address. But since we want the *address* of the
+                // deref'd location, the current value IS the address.
+                // If the local is stack-allocated, addr is already a pointer
+                // to the slot; we need to load the actual pointer value from it.
+                if !place.projection.len() == 1 || !stack_locals.is_stack(place.local) {
+                    // addr already holds the pointer value — it IS the address
+                    // of the deref'd location. Nothing to do.
+                }
+                // Update cur_ty to the pointee type.
+                cur_ty = match cur_ty.kind() {
+                    ty::Ref(_, inner, _) | ty::RawPtr(inner, _) => *inner,
+                    _ => return None,
+                };
+            }
+            PlaceElem::Field(field_idx, field_ty) => {
+                let offset = field_offset(tcx, cur_ty, field_idx.as_usize())?;
+                if offset != 0 {
+                    let off_val = builder.iconst(offset as i64, Origin::synthetic());
+                    addr = builder.ptradd(addr.into(), off_val.into(), 0, Origin::synthetic());
+                }
+                cur_ty = field_ty;
+            }
+            PlaceElem::Index(local) => {
+                let idx_val = locals.get(local)?;
+                let elem_size = type_size(tcx, match cur_ty.kind() {
+                    ty::Array(elem_ty, _) => *elem_ty,
+                    ty::Slice(elem_ty) => *elem_ty,
+                    _ => return None,
+                })?;
+                let size_val = builder.iconst(elem_size as i64, Origin::synthetic());
+                let byte_offset = builder.mul(idx_val.into(), size_val.into(), None, Origin::synthetic());
+                addr = builder.ptradd(addr.into(), byte_offset.into(), 0, Origin::synthetic());
+                cur_ty = match cur_ty.kind() {
+                    ty::Array(elem_ty, _) | ty::Slice(elem_ty) => *elem_ty,
+                    _ => return None,
+                };
+            }
+            PlaceElem::Downcast(_, _) => {
+                // Downcast doesn't change the address, only the type interpretation.
+                // We keep the same address and update cur_ty via the variant.
+            }
+            PlaceElem::ConstantIndex { offset, from_end, .. } => {
+                let elem_ty = match cur_ty.kind() {
+                    ty::Array(elem_ty, _) | ty::Slice(elem_ty) => *elem_ty,
+                    _ => return None,
+                };
+                let elem_size = type_size(tcx, elem_ty)?;
+                if !from_end {
+                    let byte_off = offset * elem_size;
+                    if byte_off != 0 {
+                        let off_val = builder.iconst(byte_off as i64, Origin::synthetic());
+                        addr = builder.ptradd(addr.into(), off_val.into(), 0, Origin::synthetic());
+                    }
+                }
+                // from_end case would need array length; skip for now.
+                cur_ty = elem_ty;
+            }
+            _ => {
+                // OpaqueCast, Subslice, UnwrapUnsafeBinder — not yet handled.
+                return None;
+            }
+        }
+    }
+    Some(addr)
+}
+
+/// Read the value at a Place (base + projections).
+///
+/// If the place has no projections, returns the local's value directly.
+/// If it has projections, computes the address and emits a Load.
+fn translate_place_to_value<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    place: &Place<'tcx>,
+    mir: &mir::Body<'tcx>,
+    builder: &mut Builder<'_>,
+    locals: &LocalMap,
+    stack_locals: &StackLocalSet,
+) -> Option<ValueRef> {
+    if place.projection.is_empty() {
+        return locals.get(place.local);
+    }
+    let addr = translate_place_to_addr(
+        tcx, place, mir, builder, locals, stack_locals,
+    )?;
+    Some(builder.load(addr.into(), Type::Int, None, Origin::synthetic()))
+}
+
+#[allow(clippy::too_many_arguments)]
 fn translate_statement<'tcx>(
     tcx: TyCtxt<'tcx>,
     stmt: &mir::Statement<'tcx>,
+    mir: &mir::Body<'tcx>,
     builder: &mut Builder<'_>,
     locals: &mut LocalMap,
     fat_locals: &mut FatLocalMap,
+    stack_locals: &mut StackLocalSet,
     static_refs: &mut HashMap<u32, String>,
     static_data: &mut Vec<(String, Vec<u8>)>,
 ) {
     match &stmt.kind {
         StatementKind::Assign(box (place, rvalue)) => {
             if let Some(val) = translate_rvalue(
-                tcx, rvalue, builder, locals, fat_locals,
-                static_refs, static_data,
+                tcx, rvalue, place, mir, builder, locals, fat_locals,
+                stack_locals, static_refs, static_data,
             ) {
-                locals.set(place.local, val);
+                if place.projection.is_empty() {
+                    locals.set(place.local, val);
+                } else {
+                    // Projected destination: compute address and emit Store.
+                    if let Some(addr) = translate_place_to_addr(
+                        tcx, place, mir, builder, locals, stack_locals,
+                    ) {
+                        builder.store(val.into(), addr.into(), Origin::synthetic());
+                    }
+                }
             }
             // Check if the rvalue produces a fat pointer (e.g., &str from ConstValue::Slice).
             if let Some(fat_val) = extract_fat_component(
-                tcx, rvalue, builder, locals, fat_locals,
-                static_refs, static_data,
+                tcx, rvalue, mir, builder, locals, fat_locals,
+                stack_locals, static_refs, static_data,
             ) {
                 fat_locals.set(place.local, fat_val);
             }
@@ -284,12 +445,15 @@ fn translate_statement<'tcx>(
 /// Extract the "high" component of a fat pointer rvalue.
 ///
 /// Handles: ConstValue::Slice, Use/Cast of fat locals, and multi-field Aggregate.
+#[allow(clippy::too_many_arguments)]
 fn extract_fat_component<'tcx>(
     tcx: TyCtxt<'tcx>,
     rvalue: &Rvalue<'tcx>,
+    mir: &mir::Body<'tcx>,
     builder: &mut Builder<'_>,
     locals: &mut LocalMap,
     fat_locals: &FatLocalMap,
+    stack_locals: &StackLocalSet,
     static_refs: &mut HashMap<u32, String>,
     static_data: &mut Vec<(String, Vec<u8>)>,
 ) -> Option<ValueRef> {
@@ -318,7 +482,7 @@ fn extract_fat_component<'tcx>(
         // Multi-field Aggregate: second field becomes the fat component.
         Rvalue::Aggregate(_, operands) if operands.len() >= 2 => {
             let second_op = operands.iter().nth(1).unwrap();
-            translate_operand(tcx, second_op, builder, locals, static_refs, static_data)
+            translate_operand(tcx, second_op, mir, builder, locals, stack_locals, static_refs, static_data)
         }
         _ => None,
     }
@@ -328,9 +492,11 @@ fn extract_fat_component<'tcx>(
 fn translate_terminator<'tcx>(
     tcx: TyCtxt<'tcx>,
     term: &mir::Terminator<'tcx>,
+    mir: &mir::Body<'tcx>,
     builder: &mut Builder<'_>,
     locals: &mut LocalMap,
     fat_locals: &mut FatLocalMap,
+    stack_locals: &mut StackLocalSet,
     block_map: &BlockMap,
     call_targets: &mut HashMap<u32, String>,
     static_refs: &mut HashMap<u32, String>,
@@ -356,7 +522,7 @@ fn translate_terminator<'tcx>(
         }
         TerminatorKind::SwitchInt { discr, targets } => {
             translate_switch_int(
-                tcx, discr, targets, builder, locals, block_map,
+                tcx, discr, targets, mir, builder, locals, stack_locals, block_map,
                 static_refs, static_data,
             );
         }
@@ -402,8 +568,8 @@ fn translate_terminator<'tcx>(
             let mut ir_args: Vec<tuffy_ir::instruction::Operand> = Vec::new();
             for arg in args {
                 if let Some(v) = translate_operand(
-                    tcx, &arg.node, builder, locals,
-                    static_refs, static_data,
+                    tcx, &arg.node, mir, builder, locals,
+                    stack_locals, static_refs, static_data,
                 ) {
                     ir_args.push(v.into());
                     // If this arg is a Copy/Move of a fat local, also pass the high part.
@@ -458,17 +624,20 @@ fn translate_terminator<'tcx>(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn translate_switch_int<'tcx>(
     tcx: TyCtxt<'tcx>,
     discr: &Operand<'tcx>,
     targets: &mir::SwitchTargets,
+    mir: &mir::Body<'tcx>,
     builder: &mut Builder<'_>,
     locals: &mut LocalMap,
+    stack_locals: &StackLocalSet,
     block_map: &BlockMap,
     static_refs: &mut HashMap<u32, String>,
     static_data: &mut Vec<(String, Vec<u8>)>,
 ) {
-    let discr_val = match translate_operand(tcx, discr, builder, locals, static_refs, static_data) {
+    let discr_val = match translate_operand(tcx, discr, mir, builder, locals, stack_locals, static_refs, static_data) {
         Some(v) => v,
         None => return,
     };
@@ -523,19 +692,23 @@ fn translate_switch_int<'tcx>(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn translate_rvalue<'tcx>(
     tcx: TyCtxt<'tcx>,
     rvalue: &Rvalue<'tcx>,
+    dest_place: &Place<'tcx>,
+    mir: &mir::Body<'tcx>,
     builder: &mut Builder<'_>,
     locals: &mut LocalMap,
     fat_locals: &mut FatLocalMap,
+    stack_locals: &mut StackLocalSet,
     static_refs: &mut HashMap<u32, String>,
     static_data: &mut Vec<(String, Vec<u8>)>,
 ) -> Option<ValueRef> {
     match rvalue {
         Rvalue::BinaryOp(op, box (lhs, rhs)) => {
-            let l = translate_operand(tcx, lhs, builder, locals, static_refs, static_data)?;
-            let r = translate_operand(tcx, rhs, builder, locals, static_refs, static_data)?;
+            let l = translate_operand(tcx, lhs, mir, builder, locals, stack_locals, static_refs, static_data)?;
+            let r = translate_operand(tcx, rhs, mir, builder, locals, stack_locals, static_refs, static_data)?;
             let val = match op {
                 BinOp::Add | BinOp::AddWithOverflow => {
                     builder.add(l.into(), r.into(), None, Origin::synthetic())
@@ -568,24 +741,77 @@ fn translate_rvalue<'tcx>(
             };
             Some(val)
         }
-        Rvalue::Use(operand) => translate_operand(tcx, operand, builder, locals, static_refs, static_data),
+        Rvalue::Use(operand) => translate_operand(tcx, operand, mir, builder, locals, stack_locals, static_refs, static_data),
         Rvalue::Cast(_kind, operand, _ty) => {
             // For now, treat all casts as bitwise moves.
-            translate_operand(tcx, operand, builder, locals, static_refs, static_data)
+            translate_operand(tcx, operand, mir, builder, locals, stack_locals, static_refs, static_data)
         }
         Rvalue::Ref(_, _, place) | Rvalue::RawPtr(_, place) => {
-            // Taking a reference or raw pointer to a local.
-            // Return the local's value (address) if available.
-            locals.get(place.local)
-        }
-        Rvalue::Aggregate(_, operands) => {
-            if operands.is_empty() {
-                Some(builder.iconst(0, Origin::synthetic()))
-            } else if let Some(first_op) = operands.iter().next() {
-                translate_operand(tcx, first_op, builder, locals, static_refs, static_data)
+            if !place.projection.is_empty() {
+                // Place has projections: compute address of the projected location.
+                translate_place_to_addr(
+                    tcx, place, mir, builder, locals, stack_locals,
+                )
+            } else if stack_locals.is_stack(place.local) {
+                // Local is stack-allocated: its value is already the address.
+                locals.get(place.local)
             } else {
-                Some(builder.iconst(0, Origin::synthetic()))
+                // Scalar local: spill to stack slot, return address.
+                if let Some(val) = locals.get(place.local) {
+                    let slot = builder.stack_slot(8, Origin::synthetic());
+                    builder.store(val.into(), slot.into(), Origin::synthetic());
+                    Some(slot)
+                } else {
+                    None
+                }
             }
+        }
+        Rvalue::Aggregate(kind, operands) => {
+            if operands.is_empty() {
+                return Some(builder.iconst(0, Origin::synthetic()));
+            }
+            // Determine the aggregate type for layout queries.
+            let agg_ty = match kind.as_ref() {
+                mir::AggregateKind::Tuple => mir.local_decls[dest_place.local].ty,
+                mir::AggregateKind::Adt(def_id, variant_idx, args, _, _) => {
+                    let adt_def = tcx.adt_def(*def_id);
+                    if adt_def.is_enum() {
+                        // For enums, use the destination local's type.
+                        mir.local_decls[dest_place.local].ty
+                    } else {
+                        let _ = variant_idx;
+                        ty::Ty::new_adt(tcx, adt_def, args)
+                    }
+                }
+                _ => mir.local_decls[dest_place.local].ty,
+            };
+            let total_size = type_size(tcx, agg_ty).unwrap_or(8 * operands.len() as u64);
+            if total_size == 0 {
+                return Some(builder.iconst(0, Origin::synthetic()));
+            }
+            let slot = builder.stack_slot(total_size as u32, Origin::synthetic());
+            for (i, op) in operands.iter().enumerate() {
+                if let Some(val) = translate_operand(
+                    tcx, op, mir, builder, locals, stack_locals,
+                    static_refs, static_data,
+                ) {
+                    let offset = field_offset(tcx, agg_ty, i).unwrap_or(i as u64 * 8);
+                    if offset == 0 {
+                        builder.store(val.into(), slot.into(), Origin::synthetic());
+                    } else {
+                        let off_val = builder.iconst(offset as i64, Origin::synthetic());
+                        let addr = builder.ptradd(
+                            slot.into(), off_val.into(), 0, Origin::synthetic(),
+                        );
+                        builder.store(val.into(), addr.into(), Origin::synthetic());
+                    }
+                }
+            }
+            // Mark the destination local as stack-allocated.
+            if dest_place.projection.is_empty() {
+                stack_locals.mark(dest_place.local);
+            }
+            Some(slot)
         }
         Rvalue::UnaryOp(mir::UnOp::PtrMetadata, operand) => {
             // Extract metadata (e.g., slice length) from a fat pointer.
@@ -597,12 +823,12 @@ fn translate_rvalue<'tcx>(
             }
         }
         Rvalue::UnaryOp(mir::UnOp::Neg, operand) => {
-            let v = translate_operand(tcx, operand, builder, locals, static_refs, static_data)?;
+            let v = translate_operand(tcx, operand, mir, builder, locals, stack_locals, static_refs, static_data)?;
             let zero = builder.iconst(0, Origin::synthetic());
             Some(builder.sub(zero.into(), v.into(), None, Origin::synthetic()))
         }
         Rvalue::UnaryOp(mir::UnOp::Not, operand) => {
-            let v = translate_operand(tcx, operand, builder, locals, static_refs, static_data)?;
+            let v = translate_operand(tcx, operand, mir, builder, locals, stack_locals, static_refs, static_data)?;
             let ones = builder.iconst(-1, Origin::synthetic());
             Some(builder.xor(v.into(), ones.into(), None, Origin::synthetic()))
         }
@@ -613,16 +839,27 @@ fn translate_rvalue<'tcx>(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn translate_operand<'tcx>(
     tcx: TyCtxt<'tcx>,
     operand: &Operand<'tcx>,
+    mir: &mir::Body<'tcx>,
     builder: &mut Builder<'_>,
     locals: &mut LocalMap,
+    stack_locals: &StackLocalSet,
     static_refs: &mut HashMap<u32, String>,
     static_data: &mut Vec<(String, Vec<u8>)>,
 ) -> Option<ValueRef> {
     match operand {
-        Operand::Copy(place) | Operand::Move(place) => locals.get(place.local),
+        Operand::Copy(place) | Operand::Move(place) => {
+            if place.projection.is_empty() {
+                locals.get(place.local)
+            } else {
+                translate_place_to_value(
+                    tcx, place, mir, builder, locals, stack_locals,
+                )
+            }
+        }
         Operand::Constant(constant) => {
             translate_const(tcx, constant, builder, static_refs, static_data)
         }
