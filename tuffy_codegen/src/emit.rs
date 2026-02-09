@@ -6,7 +6,7 @@ use object::{
     SymbolFlags, SymbolKind, SymbolScope,
 };
 
-use crate::encode::{RelocKind, Relocation};
+use tuffy_target::reloc::{RelocKind, Relocation};
 
 /// A compiled function ready for ELF emission.
 pub struct CompiledFunction {
