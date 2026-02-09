@@ -98,7 +98,7 @@ When outputting content using tools, output in multiple smaller segments rather 
 
 ## Architecture
 
-The IR definition in Lean 4 (`lean/TuffyLean/IR/`) is the **source of truth**. The Rust implementation (`tuffy_ir/`) and the spec (`docs/spec.md`) must conform to the Lean definitions. When there is a conflict, the Lean code takes precedence.
+The IR definition in Lean 4 (`lean/TuffyLean/IR/`) is the **source of truth**. The Rust implementation (`tuffy_ir/`) and the spec (`docs/spec/`) must conform to the Lean definitions. When there is a conflict, the Lean code takes precedence.
 
 `docs/initial.md` is frozen — it records early design decisions and must not be modified. New design discussions belong in `docs/RFCs/`.
 

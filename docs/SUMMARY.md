@@ -4,7 +4,7 @@
 
 # Reference
 
-- [IR Language Reference](spec.md)
+- [IR Language Reference](spec/index.md)
 - [Initial Design](initial.md)
 - [References](references.md)
 

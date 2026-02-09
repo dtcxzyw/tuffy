@@ -74,7 +74,7 @@ IR changes typically break downstream consumers. Update in dependency order:
 
 Update the human-readable reference:
 
-- `docs/spec.md`
+- `docs/spec/` (split into multiple files; see `docs/spec/index.md`)
 
 Ensure the spec accurately reflects the new Lean definitions and Rust implementation.
 The spec is not authoritative — it is documentation derived from the Lean model.

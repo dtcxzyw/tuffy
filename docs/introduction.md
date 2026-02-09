@@ -15,7 +15,7 @@ Tuffy is an experimental optimizing compiler written in Rust, developed with LLM
 
 ## Documentation Overview
 
-- **[IR Language Reference](spec.md)** — The textual IR format, type system, and instruction set.
+- **[IR Language Reference](spec/index.md)** — The textual IR format, type system, and instruction set.
 - **[Initial Design](initial.md)** — Early design discussions and architectural decisions.
 - **[References](references.md)** — Curated list of reference documents and resources.
 - **[RFCs](RFCs/202602/ir-design.md)** — Design proposals for major features.
