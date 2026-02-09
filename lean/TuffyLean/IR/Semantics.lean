@@ -66,9 +66,10 @@ def evalIntToPtr (addr : Int) (allocId : AllocId) : Value :=
   .ptr { allocId := allocId, offset := addr }
 
 -- Floating point operation semantics
+-- The IR adopts IEEE 754-2008 as the floating-point semantics standard.
 -- These use Lean 4's native Float type (IEEE 754 binary64) as a placeholder
--- model. The formal float model will be refined when full NaN/denormal
--- semantics are decided.
+-- model. The formal float model will be refined when full NaN payload and
+-- denormal semantics are decided.
 
 /-- Floating point addition. -/
 def evalFAdd (a b : Float) : Float := a + b
@@ -115,6 +116,36 @@ def applyAnnotation (v : Int) (ann : Annotation) : Value :=
   match ann with
   | .signed n => checkSignedRange v n
   | .unsigned n => checkUnsignedRange v n
+
+-- Bytecast semantics: conversion between byte types and typed values.
+-- Annotations are always droppable — they never determine bytecast semantics.
+
+/-- Resolve a single AbstractByte to a concrete byte value (0–255).
+    Returns none if the byte is poison, uninit, or a pointer fragment. -/
+def resolveAbstractByte (ab : AbstractByte) : Option UInt8 :=
+  match ab with
+  | .bits val => some val
+  | .poison => none
+  | .uninit => none
+  | .ptrFragment _ _ => none  -- TODO: ptrtoint semantics
+
+/-- Decode a list of abstract bytes as a little-endian unsigned integer.
+    Returns poison if any byte is not concrete bits. -/
+def evalBytecastToInt (bs : List AbstractByte) : Value :=
+  let rec go (remaining : List AbstractByte) (shift : Nat) (acc : Int) : Value :=
+    match remaining with
+    | [] => .int acc
+    | b :: rest =>
+      match resolveAbstractByte b with
+      | none => .poison
+      | some v => go rest (shift + 8) (acc + (v.toNat : Int) <<< shift)
+  go bs 0 0
+
+/-- Encode an integer as a list of abstract bytes (little-endian, N bytes).
+    Truncates to the low N bytes. -/
+def evalBytecastFromInt (v : Int) (numBytes : Nat) : List AbstractByte :=
+  List.ofFn (fun (i : Fin numBytes) =>
+    .bits (UInt8.ofNat ((v >>> (i.val * 8)).toNat % 256)))
 
 -- Memory load/store semantics
 
