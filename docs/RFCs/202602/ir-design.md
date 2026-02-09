@@ -191,8 +191,8 @@ All integer arithmetic operates on mathematical integers:
 | `add %a, %b` | Mathematical addition |
 | `sub %a, %b` | Mathematical subtraction |
 | `mul %a, %b` | Mathematical multiplication |
-| `sdiv %a, %b` | Signed division (poison if %b == 0) |
-| `udiv %a, %b` | Unsigned division (poison if %b == 0) |
+| `div %a, %b` | Integer division (poison if %b == 0) |
+| `rem %a, %b` | Integer remainder (poison if %b == 0) |
 | `and %a, %b` | Bitwise AND on infinite precision |
 | `or %a, %b` | Bitwise OR on infinite precision |
 | `xor %a, %b` | Bitwise XOR on infinite precision |
@@ -241,8 +241,8 @@ All vector operations work on `vec<vscale x N x T>` types. A mask operand (`vec<
 | `vec.add %a, %b` | Elementwise addition |
 | `vec.sub %a, %b` | Elementwise subtraction |
 | `vec.mul %a, %b` | Elementwise multiplication |
-| `vec.sdiv %a, %b` | Elementwise signed division |
-| `vec.udiv %a, %b` | Elementwise unsigned division |
+| `vec.div %a, %b` | Elementwise division |
+| `vec.rem %a, %b` | Elementwise remainder |
 | `vec.and %a, %b` | Elementwise bitwise AND |
 | `vec.or %a, %b` | Elementwise bitwise OR |
 | `vec.xor %a, %b` | Elementwise bitwise XOR |

@@ -250,24 +250,26 @@ vN = mul vA, vB
 
 Integer multiplication. **Semantics**: `evalMul(a, b) = a * b`
 
-#### `sdiv`
+#### `div`
 
 ```
-vN = sdiv vA, vB
+vN = div vA, vB
 ```
 
-Signed integer division. Produces `poison` if `vB` is zero.
-**Semantics**: `evalSDiv(a, b) = if b = 0 then poison else a / b`
+Integer division. Produces `poison` if `vB` is zero. Signedness is a property of
+operand annotations, not the operation itself — in the infinite precision integer
+model, signed and unsigned division are mathematically identical.
+**Semantics**: `evalDiv(a, b) = if b = 0 then poison else a / b`
 
-#### `udiv`
+#### `rem`
 
 ```
-vN = udiv vA, vB
+vN = rem vA, vB
 ```
 
-Unsigned integer division. Produces `poison` if `vB` is zero. Operands are assumed
-non-negative (enforced by annotations).
-**Semantics**: `evalUDiv(a, b) = if b = 0 then poison else a / b`
+Integer remainder. Produces `poison` if `vB` is zero. Signedness is a property of
+operand annotations, not the operation itself.
+**Semantics**: `evalRem(a, b) = if b = 0 then poison else a % b`
 
 #### `and`
 
@@ -723,6 +725,25 @@ region_yield
 
 Exit the enclosing region, yielding values to the parent region. Used for structured
 control flow where a region produces result values.
+
+#### `unreachable`
+
+```
+unreachable
+```
+
+Indicates that control flow should never reach this point. If executed, the behavior
+is undefined (the optimizer may assume this path is dead).
+
+#### `trap`
+
+```
+trap
+```
+
+Unconditionally abort execution. Used for runtime checks such as failed assertions
+(e.g., division-by-zero guards). Unlike `unreachable`, reaching a `trap` is not UB —
+it is a well-defined program abort.
 
 ## Text Format
 
