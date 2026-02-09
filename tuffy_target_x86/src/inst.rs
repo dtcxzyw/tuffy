@@ -116,4 +116,10 @@ pub enum MInst {
         offset: i32,
         imm: i32,
     },
+    /// lea reg, [rip+symbol] (RIP-relative address of named symbol)
+    LeaSymbol { dst: Gpr, symbol: String },
+    /// or dst, src (dst |= src)
+    OrRR { size: OpSize, dst: Gpr, src: Gpr },
+    /// shl dst, cl (dst <<= cl)
+    ShlRCL { size: OpSize, dst: Gpr },
 }
