@@ -398,14 +398,10 @@ Predicates:
 |-----------|-------------|
 | `eq` | Equal |
 | `ne` | Not equal |
-| `slt` | Signed less than |
-| `sle` | Signed less than or equal |
-| `sgt` | Signed greater than |
-| `sge` | Signed greater than or equal |
-| `ult` | Unsigned less than |
-| `ule` | Unsigned less than or equal |
-| `ugt` | Unsigned greater than |
-| `uge` | Unsigned greater than or equal |
+| `lt` | Less than (signedness from annotation) |
+| `le` | Less than or equal (signedness from annotation) |
+| `gt` | Greater than (signedness from annotation) |
+| `ge` | Greater than or equal (signedness from annotation) |
 
 ### Value Annotations
 
@@ -789,7 +785,7 @@ func @factorial(int:s32) -> int:s32 {
 
   region loop {
     bb1(v4: int, v5: int):
-      v6 = icmp.sle v5:s32, v0:s32
+      v6 = icmp.le v5:s32, v0:s32
       brif v6, bb2, bb3
 
     bb2:
