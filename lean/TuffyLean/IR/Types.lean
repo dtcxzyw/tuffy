@@ -14,6 +14,33 @@ inductive FloatType where
   | f64    -- IEEE 754 double precision
   deriving DecidableEq, Repr
 
+/-- Vector type parameterized by total bit-width.
+    Element count is derived: count = width / element_bits.
+    See RFC: scalable-vectors.md -/
+inductive VectorType where
+  | fixed (width : Nat)        -- fixed-width vector (e.g., 128 for SSE)
+  | scalable (baseWidth : Nat) -- vscale × baseWidth bits (e.g., SVE, RVV)
+  deriving DecidableEq, Repr
+
+/-- Well-formedness: vector width must be positive and byte-aligned -/
+def VectorType.wellFormed : VectorType → Prop
+  | .fixed w => w > 0 ∧ w % 8 = 0
+  | .scalable bw => bw > 0 ∧ bw % 8 = 0
+
+/-- Well-formedness with element width: divisible and power-of-two lane count -/
+def VectorType.wellFormedWithElement (vt : VectorType) (elemBits : Nat) : Prop :=
+  let w := match vt with | .fixed w => w | .scalable bw => bw
+  vt.wellFormed ∧ elemBits > 0 ∧ w % elemBits = 0 ∧ Nat.isPowerOfTwo (w / elemBits)
+
+/-- Get the base width in bits -/
+def VectorType.baseWidth : VectorType → Nat
+  | .fixed w => w
+  | .scalable bw => bw
+
+/-- Compute lane count given element bit-width -/
+def VectorType.laneCount (vt : VectorType) (elemBits : Nat) : Nat :=
+  vt.baseWidth / elemBits
+
 /-- Range annotation on a value definition or use edge -/
 inductive Annotation where
   | signed (bits : Nat)    -- :s<N> — value in [-2^(N-1), 2^(N-1)-1]
