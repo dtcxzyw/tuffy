@@ -14,7 +14,7 @@ use rustc_middle::ty::{self, Instance, TyCtxt, TypeVisitableExt};
 use tuffy_codegen::{AbiMetadataBox, CodegenSession};
 use tuffy_ir::builder::Builder;
 use tuffy_ir::function::{Function, RegionKind};
-use tuffy_ir::instruction::{ICmpOp, Origin};
+use tuffy_ir::instruction::{ICmpOp, Operand as IrOperand, Origin};
 use tuffy_ir::types::{Annotation, Type};
 use tuffy_ir::value::{BlockRef, ValueRef};
 
@@ -237,6 +237,16 @@ fn translate_annotation(ty: ty::Ty<'_>) -> Option<Annotation> {
         ty::RawPtr(..) | ty::Ref(..) | ty::FnPtr(..) => Some(Annotation::Unsigned(64)),
         _ => None,
     }
+}
+
+/// Extract the type annotation from a MIR operand.
+fn operand_annotation<'tcx>(operand: &Operand<'tcx>, mir: &mir::Body<'tcx>) -> Option<Annotation> {
+    let ty = match operand {
+        Operand::Copy(place) | Operand::Move(place) => mir.local_decls[place.local].ty,
+        Operand::Constant(c) => c.ty(),
+        _ => return None,
+    };
+    translate_annotation(ty)
 }
 
 /// Query the byte offset of field `field_idx` within type `ty`.
@@ -503,6 +513,14 @@ fn translate_place_to_value<'tcx>(
     stack_locals: &StackLocalSet,
 ) -> Option<ValueRef> {
     if place.projection.is_empty() {
+        return locals.get(place.local);
+    }
+    // Non-stack scalar with Field(0) projection (e.g., CheckedOp tuple `.0`):
+    // the local already holds the scalar value, no load needed.
+    if !stack_locals.is_stack(place.local)
+        && place.projection.len() == 1
+        && matches!(place.projection[0], PlaceElem::Field(idx, _) if idx.as_usize() == 0)
+    {
         return locals.get(place.local);
     }
     let addr = translate_place_to_addr(tcx, place, mir, builder, locals, stack_locals)?;
@@ -1013,39 +1031,50 @@ fn translate_rvalue<'tcx>(
                 static_refs,
                 static_data,
             )?;
+            let l_ann = operand_annotation(lhs, mir);
+            let r_ann = operand_annotation(rhs, mir);
+            let l_op = IrOperand {
+                value: l,
+                annotation: l_ann,
+            };
+            let r_op = IrOperand {
+                value: r,
+                annotation: r_ann,
+            };
+            // For arithmetic/bitwise ops the result type matches the operand type.
+            let res_ann = l_ann;
             let val = match op {
                 BinOp::Add | BinOp::AddWithOverflow => {
-                    builder.add(l.into(), r.into(), None, Origin::synthetic())
+                    builder.add(l_op, r_op, res_ann, Origin::synthetic())
                 }
                 BinOp::Sub | BinOp::SubWithOverflow => {
-                    builder.sub(l.into(), r.into(), None, Origin::synthetic())
+                    builder.sub(l_op, r_op, res_ann, Origin::synthetic())
                 }
                 BinOp::Mul | BinOp::MulWithOverflow => {
-                    builder.mul(l.into(), r.into(), None, Origin::synthetic())
+                    builder.mul(l_op, r_op, res_ann, Origin::synthetic())
                 }
-                BinOp::Eq => builder.icmp(ICmpOp::Eq, l.into(), r.into(), Origin::synthetic()),
-                BinOp::Ne => builder.icmp(ICmpOp::Ne, l.into(), r.into(), Origin::synthetic()),
-                BinOp::Lt => builder.icmp(ICmpOp::Slt, l.into(), r.into(), Origin::synthetic()),
-                BinOp::Le => builder.icmp(ICmpOp::Sle, l.into(), r.into(), Origin::synthetic()),
-                BinOp::Gt => builder.icmp(ICmpOp::Sgt, l.into(), r.into(), Origin::synthetic()),
-                BinOp::Ge => builder.icmp(ICmpOp::Sge, l.into(), r.into(), Origin::synthetic()),
+                BinOp::Eq => builder.icmp(ICmpOp::Eq, l_op, r_op, Origin::synthetic()),
+                BinOp::Ne => builder.icmp(ICmpOp::Ne, l_op, r_op, Origin::synthetic()),
+                BinOp::Lt => builder.icmp(ICmpOp::Slt, l_op, r_op, Origin::synthetic()),
+                BinOp::Le => builder.icmp(ICmpOp::Sle, l_op, r_op, Origin::synthetic()),
+                BinOp::Gt => builder.icmp(ICmpOp::Sgt, l_op, r_op, Origin::synthetic()),
+                BinOp::Ge => builder.icmp(ICmpOp::Sge, l_op, r_op, Origin::synthetic()),
                 BinOp::Shl | BinOp::ShlUnchecked => {
-                    builder.shl(l.into(), r.into(), None, Origin::synthetic())
+                    builder.shl(l_op, r_op, res_ann, Origin::synthetic())
                 }
-                BinOp::BitOr => builder.or(l.into(), r.into(), None, Origin::synthetic()),
-                BinOp::BitAnd => builder.and(l.into(), r.into(), None, Origin::synthetic()),
-                BinOp::BitXor => builder.xor(l.into(), r.into(), None, Origin::synthetic()),
+                BinOp::BitOr => builder.or(l_op, r_op, res_ann, Origin::synthetic()),
+                BinOp::BitAnd => builder.and(l_op, r_op, res_ann, Origin::synthetic()),
+                BinOp::BitXor => builder.xor(l_op, r_op, res_ann, Origin::synthetic()),
                 BinOp::Shr | BinOp::ShrUnchecked => {
-                    // Determine signedness from the LHS operand type.
                     let lhs_ty = match lhs {
                         Operand::Copy(p) | Operand::Move(p) => mir.local_decls[p.local].ty,
                         Operand::Constant(c) => c.ty(),
                         _ => return None,
                     };
                     if is_signed_int(lhs_ty) {
-                        builder.ashr(l.into(), r.into(), None, Origin::synthetic())
+                        builder.ashr(l_op, r_op, res_ann, Origin::synthetic())
                     } else {
-                        builder.lshr(l.into(), r.into(), None, Origin::synthetic())
+                        builder.lshr(l_op, r_op, res_ann, Origin::synthetic())
                     }
                 }
                 BinOp::Div => {
@@ -1055,9 +1084,9 @@ fn translate_rvalue<'tcx>(
                         _ => return None,
                     };
                     if is_signed_int(lhs_ty) {
-                        builder.sdiv(l.into(), r.into(), None, Origin::synthetic())
+                        builder.sdiv(l_op, r_op, res_ann, Origin::synthetic())
                     } else {
-                        builder.udiv(l.into(), r.into(), None, Origin::synthetic())
+                        builder.udiv(l_op, r_op, res_ann, Origin::synthetic())
                     }
                 }
                 _ => return None,
