@@ -1,8 +1,8 @@
 # Stack Frame, Load/Store, Aggregate Types
 
-- Status: In Progress
+- Status: Completed
 - Created: 2026-02-08
-- Completed: N/A
+- Completed: 2026-02-09
 - Parent: docs/tasks/202602/hello-world.md
 
 ## Description
@@ -20,6 +20,6 @@ Key deliverables:
 ## Affected Modules
 
 - `rustc_codegen_tuffy/src/mir_to_ir.rs` — Place projections, Ref, Aggregate rvalues
-- `tuffy_ir/src/instruction.rs` — add Load, Store, StackSlot, GetElementPtr ops
-- `tuffy_codegen/src/isel.rs` — select MOV with memory operands, LEA
-- `tuffy_codegen/src/encode.rs` — ModR/M with displacement, SIB byte encoding
+- `tuffy_ir/src/instruction.rs` — Load, Store, StackSlot, PtrAdd ops
+- `tuffy_target_x86/src/isel.rs` — PtrAdd lowering, ensure_in_reg, MOV with memory operands, LEA
+- `tuffy_target_x86/src/encode.rs` — ModR/M with displacement, SIB byte encoding
