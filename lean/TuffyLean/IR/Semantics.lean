@@ -11,14 +11,15 @@ def evalAdd (a b : Int) : Int := a + b
 def evalSub (a b : Int) : Int := a - b
 def evalMul (a b : Int) : Int := a * b
 
-/-- Signed division produces poison on division by zero -/
-def evalSDiv (a b : Int) : Value :=
+/-- Integer division produces poison on division by zero.
+    Signedness is a property of operand annotations, not the operation. -/
+def evalDiv (a b : Int) : Value :=
   if b = 0 then .poison else .int (a / b)
 
-/-- Unsigned division produces poison on division by zero.
-    Operands are assumed non-negative (enforced by annotations). -/
-def evalUDiv (a b : Int) : Value :=
-  if b = 0 then .poison else .int (a / b)
+/-- Integer remainder produces poison on division by zero.
+    Signedness is a property of operand annotations, not the operation. -/
+def evalRem (a b : Int) : Value :=
+  if b = 0 then .poison else .int (a % b)
 
 /-- Bitwise AND (two's complement, infinite width) -/
 def evalAnd (a b : Int) : Int := Int.land a b
