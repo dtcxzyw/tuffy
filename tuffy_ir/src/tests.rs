@@ -322,9 +322,9 @@ fn display_division_ops() {
 
     let a = builder.param(0, Type::Int, None, Origin::synthetic());
     let b = builder.param(1, Type::Int, None, Origin::synthetic());
-    let v_sdiv = builder.sdiv(a.into(), b.into(), None, Origin::synthetic());
-    let v_udiv = builder.udiv(a.into(), b.into(), None, Origin::synthetic());
-    let v_add = builder.add(v_sdiv.into(), v_udiv.into(), None, Origin::synthetic());
+    let v_div = builder.div(a.into(), b.into(), None, Origin::synthetic());
+    let v_rem = builder.rem(a.into(), b.into(), None, Origin::synthetic());
+    let v_add = builder.add(v_div.into(), v_rem.into(), None, Origin::synthetic());
     builder.ret(Some(v_add.into()), Origin::synthetic());
     builder.exit_region();
 
@@ -335,8 +335,8 @@ fn display_division_ops() {
          \x20\x20bb0:\n\
          \x20\x20\x20\x20v0 = param 0\n\
          \x20\x20\x20\x20v1 = param 1\n\
-         \x20\x20\x20\x20v2 = sdiv v0, v1\n\
-         \x20\x20\x20\x20v3 = udiv v0, v1\n\
+         \x20\x20\x20\x20v2 = div v0, v1\n\
+         \x20\x20\x20\x20v3 = rem v0, v1\n\
          \x20\x20\x20\x20v4 = add v2, v3\n\
          \x20\x20\x20\x20ret v4\n\
          }"

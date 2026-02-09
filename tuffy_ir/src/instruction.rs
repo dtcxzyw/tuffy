@@ -111,14 +111,10 @@ pub enum Op {
     Sub(Operand, Operand),
     /// Integer multiplication: mul %a, %b
     Mul(Operand, Operand),
-    /// Signed integer division: sdiv %a, %b (poison on div-by-zero)
-    SDiv(Operand, Operand),
-    /// Unsigned integer division: udiv %a, %b (poison on div-by-zero)
-    UDiv(Operand, Operand),
-    /// Signed integer remainder: srem %a, %b (poison on div-by-zero)
-    SRem(Operand, Operand),
-    /// Unsigned integer remainder: urem %a, %b (poison on div-by-zero)
-    URem(Operand, Operand),
+    /// Integer division: div %a, %b (poison on div-by-zero)
+    Div(Operand, Operand),
+    /// Integer remainder: rem %a, %b (poison on div-by-zero)
+    Rem(Operand, Operand),
     /// Bitwise AND: and %a, %b
     And(Operand, Operand),
     /// Bitwise OR: or %a, %b

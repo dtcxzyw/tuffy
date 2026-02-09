@@ -182,46 +182,26 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::Mul(a, b), Type::Int, origin, ann)
     }
 
-    /// Signed integer division (poison on division by zero).
-    pub fn sdiv(
+    /// Integer division (poison on division by zero).
+    pub fn div(
         &mut self,
         a: Operand,
         b: Operand,
         ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::SDiv(a, b), Type::Int, origin, ann)
+        self.push_inst(Op::Div(a, b), Type::Int, origin, ann)
     }
 
-    /// Unsigned integer division (poison on division by zero).
-    pub fn udiv(
+    /// Integer remainder (poison on division by zero).
+    pub fn rem(
         &mut self,
         a: Operand,
         b: Operand,
         ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::UDiv(a, b), Type::Int, origin, ann)
-    }
-
-    pub fn srem(
-        &mut self,
-        a: Operand,
-        b: Operand,
-        ann: Option<Annotation>,
-        origin: Origin,
-    ) -> ValueRef {
-        self.push_inst(Op::SRem(a, b), Type::Int, origin, ann)
-    }
-
-    pub fn urem(
-        &mut self,
-        a: Operand,
-        b: Operand,
-        ann: Option<Annotation>,
-        origin: Origin,
-    ) -> ValueRef {
-        self.push_inst(Op::URem(a, b), Type::Int, origin, ann)
+        self.push_inst(Op::Rem(a, b), Type::Int, origin, ann)
     }
 
     /// Bitwise AND.
