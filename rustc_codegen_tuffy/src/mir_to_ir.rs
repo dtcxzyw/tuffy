@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use rustc_middle::mir::{self, BasicBlock, BinOp, CastKind, Operand, Place, PlaceElem, Rvalue, StatementKind, TerminatorKind};
 use rustc_middle::ty::{self, Instance, TyCtxt, TypeVisitableExt};
 
+use tuffy_codegen::{AbiMetadataBox, CodegenSession};
 use tuffy_ir::builder::Builder;
 use tuffy_ir::function::{Function, RegionKind};
 use tuffy_ir::instruction::{ICmpOp, Origin};
@@ -23,16 +24,16 @@ pub struct TranslationResult {
     pub static_refs: HashMap<u32, String>,
     /// Static data blobs to emit in .rodata.
     pub static_data: Vec<(String, Vec<u8>)>,
-    /// Maps IR instruction index → () for values that should capture RDX
-    /// (the second return value from the preceding call).
-    pub rdx_captures: HashMap<u32, ()>,
-    /// Maps IR instruction index → source value index for explicit RDX moves.
-    /// Used to move a fat return component into RDX before ret.
-    pub rdx_moves: HashMap<u32, u32>,
+    /// Target-specific ABI metadata (e.g., secondary return register info).
+    pub abi_metadata: AbiMetadataBox,
 }
 
 /// Translate a single MIR function instance to tuffy IR.
-pub fn translate_function<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> Option<TranslationResult> {
+pub fn translate_function<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    instance: Instance<'tcx>,
+    session: &CodegenSession,
+) -> Option<TranslationResult> {
     let inst_ty = instance.ty(tcx, ty::TypingEnv::fully_monomorphized());
     if !inst_ty.is_fn() {
         return None;
@@ -71,8 +72,7 @@ pub fn translate_function<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> 
     let mut call_targets: HashMap<u32, String> = HashMap::new();
     let mut static_refs: HashMap<u32, String> = HashMap::new();
     let mut static_data: Vec<(String, Vec<u8>)> = Vec::new();
-    let mut rdx_captures: HashMap<u32, ()> = HashMap::new();
-    let mut rdx_moves: HashMap<u32, u32> = HashMap::new();
+    let mut abi_metadata = session.new_metadata();
 
     // Detect whether this function returns a large struct via sret.
     let ret_mir_ty = sig.output();
@@ -115,7 +115,7 @@ pub fn translate_function<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> 
                 tcx, term, mir, &mut builder, &mut locals, &mut fat_locals,
                 &mut stack_locals, &block_map, &mut call_targets,
                 &mut static_refs, &mut static_data,
-                &mut rdx_captures, &mut rdx_moves,
+                &mut abi_metadata,
                 sret_ptr, use_sret,
             );
         }
@@ -128,8 +128,7 @@ pub fn translate_function<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> 
         call_targets,
         static_refs,
         static_data,
-        rdx_captures,
-        rdx_moves,
+        abi_metadata,
     })
 }
 
@@ -576,8 +575,7 @@ fn translate_terminator<'tcx>(
     call_targets: &mut HashMap<u32, String>,
     static_refs: &mut HashMap<u32, String>,
     static_data: &mut Vec<(String, Vec<u8>)>,
-    rdx_captures: &mut HashMap<u32, ()>,
-    rdx_moves: &mut HashMap<u32, u32>,
+    abi_metadata: &mut AbiMetadataBox,
     sret_ptr: Option<ValueRef>,
     use_sret: bool,
 ) {
@@ -627,12 +625,12 @@ fn translate_terminator<'tcx>(
                 let word0 = builder.load(slot.into(), Type::Int, None, Origin::synthetic());
 
                 if size > 8 {
-                    // Second 8 bytes → RDX via rdx_moves.
+                    // Second 8 bytes → secondary return register.
                     let off = builder.iconst(8, Origin::synthetic());
                     let addr1 = builder.ptradd(slot.into(), off.into(), 0, Origin::synthetic());
                     let word1 = builder.load(addr1.into(), Type::Int, None, Origin::synthetic());
                     let dummy = builder.iconst(0, Origin::synthetic());
-                    rdx_moves.insert(dummy.index(), word1.index());
+                    abi_metadata.mark_secondary_return_move(dummy.index(), word1.index());
                 }
 
                 builder.ret(Some(word0.into()), Origin::synthetic());
@@ -640,7 +638,7 @@ fn translate_terminator<'tcx>(
                 // Normal scalar return.
                 if let Some(fat_val) = fat_locals.get(ret_local) {
                     let dummy = builder.iconst(0, Origin::synthetic());
-                    rdx_moves.insert(dummy.index(), fat_val.index());
+                    abi_metadata.mark_secondary_return_move(dummy.index(), fat_val.index());
                 }
                 let val = locals.values[ret_local.as_usize()];
                 builder.ret(val.map(|v| v.into()), Origin::synthetic());
@@ -800,7 +798,7 @@ fn translate_terminator<'tcx>(
                 builder.store(call_vref.into(), slot.into(), Origin::synthetic());
 
                 let rdx_val = builder.iconst(0, Origin::synthetic());
-                rdx_captures.insert(rdx_val.index(), ());
+                abi_metadata.mark_secondary_return_capture(rdx_val.index());
                 let off = builder.iconst(8, Origin::synthetic());
                 let addr1 = builder.ptradd(slot.into(), off.into(), 0, Origin::synthetic());
                 builder.store(rdx_val.into(), addr1.into(), Origin::synthetic());
@@ -811,9 +809,9 @@ fn translate_terminator<'tcx>(
                 // Scalar return (≤ 8 bytes): store directly.
                 locals.set(destination.local, call_vref);
 
-                // Capture RDX for fat pointer returns (e.g., &str).
+                // Capture secondary return register for fat pointer returns (e.g., &str).
                 let rdx_val = builder.iconst(0, Origin::synthetic());
-                rdx_captures.insert(rdx_val.index(), ());
+                abi_metadata.mark_secondary_return_capture(rdx_val.index());
                 fat_locals.set(destination.local, rdx_val);
             }
 

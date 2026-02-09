@@ -10,7 +10,7 @@ crate-type = ["dylib"]
 [dependencies]
 tuffy_ir = { path = "../tuffy_ir" }
 tuffy_target = { path = "../tuffy_target" }
-tuffy_target_x86 = { path = "../tuffy_target_x86" }
+tuffy_codegen = { path = "../tuffy_codegen" }
 
 [package.metadata.rust-analyzer]
 rustc_private = true

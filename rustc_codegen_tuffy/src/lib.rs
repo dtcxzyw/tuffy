@@ -28,6 +28,8 @@ use rustc_middle::mir::mono::MonoItem;
 use rustc_middle::ty::TyCtxt;
 use rustc_session::config::OutputFilenames;
 use rustc_session::Session;
+use tuffy_codegen::CodegenSession;
+use tuffy_target::types::{CompiledFunction, StaticData};
 
 pub struct TuffyCodegenBackend;
 
@@ -37,6 +39,8 @@ impl CodegenBackend for TuffyCodegenBackend {
     }
 
     fn codegen_crate<'tcx>(&self, tcx: TyCtxt<'tcx>) -> Box<dyn Any> {
+        let target_triple = tcx.sess.target.llvm_target.as_ref();
+        let session = CodegenSession::new(target_triple);
         let cgus = tcx.collect_and_partition_mono_items(()).codegen_units;
         let mut modules = Vec::new();
 
@@ -44,9 +48,8 @@ impl CodegenBackend for TuffyCodegenBackend {
             let cgu_name = cgu.name().to_string();
             let mono_items = cgu.items_in_deterministic_order(tcx);
 
-            let mut compiled_funcs: Vec<tuffy_target_x86::emit::CompiledFunction> = Vec::new();
-
-            let mut all_static_data: Vec<tuffy_target_x86::emit::StaticData> = Vec::new();
+            let mut compiled_funcs: Vec<CompiledFunction> = Vec::new();
+            let mut all_static_data: Vec<StaticData> = Vec::new();
 
             for (mono_item, _item_data) in &mono_items {
                 if let MonoItem::Fn(instance) = mono_item {
@@ -56,39 +59,28 @@ impl CodegenBackend for TuffyCodegenBackend {
                     if Some(instance.def_id()) == tcx.lang_items().start_fn() {
                         continue;
                     }
-                    if let Some(result) = mir_to_ir::translate_function(tcx, *instance) {
-                        // Collect static data from this function.
+                    if let Some(result) = mir_to_ir::translate_function(tcx, *instance, &session) {
                         for (sym, data) in &result.static_data {
-                            all_static_data.push(tuffy_target_x86::emit::StaticData {
+                            all_static_data.push(StaticData {
                                 name: sym.clone(),
                                 data: data.clone(),
                             });
                         }
 
-                        if let Some(isel_result) = tuffy_target_x86::isel::isel(
+                        if let Some(cf) = session.compile_function(
                             &result.func,
                             &result.call_targets,
                             &result.static_refs,
-                            &result.rdx_captures,
-                            &result.rdx_moves,
+                            &result.abi_metadata,
                         ) {
-                            let enc =
-                                tuffy_target_x86::encode::encode_function(&isel_result.insts);
-                            compiled_funcs.push(tuffy_target_x86::emit::CompiledFunction {
-                                name: isel_result.name,
-                                code: enc.code,
-                                relocations: enc.relocations,
-                            });
+                            compiled_funcs.push(cf);
                         }
                     }
                 }
             }
 
             if !compiled_funcs.is_empty() {
-                let object_data = tuffy_target_x86::emit::emit_elf_with_data(
-                    &compiled_funcs,
-                    &all_static_data,
-                );
+                let object_data = session.emit_object(&compiled_funcs, &all_static_data);
                 let tmp = tcx.output_filenames(()).temp_path_for_cgu(
                     rustc_session::config::OutputType::Object,
                     &cgu_name,
@@ -110,10 +102,10 @@ impl CodegenBackend for TuffyCodegenBackend {
         }
 
         // Generate allocator shim if needed.
-        let allocator_module = generate_allocator_module(tcx);
+        let allocator_module = generate_allocator_module(tcx, &session);
 
         // Generate C `main` entry point if this is a binary crate.
-        if let Some(entry_module) = generate_entry_point(tcx) {
+        if let Some(entry_module) = generate_entry_point(tcx, &session) {
             modules.push(entry_module);
         }
 
@@ -151,7 +143,10 @@ pub fn __rustc_codegen_backend() -> Box<dyn CodegenBackend> {
 /// The allocator shim provides `__rust_alloc` etc. that forward to the
 /// default allocator (`__rdl_alloc` etc.). This is required for binary
 /// crates that use the standard library.
-fn generate_allocator_module(tcx: TyCtxt<'_>) -> Option<CompiledModule> {
+fn generate_allocator_module(
+    tcx: TyCtxt<'_>,
+    session: &CodegenSession,
+) -> Option<CompiledModule> {
     // Only generate allocator shim for binary crates.
     let dominated_by_std = tcx
         .crates(())
@@ -167,41 +162,26 @@ fn generate_allocator_module(tcx: TyCtxt<'_>) -> Option<CompiledModule> {
     };
 
     // Generate forwarding stubs: each __rust_alloc* calls __rdl_alloc*.
-    let alloc_pairs = [
+    let alloc_pairs_raw = [
         ("__rust_alloc", "__rdl_alloc"),
         ("__rust_dealloc", "__rdl_dealloc"),
         ("__rust_realloc", "__rdl_realloc"),
         ("__rust_alloc_zeroed", "__rdl_alloc_zeroed"),
     ];
 
-    let mut funcs = Vec::new();
-    for (export_name, target_name) in &alloc_pairs {
-        let mangled_export = mangle(export_name);
-        let mangled_target = mangle(target_name);
-        // Emit a JMP rel32 to the target (will be resolved by linker).
-        let code = vec![0xe9, 0x00, 0x00, 0x00, 0x00]; // jmp rel32
-        let relocations = vec![tuffy_target::reloc::Relocation {
-            offset: 1,
-            symbol: mangled_target,
-            kind: tuffy_target::reloc::RelocKind::Call,
-        }];
-        funcs.push(tuffy_target_x86::emit::CompiledFunction {
-            name: mangled_export,
-            code,
-            relocations,
-        });
-    }
+    let mangled_pairs: Vec<(String, String)> = alloc_pairs_raw
+        .iter()
+        .map(|(e, t)| (mangle(e), mangle(t)))
+        .collect();
+    let pairs_ref: Vec<(&str, &str)> = mangled_pairs
+        .iter()
+        .map(|(e, t)| (e.as_str(), t.as_str()))
+        .collect();
 
-    // Add the no_alloc_shim marker symbol as a trivial function (just `ret`).
-    // The allocator calls this to verify the shim is linked.
     let shim_marker = mangle("__rust_no_alloc_shim_is_unstable_v2");
-    funcs.push(tuffy_target_x86::emit::CompiledFunction {
-        name: shim_marker,
-        code: vec![0xc3], // ret
-        relocations: vec![],
-    });
+    let funcs = session.generate_allocator_stubs(&pairs_ref, &shim_marker);
 
-    let object_data = tuffy_target_x86::emit::emit_elf_multi(&funcs);
+    let object_data = session.emit_object(&funcs, &[]);
 
     let tmp = tcx.output_filenames(()).temp_path_for_cgu(
         rustc_session::config::OutputType::Object,
@@ -231,7 +211,10 @@ fn generate_allocator_module(tcx: TyCtxt<'_>) -> Option<CompiledModule> {
 /// compile the real `lang_start` (it constructs a `&dyn Fn() -> i32`
 /// trait object, which requires vtable support). Our simplified version
 /// calls the user's main directly and returns 0.
-fn generate_entry_point(tcx: TyCtxt<'_>) -> Option<CompiledModule> {
+fn generate_entry_point(
+    tcx: TyCtxt<'_>,
+    session: &CodegenSession,
+) -> Option<CompiledModule> {
     use rustc_middle::ty::{self, Instance};
 
     let (entry_def_id, _) = tcx.entry_fn(())?;
@@ -242,7 +225,8 @@ fn generate_entry_point(tcx: TyCtxt<'_>) -> Option<CompiledModule> {
 
     // Resolve the lang_start function symbol.
     let start_def_id = tcx.lang_items().start_fn()?;
-    let main_ret_ty = tcx.fn_sig(entry_def_id)
+    let main_ret_ty = tcx
+        .fn_sig(entry_def_id)
         .instantiate_identity()
         .output()
         .skip_binder();
@@ -256,77 +240,9 @@ fn generate_entry_point(tcx: TyCtxt<'_>) -> Option<CompiledModule> {
     .flatten()?;
     let start_sym = tcx.symbol_name(start_instance).name.to_string();
 
-    // --- C `main` entry point ---
-    //
-    //   main(argc: i32 [edi], argv: **u8 [rsi]) -> i64
-    //     push   rbp                ; align stack to 16 bytes
-    //     movsxd rax, edi           ; sign-extend argc (i32 -> i64)
-    //     mov    rdx, rsi           ; argv -> 3rd arg
-    //     mov    rsi, rax           ; argc -> 2nd arg
-    //     lea    rdi, [rip+disp32]  ; user main fn ptr -> 1st arg (PcRel reloc)
-    //     xor    ecx, ecx           ; sigpipe=0 -> 4th arg
-    //     call   lang_start         ; call reloc
-    //     pop    rbp                ; restore stack
-    //     ret
-    let main_code = vec![
-        0x55,                                       // push rbp
-        0x48, 0x63, 0xc7,                           // movsxd rax, edi
-        0x48, 0x89, 0xf2,                           // mov rdx, rsi
-        0x48, 0x89, 0xc6,                           // mov rsi, rax
-        0x48, 0x8d, 0x3d, 0x00, 0x00, 0x00, 0x00,  // lea rdi, [rip+0]
-        0x31, 0xc9,                                 // xor ecx, ecx
-        0xe8, 0x00, 0x00, 0x00, 0x00,               // call lang_start
-        0x5d,                                       // pop rbp
-        0xc3,                                       // ret
-    ];
-    let main_relocs = vec![
-        tuffy_target::reloc::Relocation {
-            offset: 13,
-            symbol: main_sym,
-            kind: tuffy_target::reloc::RelocKind::PcRel,
-        },
-        tuffy_target::reloc::Relocation {
-            offset: 20,
-            symbol: start_sym.clone(),
-            kind: tuffy_target::reloc::RelocKind::Call,
-        },
-    ];
+    let funcs = session.generate_entry_point(&main_sym, &start_sym);
+    let object_data = session.emit_object(&funcs, &[]);
 
-    // --- Hand-crafted `lang_start` ---
-    //
-    // Simplified version that calls the user's main fn pointer directly
-    // and returns 0, bypassing trait object construction.
-    //
-    //   lang_start(main: fn() [rdi], argc [rsi], argv [rdx], sigpipe [rcx]) -> isize
-    //     push   rbp
-    //     mov    rbp, rsp
-    //     call   rdi           ; call user's main
-    //     xor    eax, eax      ; return 0
-    //     pop    rbp
-    //     ret
-    let start_code = vec![
-        0x55,                   // push rbp
-        0x48, 0x89, 0xe5,      // mov rbp, rsp
-        0xff, 0xd7,             // call rdi
-        0x31, 0xc0,             // xor eax, eax
-        0x5d,                   // pop rbp
-        0xc3,                   // ret
-    ];
-
-    let funcs = vec![
-        tuffy_target_x86::emit::CompiledFunction {
-            name: "main".to_string(),
-            code: main_code,
-            relocations: main_relocs,
-        },
-        tuffy_target_x86::emit::CompiledFunction {
-            name: start_sym,
-            code: start_code,
-            relocations: vec![],
-        },
-    ];
-
-    let object_data = tuffy_target_x86::emit::emit_elf_multi(&funcs);
     let tmp = tcx.output_filenames(()).temp_path_for_cgu(
         rustc_session::config::OutputType::Object,
         "entry_point",
