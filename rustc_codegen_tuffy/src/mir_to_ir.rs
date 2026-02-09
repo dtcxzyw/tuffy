@@ -19,6 +19,16 @@ pub struct TranslationResult {
     pub func: Function,
     /// Maps IR instruction index → callee symbol name for Call instructions.
     pub call_targets: HashMap<u32, String>,
+    /// Maps IR instruction index → static data symbol name (for address loads).
+    pub static_refs: HashMap<u32, String>,
+    /// Static data blobs to emit in .rodata.
+    pub static_data: Vec<(String, Vec<u8>)>,
+    /// Maps IR instruction index → () for values that should capture RDX
+    /// (the second return value from the preceding call).
+    pub rdx_captures: HashMap<u32, ()>,
+    /// Maps IR instruction index → source value index for explicit RDX moves.
+    /// Used to move a fat return component into RDX before ret.
+    pub rdx_moves: HashMap<u32, u32>,
 }
 
 /// Translate a single MIR function instance to tuffy IR.
@@ -49,7 +59,12 @@ pub fn translate_function<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> 
     let mut func = Function::new(&name, params, param_anns, ret_ty, ret_ann);
     let mut builder = Builder::new(&mut func);
     let mut locals = LocalMap::new(mir.local_decls.len());
+    let mut fat_locals = FatLocalMap::new();
     let mut call_targets: HashMap<u32, String> = HashMap::new();
+    let mut static_refs: HashMap<u32, String> = HashMap::new();
+    let mut static_data: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut rdx_captures: HashMap<u32, ()> = HashMap::new();
+    let mut rdx_moves: HashMap<u32, u32> = HashMap::new();
 
     let root = builder.create_region(RegionKind::Function);
     builder.enter_region(root);
@@ -65,7 +80,7 @@ pub fn translate_function<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> 
     // Emit params into the entry block.
     let entry = block_map.get(BasicBlock::from_u32(0));
     builder.switch_to_block(entry);
-    translate_params(mir, &mut builder, &mut locals);
+    translate_params(mir, &mut builder, &mut locals, &mut fat_locals);
 
     // Translate each basic block.
     for (bb, bb_data) in mir.basic_blocks.iter_enumerated() {
@@ -73,11 +88,16 @@ pub fn translate_function<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> 
         builder.switch_to_block(ir_block);
 
         for stmt in &bb_data.statements {
-            translate_statement(stmt, &mut builder, &mut locals);
+            translate_statement(
+                tcx, stmt, &mut builder, &mut locals, &mut fat_locals,
+                &mut static_refs, &mut static_data,
+            );
         }
         if let Some(ref term) = bb_data.terminator {
             translate_terminator(
-                tcx, term, &mut builder, &mut locals, &block_map, &mut call_targets,
+                tcx, term, &mut builder, &mut locals, &mut fat_locals,
+                &block_map, &mut call_targets, &mut static_refs, &mut static_data,
+                &mut rdx_captures, &mut rdx_moves,
             );
         }
     }
@@ -87,6 +107,10 @@ pub fn translate_function<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> 
     Some(TranslationResult {
         func,
         call_targets,
+        static_refs,
+        static_data,
+        rdx_captures,
+        rdx_moves,
     })
 }
 
@@ -107,6 +131,28 @@ impl LocalMap {
 
     fn get(&self, local: mir::Local) -> Option<ValueRef> {
         self.values[local.as_usize()]
+    }
+}
+
+/// Tracks the "high" component of fat pointer locals (e.g., length for &str).
+struct FatLocalMap {
+    /// Maps MIR local index → high ValueRef (e.g., slice length).
+    values: HashMap<usize, ValueRef>,
+}
+
+impl FatLocalMap {
+    fn new() -> Self {
+        Self {
+            values: HashMap::new(),
+        }
+    }
+
+    fn set(&mut self, local: mir::Local, val: ValueRef) {
+        self.values.insert(local.as_usize(), val);
+    }
+
+    fn get(&self, local: mir::Local) -> Option<ValueRef> {
+        self.values.get(&local.as_usize()).copied()
     }
 }
 
@@ -148,13 +194,37 @@ fn translate_annotation(ty: ty::Ty<'_>) -> Option<Annotation> {
     }
 }
 
-fn translate_params(mir: &mir::Body<'_>, builder: &mut Builder<'_>, locals: &mut LocalMap) {
+fn translate_params(
+    mir: &mir::Body<'_>,
+    builder: &mut Builder<'_>,
+    locals: &mut LocalMap,
+    fat_locals: &mut FatLocalMap,
+) {
+    let mut abi_idx: u32 = 0;
     for i in 0..mir.arg_count {
         let local = mir::Local::from_usize(i + 1);
         let ty = mir.local_decls[local].ty;
         let ann = translate_annotation(ty);
-        let val = builder.param(i as u32, Type::Int, ann, Origin::synthetic());
+        let val = builder.param(abi_idx, Type::Int, ann, Origin::synthetic());
         locals.set(local, val);
+        abi_idx += 1;
+
+        // Fat pointer types (&str, &[T]) occupy two ABI registers (ptr + metadata).
+        if is_fat_ptr(ty) {
+            let meta_val = builder.param(abi_idx, Type::Int, None, Origin::synthetic());
+            fat_locals.set(local, meta_val);
+            abi_idx += 1;
+        }
+    }
+}
+
+/// Check if a type is a fat pointer (e.g., &str, &[T]) that uses two registers at ABI level.
+fn is_fat_ptr(ty: ty::Ty<'_>) -> bool {
+    match ty.kind() {
+        ty::Ref(_, inner, _) | ty::RawPtr(inner, _) => {
+            matches!(inner.kind(), ty::Str | ty::Slice(..))
+        }
+        _ => false,
     }
 }
 
@@ -179,15 +249,29 @@ impl BlockMap {
     }
 }
 
-fn translate_statement(
-    stmt: &mir::Statement<'_>,
+fn translate_statement<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    stmt: &mir::Statement<'tcx>,
     builder: &mut Builder<'_>,
     locals: &mut LocalMap,
+    fat_locals: &mut FatLocalMap,
+    static_refs: &mut HashMap<u32, String>,
+    static_data: &mut Vec<(String, Vec<u8>)>,
 ) {
     match &stmt.kind {
         StatementKind::Assign(box (place, rvalue)) => {
-            if let Some(val) = translate_rvalue(rvalue, builder, locals) {
+            if let Some(val) = translate_rvalue(
+                tcx, rvalue, builder, locals, fat_locals,
+                static_refs, static_data,
+            ) {
                 locals.set(place.local, val);
+            }
+            // Check if the rvalue produces a fat pointer (e.g., &str from ConstValue::Slice).
+            if let Some(fat_val) = extract_fat_component(
+                tcx, rvalue, builder, locals, fat_locals,
+                static_refs, static_data,
+            ) {
+                fat_locals.set(place.local, fat_val);
             }
         }
         StatementKind::StorageLive(_)
@@ -197,17 +281,72 @@ fn translate_statement(
     }
 }
 
+/// Extract the "high" component of a fat pointer rvalue.
+///
+/// Handles: ConstValue::Slice, Use/Cast of fat locals, and multi-field Aggregate.
+fn extract_fat_component<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    rvalue: &Rvalue<'tcx>,
+    builder: &mut Builder<'_>,
+    locals: &mut LocalMap,
+    fat_locals: &FatLocalMap,
+    static_refs: &mut HashMap<u32, String>,
+    static_data: &mut Vec<(String, Vec<u8>)>,
+) -> Option<ValueRef> {
+    match rvalue {
+        // Constant slice: extract the length metadata.
+        Rvalue::Use(Operand::Constant(c)) => {
+            if let mir::Const::Val(mir::ConstValue::Slice { alloc_id: _, meta }, _) = c.const_ {
+                Some(builder.iconst(meta as i64, Origin::synthetic()))
+            } else {
+                None
+            }
+        }
+        // Use of a fat local: propagate the fat component.
+        Rvalue::Use(Operand::Copy(place) | Operand::Move(place)) => {
+            fat_locals.get(place.local)
+        }
+        // Cast (Transmute, PtrToPtr, etc.) of a fat local: propagate.
+        Rvalue::Cast(_, operand, _) => {
+            match operand {
+                Operand::Copy(place) | Operand::Move(place) => {
+                    fat_locals.get(place.local)
+                }
+                _ => None,
+            }
+        }
+        // Multi-field Aggregate: second field becomes the fat component.
+        Rvalue::Aggregate(_, operands) if operands.len() >= 2 => {
+            let second_op = operands.iter().nth(1).unwrap();
+            translate_operand(tcx, second_op, builder, locals, static_refs, static_data)
+        }
+        _ => None,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn translate_terminator<'tcx>(
     tcx: TyCtxt<'tcx>,
     term: &mir::Terminator<'tcx>,
     builder: &mut Builder<'_>,
     locals: &mut LocalMap,
+    fat_locals: &mut FatLocalMap,
     block_map: &BlockMap,
     call_targets: &mut HashMap<u32, String>,
+    static_refs: &mut HashMap<u32, String>,
+    static_data: &mut Vec<(String, Vec<u8>)>,
+    rdx_captures: &mut HashMap<u32, ()>,
+    rdx_moves: &mut HashMap<u32, u32>,
 ) {
     match &term.kind {
         TerminatorKind::Return => {
             let ret_local = mir::Local::from_usize(0);
+            // If the return value has a fat component, emit a dummy iconst
+            // that tells isel to move the fat value into RDX before ret.
+            if let Some(fat_val) = fat_locals.get(ret_local) {
+                let dummy = builder.iconst(0, Origin::synthetic());
+                rdx_moves.insert(dummy.index(), fat_val.index());
+            }
             let val = locals.values[ret_local.as_usize()];
             builder.ret(val.map(|v| v.into()), Origin::synthetic());
         }
@@ -216,7 +355,10 @@ fn translate_terminator<'tcx>(
             builder.br(target_block, vec![], Origin::synthetic());
         }
         TerminatorKind::SwitchInt { discr, targets } => {
-            translate_switch_int(discr, targets, builder, locals, block_map);
+            translate_switch_int(
+                tcx, discr, targets, builder, locals, block_map,
+                static_refs, static_data,
+            );
         }
         TerminatorKind::Assert {
             cond,
@@ -256,14 +398,30 @@ fn translate_terminator<'tcx>(
             // Resolve callee symbol name from the function operand's type.
             let callee_sym = resolve_call_symbol(tcx, func);
 
-            // Translate arguments to IR operands.
-            let ir_args: Vec<tuffy_ir::instruction::Operand> = args
-                .iter()
-                .filter_map(|arg| {
-                    translate_operand(&arg.node, builder, locals)
-                        .map(|v| v.into())
-                })
-                .collect();
+            // Translate arguments to IR operands, decomposing fat pointers.
+            let mut ir_args: Vec<tuffy_ir::instruction::Operand> = Vec::new();
+            for arg in args {
+                if let Some(v) = translate_operand(
+                    tcx, &arg.node, builder, locals,
+                    static_refs, static_data,
+                ) {
+                    ir_args.push(v.into());
+                    // If this arg is a Copy/Move of a fat local, also pass the high part.
+                    if let Operand::Copy(place) | Operand::Move(place) = &arg.node {
+                        if let Some(fat_v) = fat_locals.get(place.local) {
+                            ir_args.push(fat_v.into());
+                        }
+                    }
+                    // If this arg is a constant slice, the length was emitted
+                    // right after the pointer. Check if it's in the constant.
+                    if let Operand::Constant(c) = &arg.node {
+                        if let mir::Const::Val(mir::ConstValue::Slice { meta, .. }, _) = c.const_ {
+                            let len_val = builder.iconst(meta as i64, Origin::synthetic());
+                            ir_args.push(len_val.into());
+                        }
+                    }
+                }
+            }
 
             // Emit a Call IR instruction. The callee operand is a dummy const
             // (the actual symbol is tracked in call_targets).
@@ -284,6 +442,12 @@ fn translate_terminator<'tcx>(
             // Store result in destination local.
             locals.set(destination.local, call_vref);
 
+            // Capture RDX (second return value) for fat pointer returns.
+            // Many std functions return two-register structs (e.g., fmt::Arguments).
+            let rdx_val = builder.iconst(0, Origin::synthetic());
+            rdx_captures.insert(rdx_val.index(), ());
+            fat_locals.set(destination.local, rdx_val);
+
             // Branch to the continuation block if present.
             if let Some(target_bb) = target {
                 let target_block = block_map.get(*target_bb);
@@ -294,14 +458,17 @@ fn translate_terminator<'tcx>(
     }
 }
 
-fn translate_switch_int(
-    discr: &Operand<'_>,
+fn translate_switch_int<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    discr: &Operand<'tcx>,
     targets: &mir::SwitchTargets,
     builder: &mut Builder<'_>,
     locals: &mut LocalMap,
     block_map: &BlockMap,
+    static_refs: &mut HashMap<u32, String>,
+    static_data: &mut Vec<(String, Vec<u8>)>,
 ) {
-    let discr_val = match translate_operand(discr, builder, locals) {
+    let discr_val = match translate_operand(tcx, discr, builder, locals, static_refs, static_data) {
         Some(v) => v,
         None => return,
     };
@@ -356,15 +523,19 @@ fn translate_switch_int(
     }
 }
 
-fn translate_rvalue(
-    rvalue: &Rvalue<'_>,
+fn translate_rvalue<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    rvalue: &Rvalue<'tcx>,
     builder: &mut Builder<'_>,
     locals: &mut LocalMap,
+    fat_locals: &mut FatLocalMap,
+    static_refs: &mut HashMap<u32, String>,
+    static_data: &mut Vec<(String, Vec<u8>)>,
 ) -> Option<ValueRef> {
     match rvalue {
         Rvalue::BinaryOp(op, box (lhs, rhs)) => {
-            let l = translate_operand(lhs, builder, locals)?;
-            let r = translate_operand(rhs, builder, locals)?;
+            let l = translate_operand(tcx, lhs, builder, locals, static_refs, static_data)?;
+            let r = translate_operand(tcx, rhs, builder, locals, static_refs, static_data)?;
             let val = match op {
                 BinOp::Add | BinOp::AddWithOverflow => {
                     builder.add(l.into(), r.into(), None, Origin::synthetic())
@@ -381,14 +552,26 @@ fn translate_rvalue(
                 BinOp::Le => builder.icmp(ICmpOp::Sle, l.into(), r.into(), Origin::synthetic()),
                 BinOp::Gt => builder.icmp(ICmpOp::Sgt, l.into(), r.into(), Origin::synthetic()),
                 BinOp::Ge => builder.icmp(ICmpOp::Sge, l.into(), r.into(), Origin::synthetic()),
+                BinOp::Shl | BinOp::ShlUnchecked => {
+                    builder.shl(l.into(), r.into(), None, Origin::synthetic())
+                }
+                BinOp::BitOr => {
+                    builder.or(l.into(), r.into(), None, Origin::synthetic())
+                }
+                BinOp::BitAnd => {
+                    builder.and(l.into(), r.into(), None, Origin::synthetic())
+                }
+                BinOp::BitXor => {
+                    builder.xor(l.into(), r.into(), None, Origin::synthetic())
+                }
                 _ => return None,
             };
             Some(val)
         }
-        Rvalue::Use(operand) => translate_operand(operand, builder, locals),
+        Rvalue::Use(operand) => translate_operand(tcx, operand, builder, locals, static_refs, static_data),
         Rvalue::Cast(_kind, operand, _ty) => {
             // For now, treat all casts as bitwise moves.
-            translate_operand(operand, builder, locals)
+            translate_operand(tcx, operand, builder, locals, static_refs, static_data)
         }
         Rvalue::Ref(_, _, place) | Rvalue::RawPtr(_, place) => {
             // Taking a reference or raw pointer to a local.
@@ -399,18 +582,27 @@ fn translate_rvalue(
             if operands.is_empty() {
                 Some(builder.iconst(0, Origin::synthetic()))
             } else if let Some(first_op) = operands.iter().next() {
-                translate_operand(first_op, builder, locals)
+                translate_operand(tcx, first_op, builder, locals, static_refs, static_data)
             } else {
                 Some(builder.iconst(0, Origin::synthetic()))
             }
         }
+        Rvalue::UnaryOp(mir::UnOp::PtrMetadata, operand) => {
+            // Extract metadata (e.g., slice length) from a fat pointer.
+            match operand {
+                Operand::Copy(place) | Operand::Move(place) => {
+                    fat_locals.get(place.local)
+                }
+                _ => None,
+            }
+        }
         Rvalue::UnaryOp(mir::UnOp::Neg, operand) => {
-            let v = translate_operand(operand, builder, locals)?;
+            let v = translate_operand(tcx, operand, builder, locals, static_refs, static_data)?;
             let zero = builder.iconst(0, Origin::synthetic());
             Some(builder.sub(zero.into(), v.into(), None, Origin::synthetic()))
         }
         Rvalue::UnaryOp(mir::UnOp::Not, operand) => {
-            let v = translate_operand(operand, builder, locals)?;
+            let v = translate_operand(tcx, operand, builder, locals, static_refs, static_data)?;
             let ones = builder.iconst(-1, Origin::synthetic());
             Some(builder.xor(v.into(), ones.into(), None, Origin::synthetic()))
         }
@@ -421,47 +613,112 @@ fn translate_rvalue(
     }
 }
 
-fn translate_operand(
-    operand: &Operand<'_>,
+fn translate_operand<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    operand: &Operand<'tcx>,
     builder: &mut Builder<'_>,
     locals: &mut LocalMap,
+    static_refs: &mut HashMap<u32, String>,
+    static_data: &mut Vec<(String, Vec<u8>)>,
 ) -> Option<ValueRef> {
     match operand {
         Operand::Copy(place) | Operand::Move(place) => locals.get(place.local),
-        Operand::Constant(constant) => translate_const(constant, builder),
+        Operand::Constant(constant) => {
+            translate_const(tcx, constant, builder, static_refs, static_data)
+        }
         _ => None,
     }
 }
 
-fn translate_const(constant: &mir::ConstOperand<'_>, builder: &mut Builder<'_>) -> Option<ValueRef> {
+fn translate_const<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    constant: &mir::ConstOperand<'tcx>,
+    builder: &mut Builder<'_>,
+    static_refs: &mut HashMap<u32, String>,
+    static_data: &mut Vec<(String, Vec<u8>)>,
+) -> Option<ValueRef> {
     let mir::Const::Val(val, ty) = constant.const_ else {
         return None;
     };
     match val {
         mir::ConstValue::Scalar(scalar) => {
-            let mir::interpret::Scalar::Int(int) = scalar else {
-                return None;
-            };
-            let bits = int.to_bits(int.size());
-            match ty.kind() {
-                ty::Int(_) => {
-                    let val = bits as i128 as i64;
-                    Some(builder.iconst(val, Origin::synthetic()))
-                }
-                ty::Uint(_) => {
-                    let val = bits as i64;
-                    Some(builder.iconst(val, Origin::synthetic()))
-                }
-                ty::Bool => {
-                    let val = if bits != 0 { 1 } else { 0 };
-                    Some(builder.iconst(val, Origin::synthetic()))
-                }
-                _ => None,
-            }
+            translate_scalar(scalar, ty, builder)
         }
         mir::ConstValue::ZeroSized => Some(builder.iconst(0, Origin::synthetic())),
+        mir::ConstValue::Slice { alloc_id, meta } => {
+            translate_const_slice(tcx, alloc_id, meta, builder, static_refs, static_data)
+        }
         _ => None,
     }
+}
+
+fn translate_scalar(
+    scalar: mir::interpret::Scalar,
+    ty: ty::Ty<'_>,
+    builder: &mut Builder<'_>,
+) -> Option<ValueRef> {
+    let mir::interpret::Scalar::Int(int) = scalar else {
+        return None;
+    };
+    let bits = int.to_bits(int.size());
+    match ty.kind() {
+        ty::Int(_) => {
+            let val = bits as i128 as i64;
+            Some(builder.iconst(val, Origin::synthetic()))
+        }
+        ty::Uint(_) => {
+            let val = bits as i64;
+            Some(builder.iconst(val, Origin::synthetic()))
+        }
+        ty::Bool => {
+            let val = if bits != 0 { 1 } else { 0 };
+            Some(builder.iconst(val, Origin::synthetic()))
+        }
+        _ => None,
+    }
+}
+
+/// Translate a ConstValue::Slice (e.g., a string literal `&str`).
+///
+/// Emits the data bytes to .rodata and returns an IR constant whose index
+/// is recorded in `static_refs` so that isel emits a RIP-relative LEA.
+fn translate_const_slice<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    alloc_id: rustc_middle::mir::interpret::AllocId,
+    meta: u64,
+    builder: &mut Builder<'_>,
+    static_refs: &mut HashMap<u32, String>,
+    static_data: &mut Vec<(String, Vec<u8>)>,
+) -> Option<ValueRef> {
+    let alloc = tcx.global_alloc(alloc_id).unwrap_memory();
+    let alloc = alloc.inner();
+    let bytes: Vec<u8> = alloc
+        .inspect_with_uninit_and_ptr_outside_interpreter(0..alloc.len())
+        .to_vec();
+
+    // Create a unique symbol name for this data blob.
+    let sym = format!(".Lstr.{}", static_data.len());
+    static_data.push((sym.clone(), bytes));
+
+    // Emit a dummy constant whose index we record as a static ref.
+    // Isel will emit LEA rip-relative for this value.
+    let ptr_val = builder.iconst(0, Origin::synthetic());
+    static_refs.insert(ptr_val.index(), sym);
+
+    // Emit the length as a separate constant.
+    let len_val = builder.iconst(meta as i64, Origin::synthetic());
+
+    // Store both components. The "value" of this slice is the pointer;
+    // the length is stored as the next local via the fat_locals mechanism.
+    // For now, we return the pointer and rely on the caller to handle
+    // the fat pointer decomposition.
+    //
+    // We use a convention: for a &str local, we store the pointer in
+    // locals[local] and the length in fat_locals[local].
+    let _ = len_val;
+
+    // Return pointer; the caller must also retrieve the length.
+    Some(ptr_val)
 }
 
 /// Resolve the callee symbol name from a Call terminator's function operand.

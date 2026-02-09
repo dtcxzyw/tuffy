@@ -46,12 +46,26 @@ impl CodegenBackend for TuffyCodegenBackend {
 
             let mut compiled_funcs: Vec<tuffy_codegen::emit::CompiledFunction> = Vec::new();
 
+            let mut all_static_data: Vec<tuffy_codegen::emit::StaticData> = Vec::new();
+
             for (mono_item, _item_data) in &mono_items {
                 if let MonoItem::Fn(instance) = mono_item {
                     if let Some(result) = mir_to_ir::translate_function(tcx, *instance) {
-                        if let Some(isel_result) =
-                            tuffy_codegen::isel::isel(&result.func, &result.call_targets)
-                        {
+                        // Collect static data from this function.
+                        for (sym, data) in &result.static_data {
+                            all_static_data.push(tuffy_codegen::emit::StaticData {
+                                name: sym.clone(),
+                                data: data.clone(),
+                            });
+                        }
+
+                        if let Some(isel_result) = tuffy_codegen::isel::isel(
+                            &result.func,
+                            &result.call_targets,
+                            &result.static_refs,
+                            &result.rdx_captures,
+                            &result.rdx_moves,
+                        ) {
                             let enc =
                                 tuffy_codegen::encode::encode_function(&isel_result.insts);
                             compiled_funcs.push(tuffy_codegen::emit::CompiledFunction {
@@ -65,7 +79,10 @@ impl CodegenBackend for TuffyCodegenBackend {
             }
 
             if !compiled_funcs.is_empty() {
-                let object_data = tuffy_codegen::emit::emit_elf_multi(&compiled_funcs);
+                let object_data = tuffy_codegen::emit::emit_elf_with_data(
+                    &compiled_funcs,
+                    &all_static_data,
+                );
                 let tmp = tcx.output_filenames(()).temp_path_for_cgu(
                     rustc_session::config::OutputType::Object,
                     &cgu_name,
@@ -160,6 +177,7 @@ fn generate_allocator_module(tcx: TyCtxt<'_>) -> Option<CompiledModule> {
         let relocations = vec![tuffy_codegen::encode::Relocation {
             offset: 1,
             symbol: mangled_target,
+            kind: tuffy_codegen::encode::RelocKind::Call,
         }];
         funcs.push(tuffy_codegen::emit::CompiledFunction {
             name: mangled_export,
@@ -168,11 +186,12 @@ fn generate_allocator_module(tcx: TyCtxt<'_>) -> Option<CompiledModule> {
         });
     }
 
-    // Add the no_alloc_shim marker symbol (a single zero byte).
+    // Add the no_alloc_shim marker symbol as a trivial function (just `ret`).
+    // The allocator calls this to verify the shim is linked.
     let shim_marker = mangle("__rust_no_alloc_shim_is_unstable_v2");
     funcs.push(tuffy_codegen::emit::CompiledFunction {
         name: shim_marker,
-        code: vec![0x00],
+        code: vec![0xc3], // ret
         relocations: vec![],
     });
 
@@ -244,6 +263,7 @@ fn generate_entry_point(tcx: TyCtxt<'_>) -> Option<CompiledModule> {
         tuffy_codegen::encode::Relocation {
             offset: 1,
             symbol: main_sym,
+            kind: tuffy_codegen::encode::RelocKind::Call,
         },
     ];
 
