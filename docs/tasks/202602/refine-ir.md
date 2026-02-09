@@ -1,8 +1,8 @@
 # Refine IR: eliminate redundant opcodes and fix semantic bugs
 
-- Status: In Progress
+- Status: Completed
 - Created: 2026-02-09
-- Completed: N/A
+- Completed: 2026-02-09
 - Parent: N/A
 
 ## Description
@@ -35,11 +35,11 @@ completed and serves as the template for further merges.
 
 ### Spec clarifications
 
-- [ ] Document in spec that load returns `List AbstractByte` and store takes
+- [x] Document in spec that load returns `List AbstractByte` and store takes
   `List AbstractByte` — memory access operates at the byte level only. Type
   interpretation (bytes → int/float) is a separate step, cleanly separating
-  memory access from type semantics.
-- [ ] Define `bytecast` semantics in Lean. Design decisions:
+  memory access from type semantics. (completed 2026-02-09)
+- [x] Define `bytecast` semantics in Lean. Design decisions:
   - Annotations are always droppable — they never determine semantics.
   - `b<N>` requires N to be a multiple of 8 (byte-aligned).
   - `bytecast b<N> → int` always zero-extends (value in [0, 2^N-1]). For
@@ -49,6 +49,7 @@ completed and serves as the template for further merges.
     b64 → double). Size mismatch is ill-formed.
   - Handle all four AbstractByte states: `Bits` → decode, `Poison` → poison,
     `Uninit` → poison, `PtrFragment` → ptrtoint semantics.
+  (completed 2026-02-09)
 
 ### Semantic fixes
 
@@ -60,7 +61,7 @@ completed and serves as the template for further merges.
 
 ### IEEE 754-2008 conformance
 
-- [ ] Adopt IEEE 754-2008 as the floating-point semantics standard for the IR
+- [x] Adopt IEEE 754-2008 as the floating-point semantics standard for the IR (completed 2026-02-09)
 
 ### Scalable vector types
 
@@ -80,9 +81,9 @@ Key design points (derived from Highway's model):
 
 Subtasks:
 
-- [ ] Draft RFC for bit-width-parameterized vector type
-- [ ] Define vector type in Lean 4 IR
-- [ ] Implement vector type in Rust IR
+- [x] Draft RFC for bit-width-parameterized vector type (completed 2026-02-09)
+- [x] Define vector type in Lean 4 IR (completed 2026-02-09)
+- [x] Implement vector type in Rust IR (completed 2026-02-09)
 
 ## Affected Modules
 
