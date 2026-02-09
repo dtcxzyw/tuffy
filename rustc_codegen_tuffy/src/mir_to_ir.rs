@@ -739,11 +739,41 @@ fn translate_terminator<'tcx>(
             target,
             ..
         } => {
-            // Assert: if cond != expected, panic. For now, just branch to
-            // the success target unconditionally (we'll add panic support later).
-            let _ = (cond, expected);
+            // Assert: if cond != expected, trap. Otherwise branch to target.
+            let cond_val = translate_operand(
+                tcx,
+                cond,
+                mir,
+                builder,
+                locals,
+                stack_locals,
+                static_refs,
+                static_data,
+            );
             let target_block = block_map.get(*target);
-            builder.br(target_block, vec![], Origin::synthetic());
+            if let Some(cond_v) = cond_val {
+                let expected_val = builder.iconst(if *expected { 1 } else { 0 }, Origin::synthetic());
+                let cmp = builder.icmp(
+                    ICmpOp::Eq,
+                    cond_v.into(),
+                    expected_val.into(),
+                    Origin::synthetic(),
+                );
+                // Create a trap block for the failure path.
+                let trap_block = builder.create_block();
+                builder.brif(
+                    cmp.into(),
+                    target_block,
+                    vec![],
+                    trap_block,
+                    vec![],
+                    Origin::synthetic(),
+                );
+                builder.switch_to_block(trap_block);
+                builder.trap(Origin::synthetic());
+            } else {
+                builder.br(target_block, vec![], Origin::synthetic());
+            }
         }
         TerminatorKind::Unreachable => {
             builder.unreachable(Origin::synthetic());
