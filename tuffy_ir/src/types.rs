@@ -60,6 +60,77 @@ pub enum Type {
     Vec(VectorType),
 }
 
+/// Bitmask of excluded IEEE 754 floating-point value classes.
+///
+/// Each flag being `true` means that class is excluded — the value must NOT
+/// belong to that class. Violation produces poison (like integer annotations).
+/// Mirrors `TuffyLean.IR.FpClassMask`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct FpClassMask {
+    pub snan: bool,
+    pub qnan: bool,
+    pub ninf: bool,
+    pub nnorm: bool,
+    pub nsub: bool,
+    pub nzero: bool,
+    pub pzero: bool,
+    pub psub: bool,
+    pub pnorm: bool,
+    pub pinf: bool,
+}
+
+impl FpClassMask {
+    /// No classes excluded.
+    pub const NONE: Self = Self {
+        snan: false,
+        qnan: false,
+        ninf: false,
+        nnorm: false,
+        nsub: false,
+        nzero: false,
+        pzero: false,
+        psub: false,
+        pnorm: false,
+        pinf: false,
+    };
+
+    /// Exclude all NaN (snan + qnan).
+    pub const NAN: Self = Self {
+        snan: true,
+        qnan: true,
+        ..Self::NONE
+    };
+
+    /// Exclude all infinity (ninf + pinf).
+    pub const INF: Self = Self {
+        ninf: true,
+        pinf: true,
+        ..Self::NONE
+    };
+
+    /// Exclude NaN and infinity.
+    pub const NAN_INF: Self = Self {
+        snan: true,
+        qnan: true,
+        ninf: true,
+        pinf: true,
+        ..Self::NONE
+    };
+}
+
+/// Rewrite flags for floating-point instructions.
+///
+/// These are optimization permissions, not value constraints.
+/// They do not affect operational semantics — only which rewrites are legal.
+/// Mirrors `TuffyLean.IR.FpRewriteFlags`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct FpRewriteFlags {
+    /// Allow associativity/commutativity reordering.
+    pub reassoc: bool,
+    /// Allow contraction (e.g., fma fusion).
+    pub contract: bool,
+}
+
 /// Memory ordering for atomic operations.
 ///
 /// Mirrors `TuffyLean.IR.MemoryOrdering`.

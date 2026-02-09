@@ -16,7 +16,7 @@ use std::fmt;
 
 use crate::function::{CfgNode, Function, RegionKind};
 use crate::instruction::{AtomicRmwOp, ICmpOp, Op, Operand};
-use crate::types::{Annotation, FloatType, MemoryOrdering, Type, VectorType};
+use crate::types::{Annotation, FloatType, FpRewriteFlags, MemoryOrdering, Type, VectorType};
 use crate::value::{BlockRef, RegionRef, ValueRef};
 
 /// Display context that tracks value numbering.
@@ -134,6 +134,22 @@ fn fmt_atomic_rmw_op(op: &AtomicRmwOp) -> &'static str {
     }
 }
 
+/// Format FP rewrite flags as a suffix string (e.g., " reassoc contract").
+fn fmt_fp_rewrite_flags(flags: &FpRewriteFlags) -> String {
+    let mut parts = Vec::new();
+    if flags.reassoc {
+        parts.push("reassoc");
+    }
+    if flags.contract {
+        parts.push("contract");
+    }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!(" {}", parts.join(" "))
+    }
+}
+
 fn fmt_region_kind(kind: &RegionKind) -> &'static str {
     match kind {
         RegionKind::Function => "function",
@@ -205,17 +221,37 @@ fn fmt_inst(
         Op::Shr(a, b) => {
             format!("{v} = shr {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
         }
-        Op::FAdd(a, b) => {
-            format!("{v} = fadd {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+        Op::FAdd(a, b, flags) => {
+            format!(
+                "{v} = fadd{} {}, {}",
+                fmt_fp_rewrite_flags(flags),
+                ctx.fmt_operand(a),
+                ctx.fmt_operand(b)
+            )
         }
-        Op::FSub(a, b) => {
-            format!("{v} = fsub {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+        Op::FSub(a, b, flags) => {
+            format!(
+                "{v} = fsub{} {}, {}",
+                fmt_fp_rewrite_flags(flags),
+                ctx.fmt_operand(a),
+                ctx.fmt_operand(b)
+            )
         }
-        Op::FMul(a, b) => {
-            format!("{v} = fmul {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+        Op::FMul(a, b, flags) => {
+            format!(
+                "{v} = fmul{} {}, {}",
+                fmt_fp_rewrite_flags(flags),
+                ctx.fmt_operand(a),
+                ctx.fmt_operand(b)
+            )
         }
-        Op::FDiv(a, b) => {
-            format!("{v} = fdiv {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+        Op::FDiv(a, b, flags) => {
+            format!(
+                "{v} = fdiv{} {}, {}",
+                fmt_fp_rewrite_flags(flags),
+                ctx.fmt_operand(a),
+                ctx.fmt_operand(b)
+            )
         }
         Op::FNeg(a) => format!("{v} = fneg {}", ctx.fmt_operand(a)),
         Op::FAbs(a) => format!("{v} = fabs {}", ctx.fmt_operand(a)),

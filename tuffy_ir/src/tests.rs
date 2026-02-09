@@ -3,7 +3,7 @@
 use crate::builder::Builder;
 use crate::function::{Function, RegionKind};
 use crate::instruction::{AtomicRmwOp, ICmpOp, Op, Operand, Origin};
-use crate::types::{Annotation, FloatType, MemoryOrdering, Type};
+use crate::types::{Annotation, FloatType, FpRewriteFlags, MemoryOrdering, Type};
 
 #[test]
 fn build_add_function() {
@@ -432,15 +432,35 @@ fn build_float_binary_ops() {
 
     let a = builder.param(0, f32_ty.clone(), None, Origin::synthetic());
     let b = builder.param(1, f32_ty.clone(), None, Origin::synthetic());
-    let v_fadd = builder.fadd(a.into(), b.into(), f32_ty.clone(), Origin::synthetic());
-    let v_fsub = builder.fsub(a.into(), b.into(), f32_ty.clone(), Origin::synthetic());
-    let v_fmul = builder.fmul(
-        v_fadd.into(),
-        v_fsub.into(),
+    let flags = FpRewriteFlags::default();
+    let v_fadd = builder.fadd(
+        a.into(),
+        b.into(),
+        flags,
         f32_ty.clone(),
         Origin::synthetic(),
     );
-    let v_fdiv = builder.fdiv(v_fmul.into(), b.into(), f32_ty.clone(), Origin::synthetic());
+    let v_fsub = builder.fsub(
+        a.into(),
+        b.into(),
+        flags,
+        f32_ty.clone(),
+        Origin::synthetic(),
+    );
+    let v_fmul = builder.fmul(
+        v_fadd.into(),
+        v_fsub.into(),
+        flags,
+        f32_ty.clone(),
+        Origin::synthetic(),
+    );
+    let v_fdiv = builder.fdiv(
+        v_fmul.into(),
+        b.into(),
+        flags,
+        f32_ty.clone(),
+        Origin::synthetic(),
+    );
     let v_csign = builder.copysign(v_fdiv.into(), a.into(), f32_ty.clone(), Origin::synthetic());
     let v_neg = builder.fneg(v_csign.into(), f32_ty.clone(), Origin::synthetic());
     let v_abs = builder.fabs(v_neg.into(), f32_ty.clone(), Origin::synthetic());
@@ -448,10 +468,10 @@ fn build_float_binary_ops() {
     builder.exit_region();
 
     assert_eq!(func.instructions.len(), 10);
-    assert!(matches!(func.instructions[2].op, Op::FAdd(_, _)));
-    assert!(matches!(func.instructions[3].op, Op::FSub(_, _)));
-    assert!(matches!(func.instructions[4].op, Op::FMul(_, _)));
-    assert!(matches!(func.instructions[5].op, Op::FDiv(_, _)));
+    assert!(matches!(func.instructions[2].op, Op::FAdd(_, _, _)));
+    assert!(matches!(func.instructions[3].op, Op::FSub(_, _, _)));
+    assert!(matches!(func.instructions[4].op, Op::FMul(_, _, _)));
+    assert!(matches!(func.instructions[5].op, Op::FDiv(_, _, _)));
     assert!(matches!(func.instructions[6].op, Op::CopySign(_, _)));
     assert!(matches!(func.instructions[7].op, Op::FNeg(_)));
     assert!(matches!(func.instructions[8].op, Op::FAbs(_)));
@@ -477,10 +497,35 @@ fn display_float_ops() {
 
     let a = builder.param(0, f64_ty.clone(), None, Origin::synthetic());
     let b = builder.param(1, f64_ty.clone(), None, Origin::synthetic());
-    let _v_fadd = builder.fadd(a.into(), b.into(), f64_ty.clone(), Origin::synthetic());
-    let _v_fsub = builder.fsub(a.into(), b.into(), f64_ty.clone(), Origin::synthetic());
-    let _v_fmul = builder.fmul(a.into(), b.into(), f64_ty.clone(), Origin::synthetic());
-    let _v_fdiv = builder.fdiv(a.into(), b.into(), f64_ty.clone(), Origin::synthetic());
+    let flags = FpRewriteFlags::default();
+    let _v_fadd = builder.fadd(
+        a.into(),
+        b.into(),
+        flags,
+        f64_ty.clone(),
+        Origin::synthetic(),
+    );
+    let _v_fsub = builder.fsub(
+        a.into(),
+        b.into(),
+        flags,
+        f64_ty.clone(),
+        Origin::synthetic(),
+    );
+    let _v_fmul = builder.fmul(
+        a.into(),
+        b.into(),
+        flags,
+        f64_ty.clone(),
+        Origin::synthetic(),
+    );
+    let _v_fdiv = builder.fdiv(
+        a.into(),
+        b.into(),
+        flags,
+        f64_ty.clone(),
+        Origin::synthetic(),
+    );
     let _v_neg = builder.fneg(a.into(), f64_ty.clone(), Origin::synthetic());
     let _v_abs = builder.fabs(a.into(), f64_ty.clone(), Origin::synthetic());
     let _v_cs = builder.copysign(a.into(), b.into(), f64_ty.clone(), Origin::synthetic());

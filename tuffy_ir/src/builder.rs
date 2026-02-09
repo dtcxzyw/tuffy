@@ -4,7 +4,7 @@
 
 use crate::function::{BasicBlock, BlockArg, CfgNode, Function, Region, RegionKind};
 use crate::instruction::{AtomicRmwOp, ICmpOp, Instruction, Op, Operand, Origin};
-use crate::types::{Annotation, MemoryOrdering, Type};
+use crate::types::{Annotation, FpRewriteFlags, MemoryOrdering, Type};
 use crate::value::{BlockRef, RegionRef, ValueRef};
 
 /// Builder for constructing a function's IR.
@@ -263,23 +263,51 @@ impl<'a> Builder<'a> {
     // ── Floating point arithmetic ──
 
     /// Floating point addition.
-    pub fn fadd(&mut self, a: Operand, b: Operand, ty: Type, origin: Origin) -> ValueRef {
-        self.push_inst(Op::FAdd(a, b), ty, origin, None)
+    pub fn fadd(
+        &mut self,
+        a: Operand,
+        b: Operand,
+        flags: FpRewriteFlags,
+        ty: Type,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::FAdd(a, b, flags), ty, origin, None)
     }
 
     /// Floating point subtraction.
-    pub fn fsub(&mut self, a: Operand, b: Operand, ty: Type, origin: Origin) -> ValueRef {
-        self.push_inst(Op::FSub(a, b), ty, origin, None)
+    pub fn fsub(
+        &mut self,
+        a: Operand,
+        b: Operand,
+        flags: FpRewriteFlags,
+        ty: Type,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::FSub(a, b, flags), ty, origin, None)
     }
 
     /// Floating point multiplication.
-    pub fn fmul(&mut self, a: Operand, b: Operand, ty: Type, origin: Origin) -> ValueRef {
-        self.push_inst(Op::FMul(a, b), ty, origin, None)
+    pub fn fmul(
+        &mut self,
+        a: Operand,
+        b: Operand,
+        flags: FpRewriteFlags,
+        ty: Type,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::FMul(a, b, flags), ty, origin, None)
     }
 
     /// Floating point division.
-    pub fn fdiv(&mut self, a: Operand, b: Operand, ty: Type, origin: Origin) -> ValueRef {
-        self.push_inst(Op::FDiv(a, b), ty, origin, None)
+    pub fn fdiv(
+        &mut self,
+        a: Operand,
+        b: Operand,
+        flags: FpRewriteFlags,
+        ty: Type,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::FDiv(a, b, flags), ty, origin, None)
     }
 
     /// Copy sign: magnitude from first operand, sign from second.

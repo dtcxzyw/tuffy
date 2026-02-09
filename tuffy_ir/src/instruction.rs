@@ -1,6 +1,6 @@
 //! Instruction definitions for tuffy IR.
 
-use crate::types::{Annotation, MemoryOrdering, Type};
+use crate::types::{Annotation, FpRewriteFlags, MemoryOrdering, Type};
 use crate::value::{BlockRef, ValueRef};
 
 /// An operand: a value reference with an optional use-side annotation.
@@ -166,13 +166,13 @@ pub enum Op {
 
     // -- Floating point arithmetic --
     /// Floating point addition: fadd %a, %b
-    FAdd(Operand, Operand),
+    FAdd(Operand, Operand, FpRewriteFlags),
     /// Floating point subtraction: fsub %a, %b
-    FSub(Operand, Operand),
+    FSub(Operand, Operand, FpRewriteFlags),
     /// Floating point multiplication: fmul %a, %b
-    FMul(Operand, Operand),
+    FMul(Operand, Operand, FpRewriteFlags),
     /// Floating point division: fdiv %a, %b
-    FDiv(Operand, Operand),
+    FDiv(Operand, Operand, FpRewriteFlags),
     /// Floating point negation: fneg %a
     FNeg(Operand),
     /// Floating point absolute value: fabs %a
