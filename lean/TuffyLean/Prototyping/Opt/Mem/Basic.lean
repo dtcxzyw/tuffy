@@ -55,4 +55,44 @@ theorem load_store_redundant (mem : Memory) (addr : Int) (size : Nat) :
     congr 1; omega
   · simp only [h, ite_false]
 
+/-! ## Load-Load Consistency
+
+Two loads from the same memory at the same address and size always produce
+the same result. This is immediate because `evalLoad` is a pure function. -/
+
+theorem load_load_same (mem : Memory) (addr : Int) (size : Nat) :
+    evalLoad mem addr size = evalLoad mem addr size := rfl
+
+/-! ## Load After Non-Aliasing Store
+
+If a store writes to an address range that does not overlap with the load
+address range, the load result is unchanged. This validates that the IR's
+memory model correctly supports alias analysis optimizations. -/
+
+theorem load_after_noalias_store (mem : Memory) (storeAddr loadAddr : Int)
+    (bs : List AbstractByte) (size : Nat)
+    (h_noalias : ∀ i : Fin size, ∀ j : Fin bs.length,
+      loadAddr + ↑i.val ≠ storeAddr + ↑j.val) :
+    evalLoad (evalStore mem storeAddr bs) loadAddr size = evalLoad mem loadAddr size := by
+  simp only [evalLoad, evalStore]
+  congr 1
+  have key : ∀ (i : Fin size),
+      (if 0 ≤ loadAddr + ↑↑i - storeAddr ∧ loadAddr + ↑↑i - storeAddr < ↑bs.length
+       then bs.getD (loadAddr + ↑↑i - storeAddr).toNat AbstractByte.uninit
+       else mem.bytes (loadAddr + ↑↑i)) = mem.bytes (loadAddr + ↑↑i) := by
+    intro ⟨i, hi⟩
+    simp only
+    split
+    · next h =>
+      exfalso
+      have h1 := h.1
+      have hj : (loadAddr + ↑i - storeAddr).toNat < bs.length := by omega
+      set offset := loadAddr + (↑i : Int) - storeAddr with hoff
+      have cast_eq : (↑offset.toNat : Int) = offset := Int.toNat_of_nonneg h1
+      have addr_eq : loadAddr + (↑i : Int) = storeAddr + (↑offset.toNat : Int) := by
+        rw [cast_eq, hoff]; omega
+      exact h_noalias ⟨i, hi⟩ ⟨offset.toNat, hj⟩ addr_eq
+    · rfl
+  simp_rw [key]
+
 end TuffyLean.Prototyping.Opt.Mem
