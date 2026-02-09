@@ -42,9 +42,9 @@ completed and serves as the template for further merges.
 - [x] Define `bytecast` semantics in Lean. Design decisions:
   - Annotations are always droppable — they never determine semantics.
   - `b<N>` requires N to be a multiple of 8 (byte-aligned).
-  - `bytecast b<N> → int` always zero-extends (value in [0, 2^N-1]). For
-    signed interpretation, use `sext %v, N` as a separate mathematical
-    operation that changes the value.
+  - `bytecast b<N> → int` low N*8 bits are determined by byte contents;
+    high bits are **unspecified**. The caller must apply `zext` or `sext`
+    to obtain a fully determined value.
   - `bytecast b<N> → float/double` requires exact size match (b32 → float,
     b64 → double). Size mismatch is ill-formed.
   - Handle all four AbstractByte states: `Bits` → decode, `Poison` → poison,
