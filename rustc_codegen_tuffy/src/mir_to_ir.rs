@@ -233,7 +233,7 @@ fn needs_indirect_return<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> bool {
     if ty.is_unit() || ty.is_never() {
         return false;
     }
-    type_size(tcx, ty).map_or(false, |size| size > 16)
+    type_size(tcx, ty).is_some_and(|size| size > 16)
 }
 
 /// Check if a type is a signed integer type.
@@ -277,6 +277,7 @@ impl StackLocalSet {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn translate_params<'tcx>(
     tcx: TyCtxt<'tcx>,
     mir: &mir::Body<'tcx>,
@@ -539,14 +540,10 @@ fn extract_fat_component<'tcx>(
             fat_locals.get(place.local)
         }
         // Cast (Transmute, PtrToPtr, etc.) of a fat local: propagate.
-        Rvalue::Cast(_, operand, _) => {
-            match operand {
-                Operand::Copy(place) | Operand::Move(place) => {
-                    fat_locals.get(place.local)
-                }
-                _ => None,
-            }
+        Rvalue::Cast(_, Operand::Copy(place) | Operand::Move(place), _) => {
+            fat_locals.get(place.local)
         }
+        Rvalue::Cast(..) => None,
         // Multi-field Aggregate: second field becomes the fat component.
         Rvalue::Aggregate(_, operands) if operands.len() >= 2 => {
             let second_op = operands.iter().nth(1).unwrap();
@@ -587,7 +584,7 @@ fn translate_terminator<'tcx>(
                 let size = type_size(tcx, ret_ty).unwrap_or(8);
 
                 // Word-by-word copy from local _0's stack slot to sret pointer.
-                let num_words = (size + 7) / 8;
+                let num_words = size.div_ceil(8);
                 for i in 0..num_words {
                     let byte_off = i * 8;
                     let load_addr = if byte_off == 0 {
@@ -608,10 +605,29 @@ fn translate_terminator<'tcx>(
 
                 // Return the sret pointer in RAX (System V convention).
                 builder.ret(Some(sret.into()), Origin::synthetic());
+            } else if stack_locals.is_stack(ret_local) {
+                // Stack-allocated return (e.g., 16-byte struct built via Aggregate).
+                // Load the actual data from the stack slot instead of returning
+                // the slot address (which would be a dangling pointer).
+                let slot = locals.get(ret_local).expect("return local _0 must be set");
+                let ret_ty = mir.local_decls[ret_local].ty;
+                let size = type_size(tcx, ret_ty).unwrap_or(8);
+
+                // First 8 bytes → RAX.
+                let word0 = builder.load(slot.into(), Type::Int, None, Origin::synthetic());
+
+                if size > 8 {
+                    // Second 8 bytes → RDX via rdx_moves.
+                    let off = builder.iconst(8, Origin::synthetic());
+                    let addr1 = builder.ptradd(slot.into(), off.into(), 0, Origin::synthetic());
+                    let word1 = builder.load(addr1.into(), Type::Int, None, Origin::synthetic());
+                    let dummy = builder.iconst(0, Origin::synthetic());
+                    rdx_moves.insert(dummy.index(), word1.index());
+                }
+
+                builder.ret(Some(word0.into()), Origin::synthetic());
             } else {
                 // Normal scalar return.
-                // If the return value has a fat component, emit a dummy iconst
-                // that tells isel to move the fat value into RDX before ret.
                 if let Some(fat_val) = fat_locals.get(ret_local) {
                     let dummy = builder.iconst(0, Origin::synthetic());
                     rdx_moves.insert(dummy.index(), fat_val.index());
@@ -670,6 +686,7 @@ fn translate_terminator<'tcx>(
 
             // Check if the callee returns a large struct (needs sret on caller side).
             let dest_ty = mir.local_decls[destination.local].ty;
+            let dest_size = type_size(tcx, dest_ty);
             let callee_sret = needs_indirect_return(tcx, dest_ty);
 
             // Translate arguments to IR operands, decomposing fat pointers.
@@ -690,19 +707,52 @@ fn translate_terminator<'tcx>(
                     tcx, &arg.node, mir, builder, locals,
                     stack_locals, static_refs, static_data,
                 ) {
-                    ir_args.push(v.into());
-                    // If this arg is a Copy/Move of a fat local, also pass the high part.
-                    if let Operand::Copy(place) | Operand::Move(place) = &arg.node {
-                        if let Some(fat_v) = fat_locals.get(place.local) {
-                            ir_args.push(fat_v.into());
+                    // Check if this argument is a stack-allocated local that
+                    // should be decomposed into register-sized words (≤16 bytes).
+                    let decomposed = if let Operand::Copy(place) | Operand::Move(place) = &arg.node {
+                        if place.projection.is_empty() && stack_locals.is_stack(place.local) {
+                            let arg_ty = mir.local_decls[place.local].ty;
+                            let arg_size = type_size(tcx, arg_ty).unwrap_or(0);
+                            if arg_size > 0 && arg_size <= 16 {
+                                // Load word(s) from the stack slot and pass in registers.
+                                let word0 = builder.load(
+                                    v.into(), Type::Int, None, Origin::synthetic(),
+                                );
+                                ir_args.push(word0.into());
+                                if arg_size > 8 {
+                                    let off = builder.iconst(8, Origin::synthetic());
+                                    let addr1 = builder.ptradd(
+                                        v.into(), off.into(), 0, Origin::synthetic(),
+                                    );
+                                    let word1 = builder.load(
+                                        addr1.into(), Type::Int, None, Origin::synthetic(),
+                                    );
+                                    ir_args.push(word1.into());
+                                }
+                                true
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
                         }
-                    }
-                    // If this arg is a constant slice, the length was emitted
-                    // right after the pointer. Check if it's in the constant.
-                    if let Operand::Constant(c) = &arg.node {
-                        if let mir::Const::Val(mir::ConstValue::Slice { meta, .. }, _) = c.const_ {
-                            let len_val = builder.iconst(meta as i64, Origin::synthetic());
-                            ir_args.push(len_val.into());
+                    } else {
+                        false
+                    };
+
+                    if !decomposed {
+                        ir_args.push(v.into());
+                        // If this arg is a Copy/Move of a fat local, also pass the high part.
+                        if let Operand::Copy(place) | Operand::Move(place) = &arg.node
+                            && let Some(fat_v) = fat_locals.get(place.local) {
+                                ir_args.push(fat_v.into());
+                        }
+                        // If this arg is a constant slice, the length was emitted
+                        // right after the pointer. Check if it's in the constant.
+                        if let Operand::Constant(c) = &arg.node
+                            && let mir::Const::Val(mir::ConstValue::Slice { meta, .. }, _) = c.const_ {
+                                let len_val = builder.iconst(meta as i64, Origin::synthetic());
+                                ir_args.push(len_val.into());
                         }
                     }
                 }
@@ -731,11 +781,27 @@ fn translate_terminator<'tcx>(
                 locals.set(destination.local, slot);
                 stack_locals.mark(destination.local);
                 // No RDX capture needed for sret calls.
+            } else if dest_size.unwrap_or(0) > 8 {
+                // Two-register return (9-16 bytes): RAX has first word,
+                // RDX has second word. Reconstruct into a stack slot so
+                // downstream code gets a valid pointer to the struct.
+                let size = dest_size.unwrap();
+                let slot = builder.stack_slot(size as u32, Origin::synthetic());
+                builder.store(call_vref.into(), slot.into(), Origin::synthetic());
+
+                let rdx_val = builder.iconst(0, Origin::synthetic());
+                rdx_captures.insert(rdx_val.index(), ());
+                let off = builder.iconst(8, Origin::synthetic());
+                let addr1 = builder.ptradd(slot.into(), off.into(), 0, Origin::synthetic());
+                builder.store(rdx_val.into(), addr1.into(), Origin::synthetic());
+
+                locals.set(destination.local, slot);
+                stack_locals.mark(destination.local);
             } else {
-                // Store result in destination local.
+                // Scalar return (≤ 8 bytes): store directly.
                 locals.set(destination.local, call_vref);
 
-                // Capture RDX (second return value) for fat pointer returns.
+                // Capture RDX for fat pointer returns (e.g., &str).
                 let rdx_val = builder.iconst(0, Origin::synthetic());
                 rdx_captures.insert(rdx_val.index(), ());
                 fat_locals.set(destination.local, rdx_val);
@@ -976,15 +1042,11 @@ fn translate_rvalue<'tcx>(
             }
             Some(slot)
         }
-        Rvalue::UnaryOp(mir::UnOp::PtrMetadata, operand) => {
+        Rvalue::UnaryOp(mir::UnOp::PtrMetadata, Operand::Copy(place) | Operand::Move(place)) => {
             // Extract metadata (e.g., slice length) from a fat pointer.
-            match operand {
-                Operand::Copy(place) | Operand::Move(place) => {
-                    fat_locals.get(place.local)
-                }
-                _ => None,
-            }
+            fat_locals.get(place.local)
         }
+        Rvalue::UnaryOp(mir::UnOp::PtrMetadata, _) => None,
         Rvalue::UnaryOp(mir::UnOp::Neg, operand) => {
             let v = translate_operand(tcx, operand, mir, builder, locals, stack_locals, static_refs, static_data)?;
             let zero = builder.iconst(0, Origin::synthetic());
