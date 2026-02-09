@@ -194,7 +194,8 @@ pub fn isel(
 
     // Build final instruction sequence with prologue/epilogue.
     let mut out = Vec::new();
-    let needs_frame = stack.frame_size > 0;
+    let has_calls = body.iter().any(|i| matches!(i, MInst::CallSym { .. }));
+    let needs_frame = stack.frame_size > 0 || has_calls;
 
     if needs_frame {
         // Align frame size to 16 bytes (System V ABI requirement).

@@ -107,10 +107,10 @@ fn encode_inst(
             encode_pop(*reg, buf);
         }
         MInst::SubSPI { imm } => {
-            encode_rsp_imm(0xe8, *imm, buf);
+            encode_rsp_imm(0xec, *imm, buf);
         }
         MInst::AddSPI { imm } => {
-            encode_rsp_imm(0xc0, *imm, buf);
+            encode_rsp_imm(0xc4, *imm, buf);
         }
         MInst::MovRM {
             size,
