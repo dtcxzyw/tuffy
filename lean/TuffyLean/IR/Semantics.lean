@@ -34,13 +34,10 @@ def evalXor (a b : Int) : Int := Int.xor a b
 def evalShl (a b : Int) : Value :=
   if b < 0 then .poison else .int (a <<< b.toNat)
 
-/-- Logical right shift. Poison if shift amount is negative.
-    Operand `a` is assumed non-negative (enforced by annotations). -/
-def evalLshr (a b : Int) : Value :=
-  if b < 0 then .poison else .int (a >>> b.toNat)
-
-/-- Arithmetic right shift. Poison if shift amount is negative. -/
-def evalAshr (a b : Int) : Value :=
+/-- Right shift. Poison if shift amount is negative.
+    Signedness is a property of operand annotations, not the operation.
+    In infinite precision, logical and arithmetic right shift are identical. -/
+def evalShr (a b : Int) : Value :=
   if b < 0 then .poison else .int (a >>> b.toNat)
 
 -- Pointer operation semantics
