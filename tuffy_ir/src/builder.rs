@@ -327,9 +327,26 @@ impl<'a> Builder<'a> {
 
     // ── Comparison ──
 
-    /// Integer comparison.
+    /// Integer comparison. Returns Bool.
     pub fn icmp(&mut self, op: ICmpOp, a: Operand, b: Operand, origin: Origin) -> ValueRef {
-        self.push_inst(Op::ICmp(op, a, b), Type::Int, origin, None)
+        self.push_inst(Op::ICmp(op, a, b), Type::Bool, origin, None)
+    }
+
+    /// Conditional select: if cond then true_val else false_val.
+    pub fn select(
+        &mut self,
+        cond: Operand,
+        true_val: Operand,
+        false_val: Operand,
+        ty: Type,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::Select(cond, true_val, false_val), ty, origin, None)
+    }
+
+    /// Convert Bool to Int: true → 1, false → 0.
+    pub fn bool_to_int(&mut self, val: Operand, origin: Origin) -> ValueRef {
+        self.push_inst(Op::BoolToInt(val), Type::Int, origin, None)
     }
 
     // ── Memory ──

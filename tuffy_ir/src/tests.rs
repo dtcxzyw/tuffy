@@ -681,3 +681,79 @@ fn display_atomic_ops() {
          }"
     );
 }
+
+#[test]
+fn build_select_and_bool_to_int() {
+    let mut func = Function::new(
+        "select_test",
+        vec![Type::Int, Type::Int],
+        vec![],
+        Some(Type::Int),
+        None,
+    );
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+    let entry = builder.create_block();
+    builder.switch_to_block(entry);
+
+    let a = builder.param(0, Type::Int, None, Origin::synthetic());
+    let b = builder.param(1, Type::Int, None, Origin::synthetic());
+    let cmp = builder.icmp(ICmpOp::Gt, a.into(), b.into(), Origin::synthetic());
+    let sel = builder.select(
+        cmp.into(), a.into(), b.into(), Type::Int, Origin::synthetic(),
+    );
+    let b2i = builder.bool_to_int(cmp.into(), Origin::synthetic());
+    let _sum = builder.add(sel.into(), b2i.into(), None, Origin::synthetic());
+    builder.ret(Some(sel.into()), Origin::synthetic());
+    builder.exit_region();
+
+    assert_eq!(func.instructions[2].ty, Type::Bool);
+    assert_eq!(func.instructions[3].ty, Type::Int);
+    assert_eq!(func.instructions[4].ty, Type::Int);
+    assert!(matches!(func.instructions[2].op, Op::ICmp(ICmpOp::Gt, _, _)));
+    assert!(matches!(func.instructions[3].op, Op::Select(_, _, _)));
+    assert!(matches!(func.instructions[4].op, Op::BoolToInt(_)));
+}
+
+#[test]
+fn display_select_and_bool_to_int() {
+    let mut func = Function::new(
+        "sel",
+        vec![Type::Int, Type::Int],
+        vec![],
+        Some(Type::Int),
+        None,
+    );
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+    let entry = builder.create_block();
+    builder.switch_to_block(entry);
+
+    let a = builder.param(0, Type::Int, None, Origin::synthetic());
+    let b = builder.param(1, Type::Int, None, Origin::synthetic());
+    let cmp = builder.icmp(ICmpOp::Lt, a.into(), b.into(), Origin::synthetic());
+    let _sel = builder.select(
+        cmp.into(), a.into(), b.into(), Type::Int, Origin::synthetic(),
+    );
+    let b2i = builder.bool_to_int(cmp.into(), Origin::synthetic());
+    builder.ret(Some(b2i.into()), Origin::synthetic());
+    builder.exit_region();
+
+    let output = format!("{func}");
+    assert_eq!(
+        output,
+        "func @sel(int, int) -> int {\n\
+         \x20\x20bb0:\n\
+         \x20\x20\x20\x20v0 = param 0\n\
+         \x20\x20\x20\x20v1 = param 1\n\
+         \x20\x20\x20\x20v2 = icmp.lt v0, v1\n\
+         \x20\x20\x20\x20v3 = select v2, v0, v1\n\
+         \x20\x20\x20\x20v4 = bool_to_int v2\n\
+         \x20\x20\x20\x20ret v4\n\
+         }"
+    );
+}

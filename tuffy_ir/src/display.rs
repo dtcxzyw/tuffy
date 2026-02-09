@@ -80,6 +80,7 @@ impl DisplayCtx {
 fn fmt_type(ty: &Type) -> String {
     match ty {
         Type::Int => "int".to_string(),
+        Type::Bool => "bool".to_string(),
         Type::Byte(_) => "byte".to_string(),
         Type::Ptr(_) => "ptr".to_string(),
         Type::Float(ft) => match ft {
@@ -270,6 +271,17 @@ fn fmt_inst(
                 ctx.fmt_operand(a),
                 ctx.fmt_operand(b)
             )
+        }
+        Op::Select(cond, tv, fv) => {
+            format!(
+                "{v} = select {}, {}, {}",
+                ctx.fmt_operand(cond),
+                ctx.fmt_operand(tv),
+                ctx.fmt_operand(fv)
+            )
+        }
+        Op::BoolToInt(val) => {
+            format!("{v} = bool_to_int {}", ctx.fmt_operand(val))
         }
         Op::Load(ptr) => format!("{v} = load {}", ctx.fmt_operand(ptr)),
         Op::Store(val, ptr) => {

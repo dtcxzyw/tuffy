@@ -50,6 +50,8 @@ impl VectorType {
 pub enum Type {
     /// Infinite precision integer. No fixed bitwidth.
     Int,
+    /// Boolean (true/false). Distinct from integers.
+    Bool,
     /// Raw memory data of `n` bytes. Per-byte poison tracking.
     Byte(u32),
     /// Pointer with address space.

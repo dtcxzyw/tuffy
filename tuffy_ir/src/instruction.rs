@@ -128,8 +128,14 @@ pub enum Op {
     Const(i64),
 
     // -- Comparison --
-    /// Integer comparison.
+    /// Integer comparison. Returns Bool.
     ICmp(ICmpOp, Operand, Operand),
+
+    // -- Select --
+    /// Conditional select: select cond, true_val, false_val. Cond must be Bool.
+    Select(Operand, Operand, Operand),
+    /// Convert Bool to Int: true → 1, false → 0.
+    BoolToInt(Operand),
 
     // -- Memory --
     /// Load from pointer.

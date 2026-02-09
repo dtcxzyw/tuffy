@@ -489,6 +489,8 @@ fn select_inst(
         | Op::FNeg(_)
         | Op::FAbs(_)
         | Op::CopySign(..)
+        | Op::Select(..)
+        | Op::BoolToInt(_)
         | Op::LoadAtomic(..)
         | Op::StoreAtomic(..)
         | Op::AtomicRmw(..)
