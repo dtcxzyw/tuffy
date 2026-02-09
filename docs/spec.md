@@ -325,10 +325,31 @@ The formal semantics use Lean 4's native `Float` type (IEEE 754 binary64) as a p
 model. The formal float model will be refined when full NaN payload and denormal semantics
 are decided.
 
+#### Rewrite flags
+
+Binary floating-point arithmetic instructions (`fadd`, `fsub`, `fmul`, `fdiv`) may carry
+optional **rewrite flags** that grant the optimizer permission to apply algebraic
+transformations. These flags do not change the instruction's operational semantics — they
+only widen the set of legal rewrites.
+
+| Flag | Meaning |
+|---|---|
+| `reassoc` | Allow associativity / commutativity reordering |
+| `contract` | Allow contraction (e.g., `a*b+c → fma(a,b,c)`) |
+
+Flags appear between the opcode and the operands:
+
+```
+vN = fadd reassoc contract vA, vB
+```
+
+When no flags are present the instruction follows strict IEEE 754 semantics.
+Mirrors `TuffyLean.IR.FpRewriteFlags`.
+
 #### `fadd`
 
 ```
-vN = fadd vA, vB
+vN = fadd [flags] vA, vB
 ```
 
 Floating point addition. **Semantics**: `evalFAdd(a, b) = a + b`
@@ -336,7 +357,7 @@ Floating point addition. **Semantics**: `evalFAdd(a, b) = a + b`
 #### `fsub`
 
 ```
-vN = fsub vA, vB
+vN = fsub [flags] vA, vB
 ```
 
 Floating point subtraction. **Semantics**: `evalFSub(a, b) = a - b`
@@ -344,7 +365,7 @@ Floating point subtraction. **Semantics**: `evalFSub(a, b) = a - b`
 #### `fmul`
 
 ```
-vN = fmul vA, vB
+vN = fmul [flags] vA, vB
 ```
 
 Floating point multiplication. **Semantics**: `evalFMul(a, b) = a * b`
@@ -352,7 +373,7 @@ Floating point multiplication. **Semantics**: `evalFMul(a, b) = a * b`
 #### `fdiv`
 
 ```
-vN = fdiv vA, vB
+vN = fdiv [flags] vA, vB
 ```
 
 Floating point division. **Semantics**: `evalFDiv(a, b) = a / b`
@@ -416,6 +437,7 @@ Range constraints and bit-level facts are encoded as annotations on value defini
 | `:s<N>` | Value is in signed N-bit range `[-2^(N-1), 2^(N-1)-1]` |
 | `:u<N>` | Value is in unsigned N-bit range `[0, 2^N-1]` |
 | `:known(<ternary>)` | Per-bit four-state constraint |
+| `:nofpclass(<classes>)` | Float value must not belong to the listed FP classes |
 | (none) | No constraint; unconstrained `int` |
 
 Annotations are composable: `:s32:known(...)` applies both constraints simultaneously.
@@ -430,6 +452,44 @@ Each bit in a `known` annotation is one of four states:
 | `1` | Bit is known to be 1 |
 | `?` | Unknown — bit is demanded but value not determined |
 | `x` | Don't-care — bit is not demanded |
+
+#### nofpclass
+
+Constrains which IEEE 754 floating-point value classes a float value may belong to.
+If the value falls into an excluded class, the result is `poison`. This is separate
+from integer annotations (`:s<N>`, `:u<N>`) and mirrors LLVM's `nofpclass` attribute.
+
+The 10 individual FP classes (mirroring LLVM's `FPClassTest`):
+
+| Class | Description |
+|---|---|
+| `snan` | Signaling NaN |
+| `qnan` | Quiet NaN |
+| `ninf` | Negative infinity |
+| `nnorm` | Negative normal |
+| `nsub` | Negative subnormal |
+| `nzero` | Negative zero |
+| `pzero` | Positive zero |
+| `psub` | Positive subnormal |
+| `pnorm` | Positive normal |
+| `pinf` | Positive infinity |
+
+Convenience groups:
+
+| Group | Expands to |
+|---|---|
+| `nan` | `snan qnan` |
+| `inf` | `ninf pinf` |
+| `zero` | `nzero pzero` |
+
+Syntax:
+
+```
+v0:nofpclass(nan inf) = fadd v1, v2   // result must not be NaN or ±Inf
+v1 = fsub v0:nofpclass(nzero), v2     // use-side: v0 must not be -0.0
+```
+
+Mirrors `TuffyLean.IR.FpClassMask`.
 
 #### Result-side annotations
 
@@ -841,9 +901,10 @@ are not yet implemented in the Rust codebase.
 
 The IR adopts IEEE 754-2008 as the floating-point semantics standard. Basic
 operations (`fadd`, `fsub`, `fmul`, `fdiv`, `fneg`, `fabs`, `copysign`) are
-implemented. Full NaN payload and denormal semantics are still under discussion —
-the current Lean model uses Lean 4's native `Float` type (IEEE 754 binary64) as a
-placeholder.
+implemented. Per-instruction rewrite flags (`reassoc`, `contract`) and float
+value class constraints (`nofpclass`) are defined. Full NaN payload and denormal
+semantics are still under discussion — the current Lean model uses Lean 4's
+native `Float` type (IEEE 754 binary64) as a placeholder.
 
 ### Scalable Vector Types
 
