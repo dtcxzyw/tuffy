@@ -88,10 +88,11 @@ def evalFNeg (a : Float) : Float := -a
 /-- Floating point absolute value. -/
 def evalFAbs (a : Float) : Float := Float.abs a
 
-/-- Copy sign: produce a value with the magnitude of `mag` and the sign of `sign`. -/
+/-- Copy sign: produce a value with the magnitude of `mag` and the sign of `sign`.
+    Uses Float.toBits to check the sign bit (bit 63), correctly handling -0.0 and -NaN. -/
 def evalCopySign (mag sign : Float) : Float :=
   let absMag := Float.abs mag
-  if sign < 0.0 then -absMag else absMag
+  if sign.toBits >>> 63 != 0 then -absMag else absMag
 
 -- Annotation violation semantics: produce poison if constraint violated.
 -- These define the semantics of :s<N> and :u<N> annotations on value
