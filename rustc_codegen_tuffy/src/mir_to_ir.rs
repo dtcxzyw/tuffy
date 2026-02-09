@@ -5,7 +5,10 @@
 
 use std::collections::HashMap;
 
-use rustc_middle::mir::{self, BasicBlock, BinOp, CastKind, Operand, Place, PlaceElem, Rvalue, StatementKind, TerminatorKind};
+use rustc_middle::mir::{
+    self, BasicBlock, BinOp, CastKind, Operand, Place, PlaceElem, Rvalue, StatementKind,
+    TerminatorKind,
+};
 use rustc_middle::ty::{self, Instance, TyCtxt, TypeVisitableExt};
 
 use tuffy_codegen::{AbiMetadataBox, CodegenSession};
@@ -49,7 +52,9 @@ pub fn translate_function<'tcx>(
     let name = tcx.symbol_name(instance).name.to_string();
     let sig = inst_ty.fn_sig(tcx);
     let sig = tcx.instantiate_bound_regions_with_erased(sig);
-    let sig = tcx.try_normalize_erasing_regions(ty::TypingEnv::fully_monomorphized(), sig).ok()?;
+    let sig = tcx
+        .try_normalize_erasing_regions(ty::TypingEnv::fully_monomorphized(), sig)
+        .ok()?;
 
     let params: Vec<Type> = sig
         .inputs()
@@ -95,8 +100,14 @@ pub fn translate_function<'tcx>(
     let entry = block_map.get(BasicBlock::from_u32(0));
     builder.switch_to_block(entry);
     translate_params(
-        tcx, mir, &mut builder, &mut locals, &mut fat_locals,
-        &mut stack_locals, &mut sret_ptr, use_sret,
+        tcx,
+        mir,
+        &mut builder,
+        &mut locals,
+        &mut fat_locals,
+        &mut stack_locals,
+        &mut sret_ptr,
+        use_sret,
     );
 
     // Translate each basic block.
@@ -106,17 +117,33 @@ pub fn translate_function<'tcx>(
 
         for stmt in &bb_data.statements {
             translate_statement(
-                tcx, stmt, mir, &mut builder, &mut locals, &mut fat_locals,
-                &mut stack_locals, &mut static_refs, &mut static_data,
+                tcx,
+                stmt,
+                mir,
+                &mut builder,
+                &mut locals,
+                &mut fat_locals,
+                &mut stack_locals,
+                &mut static_refs,
+                &mut static_data,
             );
         }
         if let Some(ref term) = bb_data.terminator {
             translate_terminator(
-                tcx, term, mir, &mut builder, &mut locals, &mut fat_locals,
-                &mut stack_locals, &block_map, &mut call_targets,
-                &mut static_refs, &mut static_data,
+                tcx,
+                term,
+                mir,
+                &mut builder,
+                &mut locals,
+                &mut fat_locals,
+                &mut stack_locals,
+                &block_map,
+                &mut call_targets,
+                &mut static_refs,
+                &mut static_data,
                 &mut abi_metadata,
-                sret_ptr, use_sret,
+                sret_ptr,
+                use_sret,
             );
         }
     }
@@ -257,8 +284,10 @@ fn int_bitwidth(ty: ty::Ty<'_>) -> Option<u32> {
         ty::Int(ty::IntTy::I8) | ty::Uint(ty::UintTy::U8) => Some(8),
         ty::Int(ty::IntTy::I16) | ty::Uint(ty::UintTy::U16) => Some(16),
         ty::Int(ty::IntTy::I32) | ty::Uint(ty::UintTy::U32) | ty::Char => Some(32),
-        ty::Int(ty::IntTy::I64) | ty::Uint(ty::UintTy::U64)
-        | ty::Int(ty::IntTy::Isize) | ty::Uint(ty::UintTy::Usize) => Some(64),
+        ty::Int(ty::IntTy::I64)
+        | ty::Uint(ty::UintTy::U64)
+        | ty::Int(ty::IntTy::Isize)
+        | ty::Uint(ty::UintTy::Usize) => Some(64),
         ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128) => Some(128),
         _ => None,
     }
@@ -413,13 +442,17 @@ fn translate_place_to_addr<'tcx>(
             }
             PlaceElem::Index(local) => {
                 let idx_val = locals.get(local)?;
-                let elem_size = type_size(tcx, match cur_ty.kind() {
-                    ty::Array(elem_ty, _) => *elem_ty,
-                    ty::Slice(elem_ty) => *elem_ty,
-                    _ => return None,
-                })?;
+                let elem_size = type_size(
+                    tcx,
+                    match cur_ty.kind() {
+                        ty::Array(elem_ty, _) => *elem_ty,
+                        ty::Slice(elem_ty) => *elem_ty,
+                        _ => return None,
+                    },
+                )?;
                 let size_val = builder.iconst(elem_size as i64, Origin::synthetic());
-                let byte_offset = builder.mul(idx_val.into(), size_val.into(), None, Origin::synthetic());
+                let byte_offset =
+                    builder.mul(idx_val.into(), size_val.into(), None, Origin::synthetic());
                 addr = builder.ptradd(addr.into(), byte_offset.into(), 0, Origin::synthetic());
                 cur_ty = match cur_ty.kind() {
                     ty::Array(elem_ty, _) | ty::Slice(elem_ty) => *elem_ty,
@@ -430,7 +463,9 @@ fn translate_place_to_addr<'tcx>(
                 // Downcast doesn't change the address, only the type interpretation.
                 // We keep the same address and update cur_ty via the variant.
             }
-            PlaceElem::ConstantIndex { offset, from_end, .. } => {
+            PlaceElem::ConstantIndex {
+                offset, from_end, ..
+            } => {
                 let elem_ty = match cur_ty.kind() {
                     ty::Array(elem_ty, _) | ty::Slice(elem_ty) => *elem_ty,
                     _ => return None,
@@ -470,9 +505,7 @@ fn translate_place_to_value<'tcx>(
     if place.projection.is_empty() {
         return locals.get(place.local);
     }
-    let addr = translate_place_to_addr(
-        tcx, place, mir, builder, locals, stack_locals,
-    )?;
+    let addr = translate_place_to_addr(tcx, place, mir, builder, locals, stack_locals)?;
     Some(builder.load(addr.into(), Type::Int, None, Origin::synthetic()))
 }
 
@@ -491,31 +524,44 @@ fn translate_statement<'tcx>(
     match &stmt.kind {
         StatementKind::Assign(box (place, rvalue)) => {
             if let Some(val) = translate_rvalue(
-                tcx, rvalue, place, mir, builder, locals, fat_locals,
-                stack_locals, static_refs, static_data,
+                tcx,
+                rvalue,
+                place,
+                mir,
+                builder,
+                locals,
+                fat_locals,
+                stack_locals,
+                static_refs,
+                static_data,
             ) {
                 if place.projection.is_empty() {
                     locals.set(place.local, val);
                 } else {
                     // Projected destination: compute address and emit Store.
-                    if let Some(addr) = translate_place_to_addr(
-                        tcx, place, mir, builder, locals, stack_locals,
-                    ) {
+                    if let Some(addr) =
+                        translate_place_to_addr(tcx, place, mir, builder, locals, stack_locals)
+                    {
                         builder.store(val.into(), addr.into(), Origin::synthetic());
                     }
                 }
             }
             // Check if the rvalue produces a fat pointer (e.g., &str from ConstValue::Slice).
             if let Some(fat_val) = extract_fat_component(
-                tcx, rvalue, mir, builder, locals, fat_locals,
-                stack_locals, static_refs, static_data,
+                tcx,
+                rvalue,
+                mir,
+                builder,
+                locals,
+                fat_locals,
+                stack_locals,
+                static_refs,
+                static_data,
             ) {
                 fat_locals.set(place.local, fat_val);
             }
         }
-        StatementKind::StorageLive(_)
-        | StatementKind::StorageDead(_)
-        | StatementKind::Nop => {}
+        StatementKind::StorageLive(_) | StatementKind::StorageDead(_) | StatementKind::Nop => {}
         _ => {}
     }
 }
@@ -545,9 +591,7 @@ fn extract_fat_component<'tcx>(
             }
         }
         // Use of a fat local: propagate the fat component.
-        Rvalue::Use(Operand::Copy(place) | Operand::Move(place)) => {
-            fat_locals.get(place.local)
-        }
+        Rvalue::Use(Operand::Copy(place) | Operand::Move(place)) => fat_locals.get(place.local),
         // Cast (Transmute, PtrToPtr, etc.) of a fat local: propagate.
         Rvalue::Cast(_, Operand::Copy(place) | Operand::Move(place), _) => {
             fat_locals.get(place.local)
@@ -556,7 +600,16 @@ fn extract_fat_component<'tcx>(
         // Multi-field Aggregate: second field becomes the fat component.
         Rvalue::Aggregate(_, operands) if operands.len() >= 2 => {
             let second_op = operands.iter().nth(1).unwrap();
-            translate_operand(tcx, second_op, mir, builder, locals, stack_locals, static_refs, static_data)
+            translate_operand(
+                tcx,
+                second_op,
+                mir,
+                builder,
+                locals,
+                stack_locals,
+                static_refs,
+                static_data,
+            )
         }
         _ => None,
     }
@@ -650,8 +703,16 @@ fn translate_terminator<'tcx>(
         }
         TerminatorKind::SwitchInt { discr, targets } => {
             translate_switch_int(
-                tcx, discr, targets, mir, builder, locals, stack_locals, block_map,
-                static_refs, static_data,
+                tcx,
+                discr,
+                targets,
+                mir,
+                builder,
+                locals,
+                stack_locals,
+                block_map,
+                static_refs,
+                static_data,
             );
         }
         TerminatorKind::Assert {
@@ -712,28 +773,40 @@ fn translate_terminator<'tcx>(
 
             for arg in args {
                 if let Some(v) = translate_operand(
-                    tcx, &arg.node, mir, builder, locals,
-                    stack_locals, static_refs, static_data,
+                    tcx,
+                    &arg.node,
+                    mir,
+                    builder,
+                    locals,
+                    stack_locals,
+                    static_refs,
+                    static_data,
                 ) {
                     // Check if this argument is a stack-allocated local that
                     // should be decomposed into register-sized words (≤16 bytes).
-                    let decomposed = if let Operand::Copy(place) | Operand::Move(place) = &arg.node {
+                    let decomposed = if let Operand::Copy(place) | Operand::Move(place) = &arg.node
+                    {
                         if place.projection.is_empty() && stack_locals.is_stack(place.local) {
                             let arg_ty = mir.local_decls[place.local].ty;
                             let arg_size = type_size(tcx, arg_ty).unwrap_or(0);
                             if arg_size > 0 && arg_size <= 16 {
                                 // Load word(s) from the stack slot and pass in registers.
-                                let word0 = builder.load(
-                                    v.into(), Type::Int, None, Origin::synthetic(),
-                                );
+                                let word0 =
+                                    builder.load(v.into(), Type::Int, None, Origin::synthetic());
                                 ir_args.push(word0.into());
                                 if arg_size > 8 {
                                     let off = builder.iconst(8, Origin::synthetic());
                                     let addr1 = builder.ptradd(
-                                        v.into(), off.into(), 0, Origin::synthetic(),
+                                        v.into(),
+                                        off.into(),
+                                        0,
+                                        Origin::synthetic(),
                                     );
                                     let word1 = builder.load(
-                                        addr1.into(), Type::Int, None, Origin::synthetic(),
+                                        addr1.into(),
+                                        Type::Int,
+                                        None,
+                                        Origin::synthetic(),
                                     );
                                     ir_args.push(word1.into());
                                 }
@@ -752,15 +825,18 @@ fn translate_terminator<'tcx>(
                         ir_args.push(v.into());
                         // If this arg is a Copy/Move of a fat local, also pass the high part.
                         if let Operand::Copy(place) | Operand::Move(place) = &arg.node
-                            && let Some(fat_v) = fat_locals.get(place.local) {
-                                ir_args.push(fat_v.into());
+                            && let Some(fat_v) = fat_locals.get(place.local)
+                        {
+                            ir_args.push(fat_v.into());
                         }
                         // If this arg is a constant slice, the length was emitted
                         // right after the pointer. Check if it's in the constant.
                         if let Operand::Constant(c) = &arg.node
-                            && let mir::Const::Val(mir::ConstValue::Slice { meta, .. }, _) = c.const_ {
-                                let len_val = builder.iconst(meta as i64, Origin::synthetic());
-                                ir_args.push(len_val.into());
+                            && let mir::Const::Val(mir::ConstValue::Slice { meta, .. }, _) =
+                                c.const_
+                        {
+                            let len_val = builder.iconst(meta as i64, Origin::synthetic());
+                            ir_args.push(len_val.into());
                         }
                     }
                 }
@@ -838,7 +914,16 @@ fn translate_switch_int<'tcx>(
     static_refs: &mut HashMap<u32, String>,
     static_data: &mut Vec<(String, Vec<u8>)>,
 ) {
-    let discr_val = match translate_operand(tcx, discr, mir, builder, locals, stack_locals, static_refs, static_data) {
+    let discr_val = match translate_operand(
+        tcx,
+        discr,
+        mir,
+        builder,
+        locals,
+        stack_locals,
+        static_refs,
+        static_data,
+    ) {
         Some(v) => v,
         None => return,
     };
@@ -908,8 +993,26 @@ fn translate_rvalue<'tcx>(
 ) -> Option<ValueRef> {
     match rvalue {
         Rvalue::BinaryOp(op, box (lhs, rhs)) => {
-            let l = translate_operand(tcx, lhs, mir, builder, locals, stack_locals, static_refs, static_data)?;
-            let r = translate_operand(tcx, rhs, mir, builder, locals, stack_locals, static_refs, static_data)?;
+            let l = translate_operand(
+                tcx,
+                lhs,
+                mir,
+                builder,
+                locals,
+                stack_locals,
+                static_refs,
+                static_data,
+            )?;
+            let r = translate_operand(
+                tcx,
+                rhs,
+                mir,
+                builder,
+                locals,
+                stack_locals,
+                static_refs,
+                static_data,
+            )?;
             let val = match op {
                 BinOp::Add | BinOp::AddWithOverflow => {
                     builder.add(l.into(), r.into(), None, Origin::synthetic())
@@ -929,15 +1032,9 @@ fn translate_rvalue<'tcx>(
                 BinOp::Shl | BinOp::ShlUnchecked => {
                     builder.shl(l.into(), r.into(), None, Origin::synthetic())
                 }
-                BinOp::BitOr => {
-                    builder.or(l.into(), r.into(), None, Origin::synthetic())
-                }
-                BinOp::BitAnd => {
-                    builder.and(l.into(), r.into(), None, Origin::synthetic())
-                }
-                BinOp::BitXor => {
-                    builder.xor(l.into(), r.into(), None, Origin::synthetic())
-                }
+                BinOp::BitOr => builder.or(l.into(), r.into(), None, Origin::synthetic()),
+                BinOp::BitAnd => builder.and(l.into(), r.into(), None, Origin::synthetic()),
+                BinOp::BitXor => builder.xor(l.into(), r.into(), None, Origin::synthetic()),
                 BinOp::Shr | BinOp::ShrUnchecked => {
                     // Determine signedness from the LHS operand type.
                     let lhs_ty = match lhs {
@@ -967,9 +1064,27 @@ fn translate_rvalue<'tcx>(
             };
             Some(val)
         }
-        Rvalue::Use(operand) => translate_operand(tcx, operand, mir, builder, locals, stack_locals, static_refs, static_data),
+        Rvalue::Use(operand) => translate_operand(
+            tcx,
+            operand,
+            mir,
+            builder,
+            locals,
+            stack_locals,
+            static_refs,
+            static_data,
+        ),
         Rvalue::Cast(kind, operand, target_ty) => {
-            let val = translate_operand(tcx, operand, mir, builder, locals, stack_locals, static_refs, static_data)?;
+            let val = translate_operand(
+                tcx,
+                operand,
+                mir,
+                builder,
+                locals,
+                stack_locals,
+                static_refs,
+                static_data,
+            )?;
             match kind {
                 CastKind::IntToInt => {
                     let src_ty = match operand {
@@ -986,9 +1101,7 @@ fn translate_rvalue<'tcx>(
         Rvalue::Ref(_, _, place) | Rvalue::RawPtr(_, place) => {
             if !place.projection.is_empty() {
                 // Place has projections: compute address of the projected location.
-                translate_place_to_addr(
-                    tcx, place, mir, builder, locals, stack_locals,
-                )
+                translate_place_to_addr(tcx, place, mir, builder, locals, stack_locals)
             } else if stack_locals.is_stack(place.local) {
                 // Local is stack-allocated: its value is already the address.
                 locals.get(place.local)
@@ -1029,17 +1142,22 @@ fn translate_rvalue<'tcx>(
             let slot = builder.stack_slot(total_size as u32, Origin::synthetic());
             for (i, op) in operands.iter().enumerate() {
                 if let Some(val) = translate_operand(
-                    tcx, op, mir, builder, locals, stack_locals,
-                    static_refs, static_data,
+                    tcx,
+                    op,
+                    mir,
+                    builder,
+                    locals,
+                    stack_locals,
+                    static_refs,
+                    static_data,
                 ) {
                     let offset = field_offset(tcx, agg_ty, i).unwrap_or(i as u64 * 8);
                     if offset == 0 {
                         builder.store(val.into(), slot.into(), Origin::synthetic());
                     } else {
                         let off_val = builder.iconst(offset as i64, Origin::synthetic());
-                        let addr = builder.ptradd(
-                            slot.into(), off_val.into(), 0, Origin::synthetic(),
-                        );
+                        let addr =
+                            builder.ptradd(slot.into(), off_val.into(), 0, Origin::synthetic());
                         builder.store(val.into(), addr.into(), Origin::synthetic());
                     }
                 }
@@ -1056,18 +1174,34 @@ fn translate_rvalue<'tcx>(
         }
         Rvalue::UnaryOp(mir::UnOp::PtrMetadata, _) => None,
         Rvalue::UnaryOp(mir::UnOp::Neg, operand) => {
-            let v = translate_operand(tcx, operand, mir, builder, locals, stack_locals, static_refs, static_data)?;
+            let v = translate_operand(
+                tcx,
+                operand,
+                mir,
+                builder,
+                locals,
+                stack_locals,
+                static_refs,
+                static_data,
+            )?;
             let zero = builder.iconst(0, Origin::synthetic());
             Some(builder.sub(zero.into(), v.into(), None, Origin::synthetic()))
         }
         Rvalue::UnaryOp(mir::UnOp::Not, operand) => {
-            let v = translate_operand(tcx, operand, mir, builder, locals, stack_locals, static_refs, static_data)?;
+            let v = translate_operand(
+                tcx,
+                operand,
+                mir,
+                builder,
+                locals,
+                stack_locals,
+                static_refs,
+                static_data,
+            )?;
             let ones = builder.iconst(-1, Origin::synthetic());
             Some(builder.xor(v.into(), ones.into(), None, Origin::synthetic()))
         }
-        Rvalue::Discriminant(place) => {
-            locals.get(place.local)
-        }
+        Rvalue::Discriminant(place) => locals.get(place.local),
         _ => None,
     }
 }
@@ -1138,9 +1272,7 @@ fn translate_operand<'tcx>(
             if place.projection.is_empty() {
                 locals.get(place.local)
             } else {
-                translate_place_to_value(
-                    tcx, place, mir, builder, locals, stack_locals,
-                )
+                translate_place_to_value(tcx, place, mir, builder, locals, stack_locals)
             }
         }
         Operand::Constant(constant) => {
@@ -1161,9 +1293,7 @@ fn translate_const<'tcx>(
         return None;
     };
     match val {
-        mir::ConstValue::Scalar(scalar) => {
-            translate_scalar(scalar, ty, builder)
-        }
+        mir::ConstValue::Scalar(scalar) => translate_scalar(scalar, ty, builder),
         mir::ConstValue::ZeroSized => Some(builder.iconst(0, Origin::synthetic())),
         mir::ConstValue::Slice { alloc_id, meta } => {
             translate_const_slice(tcx, alloc_id, meta, builder, static_refs, static_data)

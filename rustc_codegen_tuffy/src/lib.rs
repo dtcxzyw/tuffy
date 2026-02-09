@@ -8,11 +8,12 @@
 #![feature(rustc_private)]
 #![feature(box_patterns)]
 
-extern crate rustc_driver;
 extern crate rustc_codegen_ssa;
 extern crate rustc_data_structures;
+extern crate rustc_driver;
 extern crate rustc_middle;
 extern crate rustc_session;
+extern crate rustc_span;
 extern crate rustc_symbol_mangling;
 
 mod mir_to_ir;
@@ -21,13 +22,14 @@ use std::any::Any;
 use std::fs;
 
 use rustc_codegen_ssa::traits::CodegenBackend;
-use rustc_codegen_ssa::{CodegenResults, CompiledModule, CrateInfo, ModuleKind};
+use rustc_codegen_ssa::{CodegenResults, CompiledModule, CrateInfo, ModuleKind, TargetConfig};
 use rustc_data_structures::fx::FxIndexMap;
 use rustc_middle::dep_graph::{WorkProduct, WorkProductId};
 use rustc_middle::mir::mono::MonoItem;
 use rustc_middle::ty::TyCtxt;
-use rustc_session::config::OutputFilenames;
 use rustc_session::Session;
+use rustc_session::config::OutputFilenames;
+use rustc_span::Symbol;
 use tuffy_codegen::CodegenSession;
 use tuffy_target::types::{CompiledFunction, StaticData};
 
@@ -36,6 +38,32 @@ pub struct TuffyCodegenBackend;
 impl CodegenBackend for TuffyCodegenBackend {
     fn name(&self) -> &'static str {
         "tuffy"
+    }
+
+    fn target_config(&self, sess: &Session) -> TargetConfig {
+        // Report baseline target features for the current target.
+        // For x86-64-v1: x87, sse, sse2, fxsr are mandatory.
+        let features: Vec<Symbol> = sess
+            .target
+            .rust_target_features()
+            .iter()
+            .filter(|(feature, _, _)| matches!(*feature, "x87" | "sse" | "sse2" | "fxsr"))
+            .flat_map(|(feature, _, _)| {
+                sess.target
+                    .implied_target_features(feature)
+                    .into_iter()
+                    .map(Symbol::intern)
+            })
+            .collect();
+
+        TargetConfig {
+            target_features: features.clone(),
+            unstable_target_features: features,
+            has_reliable_f16: false,
+            has_reliable_f16_math: false,
+            has_reliable_f128: false,
+            has_reliable_f128_math: false,
+        }
     }
 
     fn codegen_crate<'tcx>(&self, tcx: TyCtxt<'tcx>) -> Box<dyn Any> {
@@ -143,10 +171,7 @@ pub fn __rustc_codegen_backend() -> Box<dyn CodegenBackend> {
 /// The allocator shim provides `__rust_alloc` etc. that forward to the
 /// default allocator (`__rdl_alloc` etc.). This is required for binary
 /// crates that use the standard library.
-fn generate_allocator_module(
-    tcx: TyCtxt<'_>,
-    session: &CodegenSession,
-) -> Option<CompiledModule> {
+fn generate_allocator_module(tcx: TyCtxt<'_>, session: &CodegenSession) -> Option<CompiledModule> {
     // Only generate allocator shim for binary crates.
     let dominated_by_std = tcx
         .crates(())
@@ -157,9 +182,8 @@ fn generate_allocator_module(
     }
 
     // Use rustc's symbol mangling to get correct v0-mangled names.
-    let mangle = |name: &str| -> String {
-        rustc_symbol_mangling::mangle_internal_symbol(tcx, name)
-    };
+    let mangle =
+        |name: &str| -> String { rustc_symbol_mangling::mangle_internal_symbol(tcx, name) };
 
     // Generate forwarding stubs: each __rust_alloc* calls __rdl_alloc*.
     let alloc_pairs_raw = [
@@ -211,10 +235,7 @@ fn generate_allocator_module(
 /// compile the real `lang_start` (it constructs a `&dyn Fn() -> i32`
 /// trait object, which requires vtable support). Our simplified version
 /// calls the user's main directly and returns 0.
-fn generate_entry_point(
-    tcx: TyCtxt<'_>,
-    session: &CodegenSession,
-) -> Option<CompiledModule> {
+fn generate_entry_point(tcx: TyCtxt<'_>, session: &CodegenSession) -> Option<CompiledModule> {
     use rustc_middle::ty::{self, Instance};
 
     let (entry_def_id, _) = tcx.entry_fn(())?;
