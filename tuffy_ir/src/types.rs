@@ -19,6 +19,32 @@ pub enum FloatType {
     F64,
 }
 
+/// Vector type parameterized by total bit-width.
+///
+/// Element count is derived: `count = width / element_bits`.
+/// Mirrors `TuffyLean.IR.VectorType`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum VectorType {
+    /// Fixed-width vector (e.g., 128 for SSE, 256 for AVX).
+    Fixed(u32),
+    /// Scalable vector: `vscale × base_width` bits (e.g., SVE, RVV).
+    Scalable(u32),
+}
+
+impl VectorType {
+    /// Get the base width in bits.
+    pub fn base_width(&self) -> u32 {
+        match self {
+            VectorType::Fixed(w) | VectorType::Scalable(w) => *w,
+        }
+    }
+
+    /// Compute lane count given element bit-width.
+    pub fn lane_count(&self, elem_bits: u32) -> u32 {
+        self.base_width() / elem_bits
+    }
+}
+
 /// A type in the tuffy IR.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
@@ -30,6 +56,8 @@ pub enum Type {
     Ptr(u32),
     /// Floating point type.
     Float(FloatType),
+    /// Vector type parameterized by total bit-width.
+    Vec(VectorType),
 }
 
 /// Memory ordering for atomic operations.

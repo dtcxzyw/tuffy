@@ -16,7 +16,7 @@ use std::fmt;
 
 use crate::function::{CfgNode, Function, RegionKind};
 use crate::instruction::{AtomicRmwOp, ICmpOp, Op, Operand};
-use crate::types::{Annotation, FloatType, MemoryOrdering, Type};
+use crate::types::{Annotation, FloatType, MemoryOrdering, Type, VectorType};
 use crate::value::{BlockRef, RegionRef, ValueRef};
 
 /// Display context that tracks value numbering.
@@ -77,16 +77,20 @@ impl DisplayCtx {
     }
 }
 
-fn fmt_type(ty: &Type) -> &'static str {
+fn fmt_type(ty: &Type) -> String {
     match ty {
-        Type::Int => "int",
-        Type::Byte(_) => "byte",
-        Type::Ptr(_) => "ptr",
+        Type::Int => "int".to_string(),
+        Type::Byte(_) => "byte".to_string(),
+        Type::Ptr(_) => "ptr".to_string(),
         Type::Float(ft) => match ft {
-            FloatType::BF16 => "bf16",
-            FloatType::F16 => "f16",
-            FloatType::F32 => "f32",
-            FloatType::F64 => "f64",
+            FloatType::BF16 => "bf16".to_string(),
+            FloatType::F16 => "f16".to_string(),
+            FloatType::F32 => "f32".to_string(),
+            FloatType::F64 => "f64".to_string(),
+        },
+        Type::Vec(vt) => match vt {
+            VectorType::Fixed(w) => format!("vec<{w}>"),
+            VectorType::Scalable(bw) => format!("vec<vscale x {bw}>"),
         },
     }
 }
