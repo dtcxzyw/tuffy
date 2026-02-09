@@ -7,3 +7,7 @@ license.workspace = true
 [dependencies]
 tuffy_ir = { path = "../tuffy_ir" }
 tuffy_target = { path = "../tuffy_target" }
+object = { version = "0.36", features = ["write"] }
+
+[dev-dependencies]
+tempfile = "3"

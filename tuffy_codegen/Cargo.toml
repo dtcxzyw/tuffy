@@ -8,7 +8,3 @@ license.workspace = true
 tuffy_ir = { path = "../tuffy_ir" }
 tuffy_target = { path = "../tuffy_target" }
 tuffy_target_x86 = { path = "../tuffy_target_x86" }
-object = { version = "0.36", features = ["write"] }
-
-[dev-dependencies]
-tempfile = "3"

@@ -209,8 +209,6 @@ dependencies = [
 name = "tuffy_codegen"
 version = "0.1.0"
 dependencies = [
- "object",
- "tempfile",
  "tuffy_ir",
  "tuffy_target",
  "tuffy_target_x86",
@@ -245,6 +243,8 @@ dependencies = [
 name = "tuffy_target_x86"
 version = "0.1.0"
 dependencies = [
+ "object",
+ "tempfile",
  "tuffy_ir",
  "tuffy_target",
 ]

@@ -5,11 +5,11 @@ use std::process::Command;
 
 use std::collections::HashMap;
 
-use tuffy_codegen::{emit, encode, isel};
 use tuffy_ir::builder::Builder;
 use tuffy_ir::function::{Function, RegionKind};
 use tuffy_ir::instruction::{Operand, Origin};
 use tuffy_ir::types::{Annotation, Type};
+use tuffy_target_x86::{emit, encode, isel};
 
 fn build_add_func() -> Function {
     let s32 = Some(Annotation::Signed(32));
