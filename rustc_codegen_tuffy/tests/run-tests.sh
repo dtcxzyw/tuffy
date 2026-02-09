@@ -5,22 +5,22 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+CRATE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Find backend .so
 if [ -n "${BACKEND:-}" ]; then
     :
-elif [ -f "$REPO_ROOT/rustc_codegen_tuffy/target/release/librustc_codegen_tuffy.so" ]; then
-    BACKEND="$REPO_ROOT/rustc_codegen_tuffy/target/release/librustc_codegen_tuffy.so"
-elif [ -f "$REPO_ROOT/rustc_codegen_tuffy/target/debug/librustc_codegen_tuffy.so" ]; then
-    BACKEND="$REPO_ROOT/rustc_codegen_tuffy/target/debug/librustc_codegen_tuffy.so"
+elif [ -f "$CRATE_ROOT/target/release/librustc_codegen_tuffy.so" ]; then
+    BACKEND="$CRATE_ROOT/target/release/librustc_codegen_tuffy.so"
+elif [ -f "$CRATE_ROOT/target/debug/librustc_codegen_tuffy.so" ]; then
+    BACKEND="$CRATE_ROOT/target/debug/librustc_codegen_tuffy.so"
 else
     echo "ERROR: Backend not found."
     echo "Run: cd rustc_codegen_tuffy && cargo build"
     exit 1
 fi
 
-FIXTURE_DIR="$REPO_ROOT/tests/fixtures"
+FIXTURE_DIR="$CRATE_ROOT/tests/fixtures"
 OUT_DIR="/tmp/tuffy_hello_test"
 mkdir -p "$OUT_DIR"
 

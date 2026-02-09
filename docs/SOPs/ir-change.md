@@ -88,7 +88,7 @@ Add or update tests at every layer:
 | Rust unit tests | `tuffy_ir/src/tests.rs` |
 | Interpreter tests | `tuffy_ir_interp/tests/` |
 | Codegen tests | `tuffy_codegen/src/tests.rs` |
-| UI tests | `tests/ui/` (run via `tests/run-ui-tests.sh`) |
+| UI tests | `rustc_codegen_tuffy/tests/` (run via `rustc_codegen_tuffy/tests/run-ui-tests.sh`) |
 
 ### 6. Final Verification
 
@@ -98,7 +98,7 @@ Before committing, all of the following must pass:
 cd lean && lake build
 cargo test
 cargo clippy
-tests/run-ui-tests.sh
+rustc_codegen_tuffy/tests/run-ui-tests.sh
 ```
 
 ## Commit Strategy

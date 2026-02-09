@@ -1,13 +1,14 @@
 #!/bin/bash
 # Run rustc UI tests against tuffy codegen backend.
-# Usage: ./tests/run-ui-tests.sh [rust-src-dir]
+# Usage: ./rustc_codegen_tuffy/tests/run-ui-tests.sh [rust-src-dir]
 #
 # Requires: scratch/rust/tests/ui/ (shallow clone of rust-lang/rust)
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+CRATE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$CRATE_ROOT/.." && pwd)"
 
 # Options
 FAIL_FAST="${FAIL_FAST:-0}"
@@ -24,15 +25,15 @@ done
 # rustc_codegen_tuffy is excluded from the workspace, so prefer its own target dir.
 if [ -n "${BACKEND:-}" ]; then
     :
-elif [ -f "$REPO_ROOT/rustc_codegen_tuffy/target/release/librustc_codegen_tuffy.so" ]; then
-    BACKEND="$REPO_ROOT/rustc_codegen_tuffy/target/release/librustc_codegen_tuffy.so"
-elif [ -f "$REPO_ROOT/rustc_codegen_tuffy/target/debug/librustc_codegen_tuffy.so" ]; then
-    BACKEND="$REPO_ROOT/rustc_codegen_tuffy/target/debug/librustc_codegen_tuffy.so"
+elif [ -f "$CRATE_ROOT/target/release/librustc_codegen_tuffy.so" ]; then
+    BACKEND="$CRATE_ROOT/target/release/librustc_codegen_tuffy.so"
+elif [ -f "$CRATE_ROOT/target/debug/librustc_codegen_tuffy.so" ]; then
+    BACKEND="$CRATE_ROOT/target/debug/librustc_codegen_tuffy.so"
 else
-    BACKEND="$REPO_ROOT/rustc_codegen_tuffy/target/debug/librustc_codegen_tuffy.so"
+    BACKEND="$CRATE_ROOT/target/debug/librustc_codegen_tuffy.so"
 fi
 UI_DIR="${UI_DIR_ARG:-$REPO_ROOT/scratch/rust/tests/ui}"
-EXCLUDE_FILE="$REPO_ROOT/tests/ui-exclude.txt"
+EXCLUDE_FILE="$CRATE_ROOT/tests/ui-exclude.txt"
 OUT_DIR="/tmp/tuffy_ui_test"
 
 mkdir -p "$OUT_DIR"

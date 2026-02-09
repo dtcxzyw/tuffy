@@ -67,8 +67,8 @@ jobs:
 
       - name: Run hello world test
         run: |
-          chmod +x tests/run-tests.sh
-          tests/run-tests.sh
+          chmod +x rustc_codegen_tuffy/tests/run-tests.sh
+          rustc_codegen_tuffy/tests/run-tests.sh
 
       - name: Clone rustc UI tests
         run: |
@@ -77,8 +77,8 @@ jobs:
 
       - name: Run UI tests
         run: |
-          chmod +x tests/run-ui-tests.sh
-          tests/run-ui-tests.sh
+          chmod +x rustc_codegen_tuffy/tests/run-ui-tests.sh
+          rustc_codegen_tuffy/tests/run-ui-tests.sh
 
   lean:
     name: Lean 4 CI
