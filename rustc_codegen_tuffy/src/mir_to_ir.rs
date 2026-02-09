@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use rustc_middle::mir::{self, BasicBlock, BinOp, Operand, Place, PlaceElem, Rvalue, StatementKind, TerminatorKind};
+use rustc_middle::mir::{self, BasicBlock, BinOp, CastKind, Operand, Place, PlaceElem, Rvalue, StatementKind, TerminatorKind};
 use rustc_middle::ty::{self, Instance, TyCtxt};
 
 use tuffy_ir::builder::Builder;
@@ -208,6 +208,32 @@ fn type_size<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> Option<u64> {
     let typing_env = ty::TypingEnv::fully_monomorphized();
     let layout = tcx.layout_of(typing_env.as_query_input(ty)).ok()?;
     Some(layout.size.bytes())
+}
+
+/// Query the alignment of type `ty` in bytes.
+fn type_align<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> Option<u64> {
+    let typing_env = ty::TypingEnv::fully_monomorphized();
+    let layout = tcx.layout_of(typing_env.as_query_input(ty)).ok()?;
+    Some(layout.align.abi.bytes())
+}
+
+/// Check if a type is a signed integer type.
+fn is_signed_int(ty: ty::Ty<'_>) -> bool {
+    matches!(ty.kind(), ty::Int(_))
+}
+
+/// Get the bitwidth of an integer type (for cast operations).
+fn int_bitwidth(ty: ty::Ty<'_>) -> Option<u32> {
+    match ty.kind() {
+        ty::Bool => Some(8),
+        ty::Int(ty::IntTy::I8) | ty::Uint(ty::UintTy::U8) => Some(8),
+        ty::Int(ty::IntTy::I16) | ty::Uint(ty::UintTy::U16) => Some(16),
+        ty::Int(ty::IntTy::I32) | ty::Uint(ty::UintTy::U32) | ty::Char => Some(32),
+        ty::Int(ty::IntTy::I64) | ty::Uint(ty::UintTy::U64)
+        | ty::Int(ty::IntTy::Isize) | ty::Uint(ty::UintTy::Usize) => Some(64),
+        ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128) => Some(128),
+        _ => None,
+    }
 }
 
 /// Tracks which MIR locals hold stack slot addresses (aggregate/spilled values)
@@ -737,14 +763,50 @@ fn translate_rvalue<'tcx>(
                 BinOp::BitXor => {
                     builder.xor(l.into(), r.into(), None, Origin::synthetic())
                 }
+                BinOp::Shr | BinOp::ShrUnchecked => {
+                    // Determine signedness from the LHS operand type.
+                    let lhs_ty = match lhs {
+                        Operand::Copy(p) | Operand::Move(p) => mir.local_decls[p.local].ty,
+                        Operand::Constant(c) => c.ty(),
+                        _ => return None,
+                    };
+                    if is_signed_int(lhs_ty) {
+                        builder.ashr(l.into(), r.into(), None, Origin::synthetic())
+                    } else {
+                        builder.lshr(l.into(), r.into(), None, Origin::synthetic())
+                    }
+                }
+                BinOp::Div => {
+                    let lhs_ty = match lhs {
+                        Operand::Copy(p) | Operand::Move(p) => mir.local_decls[p.local].ty,
+                        Operand::Constant(c) => c.ty(),
+                        _ => return None,
+                    };
+                    if is_signed_int(lhs_ty) {
+                        builder.sdiv(l.into(), r.into(), None, Origin::synthetic())
+                    } else {
+                        builder.udiv(l.into(), r.into(), None, Origin::synthetic())
+                    }
+                }
                 _ => return None,
             };
             Some(val)
         }
         Rvalue::Use(operand) => translate_operand(tcx, operand, mir, builder, locals, stack_locals, static_refs, static_data),
-        Rvalue::Cast(_kind, operand, _ty) => {
-            // For now, treat all casts as bitwise moves.
-            translate_operand(tcx, operand, mir, builder, locals, stack_locals, static_refs, static_data)
+        Rvalue::Cast(kind, operand, target_ty) => {
+            let val = translate_operand(tcx, operand, mir, builder, locals, stack_locals, static_refs, static_data)?;
+            match kind {
+                CastKind::IntToInt => {
+                    let src_ty = match operand {
+                        Operand::Copy(p) | Operand::Move(p) => mir.local_decls[p.local].ty,
+                        Operand::Constant(c) => c.ty(),
+                        _ => return Some(val),
+                    };
+                    translate_int_to_int_cast(src_ty, *target_ty, val, builder)
+                }
+                // Pointer casts and transmutes are bitwise moves.
+                _ => Some(val),
+            }
         }
         Rvalue::Ref(_, _, place) | Rvalue::RawPtr(_, place) => {
             if !place.projection.is_empty() {
@@ -835,7 +897,86 @@ fn translate_rvalue<'tcx>(
         Rvalue::Discriminant(place) => {
             locals.get(place.local)
         }
+        Rvalue::NullaryOp(op, ty) => {
+            match op {
+                mir::NullaryOp::SizeOf => {
+                    let size = type_size(tcx, *ty)?;
+                    Some(builder.iconst(size as i64, Origin::synthetic()))
+                }
+                mir::NullaryOp::AlignOf => {
+                    let align = type_align(tcx, *ty)?;
+                    Some(builder.iconst(align as i64, Origin::synthetic()))
+                }
+                _ => None,
+            }
+        }
+        Rvalue::Len(place) => {
+            let place_ty = mir.local_decls[place.local].ty;
+            match place_ty.kind() {
+                ty::Array(_, len) => {
+                    let len_val = len.try_to_target_usize(tcx)?;
+                    Some(builder.iconst(len_val as i64, Origin::synthetic()))
+                }
+                ty::Ref(_, inner, _) | ty::RawPtr(inner, _) => {
+                    match inner.kind() {
+                        ty::Slice(_) => fat_locals.get(place.local),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            }
+        }
         _ => None,
+    }
+}
+
+/// Translate an IntToInt cast between integer types.
+///
+/// - Widening signed: sign-extend via shl+ashr
+/// - Widening unsigned / narrowing: mask via and
+/// - Same width: pass through (reinterpretation)
+fn translate_int_to_int_cast(
+    src_ty: ty::Ty<'_>,
+    target_ty: ty::Ty<'_>,
+    val: ValueRef,
+    builder: &mut Builder<'_>,
+) -> Option<ValueRef> {
+    let src_bits = int_bitwidth(src_ty)?;
+    let dst_bits = int_bitwidth(target_ty)?;
+
+    if src_bits == dst_bits {
+        // Same width: reinterpretation only.
+        return Some(val);
+    }
+
+    if dst_bits > src_bits {
+        // Widening cast.
+        if is_signed_int(src_ty) {
+            // Sign-extend: shl by (64 - src_bits), then ashr by (64 - src_bits).
+            let shift_amt = 64 - src_bits;
+            let shift_val = builder.iconst(shift_amt as i64, Origin::synthetic());
+            let shifted = builder.shl(val.into(), shift_val.into(), None, Origin::synthetic());
+            let shift_val2 = builder.iconst(shift_amt as i64, Origin::synthetic());
+            Some(builder.ashr(shifted.into(), shift_val2.into(), None, Origin::synthetic()))
+        } else {
+            // Zero-extend: mask off high bits.
+            let mask = if src_bits >= 64 {
+                return Some(val);
+            } else {
+                (1i64 << src_bits) - 1
+            };
+            let mask_val = builder.iconst(mask, Origin::synthetic());
+            Some(builder.and(val.into(), mask_val.into(), None, Origin::synthetic()))
+        }
+    } else {
+        // Narrowing cast: mask to target width.
+        let mask = if dst_bits >= 64 {
+            return Some(val);
+        } else {
+            (1i64 << dst_bits) - 1
+        };
+        let mask_val = builder.iconst(mask, Origin::synthetic());
+        Some(builder.and(val.into(), mask_val.into(), None, Origin::synthetic()))
     }
 }
 
