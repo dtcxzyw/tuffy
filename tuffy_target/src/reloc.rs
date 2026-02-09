@@ -3,9 +3,9 @@
 /// Kind of relocation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RelocKind {
-    /// PC-relative call (R_X86_64_PLT32).
+    /// PC-relative call (e.g., R_X86_64_PLT32 on x86-64).
     Call,
-    /// PC-relative data reference (R_X86_64_PC32).
+    /// PC-relative data reference (e.g., R_X86_64_PC32 on x86-64).
     PcRel,
 }
 
