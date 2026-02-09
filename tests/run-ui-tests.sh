@@ -9,6 +9,17 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# Options
+FAIL_FAST="${FAIL_FAST:-0}"
+UI_DIR_ARG=""
+for arg in "$@"; do
+    if [ "$arg" = "--fail-fast" ]; then
+        FAIL_FAST=1
+    else
+        UI_DIR_ARG="$arg"
+    fi
+done
+
 # Find backend .so: env var > crate-local target > workspace target
 # rustc_codegen_tuffy is excluded from the workspace, so prefer its own target dir.
 if [ -n "${BACKEND:-}" ]; then
@@ -20,7 +31,7 @@ elif [ -f "$REPO_ROOT/rustc_codegen_tuffy/target/debug/librustc_codegen_tuffy.so
 else
     BACKEND="$REPO_ROOT/rustc_codegen_tuffy/target/debug/librustc_codegen_tuffy.so"
 fi
-UI_DIR="${1:-$REPO_ROOT/scratch/rust/tests/ui}"
+UI_DIR="${UI_DIR_ARG:-$REPO_ROOT/scratch/rust/tests/ui}"
 EXCLUDE_FILE="$REPO_ROOT/tests/ui-exclude.txt"
 OUT_DIR="/tmp/tuffy_ui_test"
 
@@ -93,6 +104,13 @@ for test_file in "${tests[@]}"; do
     else
         fail=$((fail + 1))
         failures="$failures\n  FAIL: $rel_path"
+        if [ "$FAIL_FAST" -eq 1 ]; then
+            echo "FAIL: $rel_path"
+            echo "$output"
+            echo ""
+            echo "Stopping at first failure (--fail-fast)."
+            exit 1
+        fi
     fi
 
     if [ $((total % 500)) -eq 0 ]; then
