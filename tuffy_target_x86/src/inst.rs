@@ -130,4 +130,6 @@ pub enum MInst {
     ShrRCL { size: OpSize, dst: Gpr },
     /// sar dst, cl (arithmetic right shift by cl)
     SarRCL { size: OpSize, dst: Gpr },
+    /// ud2 (undefined instruction trap)
+    Ud2,
 }

@@ -466,6 +466,10 @@ fn select_inst(
             regs.assign(vref, dst);
         }
 
+        Op::Unreachable => {
+            out.push(MInst::Ud2);
+        }
+
         // Ops not yet supported in isel
         Op::Bitcast(_)
         | Op::Sext(..)

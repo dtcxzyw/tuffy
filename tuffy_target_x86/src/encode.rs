@@ -58,6 +58,10 @@ fn encode_inst(
         MInst::SubRR { size, dst, src } => encode_alu_rr(0x29, *size, *dst, *src, buf),
         MInst::ImulRR { size, dst, src } => encode_imul_rr(*size, *dst, *src, buf),
         MInst::Ret => buf.push(0xc3),
+        MInst::Ud2 => {
+            buf.push(0x0f);
+            buf.push(0x0b);
+        }
         MInst::Label { id } => {
             labels.insert(*id, buf.len());
         }
