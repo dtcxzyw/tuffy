@@ -283,10 +283,9 @@ fn display_shift_ops() {
 
     let a = builder.param(0, Type::Int, None, Origin::synthetic());
     let b = builder.param(1, Type::Int, None, Origin::synthetic());
-    let v_shl = builder.shl(a.into(), b.into(), None, Origin::synthetic());
-    let v_lshr = builder.lshr(a.into(), b.into(), None, Origin::synthetic());
-    let v_ashr = builder.ashr(v_shl.into(), v_lshr.into(), None, Origin::synthetic());
-    builder.ret(Some(v_ashr.into()), Origin::synthetic());
+    let _v_shl = builder.shl(a.into(), b.into(), None, Origin::synthetic());
+    let v_shr = builder.shr(a.into(), b.into(), None, Origin::synthetic());
+    builder.ret(Some(v_shr.into()), Origin::synthetic());
     builder.exit_region();
 
     let output = format!("{func}");
@@ -297,9 +296,8 @@ fn display_shift_ops() {
          \x20\x20\x20\x20v0 = param 0\n\
          \x20\x20\x20\x20v1 = param 1\n\
          \x20\x20\x20\x20v2 = shl v0, v1\n\
-         \x20\x20\x20\x20v3 = lshr v0, v1\n\
-         \x20\x20\x20\x20v4 = ashr v2, v3\n\
-         \x20\x20\x20\x20ret v4\n\
+         \x20\x20\x20\x20v3 = shr v0, v1\n\
+         \x20\x20\x20\x20ret v3\n\
          }"
     );
 }

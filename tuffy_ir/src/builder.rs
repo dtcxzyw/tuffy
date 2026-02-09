@@ -248,26 +248,16 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::Shl(a, b), Type::Int, origin, ann)
     }
 
-    /// Logical right shift (poison if shift amount is negative).
-    pub fn lshr(
+    /// Right shift (poison if shift amount is negative).
+    /// Signedness is a property of operand annotations, not the operation.
+    pub fn shr(
         &mut self,
         a: Operand,
         b: Operand,
         ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::Lshr(a, b), Type::Int, origin, ann)
-    }
-
-    /// Arithmetic right shift (poison if shift amount is negative).
-    pub fn ashr(
-        &mut self,
-        a: Operand,
-        b: Operand,
-        ann: Option<Annotation>,
-        origin: Origin,
-    ) -> ValueRef {
-        self.push_inst(Op::Ashr(a, b), Type::Int, origin, ann)
+        self.push_inst(Op::Shr(a, b), Type::Int, origin, ann)
     }
 
     // ── Floating point arithmetic ──

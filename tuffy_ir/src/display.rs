@@ -202,11 +202,8 @@ fn fmt_inst(
         Op::Shl(a, b) => {
             format!("{v} = shl {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
         }
-        Op::Lshr(a, b) => {
-            format!("{v} = lshr {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
-        }
-        Op::Ashr(a, b) => {
-            format!("{v} = ashr {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+        Op::Shr(a, b) => {
+            format!("{v} = shr {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
         }
         Op::FAdd(a, b) => {
             format!("{v} = fadd {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))

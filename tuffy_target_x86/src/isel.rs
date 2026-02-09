@@ -6,6 +6,7 @@ use crate::inst::{CondCode, MInst, OpSize};
 use crate::reg::Gpr;
 use tuffy_ir::function::{CfgNode, Function};
 use tuffy_ir::instruction::{ICmpOp, Op};
+use tuffy_ir::types::Annotation;
 use tuffy_ir::value::ValueRef;
 
 /// Result of instruction selection for a single function.
@@ -440,12 +441,12 @@ fn select_inst(
             select_shift_cl(vref, lhs.value, rhs.value, ShiftOp::Shl, regs, alloc, out)?;
         }
 
-        Op::Lshr(lhs, rhs) => {
-            select_shift_cl(vref, lhs.value, rhs.value, ShiftOp::Shr, regs, alloc, out)?;
-        }
-
-        Op::Ashr(lhs, rhs) => {
-            select_shift_cl(vref, lhs.value, rhs.value, ShiftOp::Sar, regs, alloc, out)?;
+        Op::Shr(lhs, rhs) => {
+            let shift_op = match lhs.annotation {
+                Some(Annotation::Signed(_)) => ShiftOp::Sar,
+                _ => ShiftOp::Shr,
+            };
+            select_shift_cl(vref, lhs.value, rhs.value, shift_op, regs, alloc, out)?;
         }
 
         Op::PtrAdd(ptr, offset) => {

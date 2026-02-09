@@ -1096,16 +1096,7 @@ fn translate_rvalue<'tcx>(
                 BinOp::BitAnd => builder.and(l_op, r_op, res_ann, Origin::synthetic()),
                 BinOp::BitXor => builder.xor(l_op, r_op, res_ann, Origin::synthetic()),
                 BinOp::Shr | BinOp::ShrUnchecked => {
-                    let lhs_ty = match lhs {
-                        Operand::Copy(p) | Operand::Move(p) => mir.local_decls[p.local].ty,
-                        Operand::Constant(c) => c.ty(),
-                        _ => return None,
-                    };
-                    if is_signed_int(lhs_ty) {
-                        builder.ashr(l_op, r_op, res_ann, Origin::synthetic())
-                    } else {
-                        builder.lshr(l_op, r_op, res_ann, Origin::synthetic())
-                    }
+                    builder.shr(l_op, r_op, res_ann, Origin::synthetic())
                 }
                 BinOp::Div => builder.div(l_op, r_op, res_ann, Origin::synthetic()),
                 BinOp::Rem => builder.rem(l_op, r_op, res_ann, Origin::synthetic()),
@@ -1257,7 +1248,7 @@ fn translate_rvalue<'tcx>(
 
 /// Translate an IntToInt cast between integer types.
 ///
-/// - Widening signed: sign-extend via shl+ashr
+/// - Widening signed: sign-extend via shl+shr
 /// - Widening unsigned / narrowing: mask via and
 /// - Same width: pass through (reinterpretation)
 fn translate_int_to_int_cast(
@@ -1277,12 +1268,14 @@ fn translate_int_to_int_cast(
     if dst_bits > src_bits {
         // Widening cast.
         if is_signed_int(src_ty) {
-            // Sign-extend: shl by (64 - src_bits), then ashr by (64 - src_bits).
+            // Sign-extend: shl by (64 - src_bits), then shr by (64 - src_bits).
+            // The shr LHS operand needs a signed annotation so isel picks SAR.
             let shift_amt = 64 - src_bits;
             let shift_val = builder.iconst(shift_amt as i64, Origin::synthetic());
             let shifted = builder.shl(val.into(), shift_val.into(), None, Origin::synthetic());
             let shift_val2 = builder.iconst(shift_amt as i64, Origin::synthetic());
-            Some(builder.ashr(shifted.into(), shift_val2.into(), None, Origin::synthetic()))
+            let shifted_op = IrOperand::annotated(shifted, Annotation::Signed(64));
+            Some(builder.shr(shifted_op, shift_val2.into(), None, Origin::synthetic()))
         } else {
             // Zero-extend: mask off high bits.
             let mask = if src_bits >= 64 {

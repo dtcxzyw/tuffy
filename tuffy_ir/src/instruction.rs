@@ -123,10 +123,9 @@ pub enum Op {
     Xor(Operand, Operand),
     /// Left shift: shl %a, %b (poison if shift amount < 0)
     Shl(Operand, Operand),
-    /// Logical right shift: lshr %a, %b (poison if shift amount < 0)
-    Lshr(Operand, Operand),
-    /// Arithmetic right shift: ashr %a, %b (poison if shift amount < 0)
-    Ashr(Operand, Operand),
+    /// Right shift: shr %a, %b (poison if shift amount < 0).
+    /// Signedness is a property of operand annotations, not the operation.
+    Shr(Operand, Operand),
     /// Integer constant.
     Const(i64),
 
