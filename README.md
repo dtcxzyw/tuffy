@@ -15,3 +15,8 @@ Tuffy explores several unconventional compiler design ideas:
 - **Formal-first** — Correctness of optimization passes is backed by formal verification from the start, not bolted on after the fact. The IR semantics are designed to be amenable to automated reasoning.
 - **Hardware-friendly IR** — Explore IR representations that are more cache-friendly and suitable for modern hardware, reducing pointer chasing and improving data locality during compilation.
 - **Policy-mechanism separation** — Optimization strategies are decoupled from the compiler engine. Users can specify or pin a particular optimization policy (e.g., lock to a versioned strategy) to prevent performance regressions when upgrading the compiler.
+
+## Milestones
+
+- **2026-02-08** — Project started
+- **2026-02-09** — Successfully compiled and ran "Hello, world!" via `rustc -Z codegen-backend`
