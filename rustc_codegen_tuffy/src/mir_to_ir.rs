@@ -47,7 +47,8 @@ pub fn translate_function<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> 
     let mir = tcx.instance_mir(instance.def);
     let name = tcx.symbol_name(instance).name.to_string();
     let sig = inst_ty.fn_sig(tcx);
-    let sig = tcx.normalize_erasing_late_bound_regions(ty::TypingEnv::fully_monomorphized(), sig);
+    let sig = tcx.instantiate_bound_regions_with_erased(sig);
+    let sig = tcx.try_normalize_erasing_regions(ty::TypingEnv::fully_monomorphized(), sig).ok()?;
 
     let params: Vec<Type> = sig
         .inputs()
@@ -1255,6 +1256,11 @@ fn resolve_call_symbol<'tcx>(tcx: TyCtxt<'tcx>, func_op: &Operand<'tcx>) -> Opti
     };
     match ty.kind() {
         ty::FnDef(def_id, args) => {
+            // Skip if the callee's generic args contain unresolved parameters —
+            // Instance::try_resolve will panic during normalization.
+            if args.has_non_region_param() {
+                return None;
+            }
             let instance =
                 Instance::try_resolve(tcx, ty::TypingEnv::fully_monomorphized(), *def_id, args)
                     .ok()
