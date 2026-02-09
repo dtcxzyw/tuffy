@@ -464,10 +464,15 @@ Parameter annotations are caller guarantees; return annotations are callee guara
 #### `load`
 
 ```
-vN = load vPtr
+vN = load vPtr, <size>
 ```
 
-Load a value from the pointer `vPtr`. The result type is determined by context.
+Load `size` bytes from the address pointed to by `vPtr`. Returns a `bytes` value
+(`List AbstractByte`). Memory access operates at the byte level only — the result
+is raw bytes with no type interpretation. To obtain a typed value (integer, float),
+use `bytecast` as a separate step.
+
+**Semantics**: `evalLoad(mem, addr, size) = bytes [mem[addr], mem[addr+1], ..., mem[addr+size-1]]`
 
 #### `store`
 
@@ -475,8 +480,10 @@ Load a value from the pointer `vPtr`. The result type is determined by context.
 store vVal, vPtr
 ```
 
-Store `vVal` to the address pointed to by `vPtr`. Does not produce a meaningful
-result value.
+Store a `bytes` value (`List AbstractByte`) to the address pointed to by `vPtr`.
+The operand `vVal` must be a bytes value. Does not produce a meaningful result value.
+
+**Semantics**: `evalStore(mem, addr, bs) = mem[addr..addr+len(bs)] := bs`
 
 #### `stack_slot`
 
@@ -591,6 +598,31 @@ vN = zext vA, <bits>
 
 Zero-extend `vA` to `bits` bits. Used during lowering to make bit widths explicit
 for instruction selection.
+
+#### `bytecast`
+
+```
+vN = bytecast vA
+```
+
+Convert between byte types and typed values. The source and target types determine
+the conversion direction.
+
+**`byte(N) → int`**: Interprets the bytes as a little-endian unsigned integer.
+The result is always in `[0, 2^(N*8)-1]` (zero-extension). For signed
+interpretation, apply `sext` as a separate step. `N` must be a multiple of 8 bits
+(i.e., the byte count is the type parameter directly).
+
+**`byte(N) → float`**: Requires exact size match: `byte(4) → f32`,
+`byte(8) → f64`. Size mismatch is ill-formed.
+
+**`int → byte(N)`**: Truncates the integer to `N` bytes (little-endian).
+
+**AbstractByte handling**: Each byte in the input is resolved independently:
+- `bits(val)` → decoded as a concrete byte
+- `poison` → the entire result is `poison`
+- `uninit` → the entire result is `poison`
+- `ptrFragment(allocId, index)` → ptrtoint semantics (extracts address byte)
 
 ### Pointer Operations
 
@@ -806,20 +838,24 @@ are not yet implemented in the Rust codebase.
 
 ### Floating Point Semantics
 
-Basic floating point operations (`fadd`, `fsub`, `fmul`, `fdiv`, `fneg`, `fabs`,
-`copysign`) are implemented. Full NaN payload and denormal semantics are still under
-discussion — the current Lean model uses IEEE 754 binary64 as a placeholder.
+The IR adopts IEEE 754-2008 as the floating-point semantics standard. Basic
+operations (`fadd`, `fsub`, `fmul`, `fdiv`, `fneg`, `fabs`, `copysign`) are
+implemented. Full NaN payload and denormal semantics are still under discussion —
+the current Lean model uses Lean 4's native `Float` type (IEEE 754 binary64) as a
+placeholder.
 
 ### Scalable Vector Types
 
-`vec<vscale x N x T>` — scalable vector type where `vscale` is a runtime constant
-determined by hardware, `N` is the minimum element count, and `T` is the element type.
-Fixed-width vectors use `vscale=1`. Vector operations include elementwise arithmetic,
-horizontal reductions, scatter/gather, masking/predication, and lane manipulation.
+Vector types parameterized by total bit-width, not element count. Element count is
+derived: `count = total_bits / element_bits`. Scalable vectors use
+`vscale × base_width`, where `vscale` is a runtime constant determined by hardware
+(cf. SVE, RVV). Well-formedness: `total_bits % element_bits == 0` and lane count
+must be a power of two. See the [scalable vector RFC](RFCs/202602/) (planned).
 
 ### Byte Type Operations
 
-- `bytecast` — type-punning conversion between byte types and other types
+`bytecast` semantics are specified in [Type Conversion](#type-conversion). The Lean
+formal definition and Rust implementation are not yet complete.
 
 ### Memory SSA
 
