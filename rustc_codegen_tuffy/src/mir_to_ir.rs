@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use rustc_middle::mir::{self, BasicBlock, BinOp, CastKind, Operand, Place, PlaceElem, Rvalue, StatementKind, TerminatorKind};
-use rustc_middle::ty::{self, Instance, TyCtxt};
+use rustc_middle::ty::{self, Instance, TyCtxt, TypeVisitableExt};
 
 use tuffy_ir::builder::Builder;
 use tuffy_ir::function::{Function, RegionKind};
@@ -35,6 +35,12 @@ pub struct TranslationResult {
 pub fn translate_function<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> Option<TranslationResult> {
     let inst_ty = instance.ty(tcx, ty::TypingEnv::fully_monomorphized());
     if !inst_ty.is_fn() {
+        return None;
+    }
+
+    // Skip partially substituted polymorphic instances — the symbol mangler
+    // will panic if generic parameters are still present.
+    if instance.args.has_non_region_param() {
         return None;
     }
 
@@ -210,6 +216,9 @@ fn translate_annotation(ty: ty::Ty<'_>) -> Option<Annotation> {
 fn field_offset<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>, field_idx: usize) -> Option<u64> {
     let typing_env = ty::TypingEnv::fully_monomorphized();
     let layout = tcx.layout_of(typing_env.as_query_input(ty)).ok()?;
+    if field_idx >= layout.fields.count() {
+        return None;
+    }
     Some(layout.fields.offset(field_idx).bytes())
 }
 
@@ -1250,6 +1259,9 @@ fn resolve_call_symbol<'tcx>(tcx: TyCtxt<'tcx>, func_op: &Operand<'tcx>) -> Opti
                 Instance::try_resolve(tcx, ty::TypingEnv::fully_monomorphized(), *def_id, args)
                     .ok()
                     .flatten()?;
+            if instance.args.has_non_region_param() {
+                return None;
+            }
             Some(tcx.symbol_name(instance).name.to_string())
         }
         _ => None,
