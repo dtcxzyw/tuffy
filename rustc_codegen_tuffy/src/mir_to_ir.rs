@@ -1083,12 +1083,30 @@ fn translate_rvalue<'tcx>(
                 BinOp::Mul | BinOp::MulWithOverflow => {
                     builder.mul(l_op, r_op, res_ann, Origin::synthetic())
                 }
-                BinOp::Eq => builder.icmp(ICmpOp::Eq, l_op, r_op, Origin::synthetic()),
-                BinOp::Ne => builder.icmp(ICmpOp::Ne, l_op, r_op, Origin::synthetic()),
-                BinOp::Lt => builder.icmp(ICmpOp::Lt, l_op, r_op, Origin::synthetic()),
-                BinOp::Le => builder.icmp(ICmpOp::Le, l_op, r_op, Origin::synthetic()),
-                BinOp::Gt => builder.icmp(ICmpOp::Gt, l_op, r_op, Origin::synthetic()),
-                BinOp::Ge => builder.icmp(ICmpOp::Ge, l_op, r_op, Origin::synthetic()),
+                BinOp::Eq => {
+                    let cmp = builder.icmp(ICmpOp::Eq, l_op, r_op, Origin::synthetic());
+                    builder.bool_to_int(cmp.into(), Origin::synthetic())
+                }
+                BinOp::Ne => {
+                    let cmp = builder.icmp(ICmpOp::Ne, l_op, r_op, Origin::synthetic());
+                    builder.bool_to_int(cmp.into(), Origin::synthetic())
+                }
+                BinOp::Lt => {
+                    let cmp = builder.icmp(ICmpOp::Lt, l_op, r_op, Origin::synthetic());
+                    builder.bool_to_int(cmp.into(), Origin::synthetic())
+                }
+                BinOp::Le => {
+                    let cmp = builder.icmp(ICmpOp::Le, l_op, r_op, Origin::synthetic());
+                    builder.bool_to_int(cmp.into(), Origin::synthetic())
+                }
+                BinOp::Gt => {
+                    let cmp = builder.icmp(ICmpOp::Gt, l_op, r_op, Origin::synthetic());
+                    builder.bool_to_int(cmp.into(), Origin::synthetic())
+                }
+                BinOp::Ge => {
+                    let cmp = builder.icmp(ICmpOp::Ge, l_op, r_op, Origin::synthetic());
+                    builder.bool_to_int(cmp.into(), Origin::synthetic())
+                }
                 BinOp::Shl | BinOp::ShlUnchecked => {
                     builder.shl(l_op, r_op, res_ann, Origin::synthetic())
                 }
