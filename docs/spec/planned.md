@@ -8,9 +8,29 @@ are not yet implemented in the Rust codebase.
 The IR adopts IEEE 754-2008 as the floating-point semantics standard. Basic
 operations (`fadd`, `fsub`, `fmul`, `fdiv`, `fneg`, `fabs`, `copysign`) are
 implemented. Per-instruction rewrite flags (`reassoc`, `contract`) and float
-value class constraints (`nofpclass`) are defined. Full NaN payload and denormal
-semantics are still under discussion — the current Lean model uses Lean 4's
-native `Float` type (IEEE 754 binary64) as a placeholder.
+value class constraints (`nofpclass`) are defined.
+
+### IEEE 754 Lean library
+
+The current Lean model uses Lean 4's native `Float` type (IEEE 754 binary64) as a
+placeholder. `Float` is opaque — it maps directly to hardware double and cannot be
+unfolded in proofs. Properties that follow from the IEEE 754 standard (e.g.,
+"fadd produces -0.0 only when both operands are -0.0") must be axiomatized
+(see `IR/FloatAxioms.lean`). This is unsatisfactory for a formal-first project.
+
+We need a Lean 4 library that provides a transparent, proof-friendly model of IEEE 754
+floating-point arithmetic covering all widths (f16, bf16, f32, f64), rounding modes,
+NaN payloads, subnormals, and signed zeros. Existing efforts:
+
+- [HOLFloat-Lean](https://github.com/opencompl/HOLFloat-Lean) — formalizes FP
+  semantics in Lean 4, building on prior HOL formalizations.
+- **Flean** — individual effort for IEEE 754 in Lean; requires rewrite.
+- **Flocq port** — the Coq [Flocq](https://flocq.gitlabpages.inria.fr/) library is
+  the most mature FP formalization; porting it to Lean 4 is a community proposal.
+
+Until a suitable library is available, tuffy will continue axiomatizing IEEE 754
+properties as needed. The axiom set should be kept minimal and well-documented so
+that it can be discharged once a real library is adopted.
 
 ## Scalable Vector Types
 
