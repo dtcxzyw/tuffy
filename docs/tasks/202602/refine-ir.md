@@ -85,14 +85,39 @@ Subtasks:
 - [x] Define vector type in Lean 4 IR (completed 2026-02-09)
 - [x] Implement vector type in Rust IR (completed 2026-02-09)
 
+### Fast math flags
+
+Two-layer design separating value constraints from optimization permissions:
+
+- **Value constraints (`nofpclass`)**: Fine-grained IEEE 754 FP class exclusion
+  mask (10 classes mirroring LLVM's `FPClassTest`). Violation produces poison.
+  Separate from integer annotations (`:s<N>`, `:u<N>`).
+- **Rewrite flags (`FpRewriteFlags`)**: Per-instruction `reassoc` and `contract`
+  flags on `fadd`/`fsub`/`fmul`/`fdiv`. Do not affect operational semantics —
+  only widen the set of legal rewrites.
+- `nsz` and `arcp` are deferred.
+
+Subtasks:
+
+- [x] Define `FpClass` (10 variants), `FpClassMask`, `FpRewriteFlags` in Lean (completed 2026-02-09)
+- [x] Mirror `FpClassMask`, `FpRewriteFlags` in Rust (completed 2026-02-09)
+- [x] Attach `FpRewriteFlags` to `FAdd`/`FSub`/`FMul`/`FDiv` in Rust (completed 2026-02-09)
+- [x] Define `Float.isNegZero` and IEEE 754 axioms in `IR/FloatAxioms.lean` (completed 2026-02-09)
+- [x] Prove `nofpclass(nzero)` propagation through `fadd` in `Prototyping/Opt/Fp/Basic.lean` (completed 2026-02-09)
+- [x] Update spec with rewrite flags syntax and `nofpclass` annotation (completed 2026-02-09)
+
 ## Affected Modules
 
 - `lean/TuffyLean/IR/Semantics.lean` — merge evalLshr/evalAshr into evalShr
-- `tuffy_ir/src/instruction.rs` — merge Op::Lshr/Op::Ashr into Op::Shr
-- `tuffy_ir/src/builder.rs` — merge lshr()/ashr() into shr()
-- `tuffy_ir/src/display.rs` — merge display arms into "shr"
-- `tuffy_ir/src/tests.rs` — update shift display test
+- `lean/TuffyLean/IR/Types.lean` — FpClass, FpClassMask, FpRewriteFlags
+- `lean/TuffyLean/IR/FloatAxioms.lean` — IEEE 754 axioms for opaque Float
+- `lean/TuffyLean/Prototyping/Opt/Fp/Basic.lean` — nofpclass propagation proofs
+- `tuffy_ir/src/instruction.rs` — merge Op::Lshr/Op::Ashr into Op::Shr; FpRewriteFlags on float ops
+- `tuffy_ir/src/types.rs` — FpClassMask, FpRewriteFlags
+- `tuffy_ir/src/builder.rs` — merge lshr()/ashr() into shr(); update float builders
+- `tuffy_ir/src/display.rs` — merge display arms into "shr"; display rewrite flags
+- `tuffy_ir/src/tests.rs` — update shift display test; update float op tests
 - `tuffy_target_x86/src/isel.rs` — isel reads annotation to choose SHR vs SAR
 - `rustc_codegen_tuffy/src/mir_to_ir.rs` — emit builder.shr() with annotations
-- `docs/spec.md` — merge lshr/ashr sections into shr
+- `docs/spec.md` — merge lshr/ashr sections into shr; add rewrite flags and nofpclass
 - `docs/RFCs/202602/ir-design.md` — update instruction table
