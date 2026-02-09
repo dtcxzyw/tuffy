@@ -509,4 +509,9 @@ impl<'a> Builder<'a> {
     pub fn region_yield(&mut self, values: Vec<Operand>, origin: Origin) -> ValueRef {
         self.push_inst(Op::RegionYield(values), Type::Int, origin, None)
     }
+
+    /// Unreachable: indicates control flow should never reach this point.
+    pub fn unreachable(&mut self, origin: Origin) -> ValueRef {
+        self.push_inst(Op::Unreachable, Type::Int, origin, None)
+    }
 }

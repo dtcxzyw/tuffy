@@ -336,6 +336,7 @@ fn fmt_inst(
                 format!("region_yield {}", ctx.fmt_operands(vals))
             }
         }
+        Op::Unreachable => "unreachable".to_string(),
     }
 }
 

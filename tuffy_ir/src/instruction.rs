@@ -206,4 +206,6 @@ pub enum Op {
     Continue(Vec<Operand>),
     /// Exit region with values.
     RegionYield(Vec<Operand>),
+    /// Unreachable: indicates control flow should never reach this point.
+    Unreachable,
 }
