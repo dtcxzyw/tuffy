@@ -307,24 +307,16 @@ vN = shl vA, vB
 Left shift. Produces `poison` if the shift amount `vB` is negative.
 **Semantics**: `evalShl(a, b) = if b < 0 then poison else a <<< b`
 
-#### `lshr`
+#### `shr`
 
 ```
-vN = lshr vA, vB
+vN = shr vA, vB
 ```
 
-Logical right shift. Produces `poison` if the shift amount `vB` is negative.
-Operand `vA` is assumed non-negative (enforced by annotations).
-**Semantics**: `evalLshr(a, b) = if b < 0 then poison else a >>> b`
-
-#### `ashr`
-
-```
-vN = ashr vA, vB
-```
-
-Arithmetic right shift. Produces `poison` if the shift amount `vB` is negative.
-**Semantics**: `evalAshr(a, b) = if b < 0 then poison else a >>> b`
+Right shift. Produces `poison` if the shift amount `vB` is negative.
+Signedness is a property of operand annotations, not the operation.
+In infinite precision, logical and arithmetic right shift are identical.
+**Semantics**: `evalShr(a, b) = if b < 0 then poison else a >>> b`
 
 ### Floating Point Arithmetic
 

@@ -197,8 +197,7 @@ All integer arithmetic operates on mathematical integers:
 | `or %a, %b` | Bitwise OR on infinite precision |
 | `xor %a, %b` | Bitwise XOR on infinite precision |
 | `shl %a, %b` | Left shift |
-| `lshr %a, %b` | Logical right shift |
-| `ashr %a, %b` | Arithmetic right shift |
+| `shr %a, %b` | Right shift (signedness from annotation) |
 
 ### Value annotations
 
@@ -247,8 +246,7 @@ All vector operations work on `vec<vscale x N x T>` types. A mask operand (`vec<
 | `vec.or %a, %b` | Elementwise bitwise OR |
 | `vec.xor %a, %b` | Elementwise bitwise XOR |
 | `vec.shl %a, %b` | Elementwise left shift |
-| `vec.lshr %a, %b` | Elementwise logical right shift |
-| `vec.ashr %a, %b` | Elementwise arithmetic right shift |
+| `vec.shr %a, %b` | Elementwise right shift (signedness from annotation) |
 | `vec.fadd %a, %b` | Elementwise floating point addition |
 | `vec.fmul %a, %b` | Elementwise floating point multiplication |
 
@@ -414,6 +412,7 @@ This enables safe `inttoptr(ptrtoint(p))` roundtrips while `ptrtoaddr` provides 
 - **Aggregate types**: Should structs/arrays exist in the IR or be fully decomposed into scalar operations?
 - **Exception handling**: How do Rust panics and unwinding interact with SESE regions?
 - **Concurrency model**: How are atomic operations and memory ordering represented?
+- **Stack slot lifetime and coloring**: `stack_slot` currently takes only a size parameter. To support stack coloring (overlapping non-live slots), lifetime information is needed. The preferred direction is region-based: stack slots belong to a SESE region and are automatically dead when control exits the region. Open question: after lowering to a flat CFG, how is region-based lifetime information preserved? Options include (a) materializing lifetime markers at region boundaries during lowering, or (b) maintaining a region tree alongside the flat CFG. The lifetime.start/end intrinsic approach (LLVM-style) is not preferred.
 
 ## Future possibilities
 
