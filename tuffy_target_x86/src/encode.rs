@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::inst::{MInst, OpSize};
+use crate::inst::{CondCode, MInst, OpSize};
 use crate::reg::Gpr;
 use tuffy_target::reloc::{EncodeResult, RelocKind, Relocation};
 
@@ -162,6 +162,15 @@ fn encode_inst(
         }
         MInst::SarRCL { size, dst } => {
             encode_shift_cl(7, *size, *dst, buf);
+        }
+        MInst::CMOVcc { size, cc, dst, src } => {
+            encode_cmovcc(*size, *cc, *dst, *src, buf);
+        }
+        MInst::SetCC { cc, dst } => {
+            encode_setcc(*cc, *dst, buf);
+        }
+        MInst::MovzxB { dst, src } => {
+            encode_movzx_b(*dst, *src, buf);
         }
     }
 }
@@ -357,4 +366,38 @@ fn encode_mov_mi(size: OpSize, base: Gpr, offset: i32, imm: i32, buf: &mut Vec<u
     buf.push(0xc7);
     modrm_mem(0, base, offset, buf);
     buf.extend_from_slice(&imm.to_le_bytes());
+}
+
+/// Encode CMOVcc r64, r/m64 (0F 40+cc /r with REX.W).
+fn encode_cmovcc(size: OpSize, cc: CondCode, dst: Gpr, src: Gpr, buf: &mut Vec<u8>) {
+    let w = matches!(size, OpSize::S64);
+    if let Some(r) = rex(w, dst, src) {
+        buf.push(r);
+    }
+    buf.push(0x0f);
+    buf.push(0x40 + cc.encoding());
+    buf.push(modrm(dst.encoding(), src.encoding()));
+}
+
+/// Encode SETcc r/m8 (0F 90+cc /0). Uses REX prefix if dst needs it.
+fn encode_setcc(cc: CondCode, dst: Gpr, buf: &mut Vec<u8>) {
+    let b_bit = if dst.needs_rex() { 0x01 } else { 0 };
+    if b_bit != 0 {
+        buf.push(0x40 | b_bit);
+    }
+    buf.push(0x0f);
+    buf.push(0x90 + cc.encoding());
+    buf.push(modrm(0, dst.encoding()));
+}
+
+/// Encode MOVZX r64, r8 (REX.W + 0F B6 /r).
+fn encode_movzx_b(dst: Gpr, src: Gpr, buf: &mut Vec<u8>) {
+    if let Some(r) = rex(true, dst, src) {
+        buf.push(r);
+    } else {
+        buf.push(0x48);
+    }
+    buf.push(0x0f);
+    buf.push(0xb6);
+    buf.push(modrm(dst.encoding(), src.encoding()));
 }

@@ -472,6 +472,59 @@ fn select_inst(
             out.push(MInst::Ud2);
         }
 
+        Op::Select(cond, tv, fv) => {
+            let tv_reg = ensure_in_reg(tv.value, regs, stack, alloc, out)?;
+            let fv_reg = ensure_in_reg(fv.value, regs, stack, alloc, out)?;
+            let dst = alloc.alloc();
+            // Start with false_val in dst.
+            if fv_reg != dst {
+                out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst,
+                    src: fv_reg,
+                });
+            }
+            if let Some(cc) = cmps.get(cond.value) {
+                // Condition from ICmp: CMOVcc dst, tv_reg.
+                out.push(MInst::CMOVcc {
+                    size: OpSize::S64,
+                    cc,
+                    dst,
+                    src: tv_reg,
+                });
+            } else {
+                // General bool value: TEST + CMOVne.
+                let cond_reg = regs.get(cond.value)?;
+                out.push(MInst::TestRR {
+                    size: OpSize::S64,
+                    src1: cond_reg,
+                    src2: cond_reg,
+                });
+                out.push(MInst::CMOVcc {
+                    size: OpSize::S64,
+                    cc: CondCode::Ne,
+                    dst,
+                    src: tv_reg,
+                });
+            }
+            regs.assign(vref, dst);
+        }
+
+        Op::BoolToInt(val) => {
+            if let Some(cc) = cmps.get(val.value) {
+                // Condition from ICmp: SETcc + MOVZX.
+                let dst = alloc.alloc();
+                out.push(MInst::SetCC { cc, dst });
+                out.push(MInst::MovzxB { dst, src: dst });
+                regs.assign(vref, dst);
+            } else {
+                // General bool value: just propagate the register
+                // (already 0 or 1 from a previous bool_to_int or icmp chain).
+                let src = regs.get(val.value)?;
+                regs.assign(vref, src);
+            }
+        }
+
         // Ops not yet supported in isel
         Op::Bitcast(_)
         | Op::Sext(..)
@@ -489,8 +542,6 @@ fn select_inst(
         | Op::FNeg(_)
         | Op::FAbs(_)
         | Op::CopySign(..)
-        | Op::Select(..)
-        | Op::BoolToInt(_)
         | Op::LoadAtomic(..)
         | Op::StoreAtomic(..)
         | Op::AtomicRmw(..)
