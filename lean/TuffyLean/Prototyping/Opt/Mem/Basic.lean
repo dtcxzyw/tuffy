@@ -95,4 +95,25 @@ theorem load_after_noalias_store (mem : Memory) (storeAddr loadAddr : Int)
     · rfl
   simp_rw [key]
 
+/-! ## Store-Store Same Address (Dead Store Elimination)
+
+If two stores target the same address and the second store covers at least
+as many bytes as the first, the first store is completely overwritten and
+can be eliminated. -/
+
+theorem store_store_same_addr (mem : Memory) (addr : Int)
+    (bs1 bs2 : List AbstractByte) (h_cover : bs1.length ≤ bs2.length) :
+    evalStore (evalStore mem addr bs1) addr bs2 = evalStore mem addr bs2 := by
+  simp only [evalStore]
+  cases mem with | mk bytes =>
+  simp only [Memory.mk.injEq]
+  funext a
+  by_cases h : 0 ≤ a - addr ∧ a - addr < ↑bs2.length
+  · simp only [h, and_self, ite_true]
+  · simp only [h, ite_false]
+    have h2 : ¬(0 ≤ a - addr ∧ a - addr < ↑bs1.length) := by
+      intro ⟨h1, h3⟩
+      exact h ⟨h1, by omega⟩
+    simp only [h2, ite_false]
+
 end TuffyLean.Prototyping.Opt.Mem
