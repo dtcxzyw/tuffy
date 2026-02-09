@@ -56,6 +56,8 @@ const-generics/associated-const-bindings/dyn-compat-self-const-projections-in-as
 const-generics/associated-const-bindings/equality-unused-issue-126729.rs
 const-generics/early/const_arg_trivial_macro_expansion-1.rs
 const-generics/issues/issue-70225.rs
+const-generics/ogca/basic.rs
+const-generics/ogca/coherence-ambiguous.rs
 const-generics/late-bound-vars/in_closure.rs
 const-generics/late-bound-vars/late-bound-in-return-issue-77357.rs
 const-generics/late-bound-vars/late-bound-in-where-issue-83993.rs
