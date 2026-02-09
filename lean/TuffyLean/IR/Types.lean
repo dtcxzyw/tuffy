@@ -41,7 +41,89 @@ def VectorType.baseWidth : VectorType → Nat
 def VectorType.laneCount (vt : VectorType) (elemBits : Nat) : Nat :=
   vt.baseWidth / elemBits
 
-/-- Range annotation on a value definition or use edge -/
+/-- IEEE 754 floating-point value classes, mirroring LLVM's FPClassTest.
+    Used by `nofpclass` annotations to exclude specific FP classes. -/
+inductive FpClass where
+  | snan   -- signaling NaN
+  | qnan   -- quiet NaN
+  | ninf   -- negative infinity
+  | nnorm  -- negative normal
+  | nsub   -- negative subnormal
+  | nzero  -- negative zero
+  | pzero  -- positive zero
+  | psub   -- positive subnormal
+  | pnorm  -- positive normal
+  | pinf   -- positive infinity
+  deriving DecidableEq, Repr
+
+/-- Bitmask of excluded FP classes. Each field being `true` means that
+    class is excluded (value must NOT be in that class). -/
+structure FpClassMask where
+  snan : Bool := false
+  qnan : Bool := false
+  ninf : Bool := false
+  nnorm : Bool := false
+  nsub : Bool := false
+  nzero : Bool := false
+  pzero : Bool := false
+  psub : Bool := false
+  pnorm : Bool := false
+  pinf : Bool := false
+  deriving DecidableEq, Repr
+
+namespace FpClassMask
+
+/-- No classes excluded (empty mask). -/
+def none : FpClassMask := {}
+
+/-- Exclude all NaN (snan + qnan). -/
+def nan : FpClassMask := { snan := true, qnan := true }
+
+/-- Exclude all infinity (ninf + pinf). -/
+def inf : FpClassMask := { ninf := true, pinf := true }
+
+/-- Exclude NaN and infinity. -/
+def nanInf : FpClassMask :=
+  { snan := true, qnan := true, ninf := true, pinf := true }
+
+/-- Test whether a specific FP class is excluded by this mask. -/
+def test (m : FpClassMask) : FpClass → Bool
+  | .snan => m.snan
+  | .qnan => m.qnan
+  | .ninf => m.ninf
+  | .nnorm => m.nnorm
+  | .nsub => m.nsub
+  | .nzero => m.nzero
+  | .pzero => m.pzero
+  | .psub => m.psub
+  | .pnorm => m.pnorm
+  | .pinf => m.pinf
+
+/-- Union of two masks (exclude classes from either). -/
+def union (a b : FpClassMask) : FpClassMask where
+  snan := a.snan || b.snan
+  qnan := a.qnan || b.qnan
+  ninf := a.ninf || b.ninf
+  nnorm := a.nnorm || b.nnorm
+  nsub := a.nsub || b.nsub
+  nzero := a.nzero || b.nzero
+  pzero := a.pzero || b.pzero
+  psub := a.psub || b.psub
+  pnorm := a.pnorm || b.pnorm
+  pinf := a.pinf || b.pinf
+
+end FpClassMask
+
+/-- Rewrite flags for floating-point instructions.
+    These are optimization permissions, not value constraints.
+    They do not affect operational semantics — only which rewrites are legal. -/
+structure FpRewriteFlags where
+  reassoc : Bool := false  -- allow associativity/commutativity reordering
+  contract : Bool := false  -- allow contraction (e.g., fma fusion)
+  deriving DecidableEq, Repr
+
+/-- Range annotation on a value definition or use edge.
+    Integer-only; float constraints use `FpClassMask` separately. -/
 inductive Annotation where
   | signed (bits : Nat)    -- :s<N> — value in [-2^(N-1), 2^(N-1)-1]
   | unsigned (bits : Nat)  -- :u<N> — value in [0, 2^N-1]
