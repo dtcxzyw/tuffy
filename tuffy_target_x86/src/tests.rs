@@ -205,7 +205,7 @@ fn build_branch_func() -> Function {
     builder.switch_to_block(entry);
     let a = builder.param(0, Type::Int, s32, Origin::synthetic());
     let b = builder.param(1, Type::Int, s32, Origin::synthetic());
-    let cmp = builder.icmp(ICmpOp::Sgt, a.into(), b.into(), Origin::synthetic());
+    let cmp = builder.icmp(ICmpOp::Gt, a.into(), b.into(), Origin::synthetic());
     builder.brif(
         cmp.into(),
         then_bb,

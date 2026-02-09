@@ -135,7 +135,7 @@ fn display_multi_block_branch() {
     builder.switch_to_block(bb0);
     let a = builder.param(0, Type::Int, None, Origin::synthetic());
     let b = builder.param(1, Type::Int, None, Origin::synthetic());
-    let cmp = builder.icmp(ICmpOp::Sgt, a.into(), b.into(), Origin::synthetic());
+    let cmp = builder.icmp(ICmpOp::Gt, a.into(), b.into(), Origin::synthetic());
     builder.brif(cmp.into(), bb1, vec![], bb2, vec![], Origin::synthetic());
 
     builder.switch_to_block(bb1);
@@ -152,7 +152,7 @@ fn display_multi_block_branch() {
          \x20\x20bb0:\n\
          \x20\x20\x20\x20v0 = param 0\n\
          \x20\x20\x20\x20v1 = param 1\n\
-         \x20\x20\x20\x20v2 = icmp.sgt v0, v1\n\
+         \x20\x20\x20\x20v2 = icmp.gt v0, v1\n\
          \x20\x20\x20\x20brif v2, bb1, bb2\n\
          \n\
          \x20\x20bb1:\n\
@@ -193,7 +193,7 @@ fn display_nested_loop_region() {
     let acc = builder.add_block_arg(bb1, Type::Int);
     let i = builder.add_block_arg(bb1, Type::Int);
     builder.switch_to_block(bb1);
-    let cmp = builder.icmp(ICmpOp::Sle, i.into(), n.into(), Origin::synthetic());
+    let cmp = builder.icmp(ICmpOp::Le, i.into(), n.into(), Origin::synthetic());
     builder.brif(cmp.into(), bb2, vec![], bb3, vec![], Origin::synthetic());
 
     // bb2: loop body
@@ -220,7 +220,7 @@ fn display_nested_loop_region() {
          \n\
          \x20\x20region loop {\n\
          \x20\x20\x20\x20bb1(v4: int, v5: int):\n\
-         \x20\x20\x20\x20\x20\x20v6 = icmp.sle v5, v0\n\
+         \x20\x20\x20\x20\x20\x20v6 = icmp.le v5, v0\n\
          \x20\x20\x20\x20\x20\x20brif v6, bb2, bb3\n\
          \n\
          \x20\x20\x20\x20bb2:\n\

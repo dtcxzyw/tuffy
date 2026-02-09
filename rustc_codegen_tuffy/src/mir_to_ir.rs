@@ -1085,10 +1085,10 @@ fn translate_rvalue<'tcx>(
                 }
                 BinOp::Eq => builder.icmp(ICmpOp::Eq, l_op, r_op, Origin::synthetic()),
                 BinOp::Ne => builder.icmp(ICmpOp::Ne, l_op, r_op, Origin::synthetic()),
-                BinOp::Lt => builder.icmp(ICmpOp::Slt, l_op, r_op, Origin::synthetic()),
-                BinOp::Le => builder.icmp(ICmpOp::Sle, l_op, r_op, Origin::synthetic()),
-                BinOp::Gt => builder.icmp(ICmpOp::Sgt, l_op, r_op, Origin::synthetic()),
-                BinOp::Ge => builder.icmp(ICmpOp::Sge, l_op, r_op, Origin::synthetic()),
+                BinOp::Lt => builder.icmp(ICmpOp::Lt, l_op, r_op, Origin::synthetic()),
+                BinOp::Le => builder.icmp(ICmpOp::Le, l_op, r_op, Origin::synthetic()),
+                BinOp::Gt => builder.icmp(ICmpOp::Gt, l_op, r_op, Origin::synthetic()),
+                BinOp::Ge => builder.icmp(ICmpOp::Ge, l_op, r_op, Origin::synthetic()),
                 BinOp::Shl | BinOp::ShlUnchecked => {
                     builder.shl(l_op, r_op, res_ann, Origin::synthetic())
                 }

@@ -102,14 +102,10 @@ fn fmt_icmp_op(op: &ICmpOp) -> &'static str {
     match op {
         ICmpOp::Eq => "eq",
         ICmpOp::Ne => "ne",
-        ICmpOp::Slt => "slt",
-        ICmpOp::Sle => "sle",
-        ICmpOp::Sgt => "sgt",
-        ICmpOp::Sge => "sge",
-        ICmpOp::Ult => "ult",
-        ICmpOp::Ule => "ule",
-        ICmpOp::Ugt => "ugt",
-        ICmpOp::Uge => "uge",
+        ICmpOp::Lt => "lt",
+        ICmpOp::Le => "le",
+        ICmpOp::Gt => "gt",
+        ICmpOp::Ge => "ge",
     }
 }
 

@@ -64,18 +64,16 @@ pub struct Instruction {
 }
 
 /// Integer comparison predicates.
+/// Signedness is a property of operand annotations, not the predicate.
+/// In infinite precision, comparison is purely mathematical.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ICmpOp {
     Eq,
     Ne,
-    Slt,
-    Sle,
-    Sgt,
-    Sge,
-    Ult,
-    Ule,
-    Ugt,
-    Uge,
+    Lt,
+    Le,
+    Gt,
+    Ge,
 }
 
 /// Atomic read-modify-write operation kinds.

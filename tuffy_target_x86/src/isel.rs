@@ -301,7 +301,7 @@ fn select_inst(
                 src1: lhs_reg,
                 src2: rhs_reg,
             });
-            let cc = icmp_to_cc(*cmp_op);
+            let cc = icmp_to_cc(*cmp_op, lhs.annotation);
             cmps.set(vref, cc);
         }
 
@@ -655,17 +655,38 @@ fn select_shift_cl(
     Some(())
 }
 
-fn icmp_to_cc(op: ICmpOp) -> CondCode {
+fn icmp_to_cc(op: ICmpOp, ann: Option<Annotation>) -> CondCode {
+    let signed = matches!(ann, Some(Annotation::Signed(_)));
     match op {
         ICmpOp::Eq => CondCode::E,
         ICmpOp::Ne => CondCode::Ne,
-        ICmpOp::Slt => CondCode::L,
-        ICmpOp::Sle => CondCode::Le,
-        ICmpOp::Sgt => CondCode::G,
-        ICmpOp::Sge => CondCode::Ge,
-        ICmpOp::Ult => CondCode::B,
-        ICmpOp::Ule => CondCode::Be,
-        ICmpOp::Ugt => CondCode::A,
-        ICmpOp::Uge => CondCode::Ae,
+        ICmpOp::Lt => {
+            if signed {
+                CondCode::L
+            } else {
+                CondCode::B
+            }
+        }
+        ICmpOp::Le => {
+            if signed {
+                CondCode::Le
+            } else {
+                CondCode::Be
+            }
+        }
+        ICmpOp::Gt => {
+            if signed {
+                CondCode::G
+            } else {
+                CondCode::A
+            }
+        }
+        ICmpOp::Ge => {
+            if signed {
+                CondCode::Ge
+            } else {
+                CondCode::Ae
+            }
+        }
     }
 }
