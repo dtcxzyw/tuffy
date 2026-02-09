@@ -5,6 +5,14 @@
 # Reference
 
 - [IR Language Reference](spec/index.md)
+  - [Type System](spec/types.md)
+  - [Values](spec/values.md)
+  - [Functions](spec/functions.md)
+  - [Regions](spec/regions.md)
+  - [Basic Blocks](spec/blocks.md)
+  - [Instructions](spec/instructions.md)
+  - [Text Format](spec/text-format.md)
+  - [Planned Features](spec/planned.md)
 - [Initial Design](initial.md)
 - [References](references.md)
 
