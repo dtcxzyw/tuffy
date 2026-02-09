@@ -13,13 +13,24 @@ struct JumpFixup {
     target_label: u32,
 }
 
-/// A relocation for an external symbol reference (e.g., CALL).
+/// Kind of relocation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelocKind {
+    /// PC-relative call (R_X86_64_PLT32).
+    Call,
+    /// PC-relative data reference (R_X86_64_PC32).
+    PcRel,
+}
+
+/// A relocation for an external symbol reference (e.g., CALL or LEA).
 #[derive(Debug, Clone)]
 pub struct Relocation {
     /// Byte offset in the code buffer where the rel32 displacement starts.
     pub offset: usize,
     /// The symbol name this relocation targets.
     pub symbol: String,
+    /// Kind of relocation.
+    pub kind: RelocKind,
 }
 
 /// Result of encoding a function.
@@ -109,6 +120,7 @@ fn encode_inst(
             relocations.push(Relocation {
                 offset: buf.len(),
                 symbol: name.clone(),
+                kind: RelocKind::Call,
             });
             buf.extend_from_slice(&[0; 4]); // placeholder for linker
         }
@@ -153,6 +165,25 @@ fn encode_inst(
             imm,
         } => {
             encode_mov_mi(*size, *base, *offset, *imm, buf);
+        }
+        MInst::LeaSymbol { dst, symbol } => {
+            encode_lea_symbol(*dst, symbol, buf, relocations);
+        }
+        MInst::OrRR { size, dst, src } => {
+            // OR r/m, r: 0x09 /r
+            encode_alu_rr(0x09, *size, *dst, *src, buf);
+        }
+        MInst::ShlRCL { size, dst } => {
+            // SHL r/m, CL: 0xD3 /4
+            let w = matches!(size, OpSize::S64);
+            let b_bit = if dst.needs_rex() { 0x01 } else { 0 };
+            let w_bit = if w { 0x08 } else { 0 };
+            let rex_bits = w_bit | b_bit;
+            if rex_bits != 0 {
+                buf.push(0x40 | rex_bits);
+            }
+            buf.push(0xd3);
+            buf.push(modrm(4, dst.encoding()));
         }
     }
 }
@@ -325,6 +356,20 @@ fn encode_mov_ri64(dst: Gpr, imm: i64, buf: &mut Vec<u8>) {
     buf.push(0x48 | b_bit); // REX.W
     buf.push(0xb8 + dst.encoding());
     buf.extend_from_slice(&imm.to_le_bytes());
+}
+
+fn encode_lea_symbol(dst: Gpr, symbol: &str, buf: &mut Vec<u8>, relocations: &mut Vec<Relocation>) {
+    // LEA reg, [rip+disp32]: REX.W + 0x8D /r with ModRM mod=00, rm=5 (RIP-relative)
+    let r_bit = if dst.needs_rex() { 0x04 } else { 0 };
+    buf.push(0x48 | r_bit); // REX.W (+ REX.R if needed)
+    buf.push(0x8d);
+    buf.push((dst.encoding() << 3) | 0x05); // mod=00, reg=dst, rm=5 (RIP)
+    relocations.push(Relocation {
+        offset: buf.len(),
+        symbol: symbol.to_string(),
+        kind: RelocKind::PcRel,
+    });
+    buf.extend_from_slice(&[0; 4]); // placeholder for linker
 }
 
 fn encode_mov_mi(size: OpSize, base: Gpr, offset: i32, imm: i32, buf: &mut Vec<u8>) {

@@ -6,13 +6,19 @@ use object::{
     SymbolFlags, SymbolKind, SymbolScope,
 };
 
-use crate::encode::Relocation;
+use crate::encode::{RelocKind, Relocation};
 
 /// A compiled function ready for ELF emission.
 pub struct CompiledFunction {
     pub name: String,
     pub code: Vec<u8>,
     pub relocations: Vec<Relocation>,
+}
+
+/// A static data blob to be placed in .rodata.
+pub struct StaticData {
+    pub name: String,
+    pub data: Vec<u8>,
 }
 
 /// Emit a single function as an ELF object file.
@@ -26,8 +32,31 @@ pub fn emit_elf(name: &str, code: &[u8], relocations: &[Relocation]) -> Vec<u8> 
 
 /// Emit multiple functions as a single ELF object file.
 pub fn emit_elf_multi(functions: &[CompiledFunction]) -> Vec<u8> {
+    emit_elf_with_data(functions, &[])
+}
+
+/// Emit multiple functions and static data as a single ELF object file.
+pub fn emit_elf_with_data(functions: &[CompiledFunction], statics: &[StaticData]) -> Vec<u8> {
     let mut obj = Object::new(BinaryFormat::Elf, Architecture::X86_64, Endianness::Little);
     let text = obj.section_id(object::write::StandardSection::Text);
+
+    // Emit static data in .rodata section.
+    if !statics.is_empty() {
+        let rodata = obj.section_id(object::write::StandardSection::ReadOnlyData);
+        for sd in statics {
+            let offset = obj.append_section_data(rodata, &sd.data, 1);
+            obj.add_symbol(Symbol {
+                name: sd.name.as_bytes().to_vec(),
+                value: offset,
+                size: sd.data.len() as u64,
+                kind: SymbolKind::Data,
+                scope: SymbolScope::Linkage,
+                weak: false,
+                section: SymbolSection::Section(rodata),
+                flags: SymbolFlags::None,
+            });
+        }
+    }
 
     for func in functions {
         let code_offset = obj.append_section_data(text, &func.code, 16);
@@ -55,6 +84,10 @@ pub fn emit_elf_multi(functions: &[CompiledFunction]) -> Vec<u8> {
                 flags: SymbolFlags::None,
             });
 
+            let (reloc_kind, reloc_encoding) = match reloc.kind {
+                RelocKind::Call => (RelocationKind::PltRelative, RelocationEncoding::X86Branch),
+                RelocKind::PcRel => (RelocationKind::Relative, RelocationEncoding::Generic),
+            };
             obj.add_relocation(
                 text,
                 ObjRelocation {
@@ -62,8 +95,8 @@ pub fn emit_elf_multi(functions: &[CompiledFunction]) -> Vec<u8> {
                     symbol: sym_id,
                     addend: -4,
                     flags: RelocationFlags::Generic {
-                        kind: RelocationKind::PltRelative,
-                        encoding: RelocationEncoding::X86Branch,
+                        kind: reloc_kind,
+                        encoding: reloc_encoding,
                         size: 32,
                     },
                 },

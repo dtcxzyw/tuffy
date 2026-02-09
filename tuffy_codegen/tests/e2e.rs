@@ -49,7 +49,17 @@ fn build_add_func() -> Function {
 fn compile_add_func() -> Vec<u8> {
     let func = build_add_func();
     let no_calls = HashMap::new();
-    let result = isel::isel(&func, &no_calls).expect("isel should succeed for add");
+    let no_static_refs = HashMap::new();
+    let no_rdx_captures = HashMap::new();
+    let no_rdx_moves = HashMap::new();
+    let result = isel::isel(
+        &func,
+        &no_calls,
+        &no_static_refs,
+        &no_rdx_captures,
+        &no_rdx_moves,
+    )
+    .expect("isel should succeed for add");
     let enc = encode::encode_function(&result.insts);
     emit::emit_elf(&result.name, &enc.code, &enc.relocations)
 }

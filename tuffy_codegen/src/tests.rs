@@ -14,7 +14,17 @@ use crate::isel;
 fn isel_add_function() {
     let func = build_add_func();
     let no_calls = HashMap::new();
-    let result = isel::isel(&func, &no_calls).expect("isel should succeed for add");
+    let no_static_refs = HashMap::new();
+    let no_rdx_captures = HashMap::new();
+    let no_rdx_moves = HashMap::new();
+    let result = isel::isel(
+        &func,
+        &no_calls,
+        &no_static_refs,
+        &no_rdx_captures,
+        &no_rdx_moves,
+    )
+    .expect("isel should succeed for add");
 
     assert_eq!(result.name, "add");
     // Expected: label; mov eax, edi; add eax, esi; ret
@@ -25,13 +35,23 @@ fn isel_add_function() {
 fn encode_add_function() {
     let func = build_add_func();
     let no_calls = HashMap::new();
-    let result = isel::isel(&func, &no_calls).expect("isel should succeed for add");
+    let no_static_refs = HashMap::new();
+    let no_rdx_captures = HashMap::new();
+    let no_rdx_moves = HashMap::new();
+    let result = isel::isel(
+        &func,
+        &no_calls,
+        &no_static_refs,
+        &no_rdx_captures,
+        &no_rdx_moves,
+    )
+    .expect("isel should succeed for add");
     let enc = encode::encode_function(&result.insts);
 
-    // mov eax, edi  => 89 f8
-    // add eax, esi  => 01 f0
+    // mov rax, rdi  => 48 89 f8
+    // add rax, rsi  => 48 01 f0
     // ret           => c3
-    assert_eq!(enc.code, vec![0x89, 0xf8, 0x01, 0xf0, 0xc3]);
+    assert_eq!(enc.code, vec![0x48, 0x89, 0xf8, 0x48, 0x01, 0xf0, 0xc3]);
     assert!(enc.relocations.is_empty());
 }
 
@@ -39,7 +59,17 @@ fn encode_add_function() {
 fn emit_elf_valid() {
     let func = build_add_func();
     let no_calls = HashMap::new();
-    let result = isel::isel(&func, &no_calls).expect("isel should succeed for add");
+    let no_static_refs = HashMap::new();
+    let no_rdx_captures = HashMap::new();
+    let no_rdx_moves = HashMap::new();
+    let result = isel::isel(
+        &func,
+        &no_calls,
+        &no_static_refs,
+        &no_rdx_captures,
+        &no_rdx_moves,
+    )
+    .expect("isel should succeed for add");
     let enc = encode::encode_function(&result.insts);
     let elf = crate::emit::emit_elf(&result.name, &enc.code, &enc.relocations);
 
@@ -86,7 +116,17 @@ fn build_add_func() -> Function {
 fn isel_branch_function() {
     let func = build_branch_func();
     let no_calls = HashMap::new();
-    let result = isel::isel(&func, &no_calls).expect("isel should succeed for branch");
+    let no_static_refs = HashMap::new();
+    let no_rdx_captures = HashMap::new();
+    let no_rdx_moves = HashMap::new();
+    let result = isel::isel(
+        &func,
+        &no_calls,
+        &no_static_refs,
+        &no_rdx_captures,
+        &no_rdx_moves,
+    )
+    .expect("isel should succeed for branch");
     assert_eq!(result.name, "max");
 
     // Verify we can encode it without panicking and get valid bytes.
@@ -98,7 +138,17 @@ fn isel_branch_function() {
 fn encode_branch_labels_resolved() {
     let func = build_branch_func();
     let no_calls = HashMap::new();
-    let result = isel::isel(&func, &no_calls).expect("isel should succeed for branch");
+    let no_static_refs = HashMap::new();
+    let no_rdx_captures = HashMap::new();
+    let no_rdx_moves = HashMap::new();
+    let result = isel::isel(
+        &func,
+        &no_calls,
+        &no_static_refs,
+        &no_rdx_captures,
+        &no_rdx_moves,
+    )
+    .expect("isel should succeed for branch");
     let enc = encode::encode_function(&result.insts);
 
     // Verify it doesn't panic and produces non-trivial output.

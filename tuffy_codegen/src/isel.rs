@@ -128,7 +128,13 @@ impl RegAlloc {
 /// machine instructions for each block.
 ///
 /// Returns None if the function contains unsupported IR ops.
-pub fn isel(func: &Function, call_targets: &HashMap<u32, String>) -> Option<IselResult> {
+pub fn isel(
+    func: &Function,
+    call_targets: &HashMap<u32, String>,
+    static_refs: &HashMap<u32, String>,
+    rdx_captures: &HashMap<u32, ()>,
+    rdx_moves: &HashMap<u32, u32>,
+) -> Option<IselResult> {
     let mut body = Vec::new();
     let mut regs = RegMap::new(func.instructions.len());
     let mut cmps = CmpMap::new(func.instructions.len());
@@ -150,6 +156,9 @@ pub fn isel(func: &Function, call_targets: &HashMap<u32, String>) -> Option<Isel
                     &mut stack,
                     &mut alloc,
                     call_targets,
+                    static_refs,
+                    rdx_captures,
+                    rdx_moves,
                     &mut body,
                 )?;
             }
@@ -197,6 +206,9 @@ fn select_inst(
     stack: &mut StackMap,
     alloc: &mut RegAlloc,
     call_targets: &HashMap<u32, String>,
+    static_refs: &HashMap<u32, String>,
+    rdx_captures: &HashMap<u32, ()>,
+    rdx_moves: &HashMap<u32, u32>,
     out: &mut Vec<MInst>,
 ) -> Option<()> {
     match op {
@@ -206,13 +218,38 @@ fn select_inst(
         }
 
         Op::Const(imm) => {
-            let dst = alloc.alloc();
-            out.push(MInst::MovRI {
-                size: OpSize::S32,
-                dst,
-                imm: *imm,
-            });
-            regs.assign(vref, dst);
+            if rdx_captures.contains_key(&vref.index()) {
+                // This value captures RDX from the preceding call.
+                regs.assign(vref, Gpr::Rdx);
+            } else if let Some(src_idx) = rdx_moves.get(&vref.index()) {
+                // Move a value into RDX (for fat return components).
+                let src_vref = ValueRef::inst_result(*src_idx);
+                let src_reg = regs.get(src_vref);
+                if src_reg != Gpr::Rdx {
+                    out.push(MInst::MovRR {
+                        size: OpSize::S64,
+                        dst: Gpr::Rdx,
+                        src: src_reg,
+                    });
+                }
+                regs.assign(vref, Gpr::Rdx);
+            } else if let Some(sym) = static_refs.get(&vref.index()) {
+                // Static data reference: emit LEA rip-relative.
+                let dst = alloc.alloc();
+                out.push(MInst::LeaSymbol {
+                    dst,
+                    symbol: sym.clone(),
+                });
+                regs.assign(vref, dst);
+            } else {
+                let dst = alloc.alloc();
+                out.push(MInst::MovRI {
+                    size: OpSize::S32,
+                    dst,
+                    imm: *imm,
+                });
+                regs.assign(vref, dst);
+            }
         }
 
         Op::Add(lhs, rhs) => {
@@ -231,7 +268,7 @@ fn select_inst(
             let lhs_reg = regs.get(lhs.value);
             let rhs_reg = regs.get(rhs.value);
             out.push(MInst::CmpRR {
-                size: OpSize::S32,
+                size: OpSize::S64,
                 src1: lhs_reg,
                 src2: rhs_reg,
             });
@@ -256,7 +293,7 @@ fn select_inst(
                 // Condition is a general value: test and branch if non-zero.
                 let cond_reg = regs.get(cond.value);
                 out.push(MInst::TestRR {
-                    size: OpSize::S32,
+                    size: OpSize::S64,
                     src1: cond_reg,
                     src2: cond_reg,
                 });
@@ -275,7 +312,7 @@ fn select_inst(
                 let src = regs.get(v.value);
                 if src != Gpr::Rax {
                     out.push(MInst::MovRR {
-                        size: OpSize::S32,
+                        size: OpSize::S64,
                         dst: Gpr::Rax,
                         src,
                     });
@@ -295,7 +332,7 @@ fn select_inst(
                 let dst = ARG_REGS[i];
                 if src != dst {
                     out.push(MInst::MovRR {
-                        size: OpSize::S32,
+                        size: OpSize::S64,
                         dst,
                         src,
                     });
@@ -359,6 +396,56 @@ fn select_inst(
             }
         }
 
+        Op::Or(lhs, rhs) => {
+            let lhs_reg = regs.get(lhs.value);
+            let rhs_reg = regs.get(rhs.value);
+            let dst = alloc.alloc();
+            if lhs_reg != dst {
+                out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst,
+                    src: lhs_reg,
+                });
+            }
+            out.push(MInst::OrRR {
+                size: OpSize::S64,
+                dst,
+                src: rhs_reg,
+            });
+            regs.assign(vref, dst);
+        }
+
+        Op::Shl(lhs, rhs) => {
+            let lhs_reg = regs.get(lhs.value);
+            let rhs_reg = regs.get(rhs.value);
+            // SHL uses CL for shift amount, so dst must not be RCX.
+            let mut dst = alloc.alloc();
+            if dst == Gpr::Rcx {
+                dst = alloc.alloc();
+            }
+            // Move lhs into dst.
+            if lhs_reg != dst {
+                out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst,
+                    src: lhs_reg,
+                });
+            }
+            // Move shift amount into RCX (CL).
+            if rhs_reg != Gpr::Rcx {
+                out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst: Gpr::Rcx,
+                    src: rhs_reg,
+                });
+            }
+            out.push(MInst::ShlRCL {
+                size: OpSize::S64,
+                dst,
+            });
+            regs.assign(vref, dst);
+        }
+
         // Ops not yet supported in isel
         Op::Bitcast(_)
         | Op::Sext(..)
@@ -366,9 +453,7 @@ fn select_inst(
         | Op::SDiv(..)
         | Op::UDiv(..)
         | Op::And(..)
-        | Op::Or(..)
         | Op::Xor(..)
-        | Op::Shl(..)
         | Op::Lshr(..)
         | Op::Ashr(..)
         | Op::PtrAdd(..)
@@ -417,24 +502,24 @@ fn select_binop_rr(
     // Move lhs into dst.
     if lhs_reg != dst {
         out.push(MInst::MovRR {
-            size: OpSize::S32,
+            size: OpSize::S64,
             dst,
             src: lhs_reg,
         });
     }
     let inst = match op {
         BinOp::Add => MInst::AddRR {
-            size: OpSize::S32,
+            size: OpSize::S64,
             dst,
             src: rhs_reg,
         },
         BinOp::Sub => MInst::SubRR {
-            size: OpSize::S32,
+            size: OpSize::S64,
             dst,
             src: rhs_reg,
         },
         BinOp::Mul => MInst::ImulRR {
-            size: OpSize::S32,
+            size: OpSize::S64,
             dst,
             src: rhs_reg,
         },
