@@ -565,7 +565,7 @@ fn translate_terminator<'tcx>(
             builder.br(target_block, vec![], Origin::synthetic());
         }
         TerminatorKind::Unreachable => {
-            builder.ret(None, Origin::synthetic());
+            builder.unreachable(Origin::synthetic());
         }
         TerminatorKind::Drop { target, .. } => {
             // Skip drop glue for now — just branch to the target.
