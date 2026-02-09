@@ -467,7 +467,7 @@ fn select_inst(
             regs.assign(vref, dst);
         }
 
-        Op::Unreachable => {
+        Op::Unreachable | Op::Trap => {
             out.push(MInst::Ud2);
         }
 

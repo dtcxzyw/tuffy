@@ -212,4 +212,6 @@ pub enum Op {
     RegionYield(Vec<Operand>),
     /// Unreachable: indicates control flow should never reach this point.
     Unreachable,
+    /// Trap: unconditionally abort execution (e.g., failed assertion).
+    Trap,
 }

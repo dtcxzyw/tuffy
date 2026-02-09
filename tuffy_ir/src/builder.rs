@@ -534,4 +534,9 @@ impl<'a> Builder<'a> {
     pub fn unreachable(&mut self, origin: Origin) -> ValueRef {
         self.push_inst(Op::Unreachable, Type::Int, origin, None)
     }
+
+    /// Trap: unconditionally abort execution.
+    pub fn trap(&mut self, origin: Origin) -> ValueRef {
+        self.push_inst(Op::Trap, Type::Int, origin, None)
+    }
 }
