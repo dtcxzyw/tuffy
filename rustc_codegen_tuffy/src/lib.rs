@@ -69,6 +69,7 @@ impl CodegenBackend for TuffyCodegenBackend {
     fn codegen_crate<'tcx>(&self, tcx: TyCtxt<'tcx>) -> Box<dyn Any> {
         let target_triple = tcx.sess.target.llvm_target.as_ref();
         let session = CodegenSession::new(target_triple);
+        let dump_ir = tcx.sess.opts.cg.llvm_args.iter().any(|a| a == "dump-ir");
         let cgus = tcx.collect_and_partition_mono_items(()).codegen_units;
         let mut modules = Vec::new();
 
@@ -88,6 +89,9 @@ impl CodegenBackend for TuffyCodegenBackend {
                         continue;
                     }
                     if let Some(result) = mir_to_ir::translate_function(tcx, *instance, &session) {
+                        if dump_ir {
+                            eprintln!("{}", result.func);
+                        }
                         for (sym, data) in &result.static_data {
                             all_static_data.push(StaticData {
                                 name: sym.clone(),
