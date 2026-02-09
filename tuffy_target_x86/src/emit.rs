@@ -7,19 +7,7 @@ use object::{
 };
 
 use tuffy_target::reloc::{RelocKind, Relocation};
-
-/// A compiled function ready for ELF emission.
-pub struct CompiledFunction {
-    pub name: String,
-    pub code: Vec<u8>,
-    pub relocations: Vec<Relocation>,
-}
-
-/// A static data blob to be placed in .rodata.
-pub struct StaticData {
-    pub name: String,
-    pub data: Vec<u8>,
-}
+pub use tuffy_target::types::{CompiledFunction, StaticData};
 
 /// Emit a single function as an ELF object file.
 pub fn emit_elf(name: &str, code: &[u8], relocations: &[Relocation]) -> Vec<u8> {
