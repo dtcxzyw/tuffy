@@ -65,6 +65,11 @@ jobs:
       - name: Build codegen backend (release)
         run: cd rustc_codegen_tuffy && cargo build --release
 
+      - name: Run hello world test
+        run: |
+          chmod +x tests/run-tests.sh
+          tests/run-tests.sh
+
       - name: Clone rustc UI tests
         run: |
           git clone --depth 1 --filter=blob:none --sparse https://github.com/rust-lang/rust.git scratch/rust
