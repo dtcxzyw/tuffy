@@ -30,3 +30,4 @@
 
 - [SOPs]()
   - [Modifying the IR](SOPs/ir-change.md)
+  - [Updating Documentation](SOPs/docs-update.md)
