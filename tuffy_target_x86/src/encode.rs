@@ -144,16 +144,20 @@ fn encode_inst(
         MInst::OrRR { size, dst, src } => {
             encode_alu_rr(0x09, *size, *dst, *src, buf);
         }
+        MInst::AndRR { size, dst, src } => {
+            encode_alu_rr(0x21, *size, *dst, *src, buf);
+        }
+        MInst::XorRR { size, dst, src } => {
+            encode_alu_rr(0x31, *size, *dst, *src, buf);
+        }
         MInst::ShlRCL { size, dst } => {
-            let w = matches!(size, OpSize::S64);
-            let b_bit = if dst.needs_rex() { 0x01 } else { 0 };
-            let w_bit = if w { 0x08 } else { 0 };
-            let rex_bits = w_bit | b_bit;
-            if rex_bits != 0 {
-                buf.push(0x40 | rex_bits);
-            }
-            buf.push(0xd3);
-            buf.push(modrm(4, dst.encoding()));
+            encode_shift_cl(4, *size, *dst, buf);
+        }
+        MInst::ShrRCL { size, dst } => {
+            encode_shift_cl(5, *size, *dst, buf);
+        }
+        MInst::SarRCL { size, dst } => {
+            encode_shift_cl(7, *size, *dst, buf);
         }
     }
 }
@@ -323,6 +327,19 @@ fn encode_lea_symbol(dst: Gpr, symbol: &str, buf: &mut Vec<u8>, relocations: &mu
         kind: RelocKind::PcRel,
     });
     buf.extend_from_slice(&[0; 4]);
+}
+
+/// Encode a shift-by-CL instruction (SHL/SHR/SAR with reg field selecting the operation).
+fn encode_shift_cl(reg_field: u8, size: OpSize, dst: Gpr, buf: &mut Vec<u8>) {
+    let w = matches!(size, OpSize::S64);
+    let b_bit = if dst.needs_rex() { 0x01 } else { 0 };
+    let w_bit = if w { 0x08 } else { 0 };
+    let rex_bits = w_bit | b_bit;
+    if rex_bits != 0 {
+        buf.push(0x40 | rex_bits);
+    }
+    buf.push(0xd3);
+    buf.push(modrm(reg_field, dst.encoding()));
 }
 
 fn encode_mov_mi(size: OpSize, base: Gpr, offset: i32, imm: i32, buf: &mut Vec<u8>) {

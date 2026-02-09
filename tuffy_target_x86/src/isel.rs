@@ -424,53 +424,27 @@ fn select_inst(
         }
 
         Op::Or(lhs, rhs) => {
-            let lhs_reg = regs.get(lhs.value);
-            let rhs_reg = regs.get(rhs.value);
-            let dst = alloc.alloc();
-            if lhs_reg != dst {
-                out.push(MInst::MovRR {
-                    size: OpSize::S64,
-                    dst,
-                    src: lhs_reg,
-                });
-            }
-            out.push(MInst::OrRR {
-                size: OpSize::S64,
-                dst,
-                src: rhs_reg,
-            });
-            regs.assign(vref, dst);
+            select_bitop_rr(vref, lhs.value, rhs.value, BitOp::Or, regs, alloc, out);
+        }
+
+        Op::And(lhs, rhs) => {
+            select_bitop_rr(vref, lhs.value, rhs.value, BitOp::And, regs, alloc, out);
+        }
+
+        Op::Xor(lhs, rhs) => {
+            select_bitop_rr(vref, lhs.value, rhs.value, BitOp::Xor, regs, alloc, out);
         }
 
         Op::Shl(lhs, rhs) => {
-            let lhs_reg = regs.get(lhs.value);
-            let rhs_reg = regs.get(rhs.value);
-            // SHL uses CL for shift amount, so dst must not be RCX.
-            let mut dst = alloc.alloc();
-            if dst == Gpr::Rcx {
-                dst = alloc.alloc();
-            }
-            // Move lhs into dst.
-            if lhs_reg != dst {
-                out.push(MInst::MovRR {
-                    size: OpSize::S64,
-                    dst,
-                    src: lhs_reg,
-                });
-            }
-            // Move shift amount into RCX (CL).
-            if rhs_reg != Gpr::Rcx {
-                out.push(MInst::MovRR {
-                    size: OpSize::S64,
-                    dst: Gpr::Rcx,
-                    src: rhs_reg,
-                });
-            }
-            out.push(MInst::ShlRCL {
-                size: OpSize::S64,
-                dst,
-            });
-            regs.assign(vref, dst);
+            select_shift_cl(vref, lhs.value, rhs.value, ShiftOp::Shl, regs, alloc, out);
+        }
+
+        Op::Lshr(lhs, rhs) => {
+            select_shift_cl(vref, lhs.value, rhs.value, ShiftOp::Shr, regs, alloc, out);
+        }
+
+        Op::Ashr(lhs, rhs) => {
+            select_shift_cl(vref, lhs.value, rhs.value, ShiftOp::Sar, regs, alloc, out);
         }
 
         Op::PtrAdd(ptr, offset) => {
@@ -498,10 +472,6 @@ fn select_inst(
         | Op::Zext(..)
         | Op::SDiv(..)
         | Op::UDiv(..)
-        | Op::And(..)
-        | Op::Xor(..)
-        | Op::Lshr(..)
-        | Op::Ashr(..)
         | Op::PtrDiff(..)
         | Op::PtrToInt(_)
         | Op::PtrToAddr(_)
@@ -567,6 +537,109 @@ fn select_binop_rr(
             size: OpSize::S64,
             dst,
             src: rhs_reg,
+        },
+    };
+    out.push(inst);
+    regs.assign(vref, dst);
+}
+
+/// Helper enum for bitwise operations (OR, AND, XOR).
+enum BitOp {
+    Or,
+    And,
+    Xor,
+}
+
+fn select_bitop_rr(
+    vref: ValueRef,
+    lhs: ValueRef,
+    rhs: ValueRef,
+    op: BitOp,
+    regs: &mut RegMap,
+    alloc: &mut RegAlloc,
+    out: &mut Vec<MInst>,
+) {
+    let lhs_reg = regs.get(lhs);
+    let rhs_reg = regs.get(rhs);
+    let dst = alloc.alloc();
+
+    if lhs_reg != dst {
+        out.push(MInst::MovRR {
+            size: OpSize::S64,
+            dst,
+            src: lhs_reg,
+        });
+    }
+    let inst = match op {
+        BitOp::Or => MInst::OrRR {
+            size: OpSize::S64,
+            dst,
+            src: rhs_reg,
+        },
+        BitOp::And => MInst::AndRR {
+            size: OpSize::S64,
+            dst,
+            src: rhs_reg,
+        },
+        BitOp::Xor => MInst::XorRR {
+            size: OpSize::S64,
+            dst,
+            src: rhs_reg,
+        },
+    };
+    out.push(inst);
+    regs.assign(vref, dst);
+}
+
+/// Helper enum for shift operations.
+enum ShiftOp {
+    Shl,
+    Shr,
+    Sar,
+}
+
+fn select_shift_cl(
+    vref: ValueRef,
+    lhs: ValueRef,
+    rhs: ValueRef,
+    op: ShiftOp,
+    regs: &mut RegMap,
+    alloc: &mut RegAlloc,
+    out: &mut Vec<MInst>,
+) {
+    let lhs_reg = regs.get(lhs);
+    let rhs_reg = regs.get(rhs);
+    // Shift uses CL for shift amount, so dst must not be RCX.
+    let mut dst = alloc.alloc();
+    if dst == Gpr::Rcx {
+        dst = alloc.alloc();
+    }
+    if lhs_reg != dst {
+        out.push(MInst::MovRR {
+            size: OpSize::S64,
+            dst,
+            src: lhs_reg,
+        });
+    }
+    if rhs_reg != Gpr::Rcx {
+        out.push(MInst::MovRR {
+            size: OpSize::S64,
+            dst: Gpr::Rcx,
+            src: rhs_reg,
+        });
+    }
+    let inst = match op {
+        ShiftOp::Shl => MInst::ShlRCL {
+            size: OpSize::S64,
+            dst,
+        },
+        ShiftOp::Shr => MInst::ShrRCL {
+            size: OpSize::S64,
+            dst,
+        },
+        ShiftOp::Sar => MInst::SarRCL {
+            size: OpSize::S64,
+            dst,
         },
     };
     out.push(inst);

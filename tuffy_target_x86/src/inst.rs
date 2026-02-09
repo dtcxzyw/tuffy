@@ -120,6 +120,14 @@ pub enum MInst {
     LeaSymbol { dst: Gpr, symbol: String },
     /// or dst, src (dst |= src)
     OrRR { size: OpSize, dst: Gpr, src: Gpr },
+    /// and dst, src (dst &= src)
+    AndRR { size: OpSize, dst: Gpr, src: Gpr },
+    /// xor dst, src (dst ^= src)
+    XorRR { size: OpSize, dst: Gpr, src: Gpr },
     /// shl dst, cl (dst <<= cl)
     ShlRCL { size: OpSize, dst: Gpr },
+    /// shr dst, cl (logical right shift by cl)
+    ShrRCL { size: OpSize, dst: Gpr },
+    /// sar dst, cl (arithmetic right shift by cl)
+    SarRCL { size: OpSize, dst: Gpr },
 }
