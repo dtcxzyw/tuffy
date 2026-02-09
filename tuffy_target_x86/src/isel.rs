@@ -30,8 +30,8 @@ impl RegMap {
         self.map[val.index() as usize] = Some(reg);
     }
 
-    fn get(&self, val: ValueRef) -> Gpr {
-        self.map[val.index() as usize].expect("register not assigned")
+    fn get(&self, val: ValueRef) -> Option<Gpr> {
+        self.map[val.index() as usize]
     }
 }
 
@@ -133,9 +133,9 @@ fn ensure_in_reg(
     stack: &StackMap,
     alloc: &mut RegAlloc,
     out: &mut Vec<MInst>,
-) -> Gpr {
+) -> Option<Gpr> {
     if let Some(reg) = regs.map[val.index() as usize] {
-        return reg;
+        return Some(reg);
     }
     if let Some(offset) = stack.get(val) {
         let dst = alloc.alloc();
@@ -144,9 +144,9 @@ fn ensure_in_reg(
             base: Gpr::Rbp,
             offset,
         });
-        return dst;
+        return Some(dst);
     }
-    panic!("value not in reg or stack map");
+    None
 }
 
 /// Perform instruction selection on a tuffy IR function.
@@ -252,7 +252,7 @@ fn select_inst(
             } else if let Some(src_idx) = rdx_moves.get(&vref.index()) {
                 // Move a value into RDX (for fat return components).
                 let src_vref = ValueRef::inst_result(*src_idx);
-                let src_reg = regs.get(src_vref);
+                let src_reg = regs.get(src_vref)?;
                 if src_reg != Gpr::Rdx {
                     out.push(MInst::MovRR {
                         size: OpSize::S64,
@@ -281,20 +281,20 @@ fn select_inst(
         }
 
         Op::Add(lhs, rhs) => {
-            select_binop_rr(vref, lhs.value, rhs.value, BinOp::Add, regs, alloc, out);
+            select_binop_rr(vref, lhs.value, rhs.value, BinOp::Add, regs, alloc, out)?;
         }
 
         Op::Sub(lhs, rhs) => {
-            select_binop_rr(vref, lhs.value, rhs.value, BinOp::Sub, regs, alloc, out);
+            select_binop_rr(vref, lhs.value, rhs.value, BinOp::Sub, regs, alloc, out)?;
         }
 
         Op::Mul(lhs, rhs) => {
-            select_binop_rr(vref, lhs.value, rhs.value, BinOp::Mul, regs, alloc, out);
+            select_binop_rr(vref, lhs.value, rhs.value, BinOp::Mul, regs, alloc, out)?;
         }
 
         Op::ICmp(cmp_op, lhs, rhs) => {
-            let lhs_reg = regs.get(lhs.value);
-            let rhs_reg = regs.get(rhs.value);
+            let lhs_reg = regs.get(lhs.value)?;
+            let rhs_reg = regs.get(rhs.value)?;
             out.push(MInst::CmpRR {
                 size: OpSize::S64,
                 src1: lhs_reg,
@@ -319,7 +319,7 @@ fn select_inst(
                 });
             } else {
                 // Condition is a general value: test and branch if non-zero.
-                let cond_reg = regs.get(cond.value);
+                let cond_reg = regs.get(cond.value)?;
                 out.push(MInst::TestRR {
                     size: OpSize::S64,
                     src1: cond_reg,
@@ -337,7 +337,7 @@ fn select_inst(
 
         Op::Ret(val) => {
             if let Some(v) = val {
-                let src = ensure_in_reg(v.value, regs, stack, alloc, out);
+                let src = ensure_in_reg(v.value, regs, stack, alloc, out)?;
                 if src != Gpr::Rax {
                     out.push(MInst::MovRR {
                         size: OpSize::S64,
@@ -356,7 +356,7 @@ fn select_inst(
                     // Stack args not yet supported.
                     return None;
                 }
-                let src = ensure_in_reg(arg.value, regs, stack, alloc, out);
+                let src = ensure_in_reg(arg.value, regs, stack, alloc, out)?;
                 let dst = ARG_REGS[i];
                 if src != dst {
                     out.push(MInst::MovRR {
@@ -393,7 +393,7 @@ fn select_inst(
                     offset,
                 });
             } else {
-                let ptr_reg = regs.get(ptr.value);
+                let ptr_reg = regs.get(ptr.value)?;
                 out.push(MInst::MovRM {
                     size: OpSize::S64,
                     dst,
@@ -405,7 +405,7 @@ fn select_inst(
         }
 
         Op::Store(val, ptr) => {
-            let val_reg = regs.get(val.value);
+            let val_reg = regs.get(val.value)?;
             if let Some(offset) = stack.get(ptr.value) {
                 out.push(MInst::MovMR {
                     size: OpSize::S64,
@@ -414,7 +414,7 @@ fn select_inst(
                     src: val_reg,
                 });
             } else {
-                let ptr_reg = regs.get(ptr.value);
+                let ptr_reg = regs.get(ptr.value)?;
                 out.push(MInst::MovMR {
                     size: OpSize::S64,
                     base: ptr_reg,
@@ -425,32 +425,32 @@ fn select_inst(
         }
 
         Op::Or(lhs, rhs) => {
-            select_bitop_rr(vref, lhs.value, rhs.value, BitOp::Or, regs, alloc, out);
+            select_bitop_rr(vref, lhs.value, rhs.value, BitOp::Or, regs, alloc, out)?;
         }
 
         Op::And(lhs, rhs) => {
-            select_bitop_rr(vref, lhs.value, rhs.value, BitOp::And, regs, alloc, out);
+            select_bitop_rr(vref, lhs.value, rhs.value, BitOp::And, regs, alloc, out)?;
         }
 
         Op::Xor(lhs, rhs) => {
-            select_bitop_rr(vref, lhs.value, rhs.value, BitOp::Xor, regs, alloc, out);
+            select_bitop_rr(vref, lhs.value, rhs.value, BitOp::Xor, regs, alloc, out)?;
         }
 
         Op::Shl(lhs, rhs) => {
-            select_shift_cl(vref, lhs.value, rhs.value, ShiftOp::Shl, regs, alloc, out);
+            select_shift_cl(vref, lhs.value, rhs.value, ShiftOp::Shl, regs, alloc, out)?;
         }
 
         Op::Lshr(lhs, rhs) => {
-            select_shift_cl(vref, lhs.value, rhs.value, ShiftOp::Shr, regs, alloc, out);
+            select_shift_cl(vref, lhs.value, rhs.value, ShiftOp::Shr, regs, alloc, out)?;
         }
 
         Op::Ashr(lhs, rhs) => {
-            select_shift_cl(vref, lhs.value, rhs.value, ShiftOp::Sar, regs, alloc, out);
+            select_shift_cl(vref, lhs.value, rhs.value, ShiftOp::Sar, regs, alloc, out)?;
         }
 
         Op::PtrAdd(ptr, offset) => {
-            let ptr_reg = ensure_in_reg(ptr.value, regs, stack, alloc, out);
-            let off_reg = ensure_in_reg(offset.value, regs, stack, alloc, out);
+            let ptr_reg = ensure_in_reg(ptr.value, regs, stack, alloc, out)?;
+            let off_reg = ensure_in_reg(offset.value, regs, stack, alloc, out)?;
             let dst = alloc.alloc();
             if ptr_reg != dst {
                 out.push(MInst::MovRR {
@@ -514,9 +514,9 @@ fn select_binop_rr(
     regs: &mut RegMap,
     alloc: &mut RegAlloc,
     out: &mut Vec<MInst>,
-) {
-    let lhs_reg = regs.get(lhs);
-    let rhs_reg = regs.get(rhs);
+) -> Option<()> {
+    let lhs_reg = regs.get(lhs)?;
+    let rhs_reg = regs.get(rhs)?;
     let dst = alloc.alloc();
 
     // Move lhs into dst.
@@ -546,6 +546,7 @@ fn select_binop_rr(
     };
     out.push(inst);
     regs.assign(vref, dst);
+    Some(())
 }
 
 /// Helper enum for bitwise operations (OR, AND, XOR).
@@ -563,9 +564,9 @@ fn select_bitop_rr(
     regs: &mut RegMap,
     alloc: &mut RegAlloc,
     out: &mut Vec<MInst>,
-) {
-    let lhs_reg = regs.get(lhs);
-    let rhs_reg = regs.get(rhs);
+) -> Option<()> {
+    let lhs_reg = regs.get(lhs)?;
+    let rhs_reg = regs.get(rhs)?;
     let dst = alloc.alloc();
 
     if lhs_reg != dst {
@@ -594,6 +595,7 @@ fn select_bitop_rr(
     };
     out.push(inst);
     regs.assign(vref, dst);
+    Some(())
 }
 
 /// Helper enum for shift operations.
@@ -611,9 +613,9 @@ fn select_shift_cl(
     regs: &mut RegMap,
     alloc: &mut RegAlloc,
     out: &mut Vec<MInst>,
-) {
-    let lhs_reg = regs.get(lhs);
-    let rhs_reg = regs.get(rhs);
+) -> Option<()> {
+    let lhs_reg = regs.get(lhs)?;
+    let rhs_reg = regs.get(rhs)?;
     // Shift uses CL for shift amount, so dst must not be RCX.
     let mut dst = alloc.alloc();
     if dst == Gpr::Rcx {
@@ -649,6 +651,7 @@ fn select_shift_cl(
     };
     out.push(inst);
     regs.assign(vref, dst);
+    Some(())
 }
 
 fn icmp_to_cc(op: ICmpOp) -> CondCode {
