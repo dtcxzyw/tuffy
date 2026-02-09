@@ -122,6 +122,33 @@ impl RegAlloc {
     }
 }
 
+/// Materialize a value into a physical register.
+///
+/// If the value is already in RegMap, returns its register.
+/// If the value is a StackSlot (in StackMap), emits LEA to compute
+/// the address (rbp+offset) into a fresh register.
+fn ensure_in_reg(
+    val: ValueRef,
+    regs: &RegMap,
+    stack: &StackMap,
+    alloc: &mut RegAlloc,
+    out: &mut Vec<MInst>,
+) -> Gpr {
+    if let Some(reg) = regs.map[val.index() as usize] {
+        return reg;
+    }
+    if let Some(offset) = stack.get(val) {
+        let dst = alloc.alloc();
+        out.push(MInst::Lea {
+            dst,
+            base: Gpr::Rbp,
+            offset,
+        });
+        return dst;
+    }
+    panic!("value not in reg or stack map");
+}
+
 /// Perform instruction selection on a tuffy IR function.
 ///
 /// Iterates all basic blocks in the root region, emitting labels and
@@ -309,7 +336,7 @@ fn select_inst(
 
         Op::Ret(val) => {
             if let Some(v) = val {
-                let src = regs.get(v.value);
+                let src = ensure_in_reg(v.value, regs, stack, alloc, out);
                 if src != Gpr::Rax {
                     out.push(MInst::MovRR {
                         size: OpSize::S64,
@@ -328,7 +355,7 @@ fn select_inst(
                     // Stack args not yet supported.
                     return None;
                 }
-                let src = regs.get(arg.value);
+                let src = ensure_in_reg(arg.value, regs, stack, alloc, out);
                 let dst = ARG_REGS[i];
                 if src != dst {
                     out.push(MInst::MovRR {
@@ -446,6 +473,25 @@ fn select_inst(
             regs.assign(vref, dst);
         }
 
+        Op::PtrAdd(ptr, offset) => {
+            let ptr_reg = ensure_in_reg(ptr.value, regs, stack, alloc, out);
+            let off_reg = ensure_in_reg(offset.value, regs, stack, alloc, out);
+            let dst = alloc.alloc();
+            if ptr_reg != dst {
+                out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst,
+                    src: ptr_reg,
+                });
+            }
+            out.push(MInst::AddRR {
+                size: OpSize::S64,
+                dst,
+                src: off_reg,
+            });
+            regs.assign(vref, dst);
+        }
+
         // Ops not yet supported in isel
         Op::Bitcast(_)
         | Op::Sext(..)
@@ -456,7 +502,6 @@ fn select_inst(
         | Op::Xor(..)
         | Op::Lshr(..)
         | Op::Ashr(..)
-        | Op::PtrAdd(..)
         | Op::PtrDiff(..)
         | Op::PtrToInt(_)
         | Op::PtrToAddr(_)
