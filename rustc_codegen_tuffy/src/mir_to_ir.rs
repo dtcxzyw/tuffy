@@ -23,17 +23,12 @@ pub struct TranslationResult {
 
 /// Translate a single MIR function instance to tuffy IR.
 pub fn translate_function<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> Option<TranslationResult> {
-    let def_id = instance.def_id();
-    if !def_id.is_local() {
-        return None;
-    }
-
     let inst_ty = instance.ty(tcx, ty::TypingEnv::fully_monomorphized());
     if !inst_ty.is_fn() {
         return None;
     }
 
-    let mir = tcx.optimized_mir(def_id);
+    let mir = tcx.instance_mir(instance.def);
     let name = tcx.symbol_name(instance).name.to_string();
     let sig = inst_ty.fn_sig(tcx);
     let sig = tcx.normalize_erasing_late_bound_regions(ty::TypingEnv::fully_monomorphized(), sig);
@@ -117,7 +112,7 @@ impl LocalMap {
 
 fn translate_ty(ty: ty::Ty<'_>) -> Option<Type> {
     match ty.kind() {
-        ty::Int(ty::IntTy::I8) | ty::Uint(ty::UintTy::U8) | ty::Bool => Some(Type::Byte),
+        ty::Int(ty::IntTy::I8) | ty::Uint(ty::UintTy::U8) | ty::Bool => Some(Type::Byte(1)),
         ty::Int(ty::IntTy::I16) | ty::Uint(ty::UintTy::U16) => Some(Type::Int),
         ty::Int(ty::IntTy::I32) | ty::Uint(ty::UintTy::U32) | ty::Char => Some(Type::Int),
         ty::Int(ty::IntTy::I64)
@@ -236,8 +231,20 @@ fn translate_terminator<'tcx>(
             builder.br(target_block, vec![], Origin::synthetic());
         }
         TerminatorKind::Unreachable => {
-            // Emit a trap-like return for now.
             builder.ret(None, Origin::synthetic());
+        }
+        TerminatorKind::Drop { target, .. } => {
+            // Skip drop glue for now — just branch to the target.
+            let target_block = block_map.get(*target);
+            builder.br(target_block, vec![], Origin::synthetic());
+        }
+        TerminatorKind::FalseEdge { real_target, .. } => {
+            let target_block = block_map.get(*real_target);
+            builder.br(target_block, vec![], Origin::synthetic());
+        }
+        TerminatorKind::FalseUnwind { real_target, .. } => {
+            let target_block = block_map.get(*real_target);
+            builder.br(target_block, vec![], Origin::synthetic());
         }
         TerminatorKind::Call {
             func,
@@ -389,12 +396,12 @@ fn translate_rvalue(
             locals.get(place.local)
         }
         Rvalue::Aggregate(_, operands) => {
-            // For simple aggregates, just translate the first field.
-            // Full aggregate support requires stack allocation.
             if operands.is_empty() {
                 Some(builder.iconst(0, Origin::synthetic()))
+            } else if let Some(first_op) = operands.iter().next() {
+                translate_operand(first_op, builder, locals)
             } else {
-                translate_operand(&operands[0], builder, locals)
+                Some(builder.iconst(0, Origin::synthetic()))
             }
         }
         Rvalue::UnaryOp(mir::UnOp::Neg, operand) => {
@@ -407,15 +414,8 @@ fn translate_rvalue(
             let ones = builder.iconst(-1, Origin::synthetic());
             Some(builder.xor(v.into(), ones.into(), None, Origin::synthetic()))
         }
-        Rvalue::Len(_) => {
-            // Placeholder: return 0 for now.
-            Some(builder.iconst(0, Origin::synthetic()))
-        }
         Rvalue::Discriminant(place) => {
             locals.get(place.local)
-        }
-        Rvalue::NullaryOp(_, _) => {
-            Some(builder.iconst(0, Origin::synthetic()))
         }
         _ => None,
     }
@@ -478,7 +478,7 @@ fn resolve_call_symbol<'tcx>(tcx: TyCtxt<'tcx>, func_op: &Operand<'tcx>) -> Opti
     match ty.kind() {
         ty::FnDef(def_id, args) => {
             let instance =
-                Instance::resolve(tcx, ty::TypingEnv::fully_monomorphized(), *def_id, args)
+                Instance::try_resolve(tcx, ty::TypingEnv::fully_monomorphized(), *def_id, args)
                     .ok()
                     .flatten()?;
             Some(tcx.symbol_name(instance).name.to_string())
