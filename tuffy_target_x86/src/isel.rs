@@ -477,6 +477,8 @@ fn select_inst(
         | Op::Zext(..)
         | Op::SDiv(..)
         | Op::UDiv(..)
+        | Op::SRem(..)
+        | Op::URem(..)
         | Op::PtrDiff(..)
         | Op::PtrToInt(_)
         | Op::PtrToAddr(_)
