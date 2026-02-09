@@ -1089,6 +1089,18 @@ fn translate_rvalue<'tcx>(
                         builder.udiv(l_op, r_op, res_ann, Origin::synthetic())
                     }
                 }
+                BinOp::Rem => {
+                    let lhs_ty = match lhs {
+                        Operand::Copy(p) | Operand::Move(p) => mir.local_decls[p.local].ty,
+                        Operand::Constant(c) => c.ty(),
+                        _ => return None,
+                    };
+                    if is_signed_int(lhs_ty) {
+                        builder.srem(l_op, r_op, res_ann, Origin::synthetic())
+                    } else {
+                        builder.urem(l_op, r_op, res_ann, Origin::synthetic())
+                    }
+                }
                 _ => return None,
             };
             Some(val)
