@@ -151,6 +151,7 @@ inductive AbstractByte where
 /-- Tuffy IR value -/
 inductive Value where
   | int (val : Int)
+  | bool (val : Bool)
   | bytes (bs : List AbstractByte)
   | ptr (p : Pointer)
   | poison
@@ -177,6 +178,12 @@ inductive AtomicRmwOp where
   | and
   | or
   | xor
+  deriving DecidableEq, Repr
+
+/-- Integer comparison predicates.
+    Signedness is a property of operand annotations, not the predicate. -/
+inductive ICmpOp where
+  | eq | ne | lt | le | gt | ge
   deriving DecidableEq, Repr
 
 end TuffyLean.IR

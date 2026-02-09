@@ -174,6 +174,28 @@ def evalStore (mem : Memory) (addr : Int) (bs : List AbstractByte) : Memory :=
       else mem.bytes a }
 
 -- Atomic operation semantics (sequential model)
+
+-- Integer comparison semantics
+
+/-- Evaluate an integer comparison, returning a Bool value. -/
+def evalICmp (op : ICmpOp) (a b : Int) : Value :=
+  match op with
+  | .eq => .bool (a == b)
+  | .ne => .bool (a != b)
+  | .lt => .bool (a < b)
+  | .le => .bool (a ≤ b)
+  | .gt => .bool (a > b)
+  | .ge => .bool (a ≥ b)
+
+/-- Select between two values based on a boolean condition. -/
+def evalSelect (cond : Bool) (tv fv : Value) : Value :=
+  if cond then tv else fv
+
+/-- Convert a boolean to an integer: true → 1, false → 0. -/
+def evalBoolToInt (b : Bool) : Value :=
+  .int (if b then 1 else 0)
+
+-- Atomic operation semantics (sequential model)
 -- NOTE: These define sequential semantics only. A formal concurrency model
 -- (e.g., based on C11 or a custom weak memory model) is TBD. Memory ordering
 -- parameters are accepted but have no effect in this sequential model.
