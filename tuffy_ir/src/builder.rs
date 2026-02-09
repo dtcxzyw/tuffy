@@ -204,6 +204,26 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::UDiv(a, b), Type::Int, origin, ann)
     }
 
+    pub fn srem(
+        &mut self,
+        a: Operand,
+        b: Operand,
+        ann: Option<Annotation>,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::SRem(a, b), Type::Int, origin, ann)
+    }
+
+    pub fn urem(
+        &mut self,
+        a: Operand,
+        b: Operand,
+        ann: Option<Annotation>,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::URem(a, b), Type::Int, origin, ann)
+    }
+
     /// Bitwise AND.
     pub fn and(
         &mut self,

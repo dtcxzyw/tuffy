@@ -190,6 +190,12 @@ fn fmt_inst(
         Op::UDiv(a, b) => {
             format!("{v} = udiv {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
         }
+        Op::SRem(a, b) => {
+            format!("{v} = srem {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+        }
+        Op::URem(a, b) => {
+            format!("{v} = urem {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+        }
         Op::And(a, b) => {
             format!("{v} = and {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
         }

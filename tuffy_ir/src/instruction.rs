@@ -115,6 +115,10 @@ pub enum Op {
     SDiv(Operand, Operand),
     /// Unsigned integer division: udiv %a, %b (poison on div-by-zero)
     UDiv(Operand, Operand),
+    /// Signed integer remainder: srem %a, %b (poison on div-by-zero)
+    SRem(Operand, Operand),
+    /// Unsigned integer remainder: urem %a, %b (poison on div-by-zero)
+    URem(Operand, Operand),
     /// Bitwise AND: and %a, %b
     And(Operand, Operand),
     /// Bitwise OR: or %a, %b
