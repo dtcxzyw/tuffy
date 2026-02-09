@@ -245,24 +245,36 @@ fn generate_entry_point(tcx: TyCtxt<'_>) -> Option<CompiledModule> {
     .flatten()?;
     let start_sym = tcx.symbol_name(start_instance).name.to_string();
 
-    // Generate x86-64 machine code for a minimal entry point:
-    //   main(argc: i32 [edi], argv: **u8 [rsi]) -> i32
-    //     call rust_main        ; call user's main directly
-    //     xor eax, eax          ; return 0
-    //     ret
+    // Generate x86-64 machine code for the entry point that calls lang_start
+    // to initialize the Rust runtime before invoking the user's main:
     //
-    // This bypasses lang_start/lang_start_internal for now.
-    // Full std runtime init will be added later.
+    //   main(argc: i32 [edi], argv: **u8 [rsi]) -> i64
+    //     movsxd rax, edi           ; sign-extend argc (i32 → i64)
+    //     mov    rdx, rsi           ; argv → 3rd arg
+    //     mov    rsi, rax           ; argc → 2nd arg
+    //     lea    rdi, [rip+disp32]  ; user main fn ptr → 1st arg (PcRel reloc)
+    //     xor    ecx, ecx           ; sigpipe=0 → 4th arg
+    //     call   lang_start         ; call reloc
+    //     ret
     let code = vec![
-        0xe8, 0x00, 0x00, 0x00, 0x00, // call rust_main
-        0x31, 0xc0, // xor eax, eax
+        0x48, 0x63, 0xc7, // movsxd rax, edi
+        0x48, 0x89, 0xf2, // mov rdx, rsi
+        0x48, 0x89, 0xc6, // mov rsi, rax
+        0x48, 0x8d, 0x3d, 0x00, 0x00, 0x00, 0x00, // lea rdi, [rip+0]
+        0x31, 0xc9, // xor ecx, ecx
+        0xe8, 0x00, 0x00, 0x00, 0x00, // call lang_start
         0xc3, // ret
     ];
 
     let relocations = vec![
         tuffy_target::reloc::Relocation {
-            offset: 1,
+            offset: 12,
             symbol: main_sym,
+            kind: tuffy_target::reloc::RelocKind::PcRel,
+        },
+        tuffy_target::reloc::Relocation {
+            offset: 19,
+            symbol: start_sym,
             kind: tuffy_target::reloc::RelocKind::Call,
         },
     ];
