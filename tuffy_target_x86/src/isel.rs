@@ -201,7 +201,7 @@ pub fn isel(
                 id: block_ref.index(),
             });
             for (vref, inst) in func.block_insts_with_values(*block_ref) {
-                select_inst(
+                if select_inst(
                     vref,
                     &inst.op,
                     func,
@@ -215,7 +215,11 @@ pub fn isel(
                     rdx_captures,
                     rdx_moves,
                     &mut body,
-                )?;
+                )
+                .is_none()
+                {
+                    return None;
+                }
             }
         }
     }
@@ -493,7 +497,6 @@ fn select_inst(
             // Move arguments into System V ABI registers.
             for (i, arg) in args.iter().enumerate() {
                 if i >= ARG_REGS.len() {
-                    // Stack args not yet supported.
                     return None;
                 }
                 let src = ensure_in_reg(arg.value, regs, stack, alloc, out)?;
@@ -508,8 +511,14 @@ fn select_inst(
             }
 
             // Look up the symbol name from call_targets.
-            let sym = call_targets.get(&vref.index())?;
-            out.push(MInst::CallSym { name: sym.clone() });
+            if let Some(sym) = call_targets.get(&vref.index()) {
+                out.push(MInst::CallSym { name: sym.clone() });
+            } else {
+                // Unresolvable call (e.g., indirect or failed symbol resolution).
+                // Emit ud2 instead of dropping the entire function, which would
+                // cascade into undefined symbols for all callers.
+                out.push(MInst::Ud2);
+            }
 
             // Result is in rax per System V ABI.
             regs.assign(vref, Gpr::Rax);
@@ -703,29 +712,29 @@ fn select_inst(
         }
 
         // Ops not yet supported in isel
-        Op::Bitcast(_)
-        | Op::Sext(..)
-        | Op::Zext(..)
-        | Op::Div(..)
-        | Op::Rem(..)
-        | Op::PtrDiff(..)
-        | Op::PtrToInt(_)
-        | Op::PtrToAddr(_)
-        | Op::IntToPtr(_)
-        | Op::FAdd(..)
-        | Op::FSub(..)
-        | Op::FMul(..)
-        | Op::FDiv(..)
-        | Op::FNeg(_)
-        | Op::FAbs(_)
-        | Op::CopySign(..)
-        | Op::LoadAtomic(..)
-        | Op::StoreAtomic(..)
-        | Op::AtomicRmw(..)
-        | Op::AtomicCmpXchg(..)
-        | Op::Fence(_)
-        | Op::Continue(_)
-        | Op::RegionYield(_) => return None,
+        Op::Bitcast(_) => return None,
+        Op::Sext(..) => return None,
+        Op::Zext(..) => return None,
+        Op::Div(..) => return None,
+        Op::Rem(..) => return None,
+        Op::PtrDiff(..) => return None,
+        Op::PtrToInt(_) => return None,
+        Op::PtrToAddr(_) => return None,
+        Op::IntToPtr(_) => return None,
+        Op::FAdd(..) => return None,
+        Op::FSub(..) => return None,
+        Op::FMul(..) => return None,
+        Op::FDiv(..) => return None,
+        Op::FNeg(_) => return None,
+        Op::FAbs(_) => return None,
+        Op::CopySign(..) => return None,
+        Op::LoadAtomic(..) => return None,
+        Op::StoreAtomic(..) => return None,
+        Op::AtomicRmw(..) => return None,
+        Op::AtomicCmpXchg(..) => return None,
+        Op::Fence(_) => return None,
+        Op::Continue(_) => return None,
+        Op::RegionYield(_) => return None,
     }
     Some(())
 }
