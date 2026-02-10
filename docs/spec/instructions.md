@@ -123,6 +123,16 @@ Signedness is a property of operand annotations, not the operation.
 In infinite precision, logical and arithmetic right shift are identical.
 **Semantics**: `evalShr(a, b) = if b < 0 then poison else a >>> b`
 
+### `count_ones`
+
+```
+vN = count_ones vA
+```
+
+Population count: returns the number of set bits in the binary representation
+of `vA`. Produces `poison` if `vA` is negative.
+**Semantics**: `evalCountOnes(a) = if a < 0 then poison else popcount(a)`
+
 ## Floating Point Arithmetic
 
 Floating point operations operate on values of `float` type (`bf16`, `f16`, `f32`, `f64`).
