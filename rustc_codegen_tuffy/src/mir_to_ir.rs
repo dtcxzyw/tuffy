@@ -1513,6 +1513,19 @@ fn detect_intrinsic<'tcx>(
     None
 }
 
+/// Map compiler intrinsics to libc/compiler-rt symbol names.
+/// Returns None for intrinsics that need inline handling or aren't supported.
+fn intrinsic_to_libc(name: &str) -> Option<&'static str> {
+    match name {
+        // compare_bytes(left, right, count) -> i32 maps directly to memcmp.
+        "compare_bytes" => Some("memcmp"),
+        // Other memory intrinsics (write_bytes, copy_nonoverlapping, copy)
+        // have argument order/count mismatches with their libc equivalents
+        // and need inline lowering instead.
+        _ => None,
+    }
+}
+
 /// Resolve the callee symbol name from a Call terminator's function operand.
 fn resolve_call_symbol<'tcx>(
     tcx: TyCtxt<'tcx>,
@@ -1538,6 +1551,14 @@ fn resolve_call_symbol<'tcx>(
     );
     match ty.kind() {
         ty::FnDef(def_id, args) => {
+            // Check if this is an intrinsic that maps to a libc symbol.
+            if let Some(intrinsic) = tcx.intrinsic(*def_id) {
+                let iname = intrinsic.name.as_str();
+                if let Some(libc_sym) = intrinsic_to_libc(iname) {
+                    return Some(libc_sym.to_string());
+                }
+
+            }
             if args.has_non_region_param() {
                 return None;
             }
