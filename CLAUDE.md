@@ -62,6 +62,23 @@ cargo clippy             # Lint
 cargo fmt                # Format code
 ```
 
+### rustc_codegen_tuffy (codegen backend)
+
+`rustc_codegen_tuffy/` is **not** part of the Cargo workspace. It has its own `Cargo.toml` (crate-type `dylib`) and its own `target/` directory. Build it separately:
+
+```
+cargo build --manifest-path rustc_codegen_tuffy/Cargo.toml
+```
+
+The resulting `.so` is at `rustc_codegen_tuffy/target/debug/librustc_codegen_tuffy.so`. Use it with rustc:
+
+```
+rustc +nightly -Z codegen-backend=rustc_codegen_tuffy/target/debug/librustc_codegen_tuffy.so \
+    -C llvm-args=dump-ir -o out input.rs
+```
+
+`cargo build` / `cargo test` / `cargo clippy` at the workspace root do **not** touch this crate.
+
 ### Lean 4 (formal verification)
 
 ```
