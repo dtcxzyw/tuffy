@@ -12,8 +12,8 @@ instruction in a block by convention.
 vN = iconst <immediate>
 ```
 
-Produces an integer constant. The immediate is a signed 64-bit value in the Rust
-implementation, but semantically represents a mathematical integer.
+Produces an integer constant. The immediate is an arbitrary-precision integer,
+matching the Lean spec's `Int` type.
 
 **Semantics**: `Value.int(immediate)`
 

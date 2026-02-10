@@ -8,6 +8,8 @@ license.workspace = true
 tuffy_ir = { path = "../tuffy_ir" }
 tuffy_target = { path = "../tuffy_target" }
 object = { version = "0.36", features = ["write"] }
+num-bigint = "0.4"
+num-traits = "0.2"
 
 [dev-dependencies]
 tempfile = "3"

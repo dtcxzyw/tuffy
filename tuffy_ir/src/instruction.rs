@@ -1,5 +1,7 @@
 //! Instruction definitions for tuffy IR.
 
+use num_bigint::BigInt;
+
 use crate::module::SymbolId;
 use crate::types::{Annotation, FpRewriteFlags, MemoryOrdering, Type};
 use crate::value::{BlockRef, ValueRef};
@@ -127,8 +129,8 @@ pub enum Op {
     Shr(Operand, Operand),
     /// Population count: count the number of set bits.
     CountOnes(Operand),
-    /// Integer constant.
-    Const(i64),
+    /// Integer constant (arbitrary precision, matching Lean `Int`).
+    Const(BigInt),
 
     // -- Comparison --
     /// Integer comparison. Returns Bool.

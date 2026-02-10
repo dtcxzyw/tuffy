@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use crate::inst::{CondCode, MInst, OpSize};
 use crate::reg::Gpr;
+use num_traits::ToPrimitive;
 use tuffy_ir::function::{CfgNode, Function};
 use tuffy_ir::instruction::{ICmpOp, Op, Operand};
 use tuffy_ir::module::SymbolTable;
@@ -298,12 +299,18 @@ fn select_inst(
                 }
                 regs.assign(vref, Gpr::Rdx);
             } else {
+                let imm_i64 = imm.to_i64()?;
                 let dst = alloc.alloc();
-                out.push(MInst::MovRI {
-                    size: OpSize::S32,
-                    dst,
-                    imm: *imm,
-                });
+                // Values that fit in u32 range can use 32-bit mov (implicit zero-extend).
+                if imm_i64 >= 0 && imm_i64 <= u32::MAX as i64 {
+                    out.push(MInst::MovRI {
+                        size: OpSize::S32,
+                        dst,
+                        imm: imm_i64,
+                    });
+                } else {
+                    out.push(MInst::MovRI64 { dst, imm: imm_i64 });
+                }
                 regs.assign(vref, dst);
             }
         }

@@ -2,6 +2,8 @@
 //!
 //! Origin is mandatory on every instruction — enforced at compile time.
 
+use num_bigint::BigInt;
+
 use crate::function::{BasicBlock, BlockArg, CfgNode, Function, Region, RegionKind};
 use crate::instruction::{AtomicRmwOp, ICmpOp, Instruction, Op, Operand, Origin};
 use crate::module::SymbolId;
@@ -146,8 +148,8 @@ impl<'a> Builder<'a> {
     }
 
     /// Integer constant.
-    pub fn iconst(&mut self, val: i64, origin: Origin) -> ValueRef {
-        self.push_inst(Op::Const(val), Type::Int, origin, None)
+    pub fn iconst(&mut self, val: impl Into<BigInt>, origin: Origin) -> ValueRef {
+        self.push_inst(Op::Const(val.into()), Type::Int, origin, None)
     }
 
     /// Integer addition.

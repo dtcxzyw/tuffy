@@ -5,3 +5,5 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+num-bigint = "0.4"
+num-traits = "0.2"
