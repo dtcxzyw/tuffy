@@ -99,6 +99,16 @@ impl CodegenBackend for TuffyCodegenBackend {
                             }
                             eprintln!("{}", result.func.display(&result.symbols));
                         }
+
+                        let vr = tuffy_ir::verifier::verify_function(
+                            &result.func,
+                            &result.symbols,
+                        );
+                        if !vr.is_ok() {
+                            let func_name = result.symbols.resolve(result.func.name);
+                            eprintln!("IR verification failed for {func_name}:\n{vr}");
+                        }
+
                         for (sym_id, data) in &result.static_data {
                             all_static_data.push(StaticData {
                                 name: result.symbols.resolve(*sym_id).to_string(),
