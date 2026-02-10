@@ -409,9 +409,10 @@ impl BlockMap {
 
 /// Compute the address of a Place (base + projections).
 ///
-/// Walks the projection chain and returns a ValueRef representing the pointer
-/// to the final memory location. For locals with no projections that are
-/// stack-allocated, returns the local's value directly (which is already a pointer).
+/// Walks the projection chain and returns a `(ValueRef, Ty)` pair: the pointer
+/// to the final memory location and the projected type at that location.
+/// For locals with no projections that are stack-allocated, returns the
+/// local's value directly (which is already a pointer).
 fn translate_place_to_addr<'tcx>(
     tcx: TyCtxt<'tcx>,
     place: &Place<'tcx>,
@@ -419,7 +420,7 @@ fn translate_place_to_addr<'tcx>(
     builder: &mut Builder<'_>,
     locals: &LocalMap,
     stack_locals: &StackLocalSet,
-) -> Option<ValueRef> {
+) -> Option<(ValueRef, ty::Ty<'tcx>)> {
     let mut addr = locals.get(place.local)?;
     let mut cur_ty = mir.local_decls[place.local].ty;
 
@@ -500,7 +501,7 @@ fn translate_place_to_addr<'tcx>(
             }
         }
     }
-    Some(addr)
+    Some((addr, cur_ty))
 }
 
 /// Read the value at a Place (base + projections).
@@ -526,8 +527,9 @@ fn translate_place_to_value<'tcx>(
     {
         return locals.get(place.local);
     }
-    let addr = translate_place_to_addr(tcx, place, mir, builder, locals, stack_locals)?;
-    Some(builder.load(addr.into(), 8, Type::Int, None, Origin::synthetic()))
+    let (addr, projected_ty) = translate_place_to_addr(tcx, place, mir, builder, locals, stack_locals)?;
+    let bytes = type_size(tcx, projected_ty).unwrap_or(8) as u32;
+    Some(builder.load(addr.into(), bytes, Type::Int, None, Origin::synthetic()))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -560,10 +562,11 @@ fn translate_statement<'tcx>(
                     locals.set(place.local, val);
                 } else {
                     // Projected destination: compute address and emit Store.
-                    if let Some(addr) =
+                    if let Some((addr, projected_ty)) =
                         translate_place_to_addr(tcx, place, mir, builder, locals, stack_locals)
                     {
-                        builder.store(val.into(), addr.into(), 8, Origin::synthetic());
+                        let bytes = type_size(tcx, projected_ty).unwrap_or(8) as u32;
+                        builder.store(val.into(), addr.into(), bytes, Origin::synthetic());
                     }
                 }
             }
@@ -1217,6 +1220,7 @@ fn translate_rvalue<'tcx>(
             if !place.projection.is_empty() {
                 // Place has projections: compute address of the projected location.
                 translate_place_to_addr(tcx, place, mir, builder, locals, stack_locals)
+                    .map(|(addr, _ty)| addr)
             } else if stack_locals.is_stack(place.local) {
                 // Local is stack-allocated: its value is already the address.
                 locals.get(place.local)
@@ -1266,14 +1270,24 @@ fn translate_rvalue<'tcx>(
                     static_refs,
                     static_data,
                 ) {
+                    let field_ty = match op {
+                        Operand::Copy(p) | Operand::Move(p) => {
+                            Some(mir.local_decls[p.local].ty)
+                        }
+                        Operand::Constant(c) => Some(c.ty()),
+                        _ => None,
+                    };
+                    let bytes = field_ty
+                        .and_then(|t| type_size(tcx, t))
+                        .unwrap_or(8) as u32;
                     let offset = field_offset(tcx, agg_ty, i).unwrap_or(i as u64 * 8);
                     if offset == 0 {
-                        builder.store(val.into(), slot.into(), 8, Origin::synthetic());
+                        builder.store(val.into(), slot.into(), bytes, Origin::synthetic());
                     } else {
                         let off_val = builder.iconst(offset as i64, Origin::synthetic());
                         let addr =
                             builder.ptradd(slot.into(), off_val.into(), 0, Origin::synthetic());
-                        builder.store(val.into(), addr.into(), 8, Origin::synthetic());
+                        builder.store(val.into(), addr.into(), bytes, Origin::synthetic());
                     }
                 }
             }
