@@ -1260,7 +1260,7 @@ fn translate_rvalue<'tcx>(
             }
             let slot = builder.stack_slot(total_size as u32, Origin::synthetic());
             for (i, op) in operands.iter().enumerate() {
-                if let Some(val) = translate_operand(
+                let val = translate_operand(
                     tcx,
                     op,
                     mir,
@@ -1269,26 +1269,26 @@ fn translate_rvalue<'tcx>(
                     stack_locals,
                     static_refs,
                     static_data,
-                ) {
-                    let field_ty = match op {
-                        Operand::Copy(p) | Operand::Move(p) => {
-                            Some(mir.local_decls[p.local].ty)
-                        }
-                        Operand::Constant(c) => Some(c.ty()),
-                        _ => None,
-                    };
-                    let bytes = field_ty
-                        .and_then(|t| type_size(tcx, t))
-                        .unwrap_or(8) as u32;
-                    let offset = field_offset(tcx, agg_ty, i).unwrap_or(i as u64 * 8);
-                    if offset == 0 {
-                        builder.store(val.into(), slot.into(), bytes, Origin::synthetic());
-                    } else {
-                        let off_val = builder.iconst(offset as i64, Origin::synthetic());
-                        let addr =
-                            builder.ptradd(slot.into(), off_val.into(), 0, Origin::synthetic());
-                        builder.store(val.into(), addr.into(), bytes, Origin::synthetic());
+                )
+                .unwrap_or_else(|| builder.iconst(0, Origin::synthetic()));
+                let field_ty = match op {
+                    Operand::Copy(p) | Operand::Move(p) => {
+                        Some(mir.local_decls[p.local].ty)
                     }
+                    Operand::Constant(c) => Some(c.ty()),
+                    _ => None,
+                };
+                let bytes = field_ty
+                    .and_then(|t| type_size(tcx, t))
+                    .unwrap_or(8) as u32;
+                let offset = field_offset(tcx, agg_ty, i).unwrap_or(i as u64 * 8);
+                if offset == 0 {
+                    builder.store(val.into(), slot.into(), bytes, Origin::synthetic());
+                } else {
+                    let off_val = builder.iconst(offset as i64, Origin::synthetic());
+                    let addr =
+                        builder.ptradd(slot.into(), off_val.into(), 0, Origin::synthetic());
+                    builder.store(val.into(), addr.into(), bytes, Origin::synthetic());
                 }
             }
             // Mark the destination local as stack-allocated.
@@ -1424,6 +1424,21 @@ fn translate_const<'tcx>(
         return None;
     };
     match val {
+        mir::ConstValue::Scalar(mir::interpret::Scalar::Ptr(ptr, _)) => {
+            let alloc_id = ptr.provenance.alloc_id();
+            let alloc = tcx.global_alloc(alloc_id).unwrap_memory();
+            let alloc = alloc.inner();
+            let offset = ptr.offset.bytes() as usize;
+            let size = alloc.len() - offset;
+            let bytes: Vec<u8> = alloc
+                .inspect_with_uninit_and_ptr_outside_interpreter(offset..offset + size)
+                .to_vec();
+            let sym = format!(".Lconst.{}", static_data.len());
+            static_data.push((sym.clone(), bytes));
+            let val = builder.iconst(0, Origin::synthetic());
+            static_refs.insert(val.index(), sym);
+            Some(val)
+        }
         mir::ConstValue::Scalar(scalar) => translate_scalar(scalar, ty, builder),
         mir::ConstValue::ZeroSized => Some(builder.iconst(0, Origin::synthetic())),
         mir::ConstValue::Slice { alloc_id, meta } => {
@@ -1453,6 +1468,15 @@ fn translate_scalar(
         }
         ty::Bool => {
             let val = if bits != 0 { 1 } else { 0 };
+            Some(builder.iconst(val, Origin::synthetic()))
+        }
+        ty::Char => {
+            let val = bits as i64;
+            Some(builder.iconst(val, Origin::synthetic()))
+        }
+        ty::Ref(..) | ty::RawPtr(..) | ty::FnPtr(..) => {
+            // Scalar::Int reference/pointer (e.g., null pointer constant)
+            let val = bits as i64;
             Some(builder.iconst(val, Origin::synthetic()))
         }
         _ => None,
