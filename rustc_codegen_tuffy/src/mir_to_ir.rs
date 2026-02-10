@@ -135,6 +135,7 @@ pub fn translate_function<'tcx>(
                 tcx,
                 term,
                 mir,
+                instance,
                 &mut builder,
                 &mut locals,
                 &mut fat_locals,
@@ -640,6 +641,7 @@ fn translate_terminator<'tcx>(
     tcx: TyCtxt<'tcx>,
     term: &mir::Terminator<'tcx>,
     mir: &mir::Body<'tcx>,
+    instance: Instance<'tcx>,
     builder: &mut Builder<'_>,
     locals: &mut LocalMap,
     fat_locals: &mut FatLocalMap,
@@ -800,8 +802,38 @@ fn translate_terminator<'tcx>(
             target,
             ..
         } => {
+            // Check for compiler intrinsics and handle them inline.
+            if let Some((intrinsic_name, _)) = detect_intrinsic(tcx, func, instance) {
+                // Translate intrinsic arguments to IR values.
+                let mut intrinsic_args: Vec<ValueRef> = Vec::new();
+                for arg in args {
+                    if let Some(v) = translate_operand(
+                        tcx, &arg.node, mir, builder, locals, stack_locals,
+                        static_refs, static_data,
+                    ) {
+                        intrinsic_args.push(v);
+                    }
+                }
+                let handled = translate_intrinsic(
+                    &intrinsic_name,
+                    &intrinsic_args,
+                    destination.local,
+                    builder,
+                    locals,
+                );
+                if handled {
+                    // Branch to the continuation block.
+                    if let Some(target) = target {
+                        let target_block = block_map.get(*target);
+                        builder.br(target_block, vec![], Origin::synthetic());
+                    }
+                    return;
+                }
+                // Fall through to normal call path for unhandled intrinsics.
+            }
+
             // Resolve callee symbol name from the function operand's type.
-            let callee_sym = resolve_call_symbol(tcx, func);
+            let callee_sym = resolve_call_symbol(tcx, func, instance);
 
             // Check if the callee returns a large struct (needs sret on caller side).
             let dest_ty = mir.local_decls[destination.local].ty;
@@ -1433,8 +1465,60 @@ fn translate_const_slice<'tcx>(
     Some(ptr_val)
 }
 
+/// Handle compiler intrinsics inline during MIR translation.
+/// Returns true if the intrinsic was handled, false to fall through to normal call.
+fn translate_intrinsic(
+    name: &str,
+    ir_args: &[ValueRef],
+    destination_local: mir::Local,
+    builder: &mut Builder<'_>,
+    locals: &mut LocalMap,
+) -> bool {
+    match name {
+        // black_box: identity function, prevents optimizations.
+        // Just copy the argument to the destination.
+        "black_box" => {
+            if let Some(&v) = ir_args.first() {
+                locals.set(destination_local, v);
+            }
+            true
+        }
+
+        // Unhandled intrinsics fall through to normal call path.
+        _ => false,
+    }
+}
+
+/// Check if a Call terminator's callee is a known intrinsic.
+/// Returns the intrinsic name (e.g., "black_box") if detected.
+fn detect_intrinsic<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    func_op: &Operand<'tcx>,
+    caller: Instance<'tcx>,
+) -> Option<(String, ty::Ty<'tcx>)> {
+    let ty = match func_op {
+        Operand::Constant(c) => c.ty(),
+        _ => return None,
+    };
+    let ty = tcx.instantiate_and_normalize_erasing_regions(
+        caller.args,
+        ty::TypingEnv::fully_monomorphized(),
+        ty::EarlyBinder::bind(ty),
+    );
+    if let ty::FnDef(def_id, _args) = ty.kind() {
+        if let Some(intrinsic) = tcx.intrinsic(*def_id) {
+            return Some((intrinsic.name.as_str().to_string(), ty));
+        }
+    }
+    None
+}
+
 /// Resolve the callee symbol name from a Call terminator's function operand.
-fn resolve_call_symbol<'tcx>(tcx: TyCtxt<'tcx>, func_op: &Operand<'tcx>) -> Option<String> {
+fn resolve_call_symbol<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    func_op: &Operand<'tcx>,
+    caller: Instance<'tcx>,
+) -> Option<String> {
     let ty = match func_op {
         Operand::Constant(c) => c.ty(),
         Operand::Copy(place) | Operand::Move(place) => {
@@ -1444,10 +1528,16 @@ fn resolve_call_symbol<'tcx>(tcx: TyCtxt<'tcx>, func_op: &Operand<'tcx>) -> Opti
         }
         _ => return None,
     };
+    // Monomorphize the callee type using the caller's substitutions.
+    // This resolves generic parameters (F/#0, Self/#0, etc.) that appear
+    // when the caller is a generic function monomorphized for specific types.
+    let ty = tcx.instantiate_and_normalize_erasing_regions(
+        caller.args,
+        ty::TypingEnv::fully_monomorphized(),
+        ty::EarlyBinder::bind(ty),
+    );
     match ty.kind() {
         ty::FnDef(def_id, args) => {
-            // Skip if the callee's generic args contain unresolved parameters —
-            // Instance::try_resolve will panic during normalization.
             if args.has_non_region_param() {
                 return None;
             }
