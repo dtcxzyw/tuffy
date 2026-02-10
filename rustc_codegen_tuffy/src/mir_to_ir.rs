@@ -946,6 +946,19 @@ fn translate_terminator<'tcx>(
             };
 
             for arg in args {
+                // Skip zero-sized (Unit) and untranslatable args — they don't
+                // occupy an ABI slot, matching the callee's param skipping.
+                let arg_ty = match &arg.node {
+                    Operand::Copy(place) | Operand::Move(place) => {
+                        mir.local_decls[place.local].ty
+                    }
+                    Operand::Constant(c) => c.ty(),
+                    _ => mir.local_decls[mir::Local::from_usize(0)].ty,
+                };
+                if matches!(translate_ty(arg_ty), Some(Type::Unit) | None) {
+                    continue;
+                }
+
                 if let Some(v) = translate_operand(
                     tcx,
                     &arg.node,
