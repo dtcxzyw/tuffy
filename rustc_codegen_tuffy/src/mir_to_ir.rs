@@ -37,11 +37,6 @@ pub fn translate_function<'tcx>(
     instance: Instance<'tcx>,
     session: &CodegenSession,
 ) -> Option<TranslationResult> {
-    let inst_ty = instance.ty(tcx, ty::TypingEnv::fully_monomorphized());
-    if !inst_ty.is_fn() {
-        return None;
-    }
-
     // Skip partially substituted polymorphic instances — the symbol mangler
     // will panic if generic parameters are still present.
     if instance.args.has_non_region_param() {
@@ -50,24 +45,32 @@ pub fn translate_function<'tcx>(
 
     let mir = tcx.instance_mir(instance.def);
     let name = tcx.symbol_name(instance).name.to_string();
-    let sig = inst_ty.fn_sig(tcx);
-    let sig = tcx.instantiate_bound_regions_with_erased(sig);
-    let sig = tcx
-        .try_normalize_erasing_regions(ty::TypingEnv::fully_monomorphized(), sig)
-        .ok()?;
 
-    let params: Vec<Type> = sig
-        .inputs()
-        .iter()
-        .filter_map(|ty| translate_ty(*ty))
-        .collect();
-    let param_anns: Vec<Option<Annotation>> = sig
-        .inputs()
-        .iter()
-        .filter_map(|ty| translate_ty(*ty).map(|_| translate_annotation(*ty)))
-        .collect();
-    let ret_ty = translate_ty(sig.output());
-    let ret_ann = translate_annotation(sig.output());
+    // Monomorphize a MIR type using the instance's substitutions.
+    let monomorphize = |ty: ty::Ty<'tcx>| -> ty::Ty<'tcx> {
+        tcx.instantiate_and_normalize_erasing_regions(
+            instance.args,
+            ty::TypingEnv::fully_monomorphized(),
+            ty::EarlyBinder::bind(ty),
+        )
+    };
+
+    // Extract parameter types from MIR local declarations.
+    // This works for all callable types (functions, closures, coroutines).
+    let mut params = Vec::new();
+    let mut param_anns = Vec::new();
+    for i in 0..mir.arg_count {
+        let local = mir::Local::from_usize(i + 1);
+        let ty = monomorphize(mir.local_decls[local].ty);
+        if let Some(ir_ty) = translate_ty(ty) {
+            params.push(ir_ty);
+            param_anns.push(translate_annotation(ty));
+        }
+    }
+
+    let ret_mir_ty = monomorphize(mir.local_decls[mir::RETURN_PLACE].ty);
+    let ret_ty = translate_ty(ret_mir_ty);
+    let ret_ann = translate_annotation(ret_mir_ty);
 
     let mut func = Function::new(&name, params, param_anns, ret_ty, ret_ann);
     let mut builder = Builder::new(&mut func);
@@ -80,7 +83,6 @@ pub fn translate_function<'tcx>(
     let mut abi_metadata = session.new_metadata();
 
     // Detect whether this function returns a large struct via sret.
-    let ret_mir_ty = sig.output();
     let use_sret = needs_indirect_return(tcx, ret_mir_ty);
     // Will hold the original sret pointer passed by the caller (callee side).
     let mut sret_ptr: Option<ValueRef> = None;
