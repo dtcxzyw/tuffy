@@ -1,8 +1,8 @@
 # Introduce Module layer and redesign IR function call representation
 
-- Status: In Progress
+- Status: Completed
 - Created: 2026-02-10
-- Completed: N/A
+- Completed: 2026-02-10
 - Parent: N/A
 
 ## Description
@@ -184,10 +184,10 @@ impl SymbolTable {
 - [x] Add `SymbolId` and `SymbolTable` to `tuffy_ir`
 - [x] Add `StaticData` struct to `tuffy_ir`
 - [x] Add `Module` struct to `tuffy_ir`
-- [ ] Change `Function.name` from `String` to `SymbolId`
-- [ ] Update `Function::new()` to accept `SymbolId`
-- [ ] Update `Display for Function` to resolve name via symbol table (requires `Module` context)
-- [ ] Update builder to work with `Module` context
+- [x] Change `Function.name` from `String` to `SymbolId`
+- [x] Update `Function::new()` to accept `SymbolId`
+- [x] Update `Display for Function` to resolve name via symbol table (requires `Module` context)
+- [x] Update builder to work with `Module` context
 
 ### Phase 2: SymbolAddr Op
 
