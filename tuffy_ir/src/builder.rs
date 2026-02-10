@@ -371,7 +371,7 @@ impl<'a> Builder<'a> {
 
     /// Store value to pointer. `bytes` is the access width in bytes.
     pub fn store(&mut self, val: Operand, ptr: Operand, bytes: u32, origin: Origin) -> ValueRef {
-        self.push_inst(Op::Store(val, ptr, bytes), Type::Int, origin, None)
+        self.push_inst(Op::Store(val, ptr, bytes), Type::Unit, origin, None)
     }
 
     /// Allocate stack slot of n bytes.
@@ -400,7 +400,12 @@ impl<'a> Builder<'a> {
         ordering: MemoryOrdering,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::StoreAtomic(val, ptr, ordering), Type::Int, origin, None)
+        self.push_inst(
+            Op::StoreAtomic(val, ptr, ordering),
+            Type::Unit,
+            origin,
+            None,
+        )
     }
 
     /// Atomic read-modify-write.
@@ -438,7 +443,7 @@ impl<'a> Builder<'a> {
 
     /// Memory fence.
     pub fn fence(&mut self, ordering: MemoryOrdering, origin: Origin) -> ValueRef {
-        self.push_inst(Op::Fence(ordering), Type::Int, origin, None)
+        self.push_inst(Op::Fence(ordering), Type::Unit, origin, None)
     }
 
     // ── Symbol ──
@@ -522,13 +527,13 @@ impl<'a> Builder<'a> {
 
     /// Return from function.
     pub fn ret(&mut self, val: Option<Operand>, origin: Origin) -> ValueRef {
-        let ty = self.func.ret_ty.clone().unwrap_or(Type::Int);
+        let ty = self.func.ret_ty.clone().unwrap_or(Type::Unit);
         self.push_inst(Op::Ret(val), ty, origin, None)
     }
 
     /// Unconditional branch with block arguments.
     pub fn br(&mut self, target: BlockRef, args: Vec<Operand>, origin: Origin) -> ValueRef {
-        self.push_inst(Op::Br(target, args), Type::Int, origin, None)
+        self.push_inst(Op::Br(target, args), Type::Unit, origin, None)
     }
 
     /// Conditional branch.
@@ -543,7 +548,7 @@ impl<'a> Builder<'a> {
     ) -> ValueRef {
         self.push_inst(
             Op::BrIf(cond, then_block, then_args, else_block, else_args),
-            Type::Int,
+            Type::Unit,
             origin,
             None,
         )
@@ -551,21 +556,21 @@ impl<'a> Builder<'a> {
 
     /// Loop backedge.
     pub fn continue_(&mut self, values: Vec<Operand>, origin: Origin) -> ValueRef {
-        self.push_inst(Op::Continue(values), Type::Int, origin, None)
+        self.push_inst(Op::Continue(values), Type::Unit, origin, None)
     }
 
     /// Exit region with values.
     pub fn region_yield(&mut self, values: Vec<Operand>, origin: Origin) -> ValueRef {
-        self.push_inst(Op::RegionYield(values), Type::Int, origin, None)
+        self.push_inst(Op::RegionYield(values), Type::Unit, origin, None)
     }
 
     /// Unreachable: indicates control flow should never reach this point.
     pub fn unreachable(&mut self, origin: Origin) -> ValueRef {
-        self.push_inst(Op::Unreachable, Type::Int, origin, None)
+        self.push_inst(Op::Unreachable, Type::Unit, origin, None)
     }
 
     /// Trap: unconditionally abort execution.
     pub fn trap(&mut self, origin: Origin) -> ValueRef {
-        self.push_inst(Op::Trap, Type::Int, origin, None)
+        self.push_inst(Op::Trap, Type::Unit, origin, None)
     }
 }

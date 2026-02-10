@@ -101,6 +101,7 @@ fn fmt_type(ty: &Type) -> String {
     match ty {
         Type::Int => "int".to_string(),
         Type::Bool => "bool".to_string(),
+        Type::Unit => "unit".to_string(),
         Type::Byte(_) => "byte".to_string(),
         Type::Ptr(_) => "ptr".to_string(),
         Type::Float(ft) => match ft {

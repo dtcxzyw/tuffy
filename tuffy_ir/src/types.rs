@@ -52,6 +52,8 @@ pub enum Type {
     Int,
     /// Boolean (true/false). Distinct from integers.
     Bool,
+    /// Zero-sized unit type. Represents Rust's `()`.
+    Unit,
     /// Raw memory data of `n` bytes. Per-byte poison tracking.
     Byte(u32),
     /// Pointer with address space.
