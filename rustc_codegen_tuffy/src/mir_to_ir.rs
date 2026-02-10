@@ -338,10 +338,7 @@ impl StackLocalSet {
 /// (0-based), with `Some(SymbolId)` for named params and `None` otherwise.
 /// Synthetic ABI params (sret, fat pointer metadata) are not covered here —
 /// the caller is responsible for prepending `None` entries for those.
-fn extract_param_names(
-    mir: &mir::Body<'_>,
-    symbols: &mut SymbolTable,
-) -> Vec<Option<SymbolId>> {
+fn extract_param_names(mir: &mir::Body<'_>, symbols: &mut SymbolTable) -> Vec<Option<SymbolId>> {
     let mut names: Vec<Option<SymbolId>> = vec![None; mir.arg_count];
     for info in &mir.var_debug_info {
         if let Some(arg_idx) = info.argument_index {
