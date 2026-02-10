@@ -519,13 +519,23 @@ fn translate_place_to_value<'tcx>(
     if place.projection.is_empty() {
         return locals.get(place.local);
     }
-    // Non-stack scalar with Field(0) projection (e.g., CheckedOp tuple `.0`):
-    // the local already holds the scalar value, no load needed.
+    // Non-stack scalar with Field projection (e.g., CheckedOp tuple `.0` / `.1`):
+    // AddWithOverflow/SubWithOverflow/MulWithOverflow return (result, bool) but
+    // we only emit the arithmetic result as a scalar.  Field(0) returns that
+    // scalar directly; Field(1) (the overflow flag) returns constant 0 (false),
+    // effectively disabling overflow detection (matches release-mode behaviour).
     if !stack_locals.is_stack(place.local)
         && place.projection.len() == 1
         && matches!(place.projection[0], PlaceElem::Field(idx, _) if idx.as_usize() == 0)
     {
         return locals.get(place.local);
+    }
+    if !stack_locals.is_stack(place.local)
+        && place.projection.len() == 1
+        && matches!(place.projection[0], PlaceElem::Field(idx, _) if idx.as_usize() == 1)
+    {
+        // Overflow flag — always false for now.
+        return Some(builder.iconst(0, Origin::synthetic()));
     }
     let (addr, projected_ty) = translate_place_to_addr(tcx, place, mir, builder, locals, stack_locals)?;
     let bytes = type_size(tcx, projected_ty).unwrap_or(8) as u32;
@@ -1425,10 +1435,11 @@ fn translate_const<'tcx>(
     };
     match val {
         mir::ConstValue::Scalar(mir::interpret::Scalar::Ptr(ptr, _)) => {
-            let alloc_id = ptr.provenance.alloc_id();
+            let (prov, ptr_offset) = ptr.into_raw_parts();
+            let alloc_id = prov.alloc_id();
             let alloc = tcx.global_alloc(alloc_id).unwrap_memory();
             let alloc = alloc.inner();
-            let offset = ptr.offset.bytes() as usize;
+            let offset = ptr_offset.bytes() as usize;
             let size = alloc.len() - offset;
             let bytes: Vec<u8> = alloc
                 .inspect_with_uninit_and_ptr_outside_interpreter(offset..offset + size)
