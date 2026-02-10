@@ -90,6 +90,13 @@ impl CodegenBackend for TuffyCodegenBackend {
                     }
                     if let Some(result) = mir_to_ir::translate_function(tcx, *instance, &session) {
                         if dump_ir {
+                            for (sym_id, data) in &result.static_data {
+                                let name = result.symbols.resolve(*sym_id);
+                                eprintln!(
+                                    "{}",
+                                    tuffy_ir::display::StaticDataDisplay { name, data }
+                                );
+                            }
                             eprintln!("{}", result.func.display(&result.symbols));
                         }
                         for (sym_id, data) in &result.static_data {
