@@ -716,8 +716,12 @@ fn translate_terminator<'tcx>(
     match &term.kind {
         TerminatorKind::Return => {
             let ret_local = mir::Local::from_usize(0);
+            let ret_mir_ty = mir.local_decls[ret_local].ty;
 
-            if use_sret {
+            // Unit-returning functions: bare ret, no value.
+            if matches!(translate_ty(ret_mir_ty), Some(Type::Unit) | None) {
+                builder.ret(None, Origin::synthetic());
+            } else if use_sret {
                 // Large struct return: copy _0's data to the caller's sret pointer,
                 // then return the sret pointer in RAX.
                 let sret = sret_ptr.expect("sret_ptr must be set when use_sret is true");
