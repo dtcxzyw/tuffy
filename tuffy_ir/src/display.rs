@@ -614,10 +614,58 @@ impl Function {
     }
 }
 
+/// Format a static data blob as a text declaration.
+///
+/// Output: `data @name = "printable\xHH..."` (mixed printable + hex escapes).
+fn write_static_data(f: &mut fmt::Formatter<'_>, name: &str, data: &[u8]) -> fmt::Result {
+    write!(f, "data @{name} = \"")?;
+    for &b in data {
+        if b == b'\\' {
+            write!(f, "\\\\")?;
+        } else if b == b'"' {
+            write!(f, "\\\"")?;
+        } else if b.is_ascii_graphic() || b == b' ' {
+            write!(f, "{}", b as char)?;
+        } else if b == b'\n' {
+            write!(f, "\\n")?;
+        } else if b == b'\r' {
+            write!(f, "\\r")?;
+        } else if b == b'\t' {
+            write!(f, "\\t")?;
+        } else if b == 0 {
+            write!(f, "\\0")?;
+        } else {
+            write!(f, "\\x{b:02x}")?;
+        }
+    }
+    write!(f, "\"")
+}
+
+/// Wrapper for displaying static data with a resolved symbol name.
+pub struct StaticDataDisplay<'a> {
+    pub name: &'a str,
+    pub data: &'a [u8],
+}
+
+impl fmt::Display for StaticDataDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write_static_data(f, self.name, self.data)
+    }
+}
+
 impl fmt::Display for crate::module::Module {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (i, func) in self.functions.iter().enumerate() {
+        // Print static data first
+        for (i, sd) in self.static_data.iter().enumerate() {
             if i > 0 {
+                writeln!(f)?;
+            }
+            let name = self.symbols.resolve(sd.name);
+            write_static_data(f, name, &sd.data)?;
+        }
+
+        for (i, func) in self.functions.iter().enumerate() {
+            if i > 0 || !self.static_data.is_empty() {
                 writeln!(f)?;
                 writeln!(f)?;
             }
