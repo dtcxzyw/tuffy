@@ -575,4 +575,27 @@ impl<'a> Builder<'a> {
     pub fn trap(&mut self, origin: Origin) -> ValueRef {
         self.push_inst(Op::Trap, Type::Unit, origin, None)
     }
+
+    /// Returns `true` if the current block already ends with a terminator.
+    pub fn current_block_is_terminated(&self) -> bool {
+        let Some(bb_ref) = self.current_block else {
+            return false;
+        };
+        let bb = &self.func.blocks[bb_ref.index() as usize];
+        if bb.inst_count == 0 {
+            return false;
+        }
+        let last_idx = (bb.inst_start + bb.inst_count - 1) as usize;
+        let last_op = &self.func.instructions[last_idx].op;
+        matches!(
+            last_op,
+            Op::Ret(_)
+                | Op::Br(_, _)
+                | Op::BrIf(..)
+                | Op::Continue(_)
+                | Op::RegionYield(_)
+                | Op::Unreachable
+                | Op::Trap
+        )
+    }
 }
