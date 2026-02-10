@@ -803,7 +803,9 @@ fn translate_terminator<'tcx>(
             ..
         } => {
             // Check for compiler intrinsics and handle them inline.
-            if let Some((intrinsic_name, _)) = detect_intrinsic(tcx, func, instance) {
+            if let Some((intrinsic_name, intrinsic_substs)) =
+                detect_intrinsic(tcx, func, instance)
+            {
                 // Translate intrinsic arguments to IR values.
                 let mut intrinsic_args: Vec<ValueRef> = Vec::new();
                 for arg in args {
@@ -814,6 +816,8 @@ fn translate_terminator<'tcx>(
                         intrinsic_args.push(v);
                     }
                 }
+
+                // Try simple inline handling first (black_box, etc.).
                 let handled = translate_intrinsic(
                     &intrinsic_name,
                     &intrinsic_args,
@@ -822,7 +826,25 @@ fn translate_terminator<'tcx>(
                     locals,
                 );
                 if handled {
-                    // Branch to the continuation block.
+                    if let Some(target) = target {
+                        let target_block = block_map.get(*target);
+                        builder.br(target_block, vec![], Origin::synthetic());
+                    }
+                    return;
+                }
+
+                // Try lowering memory intrinsics to libc calls.
+                let mem_handled = translate_memory_intrinsic(
+                    tcx,
+                    &intrinsic_name,
+                    intrinsic_substs,
+                    &intrinsic_args,
+                    destination.local,
+                    builder,
+                    locals,
+                    call_targets,
+                );
+                if mem_handled {
                     if let Some(target) = target {
                         let target_block = block_map.get(*target);
                         builder.br(target_block, vec![], Origin::synthetic());
@@ -1484,18 +1506,156 @@ fn translate_intrinsic(
             true
         }
 
+        // assume: optimizer hint, no runtime effect. Treat as no-op.
+        "assume" => true,
+
         // Unhandled intrinsics fall through to normal call path.
         _ => false,
     }
 }
 
+/// Lower memory intrinsics to libc calls with adjusted arguments.
+/// Handles write_bytes, copy_nonoverlapping, copy, and raw_eq.
+/// Returns true if the intrinsic was handled.
+fn translate_memory_intrinsic<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    name: &str,
+    substs: &'tcx ty::List<ty::GenericArg<'tcx>>,
+    ir_args: &[ValueRef],
+    destination_local: mir::Local,
+    builder: &mut Builder<'_>,
+    locals: &mut LocalMap,
+    call_targets: &mut HashMap<u32, String>,
+) -> bool {
+    // Extract the type parameter T and compute its size.
+    let elem_size = match substs.first().and_then(|a| a.as_type()) {
+        Some(t) => type_size(tcx, t).unwrap_or(0),
+        None => return false,
+    };
+
+    match name {
+        // write_bytes<T>(dst, val, count) → memset(dst, val, count * sizeof(T))
+        "write_bytes" | "volatile_set_memory" => {
+            if ir_args.len() < 3 {
+                return false;
+            }
+            let dst = ir_args[0];
+            let val = ir_args[1];
+            let count = ir_args[2];
+            let byte_count = if elem_size == 1 {
+                count
+            } else {
+                let sz = builder.iconst(elem_size as i64, Origin::synthetic());
+                builder.mul(count.into(), sz.into(), None, Origin::synthetic())
+            };
+            let callee = builder.iconst(0, Origin::synthetic());
+            let call = builder.call(
+                callee.into(),
+                vec![dst.into(), val.into(), byte_count.into()],
+                Type::Int,
+                None,
+                Origin::synthetic(),
+            );
+            call_targets.insert(call.index(), "memset".to_string());
+            locals.set(destination_local, call);
+            true
+        }
+
+        // copy_nonoverlapping<T>(src, dst, count) → memcpy(dst, src, count * sizeof(T))
+        "copy_nonoverlapping" | "volatile_copy_nonoverlapping_memory" => {
+            if ir_args.len() < 3 {
+                return false;
+            }
+            let src = ir_args[0];
+            let dst = ir_args[1];
+            let count = ir_args[2];
+            let byte_count = if elem_size == 1 {
+                count
+            } else {
+                let sz = builder.iconst(elem_size as i64, Origin::synthetic());
+                builder.mul(count.into(), sz.into(), None, Origin::synthetic())
+            };
+            // memcpy(dst, src, n) — note swapped argument order.
+            let callee = builder.iconst(0, Origin::synthetic());
+            let call = builder.call(
+                callee.into(),
+                vec![dst.into(), src.into(), byte_count.into()],
+                Type::Int,
+                None,
+                Origin::synthetic(),
+            );
+            call_targets.insert(call.index(), "memcpy".to_string());
+            locals.set(destination_local, call);
+            true
+        }
+
+        // copy<T>(src, dst, count) → memmove(dst, src, count * sizeof(T))
+        "copy" | "volatile_copy_memory" => {
+            if ir_args.len() < 3 {
+                return false;
+            }
+            let src = ir_args[0];
+            let dst = ir_args[1];
+            let count = ir_args[2];
+            let byte_count = if elem_size == 1 {
+                count
+            } else {
+                let sz = builder.iconst(elem_size as i64, Origin::synthetic());
+                builder.mul(count.into(), sz.into(), None, Origin::synthetic())
+            };
+            let callee = builder.iconst(0, Origin::synthetic());
+            let call = builder.call(
+                callee.into(),
+                vec![dst.into(), src.into(), byte_count.into()],
+                Type::Int,
+                None,
+                Origin::synthetic(),
+            );
+            call_targets.insert(call.index(), "memmove".to_string());
+            locals.set(destination_local, call);
+            true
+        }
+
+        // raw_eq<T>(a, b) → memcmp(a, b, sizeof(T)) == 0
+        "raw_eq" => {
+            if ir_args.len() < 2 {
+                return false;
+            }
+            let a = ir_args[0];
+            let b = ir_args[1];
+            let sz = builder.iconst(elem_size as i64, Origin::synthetic());
+            let callee = builder.iconst(0, Origin::synthetic());
+            let cmp_result = builder.call(
+                callee.into(),
+                vec![a.into(), b.into(), sz.into()],
+                Type::Int,
+                None,
+                Origin::synthetic(),
+            );
+            call_targets.insert(cmp_result.index(), "memcmp".to_string());
+            // raw_eq returns bool (0 or 1): true when memcmp returns 0.
+            let zero = builder.iconst(0, Origin::synthetic());
+            let eq = builder.icmp(
+                tuffy_ir::instruction::ICmpOp::Eq,
+                cmp_result.into(),
+                zero.into(),
+                Origin::synthetic(),
+            );
+            locals.set(destination_local, eq);
+            true
+        }
+
+        _ => false,
+    }
+}
+
 /// Check if a Call terminator's callee is a known intrinsic.
-/// Returns the intrinsic name (e.g., "black_box") if detected.
+/// Returns the intrinsic name and the generic args (for extracting type parameters).
 fn detect_intrinsic<'tcx>(
     tcx: TyCtxt<'tcx>,
     func_op: &Operand<'tcx>,
     caller: Instance<'tcx>,
-) -> Option<(String, ty::Ty<'tcx>)> {
+) -> Option<(String, &'tcx ty::List<ty::GenericArg<'tcx>>)> {
     let ty = match func_op {
         Operand::Constant(c) => c.ty(),
         _ => return None,
@@ -1505,9 +1665,9 @@ fn detect_intrinsic<'tcx>(
         ty::TypingEnv::fully_monomorphized(),
         ty::EarlyBinder::bind(ty),
     );
-    if let ty::FnDef(def_id, _args) = ty.kind() {
+    if let ty::FnDef(def_id, args) = ty.kind() {
         if let Some(intrinsic) = tcx.intrinsic(*def_id) {
-            return Some((intrinsic.name.as_str().to_string(), ty));
+            return Some((intrinsic.name.as_str().to_string(), args));
         }
     }
     None
@@ -1519,9 +1679,9 @@ fn intrinsic_to_libc(name: &str) -> Option<&'static str> {
     match name {
         // compare_bytes(left, right, count) -> i32 maps directly to memcmp.
         "compare_bytes" => Some("memcmp"),
-        // Other memory intrinsics (write_bytes, copy_nonoverlapping, copy)
-        // have argument order/count mismatches with their libc equivalents
-        // and need inline lowering instead.
+        // ctpop(x) -> popcount. On x86-64, __popcountdi2 takes i64 in rdi,
+        // returns i32 in eax (upper 32 bits zeroed), safe to use as usize.
+        "ctpop" => Some("__popcountdi2"),
         _ => None,
     }
 }
