@@ -239,7 +239,7 @@ fn translate_annotation(ty: ty::Ty<'_>) -> Option<Annotation> {
         ty::Uint(ty::UintTy::U64) | ty::Uint(ty::UintTy::Usize) => Some(Annotation::Unsigned(64)),
         ty::Int(ty::IntTy::I128) => Some(Annotation::Signed(128)),
         ty::Uint(ty::UintTy::U128) => Some(Annotation::Unsigned(128)),
-        ty::RawPtr(..) | ty::Ref(..) | ty::FnPtr(..) => Some(Annotation::Unsigned(64)),
+        ty::RawPtr(..) | ty::Ref(..) | ty::FnPtr(..) => None,
         _ => None,
     }
 }
