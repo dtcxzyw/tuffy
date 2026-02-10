@@ -30,6 +30,17 @@ def evalOr (a b : Int) : Int := Int.lor a b
 /-- Bitwise XOR (two's complement, infinite width) -/
 def evalXor (a b : Int) : Int := Int.xor a b
 
+/-- Population count: number of set bits in a natural number. -/
+def popcount : Nat → Nat
+  | 0 => 0
+  | n + 1 => (n + 1) % 2 + popcount ((n + 1) / 2)
+
+/-- Population count: number of set bits in the binary representation.
+    Defined for non-negative integers; negative values produce poison. -/
+def evalCountOnes (a : Int) : Value :=
+  if a < 0 then .poison
+  else .int (popcount a.toNat)
+
 /-- Left shift. Poison if shift amount is negative. -/
 def evalShl (a b : Int) : Value :=
   if b < 0 then .poison else .int (a <<< b.toNat)
