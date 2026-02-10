@@ -90,7 +90,7 @@ impl CodegenBackend for TuffyCodegenBackend {
                     }
                     if let Some(result) = mir_to_ir::translate_function(tcx, *instance, &session) {
                         if dump_ir {
-                            eprintln!("{}", result.func);
+                            eprintln!("{}", result.func.display(&result.symbols));
                         }
                         for (sym_id, data) in &result.static_data {
                             all_static_data.push(StaticData {

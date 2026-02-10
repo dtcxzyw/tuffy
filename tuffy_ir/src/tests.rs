@@ -8,8 +8,10 @@ use crate::types::{Annotation, FloatType, FpRewriteFlags, MemoryOrdering, Type};
 
 #[test]
 fn build_add_function() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("add");
     let mut func = Function::new(
-        "add",
+        name,
         vec![Type::Int, Type::Int],
         vec![],
         Some(Type::Int),
@@ -43,8 +45,10 @@ fn build_add_function() {
 #[test]
 fn build_with_annotations() {
     let s32 = Some(Annotation::Signed(32));
+    let mut st = SymbolTable::new();
+    let name = st.intern("add_i32");
     let mut func = Function::new(
-        "add_i32",
+        name,
         vec![Type::Int, Type::Int],
         vec![s32, s32],
         Some(Type::Int),
@@ -82,8 +86,10 @@ fn build_with_annotations() {
 
 #[test]
 fn display_add_function() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("add");
     let mut func = Function::new(
-        "add",
+        name,
         vec![Type::Int, Type::Int],
         vec![],
         Some(Type::Int),
@@ -102,7 +108,7 @@ fn display_add_function() {
     builder.ret(Some(sum.into()), Origin::synthetic());
     builder.exit_region();
 
-    let output = format!("{func}");
+    let output = format!("{}", func.display(&st));
     assert_eq!(
         output,
         "func @add(int, int) -> int {\n\
@@ -117,8 +123,10 @@ fn display_add_function() {
 
 #[test]
 fn display_multi_block_branch() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("max");
     let mut func = Function::new(
-        "max",
+        name,
         vec![Type::Int, Type::Int],
         vec![],
         Some(Type::Int),
@@ -146,7 +154,7 @@ fn display_multi_block_branch() {
     builder.ret(Some(b.into()), Origin::synthetic());
     builder.exit_region();
 
-    let output = format!("{func}");
+    let output = format!("{}", func.display(&st));
     assert_eq!(
         output,
         "func @max(int, int) -> int {\n\
@@ -167,7 +175,9 @@ fn display_multi_block_branch() {
 
 #[test]
 fn display_nested_loop_region() {
-    let mut func = Function::new("factorial", vec![Type::Int], vec![], Some(Type::Int), None);
+    let mut st = SymbolTable::new();
+    let name = st.intern("factorial");
+    let mut func = Function::new(name, vec![Type::Int], vec![], Some(Type::Int), None);
     let mut builder = Builder::new(&mut func);
 
     let root = builder.create_region(RegionKind::Function);
@@ -209,7 +219,7 @@ fn display_nested_loop_region() {
 
     builder.exit_region();
 
-    let output = format!("{func}");
+    let output = format!("{}", func.display(&st));
     assert_eq!(
         output,
         "func @factorial(int) -> int {\n\
@@ -238,8 +248,10 @@ fn display_nested_loop_region() {
 
 #[test]
 fn build_bitwise_ops() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("bitwise");
     let mut func = Function::new(
-        "bitwise",
+        name,
         vec![Type::Int, Type::Int],
         vec![],
         Some(Type::Int),
@@ -268,8 +280,10 @@ fn build_bitwise_ops() {
 
 #[test]
 fn display_shift_ops() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("shifts");
     let mut func = Function::new(
-        "shifts",
+        name,
         vec![Type::Int, Type::Int],
         vec![],
         Some(Type::Int),
@@ -289,7 +303,7 @@ fn display_shift_ops() {
     builder.ret(Some(v_shr.into()), Origin::synthetic());
     builder.exit_region();
 
-    let output = format!("{func}");
+    let output = format!("{}", func.display(&st));
     assert_eq!(
         output,
         "func @shifts(int, int) -> int {\n\
@@ -305,8 +319,10 @@ fn display_shift_ops() {
 
 #[test]
 fn display_division_ops() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("divs");
     let mut func = Function::new(
-        "divs",
+        name,
         vec![Type::Int, Type::Int],
         vec![],
         Some(Type::Int),
@@ -327,7 +343,7 @@ fn display_division_ops() {
     builder.ret(Some(v_add.into()), Origin::synthetic());
     builder.exit_region();
 
-    let output = format!("{func}");
+    let output = format!("{}", func.display(&st));
     assert_eq!(
         output,
         "func @divs(int, int) -> int {\n\
@@ -344,8 +360,10 @@ fn display_division_ops() {
 
 #[test]
 fn build_ptradd() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("ptr_arith");
     let mut func = Function::new(
-        "ptr_arith",
+        name,
         vec![Type::Ptr(0), Type::Int],
         vec![],
         Some(Type::Ptr(0)),
@@ -371,8 +389,10 @@ fn build_ptradd() {
 
 #[test]
 fn display_pointer_ops() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("ptr_ops");
     let mut func = Function::new(
-        "ptr_ops",
+        name,
         vec![Type::Ptr(0), Type::Ptr(0), Type::Int],
         vec![],
         Some(Type::Int),
@@ -396,7 +416,7 @@ fn display_pointer_ops() {
     builder.ret(Some(_pi.into()), Origin::synthetic());
     builder.exit_region();
 
-    let output = format!("{func}");
+    let output = format!("{}", func.display(&st));
     assert_eq!(
         output,
         "func @ptr_ops(ptr, ptr, int) -> int {\n\
@@ -417,8 +437,10 @@ fn display_pointer_ops() {
 #[test]
 fn build_float_binary_ops() {
     let f32_ty = Type::Float(FloatType::F32);
+    let mut st = SymbolTable::new();
+    let name = st.intern("float_bin");
     let mut func = Function::new(
-        "float_bin",
+        name,
         vec![f32_ty.clone(), f32_ty.clone()],
         vec![],
         Some(f32_ty.clone()),
@@ -482,8 +504,10 @@ fn build_float_binary_ops() {
 #[test]
 fn display_float_ops() {
     let f64_ty = Type::Float(FloatType::F64);
+    let mut st = SymbolTable::new();
+    let name = st.intern("float_ops");
     let mut func = Function::new(
-        "float_ops",
+        name,
         vec![f64_ty.clone(), f64_ty.clone()],
         vec![],
         Some(f64_ty.clone()),
@@ -533,7 +557,7 @@ fn display_float_ops() {
     builder.ret(Some(_v_cs.into()), Origin::synthetic());
     builder.exit_region();
 
-    let output = format!("{func}");
+    let output = format!("{}", func.display(&st));
     assert_eq!(
         output,
         "func @float_ops(f64, f64) -> f64 {\n\
@@ -554,8 +578,10 @@ fn display_float_ops() {
 
 #[test]
 fn build_atomic_ops() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("atomic_test");
     let mut func = Function::new(
-        "atomic_test",
+        name,
         vec![Type::Ptr(0), Type::Int],
         vec![],
         Some(Type::Int),
@@ -617,8 +643,10 @@ fn build_atomic_ops() {
 
 #[test]
 fn display_atomic_ops() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("atomic_ops");
     let mut func = Function::new(
-        "atomic_ops",
+        name,
         vec![Type::Ptr(0), Type::Int],
         vec![],
         Some(Type::Int),
@@ -666,7 +694,7 @@ fn display_atomic_ops() {
     builder.ret(Some(_cx.into()), Origin::synthetic());
     builder.exit_region();
 
-    let output = format!("{func}");
+    let output = format!("{}", func.display(&st));
     assert_eq!(
         output,
         "func @atomic_ops(ptr, int) -> int {\n\
@@ -685,8 +713,10 @@ fn display_atomic_ops() {
 
 #[test]
 fn build_select_and_bool_to_int() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("select_test");
     let mut func = Function::new(
-        "select_test",
+        name,
         vec![Type::Int, Type::Int],
         vec![],
         Some(Type::Int),
@@ -727,8 +757,10 @@ fn build_select_and_bool_to_int() {
 
 #[test]
 fn display_select_and_bool_to_int() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("sel");
     let mut func = Function::new(
-        "sel",
+        name,
         vec![Type::Int, Type::Int],
         vec![],
         Some(Type::Int),
@@ -755,7 +787,7 @@ fn display_select_and_bool_to_int() {
     builder.ret(Some(b2i.into()), Origin::synthetic());
     builder.exit_region();
 
-    let output = format!("{func}");
+    let output = format!("{}", func.display(&st));
     assert_eq!(
         output,
         "func @sel(int, int) -> int {\n\
@@ -788,8 +820,15 @@ fn symbol_table_intern_and_resolve() {
 fn build_symbol_addr() {
     let mut module = Module::new("test");
     let malloc_sym = module.intern("malloc");
+    let caller_sym = module.intern("caller");
 
-    let mut func = Function::new("caller", vec![Type::Int], vec![], Some(Type::Ptr(0)), None);
+    let mut func = Function::new(
+        caller_sym,
+        vec![Type::Int],
+        vec![],
+        Some(Type::Ptr(0)),
+        None,
+    );
     let mut builder = Builder::new(&mut func);
 
     let root = builder.create_region(RegionKind::Function);
@@ -822,8 +861,9 @@ fn build_symbol_addr() {
 fn display_symbol_addr_without_symbols() {
     let mut st = SymbolTable::new();
     let sym = st.intern("puts");
+    let test_sym = st.intern("test");
 
-    let mut func = Function::new("test", vec![], vec![], None, None);
+    let mut func = Function::new(test_sym, vec![], vec![], None, None);
     let mut builder = Builder::new(&mut func);
 
     let root = builder.create_region(RegionKind::Function);
@@ -835,9 +875,10 @@ fn display_symbol_addr_without_symbols() {
     builder.ret(None, Origin::synthetic());
     builder.exit_region();
 
-    // Without module context, SymbolAddr shows raw id
+    // Without module context, SymbolAddr and function name show raw ids
     let output = format!("{func}");
     assert!(output.contains("symbol_addr $0"));
+    assert!(output.contains("func $1"));
 }
 
 #[test]

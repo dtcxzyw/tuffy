@@ -71,12 +71,14 @@ pub fn translate_function<'tcx>(
     let ret_ty = translate_ty(ret_mir_ty);
     let ret_ann = translate_annotation(ret_mir_ty);
 
-    let mut func = Function::new(&name, params, param_anns, ret_ty, ret_ann);
+    let mut symbols = SymbolTable::new();
+    let func_sym = symbols.intern(&name);
+
+    let mut func = Function::new(func_sym, params, param_anns, ret_ty, ret_ann);
     let mut builder = Builder::new(&mut func);
     let mut locals = LocalMap::new(mir.local_decls.len());
     let mut fat_locals = FatLocalMap::new();
     let mut stack_locals = StackLocalSet::new(mir.local_decls.len());
-    let mut symbols = SymbolTable::new();
     let mut static_data: Vec<(SymbolId, Vec<u8>)> = Vec::new();
     let mut abi_metadata = session.new_metadata();
 

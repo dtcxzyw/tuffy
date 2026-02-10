@@ -11,10 +11,12 @@ use tuffy_ir::module::SymbolTable;
 use tuffy_ir::types::{Annotation, Type};
 use tuffy_target_x86::{emit, encode, isel};
 
-fn build_add_func() -> Function {
+fn build_add_func() -> (Function, SymbolTable) {
     let s32 = Some(Annotation::Signed(32));
+    let mut st = SymbolTable::new();
+    let name = st.intern("add");
     let mut func = Function::new(
-        "add",
+        name,
         vec![Type::Int, Type::Int],
         vec![s32, s32],
         Some(Type::Int),
@@ -43,12 +45,11 @@ fn build_add_func() -> Function {
 
     builder.exit_region();
 
-    func
+    (func, st)
 }
 
 fn compile_add_func() -> Vec<u8> {
-    let func = build_add_func();
-    let symbols = SymbolTable::new();
+    let (func, symbols) = build_add_func();
     let no_rdx_captures = HashMap::new();
     let no_rdx_moves = HashMap::new();
     let result = isel::isel(&func, &symbols, &no_rdx_captures, &no_rdx_moves)

@@ -30,8 +30,7 @@ use crate::isel;
 
 #[test]
 fn isel_add_function() {
-    let func = build_add_func();
-    let symbols = SymbolTable::new();
+    let (func, symbols) = build_add_func();
     let no_rdx_captures = HashMap::new();
     let no_rdx_moves = HashMap::new();
     let result = isel::isel(&func, &symbols, &no_rdx_captures, &no_rdx_moves)
@@ -44,8 +43,7 @@ fn isel_add_function() {
 
 #[test]
 fn encode_add_function() {
-    let func = build_add_func();
-    let symbols = SymbolTable::new();
+    let (func, symbols) = build_add_func();
     let no_rdx_captures = HashMap::new();
     let no_rdx_moves = HashMap::new();
     let result = isel::isel(&func, &symbols, &no_rdx_captures, &no_rdx_moves)
@@ -61,8 +59,7 @@ fn encode_add_function() {
 
 #[test]
 fn emit_elf_valid() {
-    let func = build_add_func();
-    let symbols = SymbolTable::new();
+    let (func, symbols) = build_add_func();
     let no_rdx_captures = HashMap::new();
     let no_rdx_moves = HashMap::new();
     let result = isel::isel(&func, &symbols, &no_rdx_captures, &no_rdx_moves)
@@ -74,10 +71,12 @@ fn emit_elf_valid() {
     assert_eq!(&elf[..4], b"\x7fELF");
 }
 
-fn build_add_func() -> Function {
+fn build_add_func() -> (Function, SymbolTable) {
     let s32 = Some(Annotation::Signed(32));
+    let mut st = SymbolTable::new();
+    let name = st.intern("add");
     let mut func = Function::new(
-        "add",
+        name,
         vec![Type::Int, Type::Int],
         vec![s32, s32],
         Some(Type::Int),
@@ -106,13 +105,12 @@ fn build_add_func() -> Function {
 
     builder.exit_region();
 
-    func
+    (func, st)
 }
 
 #[test]
 fn isel_branch_function() {
-    let func = build_branch_func();
-    let symbols = SymbolTable::new();
+    let (func, symbols) = build_branch_func();
     let no_rdx_captures = HashMap::new();
     let no_rdx_moves = HashMap::new();
     let result = isel::isel(&func, &symbols, &no_rdx_captures, &no_rdx_moves)
@@ -126,8 +124,7 @@ fn isel_branch_function() {
 
 #[test]
 fn encode_branch_labels_resolved() {
-    let func = build_branch_func();
-    let symbols = SymbolTable::new();
+    let (func, symbols) = build_branch_func();
     let no_rdx_captures = HashMap::new();
     let no_rdx_moves = HashMap::new();
     let result = isel::isel(&func, &symbols, &no_rdx_captures, &no_rdx_moves)
@@ -150,10 +147,12 @@ fn encode_branch_labels_resolved() {
 ///   ret %0
 /// else_bb:
 ///   ret %1
-fn build_branch_func() -> Function {
+fn build_branch_func() -> (Function, SymbolTable) {
     let s32 = Some(Annotation::Signed(32));
+    let mut st = SymbolTable::new();
+    let name = st.intern("max");
     let mut func = Function::new(
-        "max",
+        name,
         vec![Type::Int, Type::Int],
         vec![s32, s32],
         Some(Type::Int),
@@ -189,5 +188,5 @@ fn build_branch_func() -> Function {
 
     builder.exit_region();
 
-    func
+    (func, st)
 }

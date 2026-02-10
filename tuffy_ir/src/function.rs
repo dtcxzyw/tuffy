@@ -5,6 +5,7 @@
 //! Cross-region value references use implicit capture (VPlan style).
 
 use crate::instruction::Instruction;
+use crate::module::SymbolId;
 use crate::types::{Annotation, Type};
 use crate::value::{BlockRef, RegionRef, ValueRef};
 
@@ -59,7 +60,7 @@ pub struct Region {
 /// A function in the tuffy IR.
 #[derive(Debug)]
 pub struct Function {
-    pub name: String,
+    pub name: SymbolId,
     pub params: Vec<Type>,
     /// Annotations on function parameters (ABI-level caller guarantees).
     pub param_annotations: Vec<Option<Annotation>>,
@@ -80,7 +81,7 @@ pub struct Function {
 
 impl Function {
     pub fn new(
-        name: impl Into<String>,
+        name: SymbolId,
         params: Vec<Type>,
         param_annotations: Vec<Option<Annotation>>,
         ret_ty: Option<Type>,
@@ -91,7 +92,7 @@ impl Function {
         // Pad with None if caller provided fewer annotations than params.
         param_anns.resize(param_count, None);
         Self {
-            name: name.into(),
+            name,
             params,
             param_annotations: param_anns,
             ret_ty,

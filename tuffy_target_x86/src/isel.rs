@@ -255,7 +255,7 @@ pub fn isel(
     }
 
     Some(IselResult {
-        name: func.name.clone(),
+        name: symbols.resolve(func.name).to_string(),
         insts: out,
     })
 }

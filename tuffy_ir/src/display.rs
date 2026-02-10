@@ -536,7 +536,11 @@ fn write_function(f: &mut fmt::Formatter<'_>, func: &Function, ctx: &DisplayCtx)
             }
         })
         .collect();
-    write!(f, "func @{}({})", func.name, params.join(", "))?;
+    let name_str = match ctx.symbols {
+        Some(symbols) => format!("@{}", symbols.resolve(func.name)),
+        None => format!("${}", func.name.0),
+    };
+    write!(f, "func {}({})", name_str, params.join(", "))?;
 
     if let Some(ref ret_ty) = func.ret_ty {
         let ret_s = fmt_type(ret_ty);
@@ -558,6 +562,30 @@ impl fmt::Display for Function {
         let mut ctx = DisplayCtx::new();
         assign_values(self, self.root_region, &mut ctx);
         write_function(f, self, &ctx)
+    }
+}
+
+/// Wrapper for displaying a `Function` with symbol table context.
+pub struct FunctionDisplay<'a> {
+    func: &'a Function,
+    symbols: &'a SymbolTable,
+}
+
+impl fmt::Display for FunctionDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut ctx = DisplayCtx::with_symbols(self.symbols);
+        assign_values(self.func, self.func.root_region, &mut ctx);
+        write_function(f, self.func, &ctx)
+    }
+}
+
+impl Function {
+    /// Display this function with symbol name resolution.
+    pub fn display<'a>(&'a self, symbols: &'a SymbolTable) -> FunctionDisplay<'a> {
+        FunctionDisplay {
+            func: self,
+            symbols,
+        }
     }
 }
 
