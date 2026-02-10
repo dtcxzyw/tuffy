@@ -56,16 +56,9 @@ pub fn translate_function<'tcx>(
 
     // Extract parameter types from MIR local declarations.
     // This works for all callable types (functions, closures, coroutines).
+    // Skip parameters whose type is untranslatable (None) or zero-sized (Unit).
     let mut params = Vec::new();
     let mut param_anns = Vec::new();
-    for i in 0..mir.arg_count {
-        let local = mir::Local::from_usize(i + 1);
-        let ty = monomorphize(mir.local_decls[local].ty);
-        if let Some(ir_ty) = translate_ty(ty) {
-            params.push(ir_ty);
-            param_anns.push(translate_annotation(ty));
-        }
-    }
 
     let ret_mir_ty = monomorphize(mir.local_decls[mir::RETURN_PLACE].ty);
     let ret_ty = translate_ty(ret_mir_ty);
@@ -74,9 +67,22 @@ pub fn translate_function<'tcx>(
     let mut symbols = SymbolTable::new();
     let func_sym = symbols.intern(&name);
 
-    // Extract source-level parameter names from MIR debug info.
-    // Synthetic ABI params (sret, fat pointer metadata) get None.
-    let param_names = extract_param_names(mir, &mut symbols);
+    // Build all-args name map first, then filter to match params.
+    let all_names = extract_param_names(mir, &mut symbols);
+    let mut param_names = Vec::new();
+
+    for i in 0..mir.arg_count {
+        let local = mir::Local::from_usize(i + 1);
+        let ty = monomorphize(mir.local_decls[local].ty);
+        match translate_ty(ty) {
+            Some(Type::Unit) | None => continue,
+            Some(ir_ty) => {
+                params.push(ir_ty);
+                param_anns.push(translate_annotation(ty));
+                param_names.push(all_names.get(i).copied().flatten());
+            }
+        }
+    }
 
     let mut func = Function::new(func_sym, params, param_anns, param_names, ret_ty, ret_ann);
     let mut builder = Builder::new(&mut func);
@@ -387,8 +393,23 @@ fn translate_params<'tcx>(
     for i in 0..mir.arg_count {
         let local = mir::Local::from_usize(i + 1);
         let ty = mir.local_decls[local].ty;
+        let ir_ty = translate_ty(ty);
+
+        // Skip zero-sized (Unit) and untranslatable params — they don't
+        // occupy an ABI slot. Assign a dummy iconst 0 so downstream MIR
+        // references to this local don't crash.
+        match ir_ty {
+            Some(Type::Unit) | None => {
+                let dummy = builder.iconst(0, Origin::synthetic());
+                locals.set(local, dummy);
+                continue;
+            }
+            _ => {}
+        }
+
+        let ir_ty = ir_ty.unwrap();
         let ann = translate_annotation(ty);
-        let val = builder.param(abi_idx, Type::Int, ann, Origin::synthetic());
+        let val = builder.param(abi_idx, ir_ty, ann, Origin::synthetic());
         locals.set(local, val);
         abi_idx += 1;
 
