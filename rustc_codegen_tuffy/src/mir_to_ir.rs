@@ -270,6 +270,7 @@ fn type_size<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> Option<u64> {
 }
 
 /// Query the alignment of type `ty` in bytes.
+#[allow(dead_code)]
 fn type_align<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> Option<u64> {
     let typing_env = ty::TypingEnv::fully_monomorphized();
     let layout = tcx.layout_of(typing_env.as_query_input(ty)).ok()?;
@@ -1568,6 +1569,15 @@ fn translate_intrinsic(
         // assume: optimizer hint, no runtime effect. Treat as no-op.
         "assume" => true,
 
+        // ctpop: population count (count set bits).
+        "ctpop" => {
+            if let Some(&v) = ir_args.first() {
+                let result = builder.count_ones(v.into(), Origin::synthetic());
+                locals.set(destination_local, result);
+            }
+            true
+        }
+
         // Unhandled intrinsics fall through to normal call path.
         _ => false,
     }
@@ -1576,6 +1586,7 @@ fn translate_intrinsic(
 /// Lower memory intrinsics to libc calls with adjusted arguments.
 /// Handles write_bytes, copy_nonoverlapping, copy, and raw_eq.
 /// Returns true if the intrinsic was handled.
+#[allow(clippy::too_many_arguments)]
 fn translate_memory_intrinsic<'tcx>(
     tcx: TyCtxt<'tcx>,
     name: &str,
@@ -1724,10 +1735,10 @@ fn detect_intrinsic<'tcx>(
         ty::TypingEnv::fully_monomorphized(),
         ty::EarlyBinder::bind(ty),
     );
-    if let ty::FnDef(def_id, args) = ty.kind() {
-        if let Some(intrinsic) = tcx.intrinsic(*def_id) {
-            return Some((intrinsic.name.as_str().to_string(), args));
-        }
+    if let ty::FnDef(def_id, args) = ty.kind()
+        && let Some(intrinsic) = tcx.intrinsic(*def_id)
+    {
+        return Some((intrinsic.name.as_str().to_string(), args));
     }
     None
 }
@@ -1738,9 +1749,6 @@ fn intrinsic_to_libc(name: &str) -> Option<&'static str> {
     match name {
         // compare_bytes(left, right, count) -> i32 maps directly to memcmp.
         "compare_bytes" => Some("memcmp"),
-        // ctpop(x) -> popcount. On x86-64, __popcountdi2 takes i64 in rdi,
-        // returns i32 in eax (upper 32 bits zeroed), safe to use as usize.
-        "ctpop" => Some("__popcountdi2"),
         _ => None,
     }
 }
