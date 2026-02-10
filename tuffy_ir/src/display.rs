@@ -385,6 +385,9 @@ fn fmt_inst(
                 format!("region_yield {}", ctx.fmt_operands(vals))
             }
         }
+        Op::CountOnes(val) => {
+            format!("{v} = count_ones {}", ctx.fmt_operand(val))
+        }
         Op::Unreachable => "unreachable".to_string(),
         Op::Trap => "trap".to_string(),
     }

@@ -349,6 +349,11 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::BoolToInt(val), Type::Int, origin, None)
     }
 
+    /// Population count: count the number of set bits.
+    pub fn count_ones(&mut self, val: Operand, origin: Origin) -> ValueRef {
+        self.push_inst(Op::CountOnes(val), Type::Int, origin, None)
+    }
+
     // ── Memory ──
 
     /// Load from pointer. `bytes` is the access width in bytes.

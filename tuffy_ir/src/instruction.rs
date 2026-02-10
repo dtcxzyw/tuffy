@@ -124,6 +124,8 @@ pub enum Op {
     /// Right shift: shr %a, %b (poison if shift amount < 0).
     /// Signedness is a property of operand annotations, not the operation.
     Shr(Operand, Operand),
+    /// Population count: count the number of set bits.
+    CountOnes(Operand),
     /// Integer constant.
     Const(i64),
 
