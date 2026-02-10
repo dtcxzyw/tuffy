@@ -581,6 +581,21 @@ provenance (wildcard provenance).
 
 ## Function Calls
 
+### `symbol_addr`
+
+```
+vN = symbol_addr @name
+```
+
+Load the address of a named symbol (function or static data). The `@name` refers
+to an entry in the module's symbol table. The result type is `ptr`.
+
+This instruction makes function calls and static data references self-contained
+in the IR — the callee of a `call` is a value produced by `symbol_addr` rather
+than a side-channel mapping.
+
+**Semantics**: Produces a pointer to the symbol identified by `@name`.
+
 ### `call`
 
 ```

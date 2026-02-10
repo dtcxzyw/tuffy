@@ -181,9 +181,9 @@ impl SymbolTable {
 
 ### Phase 1: Introduce Module and SymbolTable
 
-- [ ] Add `SymbolId` and `SymbolTable` to `tuffy_ir`
-- [ ] Add `StaticData` struct to `tuffy_ir`
-- [ ] Add `Module` struct to `tuffy_ir`
+- [x] Add `SymbolId` and `SymbolTable` to `tuffy_ir`
+- [x] Add `StaticData` struct to `tuffy_ir`
+- [x] Add `Module` struct to `tuffy_ir`
 - [ ] Change `Function.name` from `String` to `SymbolId`
 - [ ] Update `Function::new()` to accept `SymbolId`
 - [ ] Update `Display for Function` to resolve name via symbol table (requires `Module` context)
@@ -191,28 +191,28 @@ impl SymbolTable {
 
 ### Phase 2: SymbolAddr Op
 
-- [ ] Add `Op::SymbolAddr(SymbolId)` to instruction set
-- [ ] Add builder method `symbol_addr(&mut self, name: &str) -> ValueRef`
-- [ ] Update display to print `symbol_addr @name`
+- [x] Add `Op::SymbolAddr(SymbolId)` to instruction set
+- [x] Add builder method `symbol_addr(&mut self, name: &str) -> ValueRef`
+- [x] Update display to print `symbol_addr @name`
 
 ### Phase 3: Migrate codegen layer
 
-- [ ] Update `mir_to_ir.rs`: build `Module` instead of `TranslationResult`
-- [ ] Emit `SymbolAddr` instead of populating `call_targets`/`static_refs`
-- [ ] Migrate `static_data` from `TranslationResult` into `Module`
-- [ ] Remove `call_targets`, `static_refs`, `static_data` from `TranslationResult`
-- [ ] Update `lib.rs` codegen driver to consume `Module`
+- [x] Update `mir_to_ir.rs`: build `Module` instead of `TranslationResult`
+- [x] Emit `SymbolAddr` instead of populating `call_targets`/`static_refs`
+- [x] Migrate `static_data` from `TranslationResult` into `Module`
+- [x] Remove `call_targets`, `static_refs`, `static_data` from `TranslationResult`
+- [x] Update `lib.rs` codegen driver to consume `Module`
 
 ### Phase 4: Update x86 backend
 
-- [ ] Handle `Op::SymbolAddr` in `select_inst` (emit `LeaSymbol`)
-- [ ] Remove `call_targets` and `static_refs` parameters from `isel()`
-- [ ] Simplify `Op::Const` handling (no more `rdx_captures`/`static_refs` checks)
+- [x] Handle `Op::SymbolAddr` in `select_inst` (emit `LeaSymbol`)
+- [x] Remove `call_targets` and `static_refs` parameters from `isel()`
+- [x] Simplify `Op::Const` handling (no more `rdx_captures`/`static_refs` checks)
 
 ### Phase 5: Lean and spec
 
-- [ ] Update Lean IR definition (source of truth)
-- [ ] Update spec documentation
+- [x] Update Lean IR definition (source of truth)
+- [x] Update spec documentation
 
 ## Affected Modules
 
