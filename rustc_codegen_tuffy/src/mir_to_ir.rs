@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 
+use num_bigint::BigInt;
 use rustc_middle::mir::{
     self, BasicBlock, BinOp, CastKind, Operand, Place, PlaceElem, Rvalue, StatementKind,
     TerminatorKind,
@@ -1342,31 +1343,22 @@ fn translate_int_to_int_cast(
     if dst_bits > src_bits {
         // Widening cast.
         if is_signed_int(src_ty) {
-            // Sign-extend: shl by (64 - src_bits), then shr by (64 - src_bits).
-            // The shr LHS operand needs a signed annotation so isel picks SAR.
-            let shift_amt = 64 - src_bits;
+            // Sign-extend: shl by (dst - src), then arithmetic shr by (dst - src).
+            let shift_amt = dst_bits - src_bits;
             let shift_val = builder.iconst(shift_amt as i64, Origin::synthetic());
             let shifted = builder.shl(val.into(), shift_val.into(), None, Origin::synthetic());
             let shift_val2 = builder.iconst(shift_amt as i64, Origin::synthetic());
-            let shifted_op = IrOperand::annotated(shifted, Annotation::Signed(64));
+            let shifted_op = IrOperand::annotated(shifted, Annotation::Signed(dst_bits));
             Some(builder.shr(shifted_op, shift_val2.into(), None, Origin::synthetic()))
         } else {
             // Zero-extend: mask off high bits.
-            let mask = if src_bits >= 64 {
-                return Some(val);
-            } else {
-                (1i64 << src_bits) - 1
-            };
+            let mask = (BigInt::from(1) << src_bits) - 1;
             let mask_val = builder.iconst(mask, Origin::synthetic());
             Some(builder.and(val.into(), mask_val.into(), None, Origin::synthetic()))
         }
     } else {
         // Narrowing cast: mask to target width.
-        let mask = if dst_bits >= 64 {
-            return Some(val);
-        } else {
-            (1i64 << dst_bits) - 1
-        };
+        let mask = (BigInt::from(1) << dst_bits) - 1;
         let mask_val = builder.iconst(mask, Origin::synthetic());
         Some(builder.and(val.into(), mask_val.into(), None, Origin::synthetic()))
     }
@@ -1428,19 +1420,29 @@ fn translate_scalar(
     let bits = int.to_bits(int.size());
     match ty.kind() {
         ty::Int(_) => {
-            let val = bits as i128 as i64;
+            // Sign-extend: interpret as i128, then convert to BigInt.
+            let size_bytes = int.size().bytes();
+            let val = match size_bytes {
+                1 => BigInt::from(bits as i8),
+                2 => BigInt::from(bits as i16),
+                4 => BigInt::from(bits as i32),
+                8 => BigInt::from(bits as i64),
+                16 => BigInt::from(bits as i128),
+                _ => BigInt::from(bits as i128),
+            };
             Some(builder.iconst(val, Origin::synthetic()))
         }
         ty::Uint(_) => {
-            let val = bits as i64;
+            // Unsigned: convert u128 directly to BigInt (always non-negative).
+            let val = BigInt::from(bits);
             Some(builder.iconst(val, Origin::synthetic()))
         }
         ty::Bool => {
-            let val = if bits != 0 { 1 } else { 0 };
+            let val = if bits != 0 { 1i64 } else { 0i64 };
             Some(builder.iconst(val, Origin::synthetic()))
         }
         ty::Char => {
-            let val = bits as i64;
+            let val = BigInt::from(bits as u32);
             Some(builder.iconst(val, Origin::synthetic()))
         }
         ty::Ref(..) | ty::RawPtr(..) | ty::FnPtr(..) => {
