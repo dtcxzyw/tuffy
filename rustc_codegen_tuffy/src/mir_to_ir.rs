@@ -74,7 +74,11 @@ pub fn translate_function<'tcx>(
     let mut symbols = SymbolTable::new();
     let func_sym = symbols.intern(&name);
 
-    let mut func = Function::new(func_sym, params, param_anns, ret_ty, ret_ann);
+    // Extract source-level parameter names from MIR debug info.
+    // Synthetic ABI params (sret, fat pointer metadata) get None.
+    let param_names = extract_param_names(mir, &mut symbols);
+
+    let mut func = Function::new(func_sym, params, param_anns, param_names, ret_ty, ret_ann);
     let mut builder = Builder::new(&mut func);
     let mut locals = LocalMap::new(mir.local_decls.len());
     let mut fat_locals = FatLocalMap::new();
@@ -325,6 +329,31 @@ impl StackLocalSet {
     fn is_stack(&self, local: mir::Local) -> bool {
         self.is_stack[local.as_usize()]
     }
+}
+
+/// Extract source-level parameter names from MIR debug info.
+///
+/// Walks `mir.var_debug_info` looking for entries with `argument_index` set,
+/// which indicate function arguments. Returns a vec indexed by MIR arg position
+/// (0-based), with `Some(SymbolId)` for named params and `None` otherwise.
+/// Synthetic ABI params (sret, fat pointer metadata) are not covered here —
+/// the caller is responsible for prepending `None` entries for those.
+fn extract_param_names(
+    mir: &mir::Body<'_>,
+    symbols: &mut SymbolTable,
+) -> Vec<Option<SymbolId>> {
+    let mut names: Vec<Option<SymbolId>> = vec![None; mir.arg_count];
+    for info in &mir.var_debug_info {
+        if let Some(arg_idx) = info.argument_index {
+            // argument_index is 1-based; convert to 0-based MIR arg index.
+            let idx = (arg_idx as usize).wrapping_sub(1);
+            if idx < mir.arg_count {
+                let name_str = info.name.as_str();
+                names[idx] = Some(symbols.intern(name_str));
+            }
+        }
+    }
+    names
 }
 
 #[allow(clippy::too_many_arguments)]
