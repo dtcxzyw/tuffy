@@ -365,6 +365,10 @@ fn fmt_inst(
             format!("{v} = symbol_addr {name}")
         }
         Op::Call(callee, args) => {
+            let ret_suffix = match result_ann {
+                Some(a) => format!(" -> {}{}", fmt_type(ty), fmt_annotation(a)),
+                None => format!(" -> {}", fmt_type(ty)),
+            };
             if *ty == Type::Unit {
                 format!(
                     "call {}({})",
@@ -373,7 +377,7 @@ fn fmt_inst(
                 )
             } else {
                 format!(
-                    "{v} = call {}({})",
+                    "{v} = call {}({}){ret_suffix}",
                     ctx.fmt_operand(callee),
                     ctx.fmt_operands(args)
                 )
