@@ -111,6 +111,14 @@ impl CmpMap {
     }
 }
 
+/// Convert a byte count to an x86 operand size.
+fn bytes_to_opsize(bytes: u32) -> OpSize {
+    match bytes {
+        4 => OpSize::S32,
+        _ => OpSize::S64,
+    }
+}
+
 /// System V AMD64 ABI: first 6 integer args in rdi, rsi, rdx, rcx, r8, r9.
 const ARG_REGS: [Gpr; 6] = [Gpr::Rdi, Gpr::Rsi, Gpr::Rdx, Gpr::Rcx, Gpr::R8, Gpr::R9];
 
@@ -531,12 +539,13 @@ fn select_inst(
             // For now, just record it in the stack map; Load/Store will use it.
         }
 
-        Op::Load(ptr, _bytes) => {
+        Op::Load(ptr, bytes) => {
             let dst = alloc.alloc();
+            let size = bytes_to_opsize(*bytes);
             // If the pointer comes from a StackSlot, load from [rbp+offset].
             if let Some(offset) = stack.get(ptr.value) {
                 out.push(MInst::MovRM {
-                    size: OpSize::S64,
+                    size,
                     dst,
                     base: Gpr::Rbp,
                     offset,
@@ -544,7 +553,7 @@ fn select_inst(
             } else {
                 let ptr_reg = regs.get(ptr.value)?;
                 out.push(MInst::MovRM {
-                    size: OpSize::S64,
+                    size,
                     dst,
                     base: ptr_reg,
                     offset: 0,
@@ -553,11 +562,12 @@ fn select_inst(
             regs.assign(vref, dst);
         }
 
-        Op::Store(val, ptr, _bytes) => {
+        Op::Store(val, ptr, bytes) => {
             let val_reg = ensure_in_reg(val.value, regs, stack, alloc, out)?;
+            let size = bytes_to_opsize(*bytes);
             if let Some(offset) = stack.get(ptr.value) {
                 out.push(MInst::MovMR {
-                    size: OpSize::S64,
+                    size,
                     base: Gpr::Rbp,
                     offset,
                     src: val_reg,
@@ -565,7 +575,7 @@ fn select_inst(
             } else {
                 let ptr_reg = ensure_in_reg(ptr.value, regs, stack, alloc, out)?;
                 out.push(MInst::MovMR {
-                    size: OpSize::S64,
+                    size,
                     base: ptr_reg,
                     offset: 0,
                     src: val_reg,
