@@ -6,7 +6,7 @@
 
 ## Summary
 
-This RFC defines the transform correctness guarantee framework for the tuffy compiler. All optimization transforms are declarative rewrite rules with machine-checked correctness proofs in Lean 4. An Alive2-style automatic verifier and traditional testing (interpreter + fuzzer) serve as auxiliary discovery tools, not as correctness foundations.
+This RFC defines the correctness guarantee framework for the tuffy compiler. All optimization transforms are declarative rewrite rules with machine-checked correctness proofs in Lean 4. Instruction selection (isel) — the lowering from tuffy IR to machine instructions — is also formally verified in Lean 4, proving that the generated machine code faithfully implements the IR semantics. An Alive2-style automatic verifier and traditional testing (interpreter + fuzzer) serve as auxiliary discovery tools, not as correctness foundations.
 
 ## Motivation
 
@@ -16,7 +16,9 @@ Compiler optimization bugs are a persistent source of real-world software defect
 - **Informal correctness arguments**: most transforms are justified by informal reasoning or review, not machine-checked proofs. Subtle errors survive review.
 - **Disconnected verification**: tools like Alive2 verify transforms after the fact, but are not integrated into the development workflow as a hard gate.
 
-Tuffy takes a formal-first approach: every rewrite rule must have a Lean 4 proof before it enters the production pipeline.
+Instruction selection has similar risks. The lowering from IR to machine instructions must preserve semantics — incorrect register sizing, wrong sign/zero extension, or mishandled non-standard bit-widths (e.g., u17 annotations) can silently produce wrong code. Traditional compilers rely on testing to catch these bugs; tuffy formally verifies isel correctness.
+
+Tuffy takes a formal-first approach: every rewrite rule and every isel lowering rule must have a Lean 4 proof before it enters the production pipeline.
 
 ## Guide-level explanation
 
@@ -26,13 +28,13 @@ Tuffy uses three layers of verification, with clear trust hierarchy:
 
 | Layer | Role | Trust level |
 |-------|------|-------------|
-| Lean 4 proofs | Gold standard. Machine-checked correctness of every rewrite rule | **Authoritative** |
+| Lean 4 proofs | Gold standard. Machine-checked correctness of every rewrite rule and isel lowering rule | **Authoritative** |
 | Alive2-style verifier | SMT-based quick check for discovering missed optimizations and regressions | Auxiliary |
 | Interpreter + fuzzer + test suite | End-to-end behavioral testing | Auxiliary |
 
 Only Lean 4 proofs gate production inclusion. The other two layers are discovery tools — they find bugs and missed optimizations, but do not constitute correctness evidence.
 
-### Declarative rewrite rules
+### Verified optimization transforms
 
 Transforms are not hand-written imperative IR manipulation. They are **declarative rewrite rules**:
 
@@ -72,6 +74,32 @@ Steps 1–3 are mandatory. Steps 5–6 are recommended but not gating.
 
 The key insight: by having Lean own both the rule definition and the proof, there is no possibility of the proof and the implementation diverging. The codegen generator only reads what Lean exports.
 
+### Verified instruction selection
+
+Instruction selection lowers tuffy IR (infinite precision integers with annotations) to
+target machine instructions (fixed-width registers). This lowering must preserve semantics:
+the machine code must produce the same observable behavior as the IR.
+
+Key properties to verify:
+
+- **Annotation-driven sizing**: an `:s32` annotation lowers to 32-bit machine operations;
+  non-standard widths (e.g., `:u17`) lower to the correct shift/mask sequences.
+- **Signedness correctness**: signed annotations select signed machine operations (SAR, IDIV,
+  signed condition codes) and unsigned annotations select unsigned ones (SHR, DIV, unsigned
+  condition codes).
+- **Extension correctness**: sext/zext from annotation width N produces the correct result,
+  including the no-op cases (zext from unsigned, sext from signed) and the cases requiring
+  explicit shift/mask sequences.
+
+Each isel lowering rule is defined in Lean 4 as a relation between IR instruction semantics
+and machine instruction semantics. The proof obligation is:
+
+> For all inputs satisfying the annotation constraints, the machine instruction sequence
+> produces the same result as the IR instruction under the formal semantics.
+
+The Lean formalization requires a machine-level semantics model (x86-64 integer operations
+on fixed-width registers) in addition to the existing IR semantics.
+
 ### Trust boundary
 
 ```
@@ -82,15 +110,19 @@ The key insight: by having Lean own both the rule definition and the proof, ther
 │  │ Lean 4 kernel │  │ IR formal      │  │
 │  │               │  │ semantics      │  │
 │  └───────────────┘  └────────────────┘  │
-│  ┌────────────────────────────────────┐  │
-│  │ Codegen generator                  │  │
-│  │ (declarative rule → Rust code)     │  │
-│  └────────────────────────────────────┘  │
+│  ┌────────────────┐  ┌───────────────┐  │
+│  │ x86-64 machine │  │ Codegen       │  │
+│  │ semantics      │  │ generator     │  │
+│  └────────────────┘  └───────────────┘  │
 ├─────────────────────────────────────────┤
 │              Verified components         │
 │                                         │
 │  ┌────────────────────────────────────┐  │
 │  │ Each rewrite rule                  │  │
+│  │ (proven correct in Lean 4)         │  │
+│  └────────────────────────────────────┘  │
+│  ┌────────────────────────────────────┐  │
+│  │ Each isel lowering rule            │  │
 │  │ (proven correct in Lean 4)         │  │
 │  └────────────────────────────────────┘  │
 ├─────────────────────────────────────────┤
@@ -218,7 +250,7 @@ SMT-based verification is bounded — it checks finite bit widths and cannot per
 
 ## Prior art
 
-- **CompCert**: fully verified C compiler in Coq. Proves correctness of the entire compilation pipeline, not just individual transforms. Tuffy takes a lighter approach (verify rewrite rules, trust infrastructure via type system).
+- **CompCert**: fully verified C compiler in Coq. Proves correctness of the entire compilation pipeline, not just individual transforms. Tuffy takes a similar approach for isel (verified lowering) while using declarative rules for optimizations.
 - **Alive / Alive2**: SMT-based verification of LLVM InstCombine transforms. Discovered numerous bugs. Tuffy uses this as an auxiliary tool, not the primary correctness mechanism.
 - **CakeML**: verified ML compiler in HOL4. Similar full-pipeline verification to CompCert.
 - **Lean 4 + Mathlib**: growing library of formalized mathematics. Provides foundations for reasoning about integers, bit operations, and algebraic properties.
@@ -235,5 +267,5 @@ SMT-based verification is bounded — it checks finite bit widths and cannot per
 
 - **Proof-carrying optimizations**: distribute verified rewrite rules as packages, enabling a community-driven optimization library with machine-checked correctness.
 - **Superoptimizer integration**: use SMT-based search (Souper-style) to discover candidate rewrites, then prove them in Lean 4 for inclusion in the production pipeline.
-- **End-to-end verification**: extend verification beyond individual rewrite rules to cover the full compilation pipeline (MIR translation → machine code emission), approaching CompCert-level guarantees.
+- **End-to-end verification**: with optimizations and isel now verified, extend verification to the remaining pipeline stages (MIR translation, register allocation, machine code emission) to close the full compilation gap.
 - **LLM-assisted proofs**: use language models to draft Lean 4 proofs for new rewrite rules, with human review and machine checking.
