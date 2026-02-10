@@ -1430,8 +1430,17 @@ fn translate_const<'tcx>(
     static_refs: &mut HashMap<u32, String>,
     static_data: &mut Vec<(String, Vec<u8>)>,
 ) -> Option<ValueRef> {
-    let mir::Const::Val(val, ty) = constant.const_ else {
-        return None;
+    let ty = constant.const_.ty();
+    let val = match constant.const_ {
+        mir::Const::Val(v, _) => v,
+        _ => {
+            // Const::Ty and Const::Unevaluated need evaluation first
+            let typing_env = ty::TypingEnv::fully_monomorphized();
+            match constant.const_.eval(tcx, typing_env, constant.span) {
+                Ok(v) => v,
+                Err(_) => return None,
+            }
+        }
     };
     match val {
         mir::ConstValue::Scalar(mir::interpret::Scalar::Ptr(ptr, _)) => {
