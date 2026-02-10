@@ -28,6 +28,9 @@ wildcards = "allow"
 highlight = "all"
 workspace-default-features = "allow"
 external-default-features = "allow"
+skip = [
+    { crate = "hashbrown@0.15", reason = "transitive dep from object crate" },
+]
 
 [sources]
 unknown-registry = "warn"
