@@ -21,10 +21,14 @@ implementation, but semantically represents a mathematical integer.
 
 ```
 vN = param <index>
+vN = param %name
 ```
 
-References a function parameter by index (0-based). This is not a true constant but
-creates a named value for the parameter within the instruction stream.
+References a function parameter by index (0-based) or by name. When source-level
+parameter names are available, the named form `param %name` is used in the text
+format. The internal representation always uses the numeric ABI index. This is not
+a true constant but creates a named value for the parameter within the instruction
+stream.
 
 ## Arithmetic
 
