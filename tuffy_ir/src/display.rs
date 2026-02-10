@@ -207,6 +207,7 @@ fn fmt_inst(
     func: &Function,
     vref: ValueRef,
     op: &Op,
+    ty: &Type,
     result_ann: &Option<Annotation>,
     ctx: &DisplayCtx,
 ) -> String {
@@ -364,11 +365,19 @@ fn fmt_inst(
             format!("{v} = symbol_addr {name}")
         }
         Op::Call(callee, args) => {
-            format!(
-                "{v} = call {}({})",
-                ctx.fmt_operand(callee),
-                ctx.fmt_operands(args)
-            )
+            if *ty == Type::Unit {
+                format!(
+                    "call {}({})",
+                    ctx.fmt_operand(callee),
+                    ctx.fmt_operands(args)
+                )
+            } else {
+                format!(
+                    "{v} = call {}({})",
+                    ctx.fmt_operand(callee),
+                    ctx.fmt_operands(args)
+                )
+            }
         }
         Op::Bitcast(src) => format!("{v} = bitcast {}", ctx.fmt_operand(src)),
         Op::Sext(src, bits) => format!("{v} = sext {}, {bits}", ctx.fmt_operand(src)),
@@ -473,7 +482,7 @@ fn write_block(
         writeln!(
             f,
             "{inst_pad}{}",
-            fmt_inst(func, vref, &inst.op, &inst.result_annotation, ctx)
+            fmt_inst(func, vref, &inst.op, &inst.ty, &inst.result_annotation, ctx)
         )?;
     }
     Ok(())

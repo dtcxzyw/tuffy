@@ -1037,10 +1037,11 @@ fn translate_terminator<'tcx>(
             } else {
                 builder.iconst(0, Origin::synthetic())
             };
+            let call_ret_ty = translate_ty(dest_ty).unwrap_or(Type::Unit);
             let call_vref = builder.call(
                 callee_val.into(),
                 ir_args,
-                Type::Int,
+                call_ret_ty,
                 None,
                 Origin::synthetic(),
             );
