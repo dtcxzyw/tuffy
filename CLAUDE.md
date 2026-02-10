@@ -10,7 +10,7 @@ When the user provides a common instruction or policy that applies broadly to fu
 
 **IMPORTANT:** When interacting with the user, you MUST match the language they are using. If the user writes in Chinese, respond in Chinese. If the user writes in English, respond in English.
 
-Always use English when editing files (code, comments, documentation).
+Always use English when editing files (code, comments, documentation). All content committed to git must be in English — this includes code, comments, documentation, commit messages, and task/RFC documents.
 
 ## Project Overview
 
