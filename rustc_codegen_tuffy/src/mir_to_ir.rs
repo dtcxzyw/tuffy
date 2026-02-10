@@ -218,7 +218,7 @@ fn translate_ty(ty: ty::Ty<'_>) -> Option<Type> {
         | ty::Int(ty::IntTy::Isize)
         | ty::Uint(ty::UintTy::Usize) => Some(Type::Int),
         ty::RawPtr(..) | ty::Ref(..) | ty::FnPtr(..) => Some(Type::Ptr(0)),
-        ty::Tuple(fields) if fields.is_empty() => Some(Type::Int),
+        ty::Tuple(fields) if fields.is_empty() => Some(Type::Unit),
         ty::FnDef(..) => Some(Type::Int),
         ty::Never => Some(Type::Int),
         ty::Adt(..) | ty::Tuple(..) | ty::Array(..) | ty::Slice(..) | ty::Str => Some(Type::Int),
