@@ -1,14 +1,22 @@
 //! Cranelift-style text format for tuffy IR.
 //!
-//! Output format:
+//! Output format (with named parameters):
+//! ```text
+//! func @name(%a: int:s32, %b: int:s32) -> int:s32 {
+//!   bb0:
+//!     v0:s32 = param %a
+//!     v1:s32 = param %b
+//!     v2:s32 = add v0:s32, v1:s32
+//!     ret v2:s32
+//! }
+//! ```
+//!
+//! When parameter names are not available, falls back to numeric indices:
 //! ```text
 //! func @name(int:s32, int:s32) -> int:s32 {
 //!   bb0:
 //!     v0:s32 = param 0
 //!     v1:s32 = param 1
-//!     v2:s32 = add v0:s32, v1:s32
-//!     ret v2:s32
-//! }
 //! ```
 
 use std::collections::HashMap;
@@ -195,7 +203,7 @@ fn assign_values(func: &Function, region: RegionRef, ctx: &mut DisplayCtx) {
 
 /// Format a single instruction. Returns the formatted string (without leading indent).
 fn fmt_inst(
-    _func: &Function,
+    func: &Function,
     vref: ValueRef,
     op: &Op,
     result_ann: &Option<Annotation>,
@@ -203,7 +211,15 @@ fn fmt_inst(
 ) -> String {
     let v = ctx.fmt_val_ann(vref, result_ann);
     match op {
-        Op::Param(idx) => format!("{v} = param {idx}"),
+        Op::Param(idx) => {
+            let name = func.param_names.get(*idx as usize).and_then(|n| *n);
+            match (name, ctx.symbols) {
+                (Some(sym_id), Some(symbols)) => {
+                    format!("{v} = param %{}", symbols.resolve(sym_id))
+                }
+                _ => format!("{v} = param {idx}"),
+            }
+        }
         Op::Add(a, b) => {
             format!("{v} = add {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
         }
@@ -523,16 +539,25 @@ fn write_region_children(
 
 /// Write a function signature and body to the formatter.
 fn write_function(f: &mut fmt::Formatter<'_>, func: &Function, ctx: &DisplayCtx) -> fmt::Result {
-    // Function signature with annotations
+    // Function signature with annotations and optional parameter names
     let params: Vec<String> = func
         .params
         .iter()
         .zip(func.param_annotations.iter())
-        .map(|(ty, ann)| {
+        .enumerate()
+        .map(|(i, (ty, ann))| {
             let ty_s = fmt_type(ty);
-            match ann {
+            let ty_with_ann = match ann {
                 Some(a) => format!("{ty_s}{}", fmt_annotation(a)),
                 None => ty_s.to_string(),
+            };
+            // Prepend %name if a parameter name is available
+            let name = func.param_names.get(i).and_then(|n| *n);
+            match (name, ctx.symbols) {
+                (Some(sym_id), Some(symbols)) => {
+                    format!("%{}: {ty_with_ann}", symbols.resolve(sym_id))
+                }
+                _ => ty_with_ann,
             }
         })
         .collect();

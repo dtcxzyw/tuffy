@@ -79,6 +79,7 @@ fn build_add_func() -> (Function, SymbolTable) {
         name,
         vec![Type::Int, Type::Int],
         vec![s32, s32],
+        vec![],
         Some(Type::Int),
         s32,
     );
@@ -155,6 +156,7 @@ fn build_branch_func() -> (Function, SymbolTable) {
         name,
         vec![Type::Int, Type::Int],
         vec![s32, s32],
+        vec![],
         Some(Type::Int),
         s32,
     );

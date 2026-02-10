@@ -64,6 +64,9 @@ pub struct Function {
     pub params: Vec<Type>,
     /// Annotations on function parameters (ABI-level caller guarantees).
     pub param_annotations: Vec<Option<Annotation>>,
+    /// Optional source-level names for parameters (for display only).
+    /// Indexed by ABI parameter index. `None` means no name available.
+    pub param_names: Vec<Option<SymbolId>>,
     pub ret_ty: Option<Type>,
     /// Annotation on the return type (ABI-level callee guarantee).
     pub ret_annotation: Option<Annotation>,
@@ -84,6 +87,7 @@ impl Function {
         name: SymbolId,
         params: Vec<Type>,
         param_annotations: Vec<Option<Annotation>>,
+        param_names: Vec<Option<SymbolId>>,
         ret_ty: Option<Type>,
         ret_annotation: Option<Annotation>,
     ) -> Self {
@@ -91,10 +95,13 @@ impl Function {
         let mut param_anns = param_annotations;
         // Pad with None if caller provided fewer annotations than params.
         param_anns.resize(param_count, None);
+        let mut names = param_names;
+        names.resize(param_count, None);
         Self {
             name,
             params,
             param_annotations: param_anns,
+            param_names: names,
             ret_ty,
             ret_annotation,
             instructions: Vec::new(),
