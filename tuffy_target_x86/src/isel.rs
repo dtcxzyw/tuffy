@@ -209,7 +209,7 @@ pub fn isel(
                 id: block_ref.index(),
             });
             for (vref, inst) in func.block_insts_with_values(*block_ref) {
-                if select_inst(
+                select_inst(
                     vref,
                     &inst.op,
                     func,
@@ -223,11 +223,7 @@ pub fn isel(
                     rdx_captures,
                     rdx_moves,
                     &mut body,
-                )
-                .is_none()
-                {
-                    return None;
-                }
+                )?;
             }
         }
     }
@@ -756,6 +752,7 @@ enum BinOp {
     Mul,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn select_binop_rr(
     vref: ValueRef,
     lhs: ValueRef,
@@ -807,6 +804,7 @@ enum BitOp {
     Xor,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn select_bitop_rr(
     vref: ValueRef,
     lhs: ValueRef,
@@ -857,6 +855,7 @@ enum ShiftOp {
     Sar,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn select_shift_cl(
     vref: ValueRef,
     lhs: ValueRef,
