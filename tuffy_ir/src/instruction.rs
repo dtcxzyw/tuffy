@@ -138,10 +138,10 @@ pub enum Op {
     BoolToInt(Operand),
 
     // -- Memory --
-    /// Load from pointer.
-    Load(Operand),
-    /// Store value to pointer: store val, ptr.
-    Store(Operand, Operand),
+    /// Load from pointer. Second field is byte count.
+    Load(Operand, u32),
+    /// Store value to pointer: store val, ptr. Third field is byte count.
+    Store(Operand, Operand, u32),
     /// Allocate n bytes on stack, returns pointer.
     StackSlot(u32),
 

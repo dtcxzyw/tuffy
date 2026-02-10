@@ -283,9 +283,13 @@ fn fmt_inst(
         Op::BoolToInt(val) => {
             format!("{v} = bool_to_int {}", ctx.fmt_operand(val))
         }
-        Op::Load(ptr) => format!("{v} = load {}", ctx.fmt_operand(ptr)),
-        Op::Store(val, ptr) => {
-            format!("store {}, {}", ctx.fmt_operand(val), ctx.fmt_operand(ptr))
+        Op::Load(ptr, bytes) => format!("{v} = load.{bytes} {}", ctx.fmt_operand(ptr)),
+        Op::Store(val, ptr, bytes) => {
+            format!(
+                "store.{bytes} {}, {}",
+                ctx.fmt_operand(val),
+                ctx.fmt_operand(ptr)
+            )
         }
         Op::StackSlot(bytes) => format!("{v} = stack_slot {bytes}"),
         Op::LoadAtomic(ptr, ord) => {

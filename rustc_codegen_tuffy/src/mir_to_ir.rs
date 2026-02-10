@@ -527,7 +527,7 @@ fn translate_place_to_value<'tcx>(
         return locals.get(place.local);
     }
     let addr = translate_place_to_addr(tcx, place, mir, builder, locals, stack_locals)?;
-    Some(builder.load(addr.into(), Type::Int, None, Origin::synthetic()))
+    Some(builder.load(addr.into(), 8, Type::Int, None, Origin::synthetic()))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -563,7 +563,7 @@ fn translate_statement<'tcx>(
                     if let Some(addr) =
                         translate_place_to_addr(tcx, place, mir, builder, locals, stack_locals)
                     {
-                        builder.store(val.into(), addr.into(), Origin::synthetic());
+                        builder.store(val.into(), addr.into(), 8, Origin::synthetic());
                     }
                 }
             }
@@ -676,14 +676,14 @@ fn translate_terminator<'tcx>(
                         let off = builder.iconst(byte_off as i64, Origin::synthetic());
                         builder.ptradd(src.into(), off.into(), 0, Origin::synthetic())
                     };
-                    let word = builder.load(load_addr.into(), Type::Int, None, Origin::synthetic());
+                    let word = builder.load(load_addr.into(), 8, Type::Int, None, Origin::synthetic());
                     let store_addr = if byte_off == 0 {
                         sret
                     } else {
                         let off = builder.iconst(byte_off as i64, Origin::synthetic());
                         builder.ptradd(sret.into(), off.into(), 0, Origin::synthetic())
                     };
-                    builder.store(word.into(), store_addr.into(), Origin::synthetic());
+                    builder.store(word.into(), store_addr.into(), 8, Origin::synthetic());
                 }
 
                 // Return the sret pointer in RAX (System V convention).
@@ -697,13 +697,13 @@ fn translate_terminator<'tcx>(
                 let size = type_size(tcx, ret_ty).unwrap_or(8);
 
                 // First 8 bytes → RAX.
-                let word0 = builder.load(slot.into(), Type::Int, None, Origin::synthetic());
+                let word0 = builder.load(slot.into(), 8, Type::Int, None, Origin::synthetic());
 
                 if size > 8 {
                     // Second 8 bytes → secondary return register.
                     let off = builder.iconst(8, Origin::synthetic());
                     let addr1 = builder.ptradd(slot.into(), off.into(), 0, Origin::synthetic());
-                    let word1 = builder.load(addr1.into(), Type::Int, None, Origin::synthetic());
+                    let word1 = builder.load(addr1.into(), 8, Type::Int, None, Origin::synthetic());
                     let dummy = builder.iconst(0, Origin::synthetic());
                     abi_metadata.mark_secondary_return_move(dummy.index(), word1.index());
                 }
@@ -896,7 +896,7 @@ fn translate_terminator<'tcx>(
                             if arg_size > 0 && arg_size <= 16 {
                                 // Load word(s) from the stack slot and pass in registers.
                                 let word0 =
-                                    builder.load(v.into(), Type::Int, None, Origin::synthetic());
+                                    builder.load(v.into(), 8, Type::Int, None, Origin::synthetic());
                                 ir_args.push(word0.into());
                                 if arg_size > 8 {
                                     let off = builder.iconst(8, Origin::synthetic());
@@ -908,6 +908,7 @@ fn translate_terminator<'tcx>(
                                     );
                                     let word1 = builder.load(
                                         addr1.into(),
+                                        8,
                                         Type::Int,
                                         None,
                                         Origin::synthetic(),
@@ -975,13 +976,13 @@ fn translate_terminator<'tcx>(
                 // downstream code gets a valid pointer to the struct.
                 let size = dest_size.unwrap();
                 let slot = builder.stack_slot(size as u32, Origin::synthetic());
-                builder.store(call_vref.into(), slot.into(), Origin::synthetic());
+                builder.store(call_vref.into(), slot.into(), 8, Origin::synthetic());
 
                 let rdx_val = builder.iconst(0, Origin::synthetic());
                 abi_metadata.mark_secondary_return_capture(rdx_val.index());
                 let off = builder.iconst(8, Origin::synthetic());
                 let addr1 = builder.ptradd(slot.into(), off.into(), 0, Origin::synthetic());
-                builder.store(rdx_val.into(), addr1.into(), Origin::synthetic());
+                builder.store(rdx_val.into(), addr1.into(), 8, Origin::synthetic());
 
                 locals.set(destination.local, slot);
                 stack_locals.mark(destination.local);
@@ -1223,7 +1224,7 @@ fn translate_rvalue<'tcx>(
                 // Scalar local: spill to stack slot, return address.
                 if let Some(val) = locals.get(place.local) {
                     let slot = builder.stack_slot(8, Origin::synthetic());
-                    builder.store(val.into(), slot.into(), Origin::synthetic());
+                    builder.store(val.into(), slot.into(), 8, Origin::synthetic());
                     Some(slot)
                 } else {
                     None
@@ -1267,12 +1268,12 @@ fn translate_rvalue<'tcx>(
                 ) {
                     let offset = field_offset(tcx, agg_ty, i).unwrap_or(i as u64 * 8);
                     if offset == 0 {
-                        builder.store(val.into(), slot.into(), Origin::synthetic());
+                        builder.store(val.into(), slot.into(), 8, Origin::synthetic());
                     } else {
                         let off_val = builder.iconst(offset as i64, Origin::synthetic());
                         let addr =
                             builder.ptradd(slot.into(), off_val.into(), 0, Origin::synthetic());
-                        builder.store(val.into(), addr.into(), Origin::synthetic());
+                        builder.store(val.into(), addr.into(), 8, Origin::synthetic());
                     }
                 }
             }

@@ -351,20 +351,21 @@ impl<'a> Builder<'a> {
 
     // ── Memory ──
 
-    /// Load from pointer.
+    /// Load from pointer. `bytes` is the access width in bytes.
     pub fn load(
         &mut self,
         ptr: Operand,
+        bytes: u32,
         ty: Type,
         ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::Load(ptr), ty, origin, ann)
+        self.push_inst(Op::Load(ptr, bytes), ty, origin, ann)
     }
 
-    /// Store value to pointer.
-    pub fn store(&mut self, val: Operand, ptr: Operand, origin: Origin) -> ValueRef {
-        self.push_inst(Op::Store(val, ptr), Type::Int, origin, None)
+    /// Store value to pointer. `bytes` is the access width in bytes.
+    pub fn store(&mut self, val: Operand, ptr: Operand, bytes: u32, origin: Origin) -> ValueRef {
+        self.push_inst(Op::Store(val, ptr, bytes), Type::Int, origin, None)
     }
 
     /// Allocate stack slot of n bytes.

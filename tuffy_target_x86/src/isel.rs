@@ -531,7 +531,7 @@ fn select_inst(
             // For now, just record it in the stack map; Load/Store will use it.
         }
 
-        Op::Load(ptr) => {
+        Op::Load(ptr, _bytes) => {
             let dst = alloc.alloc();
             // If the pointer comes from a StackSlot, load from [rbp+offset].
             if let Some(offset) = stack.get(ptr.value) {
@@ -553,7 +553,7 @@ fn select_inst(
             regs.assign(vref, dst);
         }
 
-        Op::Store(val, ptr) => {
+        Op::Store(val, ptr, _bytes) => {
             let val_reg = ensure_in_reg(val.value, regs, stack, alloc, out)?;
             if let Some(offset) = stack.get(ptr.value) {
                 out.push(MInst::MovMR {
