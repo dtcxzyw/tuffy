@@ -702,7 +702,11 @@ fn build_select_and_bool_to_int() {
     let b = builder.param(1, Type::Int, None, Origin::synthetic());
     let cmp = builder.icmp(ICmpOp::Gt, a.into(), b.into(), Origin::synthetic());
     let sel = builder.select(
-        cmp.into(), a.into(), b.into(), Type::Int, Origin::synthetic(),
+        cmp.into(),
+        a.into(),
+        b.into(),
+        Type::Int,
+        Origin::synthetic(),
     );
     let b2i = builder.bool_to_int(cmp.into(), Origin::synthetic());
     let _sum = builder.add(sel.into(), b2i.into(), None, Origin::synthetic());
@@ -712,7 +716,10 @@ fn build_select_and_bool_to_int() {
     assert_eq!(func.instructions[2].ty, Type::Bool);
     assert_eq!(func.instructions[3].ty, Type::Int);
     assert_eq!(func.instructions[4].ty, Type::Int);
-    assert!(matches!(func.instructions[2].op, Op::ICmp(ICmpOp::Gt, _, _)));
+    assert!(matches!(
+        func.instructions[2].op,
+        Op::ICmp(ICmpOp::Gt, _, _)
+    ));
     assert!(matches!(func.instructions[3].op, Op::Select(_, _, _)));
     assert!(matches!(func.instructions[4].op, Op::BoolToInt(_)));
 }
@@ -737,7 +744,11 @@ fn display_select_and_bool_to_int() {
     let b = builder.param(1, Type::Int, None, Origin::synthetic());
     let cmp = builder.icmp(ICmpOp::Lt, a.into(), b.into(), Origin::synthetic());
     let _sel = builder.select(
-        cmp.into(), a.into(), b.into(), Type::Int, Origin::synthetic(),
+        cmp.into(),
+        a.into(),
+        b.into(),
+        Type::Int,
+        Origin::synthetic(),
     );
     let b2i = builder.bool_to_int(cmp.into(), Origin::synthetic());
     builder.ret(Some(b2i.into()), Origin::synthetic());

@@ -131,7 +131,12 @@ pub enum MInst {
     /// sar dst, cl (arithmetic right shift by cl)
     SarRCL { size: OpSize, dst: Gpr },
     /// cmovcc dst, src (conditional move based on condition code)
-    CMOVcc { size: OpSize, cc: CondCode, dst: Gpr, src: Gpr },
+    CMOVcc {
+        size: OpSize,
+        cc: CondCode,
+        dst: Gpr,
+        src: Gpr,
+    },
     /// setcc dst (set byte based on condition code)
     SetCC { cc: CondCode, dst: Gpr },
     /// movzx r64, r8 (zero-extend byte to qword)

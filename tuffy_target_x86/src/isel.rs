@@ -17,22 +17,34 @@ pub struct IselResult {
 
 /// Map from IR value to physical register.
 struct RegMap {
+    /// Instruction result values.
     map: Vec<Option<Gpr>>,
+    /// Block argument values (separate namespace).
+    block_arg_map: Vec<Option<Gpr>>,
 }
 
 impl RegMap {
-    fn new(capacity: usize) -> Self {
+    fn new(inst_capacity: usize, block_arg_capacity: usize) -> Self {
         Self {
-            map: vec![None; capacity],
+            map: vec![None; inst_capacity],
+            block_arg_map: vec![None; block_arg_capacity],
         }
     }
 
     fn assign(&mut self, val: ValueRef, reg: Gpr) {
-        self.map[val.index() as usize] = Some(reg);
+        if val.is_block_arg() {
+            self.block_arg_map[val.index() as usize] = Some(reg);
+        } else {
+            self.map[val.index() as usize] = Some(reg);
+        }
     }
 
     fn get(&self, val: ValueRef) -> Option<Gpr> {
-        self.map[val.index() as usize]
+        if val.is_block_arg() {
+            *self.block_arg_map.get(val.index() as usize)?
+        } else {
+            *self.map.get(val.index() as usize)?
+        }
     }
 }
 
@@ -40,14 +52,17 @@ impl RegMap {
 struct StackMap {
     /// Maps IR value index → offset from RBP (negative).
     slots: Vec<Option<i32>>,
+    /// Block argument stack slots (separate namespace).
+    block_arg_slots: Vec<Option<i32>>,
     /// Current stack frame size (grows downward).
     frame_size: i32,
 }
 
 impl StackMap {
-    fn new(capacity: usize) -> Self {
+    fn new(inst_capacity: usize, block_arg_capacity: usize) -> Self {
         Self {
-            slots: vec![None; capacity],
+            slots: vec![None; inst_capacity],
+            block_arg_slots: vec![None; block_arg_capacity],
             frame_size: 0,
         }
     }
@@ -58,12 +73,20 @@ impl StackMap {
         let align = std::cmp::max(bytes as i32, 8);
         self.frame_size = (self.frame_size + align - 1) & !(align - 1);
         let offset = -self.frame_size;
-        self.slots[val.index() as usize] = Some(offset);
+        if val.is_block_arg() {
+            self.block_arg_slots[val.index() as usize] = Some(offset);
+        } else {
+            self.slots[val.index() as usize] = Some(offset);
+        }
         offset
     }
 
     fn get(&self, val: ValueRef) -> Option<i32> {
-        self.slots[val.index() as usize]
+        if val.is_block_arg() {
+            *self.block_arg_slots.get(val.index() as usize)?
+        } else {
+            *self.slots.get(val.index() as usize)?
+        }
     }
 }
 
@@ -135,7 +158,7 @@ fn ensure_in_reg(
     alloc: &mut RegAlloc,
     out: &mut Vec<MInst>,
 ) -> Option<Gpr> {
-    if let Some(reg) = regs.map[val.index() as usize] {
+    if let Some(reg) = regs.get(val) {
         return Some(reg);
     }
     if let Some(offset) = stack.get(val) {
@@ -164,10 +187,12 @@ pub fn isel(
     rdx_moves: &HashMap<u32, u32>,
 ) -> Option<IselResult> {
     let mut body = Vec::new();
-    let mut regs = RegMap::new(func.instructions.len());
+    let ba_cap = func.block_args.len();
+    let mut regs = RegMap::new(func.instructions.len(), ba_cap);
     let mut cmps = CmpMap::new(func.instructions.len());
-    let mut stack = StackMap::new(func.instructions.len());
+    let mut stack = StackMap::new(func.instructions.len(), ba_cap);
     let mut alloc = RegAlloc::new();
+    let mut next_label = func.blocks.len() as u32;
 
     let root = &func.regions[func.root_region.index() as usize];
     for child in &root.children {
@@ -179,10 +204,12 @@ pub fn isel(
                 select_inst(
                     vref,
                     &inst.op,
+                    func,
                     &mut regs,
                     &mut cmps,
                     &mut stack,
                     &mut alloc,
+                    &mut next_label,
                     call_targets,
                     static_refs,
                     rdx_captures,
@@ -230,10 +257,12 @@ pub fn isel(
 fn select_inst(
     vref: ValueRef,
     op: &Op,
+    func: &Function,
     regs: &mut RegMap,
     cmps: &mut CmpMap,
     stack: &mut StackMap,
     alloc: &mut RegAlloc,
+    next_label: &mut u32,
     call_targets: &HashMap<u32, String>,
     static_refs: &HashMap<u32, String>,
     rdx_captures: &HashMap<u32, ()>,
@@ -282,20 +311,47 @@ fn select_inst(
         }
 
         Op::Add(lhs, rhs) => {
-            select_binop_rr(vref, lhs.value, rhs.value, BinOp::Add, regs, alloc, out)?;
+            select_binop_rr(
+                vref,
+                lhs.value,
+                rhs.value,
+                BinOp::Add,
+                regs,
+                stack,
+                alloc,
+                out,
+            )?;
         }
 
         Op::Sub(lhs, rhs) => {
-            select_binop_rr(vref, lhs.value, rhs.value, BinOp::Sub, regs, alloc, out)?;
+            select_binop_rr(
+                vref,
+                lhs.value,
+                rhs.value,
+                BinOp::Sub,
+                regs,
+                stack,
+                alloc,
+                out,
+            )?;
         }
 
         Op::Mul(lhs, rhs) => {
-            select_binop_rr(vref, lhs.value, rhs.value, BinOp::Mul, regs, alloc, out)?;
+            select_binop_rr(
+                vref,
+                lhs.value,
+                rhs.value,
+                BinOp::Mul,
+                regs,
+                stack,
+                alloc,
+                out,
+            )?;
         }
 
         Op::ICmp(cmp_op, lhs, rhs) => {
-            let lhs_reg = regs.get(lhs.value)?;
-            let rhs_reg = regs.get(rhs.value)?;
+            let lhs_reg = ensure_in_reg(lhs.value, regs, stack, alloc, out)?;
+            let rhs_reg = ensure_in_reg(rhs.value, regs, stack, alloc, out)?;
             out.push(MInst::CmpRR {
                 size: OpSize::S64,
                 src1: lhs_reg,
@@ -305,35 +361,118 @@ fn select_inst(
             cmps.set(vref, cc);
         }
 
-        Op::Br(target, _args) => {
+        Op::Br(target, args) => {
+            // Copy branch arguments to target block's block-arg registers.
+            let ba_vrefs = func.block_arg_values(*target);
+            for (arg, ba_vref) in args.iter().zip(ba_vrefs.iter()) {
+                let src = ensure_in_reg(arg.value, regs, stack, alloc, out)?;
+                let dst = alloc.alloc();
+                if src != dst {
+                    out.push(MInst::MovRR {
+                        size: OpSize::S64,
+                        dst,
+                        src,
+                    });
+                }
+                regs.assign(*ba_vref, dst);
+            }
             out.push(MInst::Jmp {
                 target: target.index(),
             });
         }
 
-        Op::BrIf(cond, then_block, _then_args, else_block, _else_args) => {
-            if let Some(cc) = cmps.get(cond.value) {
-                // Condition came from ICmp: use Jcc directly.
-                out.push(MInst::Jcc {
-                    cc,
+        Op::BrIf(cond, then_block, then_args, else_block, else_args) => {
+            let has_args = !then_args.is_empty() || !else_args.is_empty();
+
+            if has_args {
+                // Need intermediate label so we can copy different args
+                // for each branch target.
+                //   Jcc intermediate_then
+                //   <copy else_args>
+                //   Jmp else_block
+                // intermediate_then:
+                //   <copy then_args>
+                //   Jmp then_block
+                let intermediate = *next_label;
+                *next_label += 1;
+
+                if let Some(cc) = cmps.get(cond.value) {
+                    out.push(MInst::Jcc {
+                        cc,
+                        target: intermediate,
+                    });
+                } else {
+                    let cond_reg = regs.get(cond.value)?;
+                    out.push(MInst::TestRR {
+                        size: OpSize::S64,
+                        src1: cond_reg,
+                        src2: cond_reg,
+                    });
+                    out.push(MInst::Jcc {
+                        cc: CondCode::Ne,
+                        target: intermediate,
+                    });
+                }
+
+                // Else path: copy else_args, jump to else_block.
+                let else_ba_vrefs = func.block_arg_values(*else_block);
+                for (arg, ba_vref) in else_args.iter().zip(else_ba_vrefs.iter()) {
+                    let src = ensure_in_reg(arg.value, regs, stack, alloc, out)?;
+                    let dst = alloc.alloc();
+                    if src != dst {
+                        out.push(MInst::MovRR {
+                            size: OpSize::S64,
+                            dst,
+                            src,
+                        });
+                    }
+                    regs.assign(*ba_vref, dst);
+                }
+                out.push(MInst::Jmp {
+                    target: else_block.index(),
+                });
+
+                // Then path: intermediate label, copy then_args, jump.
+                out.push(MInst::Label { id: intermediate });
+                let then_ba_vrefs = func.block_arg_values(*then_block);
+                for (arg, ba_vref) in then_args.iter().zip(then_ba_vrefs.iter()) {
+                    let src = ensure_in_reg(arg.value, regs, stack, alloc, out)?;
+                    let dst = alloc.alloc();
+                    if src != dst {
+                        out.push(MInst::MovRR {
+                            size: OpSize::S64,
+                            dst,
+                            src,
+                        });
+                    }
+                    regs.assign(*ba_vref, dst);
+                }
+                out.push(MInst::Jmp {
                     target: then_block.index(),
                 });
             } else {
-                // Condition is a general value: test and branch if non-zero.
-                let cond_reg = regs.get(cond.value)?;
-                out.push(MInst::TestRR {
-                    size: OpSize::S64,
-                    src1: cond_reg,
-                    src2: cond_reg,
-                });
-                out.push(MInst::Jcc {
-                    cc: CondCode::Ne,
-                    target: then_block.index(),
+                // No block args — simple Jcc + Jmp.
+                if let Some(cc) = cmps.get(cond.value) {
+                    out.push(MInst::Jcc {
+                        cc,
+                        target: then_block.index(),
+                    });
+                } else {
+                    let cond_reg = regs.get(cond.value)?;
+                    out.push(MInst::TestRR {
+                        size: OpSize::S64,
+                        src1: cond_reg,
+                        src2: cond_reg,
+                    });
+                    out.push(MInst::Jcc {
+                        cc: CondCode::Ne,
+                        target: then_block.index(),
+                    });
+                }
+                out.push(MInst::Jmp {
+                    target: else_block.index(),
                 });
             }
-            out.push(MInst::Jmp {
-                target: else_block.index(),
-            });
         }
 
         Op::Ret(val) => {
@@ -406,7 +545,7 @@ fn select_inst(
         }
 
         Op::Store(val, ptr) => {
-            let val_reg = regs.get(val.value)?;
+            let val_reg = ensure_in_reg(val.value, regs, stack, alloc, out)?;
             if let Some(offset) = stack.get(ptr.value) {
                 out.push(MInst::MovMR {
                     size: OpSize::S64,
@@ -415,7 +554,7 @@ fn select_inst(
                     src: val_reg,
                 });
             } else {
-                let ptr_reg = regs.get(ptr.value)?;
+                let ptr_reg = ensure_in_reg(ptr.value, regs, stack, alloc, out)?;
                 out.push(MInst::MovMR {
                     size: OpSize::S64,
                     base: ptr_reg,
@@ -426,19 +565,55 @@ fn select_inst(
         }
 
         Op::Or(lhs, rhs) => {
-            select_bitop_rr(vref, lhs.value, rhs.value, BitOp::Or, regs, alloc, out)?;
+            select_bitop_rr(
+                vref,
+                lhs.value,
+                rhs.value,
+                BitOp::Or,
+                regs,
+                stack,
+                alloc,
+                out,
+            )?;
         }
 
         Op::And(lhs, rhs) => {
-            select_bitop_rr(vref, lhs.value, rhs.value, BitOp::And, regs, alloc, out)?;
+            select_bitop_rr(
+                vref,
+                lhs.value,
+                rhs.value,
+                BitOp::And,
+                regs,
+                stack,
+                alloc,
+                out,
+            )?;
         }
 
         Op::Xor(lhs, rhs) => {
-            select_bitop_rr(vref, lhs.value, rhs.value, BitOp::Xor, regs, alloc, out)?;
+            select_bitop_rr(
+                vref,
+                lhs.value,
+                rhs.value,
+                BitOp::Xor,
+                regs,
+                stack,
+                alloc,
+                out,
+            )?;
         }
 
         Op::Shl(lhs, rhs) => {
-            select_shift_cl(vref, lhs.value, rhs.value, ShiftOp::Shl, regs, alloc, out)?;
+            select_shift_cl(
+                vref,
+                lhs.value,
+                rhs.value,
+                ShiftOp::Shl,
+                regs,
+                stack,
+                alloc,
+                out,
+            )?;
         }
 
         Op::Shr(lhs, rhs) => {
@@ -446,7 +621,9 @@ fn select_inst(
                 Some(Annotation::Signed(_)) => ShiftOp::Sar,
                 _ => ShiftOp::Shr,
             };
-            select_shift_cl(vref, lhs.value, rhs.value, shift_op, regs, alloc, out)?;
+            select_shift_cl(
+                vref, lhs.value, rhs.value, shift_op, regs, stack, alloc, out,
+            )?;
         }
 
         Op::PtrAdd(ptr, offset) => {
@@ -566,11 +743,12 @@ fn select_binop_rr(
     rhs: ValueRef,
     op: BinOp,
     regs: &mut RegMap,
+    stack: &StackMap,
     alloc: &mut RegAlloc,
     out: &mut Vec<MInst>,
 ) -> Option<()> {
-    let lhs_reg = regs.get(lhs)?;
-    let rhs_reg = regs.get(rhs)?;
+    let lhs_reg = ensure_in_reg(lhs, regs, stack, alloc, out)?;
+    let rhs_reg = ensure_in_reg(rhs, regs, stack, alloc, out)?;
     let dst = alloc.alloc();
 
     // Move lhs into dst.
@@ -616,11 +794,12 @@ fn select_bitop_rr(
     rhs: ValueRef,
     op: BitOp,
     regs: &mut RegMap,
+    stack: &StackMap,
     alloc: &mut RegAlloc,
     out: &mut Vec<MInst>,
 ) -> Option<()> {
-    let lhs_reg = regs.get(lhs)?;
-    let rhs_reg = regs.get(rhs)?;
+    let lhs_reg = ensure_in_reg(lhs, regs, stack, alloc, out)?;
+    let rhs_reg = ensure_in_reg(rhs, regs, stack, alloc, out)?;
     let dst = alloc.alloc();
 
     if lhs_reg != dst {
@@ -665,11 +844,12 @@ fn select_shift_cl(
     rhs: ValueRef,
     op: ShiftOp,
     regs: &mut RegMap,
+    stack: &StackMap,
     alloc: &mut RegAlloc,
     out: &mut Vec<MInst>,
 ) -> Option<()> {
-    let lhs_reg = regs.get(lhs)?;
-    let rhs_reg = regs.get(rhs)?;
+    let lhs_reg = ensure_in_reg(lhs, regs, stack, alloc, out)?;
+    let rhs_reg = ensure_in_reg(rhs, regs, stack, alloc, out)?;
     // Shift uses CL for shift amount, so dst must not be RCX.
     let mut dst = alloc.alloc();
     if dst == Gpr::Rcx {
