@@ -4,9 +4,8 @@
 //! backend based on the target triple and delegates all code generation
 //! calls through enum dispatch.
 
-use std::collections::HashMap;
-
 use tuffy_ir::function::Function;
+use tuffy_ir::module::SymbolTable;
 use tuffy_target::backend::{AbiMetadata, Backend};
 use tuffy_target::types::{CompiledFunction, StaticData};
 use tuffy_target_x86::backend::{X86AbiMetadata, X86Backend};
@@ -57,13 +56,12 @@ impl CodegenSession {
     pub fn compile_function(
         &self,
         func: &Function,
-        call_targets: &HashMap<u32, String>,
-        static_refs: &HashMap<u32, String>,
+        symbols: &SymbolTable,
         metadata: &AbiMetadataBox,
     ) -> Option<CompiledFunction> {
         match (&self.inner, metadata) {
             (CodegenInner::X86(backend), AbiMetadataBox::X86(meta)) => {
-                backend.compile_function(func, call_targets, static_refs, meta)
+                backend.compile_function(func, symbols, meta)
             }
         }
     }

@@ -92,17 +92,16 @@ impl CodegenBackend for TuffyCodegenBackend {
                         if dump_ir {
                             eprintln!("{}", result.func);
                         }
-                        for (sym, data) in &result.static_data {
+                        for (sym_id, data) in &result.static_data {
                             all_static_data.push(StaticData {
-                                name: sym.clone(),
+                                name: result.symbols.resolve(*sym_id).to_string(),
                                 data: data.clone(),
                             });
                         }
 
                         if let Some(cf) = session.compile_function(
                             &result.func,
-                            &result.call_targets,
-                            &result.static_refs,
+                            &result.symbols,
                             &result.abi_metadata,
                         ) {
                             compiled_funcs.push(cf);

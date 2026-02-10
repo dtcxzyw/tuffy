@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use tuffy_ir::function::Function;
+use tuffy_ir::module::SymbolTable;
 use tuffy_target::backend::{AbiMetadata, Backend};
 use tuffy_target::reloc::{RelocKind, Relocation};
 use tuffy_target::types::{CompiledFunction, StaticData};
@@ -41,17 +42,10 @@ impl Backend for X86Backend {
     fn compile_function(
         &self,
         func: &Function,
-        call_targets: &HashMap<u32, String>,
-        static_refs: &HashMap<u32, String>,
+        symbols: &SymbolTable,
         metadata: &X86AbiMetadata,
     ) -> Option<CompiledFunction> {
-        let isel_result = isel::isel(
-            func,
-            call_targets,
-            static_refs,
-            &metadata.rdx_captures,
-            &metadata.rdx_moves,
-        )?;
+        let isel_result = isel::isel(func, symbols, &metadata.rdx_captures, &metadata.rdx_moves)?;
         let enc = encode_function(&isel_result.insts);
         Some(CompiledFunction {
             name: isel_result.name,

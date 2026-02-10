@@ -1,8 +1,7 @@
 //! Backend trait for target-specific code generation.
 
-use std::collections::HashMap;
-
 use tuffy_ir::function::Function;
+use tuffy_ir::module::SymbolTable;
 
 use crate::types::{CompiledFunction, StaticData};
 
@@ -38,8 +37,7 @@ pub trait Backend {
     fn compile_function(
         &self,
         func: &Function,
-        call_targets: &HashMap<u32, String>,
-        static_refs: &HashMap<u32, String>,
+        symbols: &SymbolTable,
         metadata: &Self::Metadata,
     ) -> Option<CompiledFunction>;
 

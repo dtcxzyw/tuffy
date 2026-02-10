@@ -1,6 +1,6 @@
 # Introduce Module layer and redesign IR function call representation
 
-- Status: Draft
+- Status: In Progress
 - Created: 2026-02-10
 - Completed: N/A
 - Parent: N/A

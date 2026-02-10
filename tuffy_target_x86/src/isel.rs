@@ -6,6 +6,7 @@ use crate::inst::{CondCode, MInst, OpSize};
 use crate::reg::Gpr;
 use tuffy_ir::function::{CfgNode, Function};
 use tuffy_ir::instruction::{ICmpOp, Op, Operand};
+use tuffy_ir::module::SymbolTable;
 use tuffy_ir::types::Annotation;
 use tuffy_ir::value::ValueRef;
 
@@ -189,8 +190,7 @@ fn ensure_in_reg(
 /// Returns None if the function contains unsupported IR ops.
 pub fn isel(
     func: &Function,
-    call_targets: &HashMap<u32, String>,
-    static_refs: &HashMap<u32, String>,
+    symbols: &SymbolTable,
     rdx_captures: &HashMap<u32, ()>,
     rdx_moves: &HashMap<u32, u32>,
 ) -> Option<IselResult> {
@@ -218,8 +218,7 @@ pub fn isel(
                     &mut stack,
                     &mut alloc,
                     &mut next_label,
-                    call_targets,
-                    static_refs,
+                    symbols,
                     rdx_captures,
                     rdx_moves,
                     &mut body,
@@ -271,8 +270,7 @@ fn select_inst(
     stack: &mut StackMap,
     alloc: &mut RegAlloc,
     next_label: &mut u32,
-    call_targets: &HashMap<u32, String>,
-    static_refs: &HashMap<u32, String>,
+    symbols: &SymbolTable,
     rdx_captures: &HashMap<u32, ()>,
     rdx_moves: &HashMap<u32, u32>,
     out: &mut Vec<MInst>,
@@ -299,14 +297,6 @@ fn select_inst(
                     });
                 }
                 regs.assign(vref, Gpr::Rdx);
-            } else if let Some(sym) = static_refs.get(&vref.index()) {
-                // Static data reference: emit LEA rip-relative.
-                let dst = alloc.alloc();
-                out.push(MInst::LeaSymbol {
-                    dst,
-                    symbol: sym.clone(),
-                });
-                regs.assign(vref, dst);
             } else {
                 let dst = alloc.alloc();
                 out.push(MInst::MovRI {
@@ -497,7 +487,7 @@ fn select_inst(
             out.push(MInst::Ret);
         }
 
-        Op::Call(_callee, args) => {
+        Op::Call(callee, args) => {
             // Move arguments into System V ABI registers.
             for (i, arg) in args.iter().enumerate() {
                 if i >= ARG_REGS.len() {
@@ -514,13 +504,13 @@ fn select_inst(
                 }
             }
 
-            // Look up the symbol name from call_targets.
-            if let Some(sym) = call_targets.get(&vref.index()) {
-                out.push(MInst::CallSym { name: sym.clone() });
+            // Resolve the callee. If it was produced by SymbolAddr, emit
+            // a direct call; otherwise emit ud2 (indirect calls not yet supported).
+            let callee_idx = callee.value.index();
+            if let Op::SymbolAddr(sym_id) = &func.inst(callee_idx).op {
+                let name = symbols.resolve(*sym_id).to_string();
+                out.push(MInst::CallSym { name });
             } else {
-                // Unresolvable call (e.g., indirect or failed symbol resolution).
-                // Emit ud2 instead of dropping the entire function, which would
-                // cascade into undefined symbols for all callers.
                 out.push(MInst::Ud2);
             }
 
@@ -803,7 +793,14 @@ fn select_inst(
         Op::StoreAtomic(..) => return None,
         Op::AtomicRmw(..) => return None,
         Op::AtomicCmpXchg(..) => return None,
-        Op::SymbolAddr(_) => return None,
+        Op::SymbolAddr(sym_id) => {
+            let dst = alloc.alloc();
+            out.push(MInst::LeaSymbol {
+                dst,
+                symbol: symbols.resolve(*sym_id).to_string(),
+            });
+            regs.assign(vref, dst);
+        }
         Op::Fence(_) => return None,
         Op::Continue(_) => return None,
         Op::RegionYield(_) => return None,

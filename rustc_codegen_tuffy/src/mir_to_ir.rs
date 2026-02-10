@@ -15,18 +15,17 @@ use tuffy_codegen::{AbiMetadataBox, CodegenSession};
 use tuffy_ir::builder::Builder;
 use tuffy_ir::function::{Function, RegionKind};
 use tuffy_ir::instruction::{ICmpOp, Operand as IrOperand, Origin};
+use tuffy_ir::module::{SymbolId, SymbolTable};
 use tuffy_ir::types::{Annotation, Type};
 use tuffy_ir::value::{BlockRef, ValueRef};
 
 /// Result of MIR → IR translation.
 pub struct TranslationResult {
     pub func: Function,
-    /// Maps IR instruction index → callee symbol name for Call instructions.
-    pub call_targets: HashMap<u32, String>,
-    /// Maps IR instruction index → static data symbol name (for address loads).
-    pub static_refs: HashMap<u32, String>,
-    /// Static data blobs to emit in .rodata.
-    pub static_data: Vec<(String, Vec<u8>)>,
+    /// Interned symbol table shared across the codegen unit.
+    pub symbols: SymbolTable,
+    /// Static data blobs to emit in .rodata, keyed by SymbolId.
+    pub static_data: Vec<(SymbolId, Vec<u8>)>,
     /// Target-specific ABI metadata (e.g., secondary return register info).
     pub abi_metadata: AbiMetadataBox,
 }
@@ -77,9 +76,8 @@ pub fn translate_function<'tcx>(
     let mut locals = LocalMap::new(mir.local_decls.len());
     let mut fat_locals = FatLocalMap::new();
     let mut stack_locals = StackLocalSet::new(mir.local_decls.len());
-    let mut call_targets: HashMap<u32, String> = HashMap::new();
-    let mut static_refs: HashMap<u32, String> = HashMap::new();
-    let mut static_data: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut symbols = SymbolTable::new();
+    let mut static_data: Vec<(SymbolId, Vec<u8>)> = Vec::new();
     let mut abi_metadata = session.new_metadata();
 
     // Detect whether this function returns a large struct via sret.
@@ -126,7 +124,7 @@ pub fn translate_function<'tcx>(
                 &mut locals,
                 &mut fat_locals,
                 &mut stack_locals,
-                &mut static_refs,
+                &mut symbols,
                 &mut static_data,
             );
         }
@@ -141,8 +139,7 @@ pub fn translate_function<'tcx>(
                 &mut fat_locals,
                 &mut stack_locals,
                 &block_map,
-                &mut call_targets,
-                &mut static_refs,
+                &mut symbols,
                 &mut static_data,
                 &mut abi_metadata,
                 sret_ptr,
@@ -155,8 +152,7 @@ pub fn translate_function<'tcx>(
 
     Some(TranslationResult {
         func,
-        call_targets,
-        static_refs,
+        symbols,
         static_data,
         abi_metadata,
     })
@@ -538,7 +534,8 @@ fn translate_place_to_value<'tcx>(
         // Overflow flag — always false for now.
         return Some(builder.iconst(0, Origin::synthetic()));
     }
-    let (addr, projected_ty) = translate_place_to_addr(tcx, place, mir, builder, locals, stack_locals)?;
+    let (addr, projected_ty) =
+        translate_place_to_addr(tcx, place, mir, builder, locals, stack_locals)?;
     let bytes = type_size(tcx, projected_ty).unwrap_or(8) as u32;
     Some(builder.load(addr.into(), bytes, Type::Int, None, Origin::synthetic()))
 }
@@ -552,8 +549,8 @@ fn translate_statement<'tcx>(
     locals: &mut LocalMap,
     fat_locals: &mut FatLocalMap,
     stack_locals: &mut StackLocalSet,
-    static_refs: &mut HashMap<u32, String>,
-    static_data: &mut Vec<(String, Vec<u8>)>,
+    symbols: &mut SymbolTable,
+    static_data: &mut Vec<(SymbolId, Vec<u8>)>,
 ) {
     match &stmt.kind {
         StatementKind::Assign(box (place, rvalue)) => {
@@ -566,7 +563,7 @@ fn translate_statement<'tcx>(
                 locals,
                 fat_locals,
                 stack_locals,
-                static_refs,
+                symbols,
                 static_data,
             ) {
                 if place.projection.is_empty() {
@@ -590,7 +587,7 @@ fn translate_statement<'tcx>(
                 locals,
                 fat_locals,
                 stack_locals,
-                static_refs,
+                symbols,
                 static_data,
             ) {
                 fat_locals.set(place.local, fat_val);
@@ -613,8 +610,8 @@ fn extract_fat_component<'tcx>(
     locals: &mut LocalMap,
     fat_locals: &FatLocalMap,
     stack_locals: &StackLocalSet,
-    static_refs: &mut HashMap<u32, String>,
-    static_data: &mut Vec<(String, Vec<u8>)>,
+    symbols: &mut SymbolTable,
+    static_data: &mut Vec<(SymbolId, Vec<u8>)>,
 ) -> Option<ValueRef> {
     match rvalue {
         // Constant slice: extract the length metadata.
@@ -642,7 +639,7 @@ fn extract_fat_component<'tcx>(
                 builder,
                 locals,
                 stack_locals,
-                static_refs,
+                symbols,
                 static_data,
             )
         }
@@ -661,9 +658,8 @@ fn translate_terminator<'tcx>(
     fat_locals: &mut FatLocalMap,
     stack_locals: &mut StackLocalSet,
     block_map: &BlockMap,
-    call_targets: &mut HashMap<u32, String>,
-    static_refs: &mut HashMap<u32, String>,
-    static_data: &mut Vec<(String, Vec<u8>)>,
+    symbols: &mut SymbolTable,
+    static_data: &mut Vec<(SymbolId, Vec<u8>)>,
     abi_metadata: &mut AbiMetadataBox,
     sret_ptr: Option<ValueRef>,
     use_sret: bool,
@@ -690,7 +686,8 @@ fn translate_terminator<'tcx>(
                         let off = builder.iconst(byte_off as i64, Origin::synthetic());
                         builder.ptradd(src.into(), off.into(), 0, Origin::synthetic())
                     };
-                    let word = builder.load(load_addr.into(), 8, Type::Int, None, Origin::synthetic());
+                    let word =
+                        builder.load(load_addr.into(), 8, Type::Int, None, Origin::synthetic());
                     let store_addr = if byte_off == 0 {
                         sret
                     } else {
@@ -747,7 +744,7 @@ fn translate_terminator<'tcx>(
                 locals,
                 stack_locals,
                 block_map,
-                static_refs,
+                symbols,
                 static_data,
             );
         }
@@ -765,12 +762,13 @@ fn translate_terminator<'tcx>(
                 builder,
                 locals,
                 stack_locals,
-                static_refs,
+                symbols,
                 static_data,
             );
             let target_block = block_map.get(*target);
             if let Some(cond_v) = cond_val {
-                let expected_val = builder.iconst(if *expected { 1 } else { 0 }, Origin::synthetic());
+                let expected_val =
+                    builder.iconst(if *expected { 1 } else { 0 }, Origin::synthetic());
                 let cmp = builder.icmp(
                     ICmpOp::Eq,
                     cond_v.into(),
@@ -817,15 +815,20 @@ fn translate_terminator<'tcx>(
             ..
         } => {
             // Check for compiler intrinsics and handle them inline.
-            if let Some((intrinsic_name, intrinsic_substs)) =
-                detect_intrinsic(tcx, func, instance)
+            if let Some((intrinsic_name, intrinsic_substs)) = detect_intrinsic(tcx, func, instance)
             {
                 // Translate intrinsic arguments to IR values.
                 let mut intrinsic_args: Vec<ValueRef> = Vec::new();
                 for arg in args {
                     if let Some(v) = translate_operand(
-                        tcx, &arg.node, mir, builder, locals, stack_locals,
-                        static_refs, static_data,
+                        tcx,
+                        &arg.node,
+                        mir,
+                        builder,
+                        locals,
+                        stack_locals,
+                        symbols,
+                        static_data,
                     ) {
                         intrinsic_args.push(v);
                     }
@@ -856,7 +859,7 @@ fn translate_terminator<'tcx>(
                     destination.local,
                     builder,
                     locals,
-                    call_targets,
+                    symbols,
                 );
                 if mem_handled {
                     if let Some(target) = target {
@@ -897,7 +900,7 @@ fn translate_terminator<'tcx>(
                     builder,
                     locals,
                     stack_locals,
-                    static_refs,
+                    symbols,
                     static_data,
                 ) {
                     // Check if this argument is a stack-allocated local that
@@ -961,9 +964,13 @@ fn translate_terminator<'tcx>(
                 }
             }
 
-            // Emit a Call IR instruction. The callee operand is a dummy const
-            // (the actual symbol is tracked in call_targets).
-            let callee_val = builder.iconst(0, Origin::synthetic());
+            // Emit a Call IR instruction with a proper SymbolAddr callee.
+            let callee_val = if let Some(sym) = callee_sym {
+                let sym_id = symbols.intern(&sym);
+                builder.symbol_addr(sym_id, Origin::synthetic())
+            } else {
+                builder.iconst(0, Origin::synthetic())
+            };
             let call_vref = builder.call(
                 callee_val.into(),
                 ir_args,
@@ -971,11 +978,6 @@ fn translate_terminator<'tcx>(
                 None,
                 Origin::synthetic(),
             );
-
-            // Record the mapping from instruction index to symbol name.
-            if let Some(sym) = callee_sym {
-                call_targets.insert(call_vref.index(), sym);
-            }
 
             if callee_sret {
                 // For sret calls, the result is in the stack slot we allocated.
@@ -1030,8 +1032,8 @@ fn translate_switch_int<'tcx>(
     locals: &mut LocalMap,
     stack_locals: &StackLocalSet,
     block_map: &BlockMap,
-    static_refs: &mut HashMap<u32, String>,
-    static_data: &mut Vec<(String, Vec<u8>)>,
+    symbols: &mut SymbolTable,
+    static_data: &mut Vec<(SymbolId, Vec<u8>)>,
 ) {
     let discr_val = match translate_operand(
         tcx,
@@ -1040,7 +1042,7 @@ fn translate_switch_int<'tcx>(
         builder,
         locals,
         stack_locals,
-        static_refs,
+        symbols,
         static_data,
     ) {
         Some(v) => v,
@@ -1107,8 +1109,8 @@ fn translate_rvalue<'tcx>(
     locals: &mut LocalMap,
     fat_locals: &mut FatLocalMap,
     stack_locals: &mut StackLocalSet,
-    static_refs: &mut HashMap<u32, String>,
-    static_data: &mut Vec<(String, Vec<u8>)>,
+    symbols: &mut SymbolTable,
+    static_data: &mut Vec<(SymbolId, Vec<u8>)>,
 ) -> Option<ValueRef> {
     match rvalue {
         Rvalue::BinaryOp(op, box (lhs, rhs)) => {
@@ -1119,7 +1121,7 @@ fn translate_rvalue<'tcx>(
                 builder,
                 locals,
                 stack_locals,
-                static_refs,
+                symbols,
                 static_data,
             )?;
             let r = translate_operand(
@@ -1129,7 +1131,7 @@ fn translate_rvalue<'tcx>(
                 builder,
                 locals,
                 stack_locals,
-                static_refs,
+                symbols,
                 static_data,
             )?;
             let l_ann = operand_annotation(lhs, mir);
@@ -1200,7 +1202,7 @@ fn translate_rvalue<'tcx>(
             builder,
             locals,
             stack_locals,
-            static_refs,
+            symbols,
             static_data,
         ),
         Rvalue::Cast(kind, operand, target_ty) => {
@@ -1211,7 +1213,7 @@ fn translate_rvalue<'tcx>(
                 builder,
                 locals,
                 stack_locals,
-                static_refs,
+                symbols,
                 static_data,
             )?;
             match kind {
@@ -1278,27 +1280,22 @@ fn translate_rvalue<'tcx>(
                     builder,
                     locals,
                     stack_locals,
-                    static_refs,
+                    symbols,
                     static_data,
                 )
                 .unwrap_or_else(|| builder.iconst(0, Origin::synthetic()));
                 let field_ty = match op {
-                    Operand::Copy(p) | Operand::Move(p) => {
-                        Some(mir.local_decls[p.local].ty)
-                    }
+                    Operand::Copy(p) | Operand::Move(p) => Some(mir.local_decls[p.local].ty),
                     Operand::Constant(c) => Some(c.ty()),
                     _ => None,
                 };
-                let bytes = field_ty
-                    .and_then(|t| type_size(tcx, t))
-                    .unwrap_or(8) as u32;
+                let bytes = field_ty.and_then(|t| type_size(tcx, t)).unwrap_or(8) as u32;
                 let offset = field_offset(tcx, agg_ty, i).unwrap_or(i as u64 * 8);
                 if offset == 0 {
                     builder.store(val.into(), slot.into(), bytes, Origin::synthetic());
                 } else {
                     let off_val = builder.iconst(offset as i64, Origin::synthetic());
-                    let addr =
-                        builder.ptradd(slot.into(), off_val.into(), 0, Origin::synthetic());
+                    let addr = builder.ptradd(slot.into(), off_val.into(), 0, Origin::synthetic());
                     builder.store(val.into(), addr.into(), bytes, Origin::synthetic());
                 }
             }
@@ -1321,7 +1318,7 @@ fn translate_rvalue<'tcx>(
                 builder,
                 locals,
                 stack_locals,
-                static_refs,
+                symbols,
                 static_data,
             )?;
             let zero = builder.iconst(0, Origin::synthetic());
@@ -1335,7 +1332,7 @@ fn translate_rvalue<'tcx>(
                 builder,
                 locals,
                 stack_locals,
-                static_refs,
+                symbols,
                 static_data,
             )?;
             let ones = builder.iconst(-1, Origin::synthetic());
@@ -1406,8 +1403,8 @@ fn translate_operand<'tcx>(
     builder: &mut Builder<'_>,
     locals: &mut LocalMap,
     stack_locals: &StackLocalSet,
-    static_refs: &mut HashMap<u32, String>,
-    static_data: &mut Vec<(String, Vec<u8>)>,
+    symbols: &mut SymbolTable,
+    static_data: &mut Vec<(SymbolId, Vec<u8>)>,
 ) -> Option<ValueRef> {
     match operand {
         Operand::Copy(place) | Operand::Move(place) => {
@@ -1418,7 +1415,7 @@ fn translate_operand<'tcx>(
             }
         }
         Operand::Constant(constant) => {
-            translate_const(tcx, constant, builder, static_refs, static_data)
+            translate_const(tcx, constant, builder, symbols, static_data)
         }
         _ => None,
     }
@@ -1428,8 +1425,8 @@ fn translate_const<'tcx>(
     tcx: TyCtxt<'tcx>,
     constant: &mir::ConstOperand<'tcx>,
     builder: &mut Builder<'_>,
-    static_refs: &mut HashMap<u32, String>,
-    static_data: &mut Vec<(String, Vec<u8>)>,
+    symbols: &mut SymbolTable,
+    static_data: &mut Vec<(SymbolId, Vec<u8>)>,
 ) -> Option<ValueRef> {
     let ty = constant.const_.ty();
     let val = match constant.const_ {
@@ -1455,15 +1452,15 @@ fn translate_const<'tcx>(
                 .inspect_with_uninit_and_ptr_outside_interpreter(offset..offset + size)
                 .to_vec();
             let sym = format!(".Lconst.{}", static_data.len());
-            static_data.push((sym.clone(), bytes));
-            let val = builder.iconst(0, Origin::synthetic());
-            static_refs.insert(val.index(), sym);
+            let sym_id = symbols.intern(&sym);
+            static_data.push((sym_id, bytes));
+            let val = builder.symbol_addr(sym_id, Origin::synthetic());
             Some(val)
         }
         mir::ConstValue::Scalar(scalar) => translate_scalar(scalar, ty, builder),
         mir::ConstValue::ZeroSized => Some(builder.iconst(0, Origin::synthetic())),
         mir::ConstValue::Slice { alloc_id, meta } => {
-            translate_const_slice(tcx, alloc_id, meta, builder, static_refs, static_data)
+            translate_const_slice(tcx, alloc_id, meta, builder, symbols, static_data)
         }
         _ => None,
     }
@@ -1507,14 +1504,14 @@ fn translate_scalar(
 /// Translate a ConstValue::Slice (e.g., a string literal `&str`).
 ///
 /// Emits the data bytes to .rodata and returns an IR constant whose index
-/// is recorded in `static_refs` so that isel emits a RIP-relative LEA.
+/// is recorded in `symbols` so that isel emits a RIP-relative LEA.
 fn translate_const_slice<'tcx>(
     tcx: TyCtxt<'tcx>,
     alloc_id: rustc_middle::mir::interpret::AllocId,
     meta: u64,
     builder: &mut Builder<'_>,
-    static_refs: &mut HashMap<u32, String>,
-    static_data: &mut Vec<(String, Vec<u8>)>,
+    symbols: &mut SymbolTable,
+    static_data: &mut Vec<(SymbolId, Vec<u8>)>,
 ) -> Option<ValueRef> {
     let alloc = tcx.global_alloc(alloc_id).unwrap_memory();
     let alloc = alloc.inner();
@@ -1524,12 +1521,11 @@ fn translate_const_slice<'tcx>(
 
     // Create a unique symbol name for this data blob.
     let sym = format!(".Lstr.{}", static_data.len());
-    static_data.push((sym.clone(), bytes));
+    let sym_id = symbols.intern(&sym);
+    static_data.push((sym_id, bytes));
 
-    // Emit a dummy constant whose index we record as a static ref.
-    // Isel will emit LEA rip-relative for this value.
-    let ptr_val = builder.iconst(0, Origin::synthetic());
-    static_refs.insert(ptr_val.index(), sym);
+    // Emit a SymbolAddr to reference this static data blob.
+    let ptr_val = builder.symbol_addr(sym_id, Origin::synthetic());
 
     // Emit the length as a separate constant.
     let len_val = builder.iconst(meta as i64, Origin::synthetic());
@@ -1595,7 +1591,7 @@ fn translate_memory_intrinsic<'tcx>(
     destination_local: mir::Local,
     builder: &mut Builder<'_>,
     locals: &mut LocalMap,
-    call_targets: &mut HashMap<u32, String>,
+    symbols: &mut SymbolTable,
 ) -> bool {
     // Extract the type parameter T and compute its size.
     let elem_size = match substs.first().and_then(|a| a.as_type()) {
@@ -1618,7 +1614,8 @@ fn translate_memory_intrinsic<'tcx>(
                 let sz = builder.iconst(elem_size as i64, Origin::synthetic());
                 builder.mul(count.into(), sz.into(), None, Origin::synthetic())
             };
-            let callee = builder.iconst(0, Origin::synthetic());
+            let sym_id = symbols.intern("memset");
+            let callee = builder.symbol_addr(sym_id, Origin::synthetic());
             let call = builder.call(
                 callee.into(),
                 vec![dst.into(), val.into(), byte_count.into()],
@@ -1626,7 +1623,6 @@ fn translate_memory_intrinsic<'tcx>(
                 None,
                 Origin::synthetic(),
             );
-            call_targets.insert(call.index(), "memset".to_string());
             locals.set(destination_local, call);
             true
         }
@@ -1646,7 +1642,8 @@ fn translate_memory_intrinsic<'tcx>(
                 builder.mul(count.into(), sz.into(), None, Origin::synthetic())
             };
             // memcpy(dst, src, n) — note swapped argument order.
-            let callee = builder.iconst(0, Origin::synthetic());
+            let sym_id = symbols.intern("memcpy");
+            let callee = builder.symbol_addr(sym_id, Origin::synthetic());
             let call = builder.call(
                 callee.into(),
                 vec![dst.into(), src.into(), byte_count.into()],
@@ -1654,7 +1651,6 @@ fn translate_memory_intrinsic<'tcx>(
                 None,
                 Origin::synthetic(),
             );
-            call_targets.insert(call.index(), "memcpy".to_string());
             locals.set(destination_local, call);
             true
         }
@@ -1673,7 +1669,8 @@ fn translate_memory_intrinsic<'tcx>(
                 let sz = builder.iconst(elem_size as i64, Origin::synthetic());
                 builder.mul(count.into(), sz.into(), None, Origin::synthetic())
             };
-            let callee = builder.iconst(0, Origin::synthetic());
+            let sym_id = symbols.intern("memmove");
+            let callee = builder.symbol_addr(sym_id, Origin::synthetic());
             let call = builder.call(
                 callee.into(),
                 vec![dst.into(), src.into(), byte_count.into()],
@@ -1681,7 +1678,6 @@ fn translate_memory_intrinsic<'tcx>(
                 None,
                 Origin::synthetic(),
             );
-            call_targets.insert(call.index(), "memmove".to_string());
             locals.set(destination_local, call);
             true
         }
@@ -1694,7 +1690,8 @@ fn translate_memory_intrinsic<'tcx>(
             let a = ir_args[0];
             let b = ir_args[1];
             let sz = builder.iconst(elem_size as i64, Origin::synthetic());
-            let callee = builder.iconst(0, Origin::synthetic());
+            let sym_id = symbols.intern("memcmp");
+            let callee = builder.symbol_addr(sym_id, Origin::synthetic());
             let cmp_result = builder.call(
                 callee.into(),
                 vec![a.into(), b.into(), sz.into()],
@@ -1702,7 +1699,6 @@ fn translate_memory_intrinsic<'tcx>(
                 None,
                 Origin::synthetic(),
             );
-            call_targets.insert(cmp_result.index(), "memcmp".to_string());
             // raw_eq returns bool (0 or 1): true when memcmp returns 0.
             let zero = builder.iconst(0, Origin::synthetic());
             let eq = builder.icmp(
@@ -1784,7 +1780,6 @@ fn resolve_call_symbol<'tcx>(
                 if let Some(libc_sym) = intrinsic_to_libc(iname) {
                     return Some(libc_sym.to_string());
                 }
-
             }
             if args.has_non_region_param() {
                 return None;
