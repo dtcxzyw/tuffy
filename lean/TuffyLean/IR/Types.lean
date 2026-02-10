@@ -186,4 +186,10 @@ inductive ICmpOp where
   | eq | ne | lt | le | gt | ge
   deriving DecidableEq, Repr
 
+/-- Interned symbol identifier. Indexes into a module-level symbol table.
+    Used for function names, static data labels, and external references. -/
+structure SymbolId where
+  id : Nat
+  deriving DecidableEq, Repr, Hashable
+
 end TuffyLean.IR
