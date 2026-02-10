@@ -106,7 +106,7 @@ impl CodegenBackend for TuffyCodegenBackend {
                         );
                         if !vr.is_ok() {
                             let func_name = result.symbols.resolve(result.func.name);
-                            eprintln!("IR verification failed for {func_name}:\n{vr}");
+                            panic!("IR verification failed for {func_name}:\n{vr}");
                         }
 
                         for (sym_id, data) in &result.static_data {
