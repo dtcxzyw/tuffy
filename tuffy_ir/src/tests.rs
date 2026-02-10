@@ -947,3 +947,297 @@ fn module_static_data() {
     assert_eq!(module.resolve(module.static_data[0].name), ".Lstr.0");
     assert_eq!(module.static_data[0].data, b"hello");
 }
+
+// ---------------------------------------------------------------------------
+// Verifier tests
+// ---------------------------------------------------------------------------
+
+use crate::verifier::{verify_function, verify_module};
+
+/// Helper: build a valid "add" function and verify it passes.
+fn build_valid_add_module() -> Module {
+    let mut module = Module::new("test");
+    let name = module.intern("add");
+    let mut func = Function::new(
+        name,
+        vec![Type::Int, Type::Int],
+        vec![],
+        vec![],
+        Some(Type::Int),
+        None,
+    );
+    let mut b = Builder::new(&mut func);
+    let root = b.create_region(RegionKind::Function);
+    b.enter_region(root);
+    let bb = b.create_block();
+    b.switch_to_block(bb);
+    let a = b.param(0, Type::Int, None, Origin::synthetic());
+    let p1 = b.param(1, Type::Int, None, Origin::synthetic());
+    let sum = b.add(a.into(), p1.into(), None, Origin::synthetic());
+    b.ret(Some(sum.into()), Origin::synthetic());
+    b.exit_region();
+    module.add_function(func);
+    module
+}
+
+#[test]
+fn verify_valid_add_function() {
+    let module = build_valid_add_module();
+    let result = verify_module(&module);
+    assert!(result.is_ok(), "expected no errors: {result}");
+}
+
+#[test]
+fn verify_valid_multi_block() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("max");
+    let mut func = Function::new(
+        name,
+        vec![Type::Int, Type::Int],
+        vec![],
+        vec![],
+        Some(Type::Int),
+        None,
+    );
+    let mut b = Builder::new(&mut func);
+    let root = b.create_region(RegionKind::Function);
+    b.enter_region(root);
+
+    let bb0 = b.create_block();
+    let bb1 = b.create_block();
+    let bb2 = b.create_block();
+
+    b.switch_to_block(bb0);
+    let a = b.param(0, Type::Int, None, Origin::synthetic());
+    let p1 = b.param(1, Type::Int, None, Origin::synthetic());
+    let cmp = b.icmp(ICmpOp::Gt, a.into(), p1.into(), Origin::synthetic());
+    b.brif(cmp.into(), bb1, vec![], bb2, vec![], Origin::synthetic());
+
+    b.switch_to_block(bb1);
+    b.ret(Some(a.into()), Origin::synthetic());
+
+    b.switch_to_block(bb2);
+    b.ret(Some(p1.into()), Origin::synthetic());
+    b.exit_region();
+
+    let result = verify_function(&func, &st);
+    assert!(result.is_ok(), "expected no errors: {result}");
+}
+
+#[test]
+fn verify_valid_loop_region() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("factorial");
+    let mut func = Function::new(name, vec![Type::Int], vec![], vec![], Some(Type::Int), None);
+    let mut b = Builder::new(&mut func);
+
+    let root = b.create_region(RegionKind::Function);
+    b.enter_region(root);
+
+    let bb0 = b.create_block();
+    let loop_region = b.create_region(RegionKind::Loop);
+    b.enter_region(loop_region);
+    let bb1 = b.create_block();
+    let bb2 = b.create_block();
+    b.exit_region();
+    let bb3 = b.create_block();
+
+    b.switch_to_block(bb0);
+    let n = b.param(0, Type::Int, None, Origin::synthetic());
+    let one = b.iconst(1, Origin::synthetic());
+    let init = b.iconst(1, Origin::synthetic());
+    b.br(bb1, vec![init.into(), one.into()], Origin::synthetic());
+
+    let acc = b.add_block_arg(bb1, Type::Int);
+    let i = b.add_block_arg(bb1, Type::Int);
+    b.switch_to_block(bb1);
+    let cmp = b.icmp(ICmpOp::Le, i.into(), n.into(), Origin::synthetic());
+    b.brif(cmp.into(), bb2, vec![], bb3, vec![], Origin::synthetic());
+
+    b.switch_to_block(bb2);
+    let new_acc = b.mul(acc.into(), i.into(), None, Origin::synthetic());
+    let new_i = b.sub(i.into(), one.into(), None, Origin::synthetic());
+    b.continue_(vec![new_acc.into(), new_i.into()], Origin::synthetic());
+
+    b.switch_to_block(bb3);
+    b.ret(Some(acc.into()), Origin::synthetic());
+    b.exit_region();
+
+    let result = verify_function(&func, &st);
+    assert!(result.is_ok(), "expected no errors: {result}");
+}
+
+#[test]
+fn verify_detects_wrong_arith_operand_type() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("bad_add");
+    let mut func = Function::new(
+        name,
+        vec![Type::Int, Type::Int],
+        vec![],
+        vec![],
+        Some(Type::Int),
+        None,
+    );
+    let mut b = Builder::new(&mut func);
+    let root = b.create_region(RegionKind::Function);
+    b.enter_region(root);
+    let bb = b.create_block();
+    b.switch_to_block(bb);
+
+    let a = b.param(0, Type::Int, None, Origin::synthetic());
+    let p1 = b.param(1, Type::Int, None, Origin::synthetic());
+    // icmp returns Bool — passing it to Add should be flagged.
+    let cmp = b.icmp(ICmpOp::Gt, a.into(), p1.into(), Origin::synthetic());
+    b.add(cmp.into(), p1.into(), None, Origin::synthetic());
+    b.ret(Some(a.into()), Origin::synthetic());
+    b.exit_region();
+
+    let result = verify_function(&func, &st);
+    assert!(!result.is_ok(), "expected errors");
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|e| e.message.contains("int arith lhs")),
+        "should flag Bool operand in Add: {result}"
+    );
+}
+
+#[test]
+fn verify_detects_missing_terminator() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("no_term");
+    let mut func = Function::new(name, vec![Type::Int], vec![], vec![], Some(Type::Int), None);
+    let mut b = Builder::new(&mut func);
+    let root = b.create_region(RegionKind::Function);
+    b.enter_region(root);
+    let bb = b.create_block();
+    b.switch_to_block(bb);
+    b.param(0, Type::Int, None, Origin::synthetic());
+    // No terminator
+    b.exit_region();
+
+    let result = verify_function(&func, &st);
+    assert!(!result.is_ok(), "expected errors");
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|e| e.message.contains("terminator")),
+        "should flag missing terminator: {result}"
+    );
+}
+
+#[test]
+fn verify_detects_load_non_ptr() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("bad_load");
+    let mut func = Function::new(name, vec![Type::Int], vec![], vec![], Some(Type::Int), None);
+    let mut b = Builder::new(&mut func);
+    let root = b.create_region(RegionKind::Function);
+    b.enter_region(root);
+    let bb = b.create_block();
+    b.switch_to_block(bb);
+
+    let a = b.param(0, Type::Int, None, Origin::synthetic());
+    // Load from Int instead of Ptr — should be flagged.
+    let v = b.load(a.into(), 4, Type::Int, None, Origin::synthetic());
+    b.ret(Some(v.into()), Origin::synthetic());
+    b.exit_region();
+
+    let result = verify_function(&func, &st);
+    assert!(!result.is_ok(), "expected errors");
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|e| e.message.contains("expected Ptr")),
+        "should flag non-Ptr load operand: {result}"
+    );
+}
+
+#[test]
+fn verify_detects_branch_arg_count_mismatch() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("bad_br");
+    let mut func = Function::new(name, vec![Type::Int], vec![], vec![], Some(Type::Int), None);
+    let mut b = Builder::new(&mut func);
+    let root = b.create_region(RegionKind::Function);
+    b.enter_region(root);
+
+    let bb0 = b.create_block();
+    let bb1 = b.create_block();
+    let _arg = b.add_block_arg(bb1, Type::Int);
+
+    b.switch_to_block(bb0);
+    let a = b.param(0, Type::Int, None, Origin::synthetic());
+    // Branch to bb1 which expects 1 arg, but pass 0.
+    b.br(bb1, vec![], Origin::synthetic());
+
+    b.switch_to_block(bb1);
+    b.ret(Some(a.into()), Origin::synthetic());
+    b.exit_region();
+
+    let result = verify_function(&func, &st);
+    assert!(!result.is_ok(), "expected errors");
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|e| e.message.contains("passes 0 args, expected 1")),
+        "should flag branch arg count mismatch: {result}"
+    );
+}
+
+#[test]
+fn verify_detects_annotation_on_non_int() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("bad_ann");
+    let mut func = Function::new(
+        name,
+        vec![Type::Ptr(0)],
+        vec![Some(Annotation::Signed(32))],
+        vec![],
+        Some(Type::Ptr(0)),
+        None,
+    );
+    let mut b = Builder::new(&mut func);
+    let root = b.create_region(RegionKind::Function);
+    b.enter_region(root);
+    let bb = b.create_block();
+    b.switch_to_block(bb);
+    let p = b.param(0, Type::Ptr(0), None, Origin::synthetic());
+    b.ret(Some(p.into()), Origin::synthetic());
+    b.exit_region();
+
+    let result = verify_function(&func, &st);
+    assert!(!result.is_ok(), "expected errors");
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|e| e.message.contains("integer annotation on non-Int")),
+        "should flag annotation on Ptr: {result}"
+    );
+}
+
+#[test]
+fn verify_detects_duplicate_function_names() {
+    let mut module = Module::new("test");
+    let name = module.intern("dup");
+    let func1 = Function::new(name, vec![], vec![], vec![], None, None);
+    let func2 = Function::new(name, vec![], vec![], vec![], None, None);
+    module.add_function(func1);
+    module.add_function(func2);
+
+    let result = verify_module(&module);
+    assert!(!result.is_ok(), "expected errors");
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|e| e.message.contains("duplicate function name")),
+        "should flag duplicate names: {result}"
+    );
+}

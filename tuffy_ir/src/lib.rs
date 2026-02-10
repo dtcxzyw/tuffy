@@ -7,6 +7,7 @@ pub mod instruction;
 pub mod module;
 pub mod types;
 pub mod value;
+pub mod verifier;
 
 #[cfg(test)]
 mod tests;
