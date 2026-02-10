@@ -702,6 +702,13 @@ fn select_inst(
             regs.assign(vref, dst);
         }
 
+        Op::CountOnes(val) => {
+            let src = ensure_in_reg(val.value, regs, stack, alloc, out)?;
+            let dst = alloc.alloc();
+            out.push(MInst::Popcnt { dst, src });
+            regs.assign(vref, dst);
+        }
+
         Op::BoolToInt(val) => {
             if let Some(cc) = cmps.get(val.value) {
                 // Condition from ICmp: SETcc + MOVZX.

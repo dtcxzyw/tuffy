@@ -141,6 +141,8 @@ pub enum MInst {
     SetCC { cc: CondCode, dst: Gpr },
     /// movzx r64, r8 (zero-extend byte to qword)
     MovzxB { dst: Gpr, src: Gpr },
+    /// popcnt r64, r64 (population count)
+    Popcnt { dst: Gpr, src: Gpr },
     /// ud2 (undefined instruction trap)
     Ud2,
 }

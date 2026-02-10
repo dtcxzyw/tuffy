@@ -172,6 +172,9 @@ fn encode_inst(
         MInst::MovzxB { dst, src } => {
             encode_movzx_b(*dst, *src, buf);
         }
+        MInst::Popcnt { dst, src } => {
+            encode_popcnt(*dst, *src, buf);
+        }
     }
 }
 
@@ -399,5 +402,18 @@ fn encode_movzx_b(dst: Gpr, src: Gpr, buf: &mut Vec<u8>) {
     }
     buf.push(0x0f);
     buf.push(0xb6);
+    buf.push(modrm(dst.encoding(), src.encoding()));
+}
+
+/// Encode POPCNT r64, r64 (F3 REX.W 0F B8 /r).
+fn encode_popcnt(dst: Gpr, src: Gpr, buf: &mut Vec<u8>) {
+    buf.push(0xf3);
+    if let Some(r) = rex(true, dst, src) {
+        buf.push(r);
+    } else {
+        buf.push(0x48);
+    }
+    buf.push(0x0f);
+    buf.push(0xb8);
     buf.push(modrm(dst.encoding(), src.encoding()));
 }
