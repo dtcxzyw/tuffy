@@ -172,6 +172,27 @@ fn encode_inst(
         MInst::MovzxB { dst, src } => {
             encode_movzx_b(*dst, *src, buf);
         }
+        MInst::MovzxW { dst, src } => {
+            encode_movzx_w(*dst, *src, buf);
+        }
+        MInst::MovsxB { dst, src } => {
+            encode_movsx_b(*dst, *src, buf);
+        }
+        MInst::MovsxW { dst, src } => {
+            encode_movsx_w(*dst, *src, buf);
+        }
+        MInst::MovsxD { dst, src } => {
+            encode_movsxd(*dst, *src, buf);
+        }
+        MInst::Cqo => {
+            encode_cqo(buf);
+        }
+        MInst::Idiv { size, src } => {
+            encode_idiv(*size, *src, buf);
+        }
+        MInst::Div { size, src } => {
+            encode_div(*size, *src, buf);
+        }
         MInst::Popcnt { dst, src } => {
             encode_popcnt(*dst, *src, buf);
         }
@@ -403,6 +424,85 @@ fn encode_movzx_b(dst: Gpr, src: Gpr, buf: &mut Vec<u8>) {
     buf.push(0x0f);
     buf.push(0xb6);
     buf.push(modrm(dst.encoding(), src.encoding()));
+}
+
+/// Encode MOVZX r64, r16 (REX.W + 0F B7 /r).
+fn encode_movzx_w(dst: Gpr, src: Gpr, buf: &mut Vec<u8>) {
+    if let Some(r) = rex(true, dst, src) {
+        buf.push(r);
+    } else {
+        buf.push(0x48);
+    }
+    buf.push(0x0f);
+    buf.push(0xb7);
+    buf.push(modrm(dst.encoding(), src.encoding()));
+}
+
+/// Encode MOVSX r64, r8 (REX.W + 0F BE /r).
+fn encode_movsx_b(dst: Gpr, src: Gpr, buf: &mut Vec<u8>) {
+    if let Some(r) = rex(true, dst, src) {
+        buf.push(r);
+    } else {
+        buf.push(0x48);
+    }
+    buf.push(0x0f);
+    buf.push(0xbe);
+    buf.push(modrm(dst.encoding(), src.encoding()));
+}
+
+/// Encode MOVSX r64, r16 (REX.W + 0F BF /r).
+fn encode_movsx_w(dst: Gpr, src: Gpr, buf: &mut Vec<u8>) {
+    if let Some(r) = rex(true, dst, src) {
+        buf.push(r);
+    } else {
+        buf.push(0x48);
+    }
+    buf.push(0x0f);
+    buf.push(0xbf);
+    buf.push(modrm(dst.encoding(), src.encoding()));
+}
+
+/// Encode MOVSXD r64, r32 (REX.W + 63 /r).
+fn encode_movsxd(dst: Gpr, src: Gpr, buf: &mut Vec<u8>) {
+    if let Some(r) = rex(true, dst, src) {
+        buf.push(r);
+    } else {
+        buf.push(0x48);
+    }
+    buf.push(0x63);
+    buf.push(modrm(dst.encoding(), src.encoding()));
+}
+
+/// Encode CQO (REX.W + 99): sign-extend RAX into RDX:RAX.
+fn encode_cqo(buf: &mut Vec<u8>) {
+    buf.push(0x48);
+    buf.push(0x99);
+}
+
+/// Encode IDIV r/m (REX.W + F7 /7): signed divide RDX:RAX by src.
+fn encode_idiv(size: OpSize, src: Gpr, buf: &mut Vec<u8>) {
+    let w = matches!(size, OpSize::S64);
+    let b_bit = if src.needs_rex() { 0x01 } else { 0 };
+    let w_bit = if w { 0x08 } else { 0 };
+    let rex_bits = w_bit | b_bit;
+    if rex_bits != 0 {
+        buf.push(0x40 | rex_bits);
+    }
+    buf.push(0xf7);
+    buf.push(modrm(7, src.encoding()));
+}
+
+/// Encode DIV r/m (REX.W + F7 /6): unsigned divide RDX:RAX by src.
+fn encode_div(size: OpSize, src: Gpr, buf: &mut Vec<u8>) {
+    let w = matches!(size, OpSize::S64);
+    let b_bit = if src.needs_rex() { 0x01 } else { 0 };
+    let w_bit = if w { 0x08 } else { 0 };
+    let rex_bits = w_bit | b_bit;
+    if rex_bits != 0 {
+        buf.push(0x40 | rex_bits);
+    }
+    buf.push(0xf7);
+    buf.push(modrm(6, src.encoding()));
 }
 
 /// Encode POPCNT r64, r64 (F3 REX.W 0F B8 /r).

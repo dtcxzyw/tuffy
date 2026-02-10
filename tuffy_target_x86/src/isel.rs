@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::inst::{CondCode, MInst, OpSize};
 use crate::reg::Gpr;
 use tuffy_ir::function::{CfgNode, Function};
-use tuffy_ir::instruction::{ICmpOp, Op};
+use tuffy_ir::instruction::{ICmpOp, Op, Operand};
 use tuffy_ir::types::Annotation;
 use tuffy_ir::value::ValueRef;
 
@@ -724,16 +724,74 @@ fn select_inst(
             }
         }
 
-        // Ops not yet supported in isel
-        Op::Bitcast(_) => return None,
-        Op::Sext(..) => return None,
-        Op::Zext(..) => return None,
-        Op::Div(..) => return None,
-        Op::Rem(..) => return None,
-        Op::PtrDiff(..) => return None,
-        Op::PtrToInt(_) => return None,
-        Op::PtrToAddr(_) => return None,
-        Op::IntToPtr(_) => return None,
+        Op::Bitcast(val) | Op::PtrToInt(val) | Op::PtrToAddr(val) | Op::IntToPtr(val) => {
+            let src = ensure_in_reg(val.value, regs, stack, alloc, out)?;
+            regs.assign(vref, src);
+        }
+
+        Op::PtrDiff(lhs, rhs) => {
+            select_binop_rr(
+                vref,
+                lhs.value,
+                rhs.value,
+                BinOp::Sub,
+                regs,
+                stack,
+                alloc,
+                out,
+            )?;
+        }
+
+        Op::Sext(val, _target_bits) => {
+            let src = ensure_in_reg(val.value, regs, stack, alloc, out)?;
+            let dst = alloc.alloc();
+            match val.annotation {
+                Some(Annotation::Signed(8)) | Some(Annotation::Unsigned(8)) => {
+                    out.push(MInst::MovsxB { dst, src });
+                }
+                Some(Annotation::Signed(16)) | Some(Annotation::Unsigned(16)) => {
+                    out.push(MInst::MovsxW { dst, src });
+                }
+                Some(Annotation::Signed(32)) | Some(Annotation::Unsigned(32)) => {
+                    out.push(MInst::MovsxD { dst, src });
+                }
+                _ => {
+                    // Default: assume 32-bit source.
+                    out.push(MInst::MovsxD { dst, src });
+                }
+            }
+            regs.assign(vref, dst);
+        }
+
+        Op::Zext(val, _target_bits) => {
+            let src = ensure_in_reg(val.value, regs, stack, alloc, out)?;
+            let dst = alloc.alloc();
+            match val.annotation {
+                Some(Annotation::Signed(8)) | Some(Annotation::Unsigned(8)) => {
+                    out.push(MInst::MovzxB { dst, src });
+                }
+                Some(Annotation::Signed(16)) | Some(Annotation::Unsigned(16)) => {
+                    out.push(MInst::MovzxW { dst, src });
+                }
+                _ => {
+                    // 32→64 zero-extend: mov r32 implicitly zero-extends.
+                    out.push(MInst::MovRR {
+                        size: OpSize::S32,
+                        dst,
+                        src,
+                    });
+                }
+            }
+            regs.assign(vref, dst);
+        }
+
+        Op::Div(lhs, rhs) => {
+            select_divrem(vref, lhs, rhs, DivRemKind::Div, regs, stack, alloc, out)?;
+        }
+
+        Op::Rem(lhs, rhs) => {
+            select_divrem(vref, lhs, rhs, DivRemKind::Rem, regs, stack, alloc, out)?;
+        }
         Op::FAdd(..) => return None,
         Op::FSub(..) => return None,
         Op::FMul(..) => return None,
@@ -910,6 +968,90 @@ fn select_shift_cl(
     };
     out.push(inst);
     regs.assign(vref, dst);
+    Some(())
+}
+
+/// Whether we want the quotient or remainder from division.
+enum DivRemKind {
+    Div,
+    Rem,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn select_divrem(
+    vref: ValueRef,
+    lhs: &Operand,
+    rhs: &Operand,
+    kind: DivRemKind,
+    regs: &mut RegMap,
+    stack: &StackMap,
+    alloc: &mut RegAlloc,
+    out: &mut Vec<MInst>,
+) -> Option<()> {
+    let lhs_reg = ensure_in_reg(lhs.value, regs, stack, alloc, out)?;
+    let rhs_reg = ensure_in_reg(rhs.value, regs, stack, alloc, out)?;
+    let signed = matches!(lhs.annotation, Some(Annotation::Signed(_)));
+
+    // If rhs is in RAX or RDX, move it to a safe temp first since
+    // DIV/IDIV clobber both RAX and RDX.
+    let divisor = if rhs_reg == Gpr::Rax || rhs_reg == Gpr::Rdx {
+        let tmp = alloc.alloc();
+        // Make sure tmp isn't RAX or RDX either.
+        let tmp = if tmp == Gpr::Rax || tmp == Gpr::Rdx {
+            alloc.alloc()
+        } else {
+            tmp
+        };
+        let tmp = if tmp == Gpr::Rax || tmp == Gpr::Rdx {
+            alloc.alloc()
+        } else {
+            tmp
+        };
+        out.push(MInst::MovRR {
+            size: OpSize::S64,
+            dst: tmp,
+            src: rhs_reg,
+        });
+        tmp
+    } else {
+        rhs_reg
+    };
+
+    // Move dividend into RAX.
+    if lhs_reg != Gpr::Rax {
+        out.push(MInst::MovRR {
+            size: OpSize::S64,
+            dst: Gpr::Rax,
+            src: lhs_reg,
+        });
+    }
+
+    if signed {
+        // CQO: sign-extend RAX into RDX:RAX.
+        out.push(MInst::Cqo);
+        out.push(MInst::Idiv {
+            size: OpSize::S64,
+            src: divisor,
+        });
+    } else {
+        // Zero RDX for unsigned division.
+        out.push(MInst::XorRR {
+            size: OpSize::S32,
+            dst: Gpr::Rdx,
+            src: Gpr::Rdx,
+        });
+        out.push(MInst::Div {
+            size: OpSize::S64,
+            src: divisor,
+        });
+    }
+
+    // Quotient in RAX, remainder in RDX.
+    let result_reg = match kind {
+        DivRemKind::Div => Gpr::Rax,
+        DivRemKind::Rem => Gpr::Rdx,
+    };
+    regs.assign(vref, result_reg);
     Some(())
 }
 

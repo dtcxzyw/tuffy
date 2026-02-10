@@ -141,6 +141,20 @@ pub enum MInst {
     SetCC { cc: CondCode, dst: Gpr },
     /// movzx r64, r8 (zero-extend byte to qword)
     MovzxB { dst: Gpr, src: Gpr },
+    /// movzx r64, r16 (zero-extend word to qword)
+    MovzxW { dst: Gpr, src: Gpr },
+    /// movsx r64, r8 (sign-extend byte to qword)
+    MovsxB { dst: Gpr, src: Gpr },
+    /// movsx r64, r16 (sign-extend word to qword)
+    MovsxW { dst: Gpr, src: Gpr },
+    /// movsxd r64, r32 (sign-extend dword to qword)
+    MovsxD { dst: Gpr, src: Gpr },
+    /// cqo (sign-extend RAX into RDX:RAX)
+    Cqo,
+    /// idiv r/m64 (signed divide RDX:RAX by src)
+    Idiv { size: OpSize, src: Gpr },
+    /// div r/m64 (unsigned divide RDX:RAX by src)
+    Div { size: OpSize, src: Gpr },
     /// popcnt r64, r64 (population count)
     Popcnt { dst: Gpr, src: Gpr },
     /// ud2 (undefined instruction trap)
