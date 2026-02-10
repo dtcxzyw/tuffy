@@ -3,6 +3,7 @@
 use crate::builder::Builder;
 use crate::function::{Function, RegionKind};
 use crate::instruction::{AtomicRmwOp, ICmpOp, Op, Operand, Origin};
+use crate::module::{Module, SymbolTable};
 use crate::types::{Annotation, FloatType, FpRewriteFlags, MemoryOrdering, Type};
 
 #[test]
@@ -767,4 +768,85 @@ fn display_select_and_bool_to_int() {
          \x20\x20\x20\x20ret v4\n\
          }"
     );
+}
+
+#[test]
+fn symbol_table_intern_and_resolve() {
+    let mut st = SymbolTable::new();
+    let id1 = st.intern("malloc");
+    let id2 = st.intern("free");
+    let id3 = st.intern("malloc"); // duplicate
+
+    assert_eq!(id1, id3);
+    assert_ne!(id1, id2);
+    assert_eq!(st.resolve(id1), "malloc");
+    assert_eq!(st.resolve(id2), "free");
+    assert_eq!(st.len(), 2);
+}
+
+#[test]
+fn build_symbol_addr() {
+    let mut module = Module::new("test");
+    let malloc_sym = module.intern("malloc");
+
+    let mut func = Function::new("caller", vec![Type::Int], vec![], Some(Type::Ptr(0)), None);
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+    let entry = builder.create_block();
+    builder.switch_to_block(entry);
+
+    let size = builder.param(0, Type::Int, None, Origin::synthetic());
+    let addr = builder.symbol_addr(malloc_sym, Origin::synthetic());
+    let result = builder.call(
+        addr.into(),
+        vec![size.into()],
+        Type::Ptr(0),
+        None,
+        Origin::synthetic(),
+    );
+    builder.ret(Some(result.into()), Origin::synthetic());
+    builder.exit_region();
+
+    assert_eq!(func.instructions.len(), 4);
+    assert!(matches!(func.instructions[1].op, Op::SymbolAddr(_)));
+    assert_eq!(func.instructions[1].ty, Type::Ptr(0));
+
+    module.add_function(func);
+    let output = format!("{module}");
+    assert!(output.contains("symbol_addr @malloc"));
+}
+
+#[test]
+fn display_symbol_addr_without_symbols() {
+    let mut st = SymbolTable::new();
+    let sym = st.intern("puts");
+
+    let mut func = Function::new("test", vec![], vec![], None, None);
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+    let entry = builder.create_block();
+    builder.switch_to_block(entry);
+
+    builder.symbol_addr(sym, Origin::synthetic());
+    builder.ret(None, Origin::synthetic());
+    builder.exit_region();
+
+    // Without module context, SymbolAddr shows raw id
+    let output = format!("{func}");
+    assert!(output.contains("symbol_addr $0"));
+}
+
+#[test]
+fn module_static_data() {
+    let mut module = Module::new("test_module");
+    let sym = module.intern(".Lstr.0");
+    module.add_static_data(sym, b"hello".to_vec());
+
+    assert_eq!(module.static_data.len(), 1);
+    assert_eq!(module.resolve(module.static_data[0].name), ".Lstr.0");
+    assert_eq!(module.static_data[0].data, b"hello");
 }

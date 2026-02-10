@@ -16,21 +16,33 @@ use std::fmt;
 
 use crate::function::{CfgNode, Function, RegionKind};
 use crate::instruction::{AtomicRmwOp, ICmpOp, Op, Operand};
+use crate::module::SymbolTable;
 use crate::types::{Annotation, FloatType, FpRewriteFlags, MemoryOrdering, Type, VectorType};
 use crate::value::{BlockRef, RegionRef, ValueRef};
 
 /// Display context that tracks value numbering.
-struct DisplayCtx {
+struct DisplayCtx<'a> {
     /// Map from ValueRef raw encoding to display number.
     value_names: HashMap<u32, u32>,
     next_value: u32,
+    /// Optional symbol table for resolving SymbolId names.
+    symbols: Option<&'a SymbolTable>,
 }
 
-impl DisplayCtx {
+impl<'a> DisplayCtx<'a> {
     fn new() -> Self {
         Self {
             value_names: HashMap::new(),
             next_value: 0,
+            symbols: None,
+        }
+    }
+
+    fn with_symbols(symbols: &'a SymbolTable) -> Self {
+        Self {
+            value_names: HashMap::new(),
+            next_value: 0,
+            symbols: Some(symbols),
         }
     }
 
@@ -327,6 +339,13 @@ fn fmt_inst(
             )
         }
         Op::Fence(ord) => format!("fence.{}", fmt_memory_ordering(ord)),
+        Op::SymbolAddr(sym_id) => {
+            let name = match ctx.symbols {
+                Some(symbols) => format!("@{}", symbols.resolve(*sym_id)),
+                None => format!("${}", sym_id.0),
+            };
+            format!("{v} = symbol_addr {name}")
+        }
         Op::Call(callee, args) => {
             format!(
                 "{v} = call {}({})",
@@ -502,39 +521,57 @@ fn write_region_children(
     Ok(())
 }
 
+/// Write a function signature and body to the formatter.
+fn write_function(f: &mut fmt::Formatter<'_>, func: &Function, ctx: &DisplayCtx) -> fmt::Result {
+    // Function signature with annotations
+    let params: Vec<String> = func
+        .params
+        .iter()
+        .zip(func.param_annotations.iter())
+        .map(|(ty, ann)| {
+            let ty_s = fmt_type(ty);
+            match ann {
+                Some(a) => format!("{ty_s}{}", fmt_annotation(a)),
+                None => ty_s.to_string(),
+            }
+        })
+        .collect();
+    write!(f, "func @{}({})", func.name, params.join(", "))?;
+
+    if let Some(ref ret_ty) = func.ret_ty {
+        let ret_s = fmt_type(ret_ty);
+        match &func.ret_annotation {
+            Some(a) => write!(f, " -> {ret_s}{}", fmt_annotation(a))?,
+            None => write!(f, " -> {ret_s}")?,
+        }
+    }
+    writeln!(f, " {{")?;
+
+    // Elide top-level region function wrapper; write children directly
+    write_region_children(f, func, func.root_region, ctx, 2)?;
+
+    write!(f, "}}")
+}
+
 impl fmt::Display for Function {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // First pass: assign value numbers
         let mut ctx = DisplayCtx::new();
         assign_values(self, self.root_region, &mut ctx);
+        write_function(f, self, &ctx)
+    }
+}
 
-        // Function signature with annotations
-        let params: Vec<String> = self
-            .params
-            .iter()
-            .zip(self.param_annotations.iter())
-            .map(|(ty, ann)| {
-                let ty_s = fmt_type(ty);
-                match ann {
-                    Some(a) => format!("{ty_s}{}", fmt_annotation(a)),
-                    None => ty_s.to_string(),
-                }
-            })
-            .collect();
-        write!(f, "func @{}({})", self.name, params.join(", "))?;
-
-        if let Some(ref ret_ty) = self.ret_ty {
-            let ret_s = fmt_type(ret_ty);
-            match &self.ret_annotation {
-                Some(a) => write!(f, " -> {ret_s}{}", fmt_annotation(a))?,
-                None => write!(f, " -> {ret_s}")?,
+impl fmt::Display for crate::module::Module {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (i, func) in self.functions.iter().enumerate() {
+            if i > 0 {
+                writeln!(f)?;
+                writeln!(f)?;
             }
+            let mut ctx = DisplayCtx::with_symbols(&self.symbols);
+            assign_values(func, func.root_region, &mut ctx);
+            write_function(f, func, &ctx)?;
         }
-        writeln!(f, " {{")?;
-
-        // Elide top-level region function wrapper; write children directly
-        write_region_children(f, self, self.root_region, &ctx, 2)?;
-
-        write!(f, "}}")
+        Ok(())
     }
 }

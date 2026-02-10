@@ -4,6 +4,7 @@
 
 use crate::function::{BasicBlock, BlockArg, CfgNode, Function, Region, RegionKind};
 use crate::instruction::{AtomicRmwOp, ICmpOp, Instruction, Op, Operand, Origin};
+use crate::module::SymbolId;
 use crate::types::{Annotation, FpRewriteFlags, MemoryOrdering, Type};
 use crate::value::{BlockRef, RegionRef, ValueRef};
 
@@ -438,6 +439,13 @@ impl<'a> Builder<'a> {
     /// Memory fence.
     pub fn fence(&mut self, ordering: MemoryOrdering, origin: Origin) -> ValueRef {
         self.push_inst(Op::Fence(ordering), Type::Int, origin, None)
+    }
+
+    // ── Symbol ──
+
+    /// Load the address of a symbol (function or static data).
+    pub fn symbol_addr(&mut self, sym: SymbolId, origin: Origin) -> ValueRef {
+        self.push_inst(Op::SymbolAddr(sym), Type::Ptr(0), origin, None)
     }
 
     // ── Call ──

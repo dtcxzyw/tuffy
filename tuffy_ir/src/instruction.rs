@@ -1,5 +1,6 @@
 //! Instruction definitions for tuffy IR.
 
+use crate::module::SymbolId;
 use crate::types::{Annotation, FpRewriteFlags, MemoryOrdering, Type};
 use crate::value::{BlockRef, ValueRef};
 
@@ -159,6 +160,11 @@ pub enum Op {
     AtomicCmpXchg(Operand, Operand, Operand, MemoryOrdering, MemoryOrdering),
     /// Memory fence with ordering.
     Fence(MemoryOrdering),
+
+    // -- Symbol --
+    /// Load the address of a symbol (function or static data).
+    /// The SymbolId indexes into the module's symbol table.
+    SymbolAddr(SymbolId),
 
     // -- Call --
     /// Call function with arguments.

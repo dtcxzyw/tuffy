@@ -803,6 +803,7 @@ fn select_inst(
         Op::StoreAtomic(..) => return None,
         Op::AtomicRmw(..) => return None,
         Op::AtomicCmpXchg(..) => return None,
+        Op::SymbolAddr(_) => return None,
         Op::Fence(_) => return None,
         Op::Continue(_) => return None,
         Op::RegionYield(_) => return None,
