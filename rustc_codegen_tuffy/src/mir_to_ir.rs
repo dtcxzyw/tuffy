@@ -63,7 +63,9 @@ pub fn translate_function<'tcx>(
     let mut param_anns = Vec::new();
 
     let ret_mir_ty = monomorphize(mir.local_decls[mir::RETURN_PLACE].ty);
-    let ret_ty = translate_ty(ret_mir_ty);
+    // Unit-returning functions have no IR return type (ret_ty = None) so that
+    // bare `ret` (no value) is valid.
+    let ret_ty = translate_ty(ret_mir_ty).filter(|t| !matches!(t, Type::Unit));
     let ret_ann = translate_annotation(ret_mir_ty);
 
     let mut symbols = SymbolTable::new();
@@ -406,6 +408,15 @@ struct TranslationCtx<'a, 'tcx> {
 }
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
+    /// Monomorphize a MIR type using the current instance's substitutions.
+    fn monomorphize(&self, ty: ty::Ty<'tcx>) -> ty::Ty<'tcx> {
+        self.tcx.instantiate_and_normalize_erasing_regions(
+            self.instance.args,
+            ty::TypingEnv::fully_monomorphized(),
+            ty::EarlyBinder::bind(ty),
+        )
+    }
+
     fn translate_params(&mut self) {
         let mut abi_idx: u32 = 0;
 
@@ -677,9 +688,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         match &term.kind {
             TerminatorKind::Return => {
                 let ret_local = mir::Local::from_usize(0);
-                let ret_mir_ty = self.mir.local_decls[ret_local].ty;
+                let ret_mir_ty = self.monomorphize(self.mir.local_decls[ret_local].ty);
 
-                // Unit-returning functions: bare ret, no value.
+                // Unit-returning or untranslatable return type: bare ret, no value.
                 if matches!(translate_ty(ret_mir_ty), Some(Type::Unit) | None) {
                     self.builder.ret(None, Origin::synthetic());
                 } else if self.use_sret {
@@ -763,13 +774,19 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     self.builder.ret(Some(word0.into()), Origin::synthetic());
                 } else {
                     // Normal scalar return.
-                    if let Some(fat_val) = self.fat_locals.get(ret_local) {
-                        let dummy = self.builder.iconst(0, Origin::synthetic());
-                        self.abi_metadata
-                            .mark_secondary_return_move(dummy.index(), fat_val.index());
-                    }
                     let val = self.locals.values[ret_local.as_usize()];
-                    self.builder.ret(val.map(|v| v.into()), Origin::synthetic());
+                    if let Some(v) = val {
+                        if let Some(fat_val) = self.fat_locals.get(ret_local) {
+                            let dummy = self.builder.iconst(0, Origin::synthetic());
+                            self.abi_metadata
+                                .mark_secondary_return_move(dummy.index(), fat_val.index());
+                        }
+                        self.builder.ret(Some(v.into()), Origin::synthetic());
+                    } else {
+                        // Return local was never assigned — this path is
+                        // unreachable at runtime (diverging function).
+                        self.builder.unreachable(Origin::synthetic());
+                    }
                 }
             }
             TerminatorKind::Goto { target } => {
