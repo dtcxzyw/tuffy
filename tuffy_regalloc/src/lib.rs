@@ -73,3 +73,6 @@ impl fmt::Display for PReg {
         write!(f, "p{}", self.0)
     }
 }
+
+#[cfg(test)]
+mod tests;
