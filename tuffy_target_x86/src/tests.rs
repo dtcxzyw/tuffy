@@ -94,6 +94,7 @@ fn build_add_func() -> (Function, SymbolTable) {
     let entry = builder.create_block();
     builder.switch_to_block(entry);
 
+    let mem0 = builder.add_block_arg(entry, Type::Mem);
     let a = builder.param(0, Type::Int, s32, Origin::synthetic());
     let b = builder.param(1, Type::Int, s32, Origin::synthetic());
     let sum = builder.add(
@@ -104,6 +105,7 @@ fn build_add_func() -> (Function, SymbolTable) {
     );
     builder.ret(
         Some(Operand::annotated(sum, Annotation::Signed(32))),
+        mem0.into(),
         Origin::synthetic(),
     );
 
@@ -175,6 +177,7 @@ fn build_branch_func() -> (Function, SymbolTable) {
     let else_bb = builder.create_block();
 
     builder.switch_to_block(entry);
+    let mem0 = builder.add_block_arg(entry, Type::Mem);
     let a = builder.param(0, Type::Int, s32, Origin::synthetic());
     let b = builder.param(1, Type::Int, s32, Origin::synthetic());
     let cmp = builder.icmp(ICmpOp::Gt, a.into(), b.into(), Origin::synthetic());
@@ -188,10 +191,10 @@ fn build_branch_func() -> (Function, SymbolTable) {
     );
 
     builder.switch_to_block(then_bb);
-    builder.ret(Some(a.into()), Origin::synthetic());
+    builder.ret(Some(a.into()), mem0.into(), Origin::synthetic());
 
     builder.switch_to_block(else_bb);
-    builder.ret(Some(b.into()), Origin::synthetic());
+    builder.ret(Some(b.into()), mem0.into(), Origin::synthetic());
 
     builder.exit_region();
 
@@ -285,6 +288,7 @@ fn build_extend_func(name: &str, ann: Annotation, is_sext: bool) -> (Function, S
     let entry = builder.create_block();
     builder.switch_to_block(entry);
 
+    let mem0 = builder.add_block_arg(entry, Type::Mem);
     let a = builder.param(0, Type::Int, src_ann, Origin::synthetic());
     let extended = if is_sext {
         builder.sext(Operand::annotated(a, ann), 64, Origin::synthetic())
@@ -293,6 +297,7 @@ fn build_extend_func(name: &str, ann: Annotation, is_sext: bool) -> (Function, S
     };
     builder.ret(
         Some(Operand::annotated(extended, Annotation::Signed(64))),
+        mem0.into(),
         Origin::synthetic(),
     );
 

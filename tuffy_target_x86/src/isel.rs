@@ -350,7 +350,7 @@ fn select_inst(
             )?;
         }
 
-        Op::Ret(val) => {
+        Op::Ret(val, _mem) => {
             if let Some(v) = val {
                 let src = ctx.ensure_in_reg(v.value)?;
                 let rax = ctx.alloc.alloc_fixed(Gpr::Rax.to_preg());
@@ -363,7 +363,7 @@ fn select_inst(
             ctx.out.push(MInst::Ret);
         }
 
-        Op::Call(callee, args) => {
+        Op::Call(callee, args, _mem) => {
             select_call(ctx, vref, callee, args, func, symbols)?;
         }
 
@@ -371,7 +371,7 @@ fn select_inst(
             let _offset = ctx.stack.alloc(vref, *bytes);
         }
 
-        Op::Load(ptr, bytes) => {
+        Op::Load(ptr, bytes, _mem) => {
             let dst = ctx.alloc.alloc();
             let size = bytes_to_opsize(*bytes);
             if let Some(offset) = ctx.stack.get(ptr.value) {
@@ -394,7 +394,7 @@ fn select_inst(
             ctx.regs.assign(vref, dst);
         }
 
-        Op::Store(val, ptr, bytes) => {
+        Op::Store(val, ptr, bytes, _mem) => {
             let val_vreg = ctx.ensure_in_reg(val.value)?;
             let size = bytes_to_opsize(*bytes);
             if let Some(offset) = ctx.stack.get(ptr.value) {
@@ -526,7 +526,7 @@ fn select_inst(
             ctx.regs.assign(vref, dst);
         }
 
-        Op::Fence(_) | Op::Continue(_) | Op::RegionYield(_) => return None,
+        Op::Fence(..) | Op::Continue(_) | Op::RegionYield(_) => return None,
     }
     Some(())
 }
