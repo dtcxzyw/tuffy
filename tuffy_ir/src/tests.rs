@@ -1344,3 +1344,198 @@ fn display_min_max() {
     let result = verify_function(&func, &st);
     assert!(result.is_ok(), "expected no errors: {result}");
 }
+
+// --- MemSSA-specific tests ---
+
+#[test]
+fn memssa_store_load_threading() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("memssa_basic");
+    let mut func = Function::new(
+        name,
+        vec![Type::Int, Type::Ptr(0)],
+        vec![],
+        vec![],
+        Some(Type::Int),
+        None,
+    );
+    let mut b = Builder::new(&mut func);
+
+    let root = b.create_region(RegionKind::Function);
+    b.enter_region(root);
+    let bb = b.create_block();
+    b.switch_to_block(bb);
+
+    let mem0 = b.add_block_arg(bb, Type::Mem);
+    let val = b.param(0, Type::Int, None, Origin::synthetic());
+    let ptr = b.param(1, Type::Ptr(0), None, Origin::synthetic());
+    // store produces mem1
+    let mem1 = b.store(val.into(), ptr.into(), 4, mem0.into(), Origin::synthetic());
+    // load consumes mem1
+    let loaded = b.load(
+        ptr.into(),
+        4,
+        Type::Int,
+        mem1.into(),
+        None,
+        Origin::synthetic(),
+    );
+    // ret carries mem1 (store was the last memory def)
+    b.ret(Some(loaded.into()), mem1.into(), Origin::synthetic());
+    b.exit_region();
+
+    // Verify store result is Mem
+    assert_eq!(func.instructions[2].ty, Type::Mem);
+    // Verify load result is Int (not Mem)
+    assert_eq!(func.instructions[3].ty, Type::Int);
+
+    let result = verify_function(&func, &st);
+    assert!(result.is_ok(), "expected no errors: {result}");
+}
+
+#[test]
+fn memssa_multi_result_load_atomic() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("atomic_load");
+    let mut func = Function::new(
+        name,
+        vec![Type::Ptr(0)],
+        vec![],
+        vec![],
+        Some(Type::Int),
+        None,
+    );
+    let mut b = Builder::new(&mut func);
+
+    let root = b.create_region(RegionKind::Function);
+    b.enter_region(root);
+    let bb = b.create_block();
+    b.switch_to_block(bb);
+
+    let mem0 = b.add_block_arg(bb, Type::Mem);
+    let ptr = b.param(0, Type::Ptr(0), None, Origin::synthetic());
+    let (mem1, data) = b.load_atomic(
+        ptr.into(),
+        Type::Int,
+        MemoryOrdering::Acquire,
+        mem0.into(),
+        Origin::synthetic(),
+    );
+    b.ret(Some(data.into()), mem1.into(), Origin::synthetic());
+    b.exit_region();
+
+    let inst = &func.instructions[1];
+    assert_eq!(inst.ty, Type::Mem);
+    assert_eq!(inst.secondary_ty, Some(Type::Int));
+    assert!(data.is_secondary_result());
+    assert!(!mem1.is_secondary_result());
+
+    let result = verify_function(&func, &st);
+    assert!(result.is_ok(), "expected no errors: {result}");
+}
+
+#[test]
+fn memssa_block_arg_phi() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("mem_phi");
+    let mut func = Function::new(
+        name,
+        vec![Type::Bool, Type::Int, Type::Ptr(0)],
+        vec![],
+        vec![],
+        Some(Type::Int),
+        None,
+    );
+    let mut b = Builder::new(&mut func);
+
+    let root = b.create_region(RegionKind::Function);
+    b.enter_region(root);
+
+    let bb0 = b.create_block();
+    let bb1 = b.create_block();
+    let bb2 = b.create_block();
+    let bb3 = b.create_block();
+
+    // bb0: branch based on condition
+    b.switch_to_block(bb0);
+    let mem0 = b.add_block_arg(bb0, Type::Mem);
+    let cond = b.param(0, Type::Bool, None, Origin::synthetic());
+    let val = b.param(1, Type::Int, None, Origin::synthetic());
+    let ptr = b.param(2, Type::Ptr(0), None, Origin::synthetic());
+    b.brif(cond.into(), bb1, vec![], bb2, vec![], Origin::synthetic());
+
+    // bb1: store, then jump to bb3 with new mem
+    b.switch_to_block(bb1);
+    let mem1 = b.store(val.into(), ptr.into(), 4, mem0.into(), Origin::synthetic());
+    b.br(bb3, vec![mem1.into()], Origin::synthetic());
+
+    // bb2: no store, jump to bb3 with original mem
+    b.switch_to_block(bb2);
+    b.br(bb3, vec![mem0.into()], Origin::synthetic());
+
+    // bb3: mem phi via block arg
+    let mem_phi = b.add_block_arg(bb3, Type::Mem);
+    b.switch_to_block(bb3);
+    let loaded = b.load(
+        ptr.into(),
+        4,
+        Type::Int,
+        mem_phi.into(),
+        None,
+        Origin::synthetic(),
+    );
+    b.ret(Some(loaded.into()), mem_phi.into(), Origin::synthetic());
+
+    b.exit_region();
+
+    let result = verify_function(&func, &st);
+    assert!(result.is_ok(), "expected no errors: {result}");
+}
+
+#[test]
+fn memssa_display_store_load() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("sl");
+    let mut func = Function::new(
+        name,
+        vec![Type::Int, Type::Ptr(0)],
+        vec![],
+        vec![],
+        Some(Type::Int),
+        None,
+    );
+    let mut b = Builder::new(&mut func);
+
+    let root = b.create_region(RegionKind::Function);
+    b.enter_region(root);
+    let bb = b.create_block();
+    b.switch_to_block(bb);
+
+    let mem0 = b.add_block_arg(bb, Type::Mem);
+    let val = b.param(0, Type::Int, None, Origin::synthetic());
+    let ptr = b.param(1, Type::Ptr(0), None, Origin::synthetic());
+    let mem1 = b.store(val.into(), ptr.into(), 4, mem0.into(), Origin::synthetic());
+    let loaded = b.load(
+        ptr.into(),
+        4,
+        Type::Int,
+        mem1.into(),
+        None,
+        Origin::synthetic(),
+    );
+    b.ret(Some(loaded.into()), mem1.into(), Origin::synthetic());
+    b.exit_region();
+
+    let output = format!("{}", func.display(&st));
+    assert_eq!(
+        output,
+        "func @sl(int, ptr) -> int {\n\
+         \x20\x20bb0(v0: mem):\n\
+         \x20\x20\x20\x20v1 = param 0\n\
+         \x20\x20\x20\x20v2 = param 1\n\
+         \x20\x20\x20\x20v3 = store.4 v1, v2, v0\n\
+         \x20\x20\x20\x20v4 = load.4 v2, v3\n\
+         \x20\x20\x20\x20ret v4, v3\n\
+         }"
+    );
+}
