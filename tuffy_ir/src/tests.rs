@@ -1241,3 +1241,54 @@ fn verify_detects_duplicate_function_names() {
         "should flag duplicate names: {result}"
     );
 }
+
+#[test]
+fn display_min_max() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("minmax");
+    let mut func = Function::new(
+        name,
+        vec![Type::Int, Type::Int],
+        vec![],
+        vec![],
+        Some(Type::Int),
+        None,
+    );
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+    let entry = builder.create_block();
+    builder.switch_to_block(entry);
+
+    let a = builder.param(0, Type::Int, None, Origin::synthetic());
+    let b = builder.param(1, Type::Int, None, Origin::synthetic());
+    let v_min = builder.min(a.into(), b.into(), None, Origin::synthetic());
+    let v_max = builder.max(a.into(), b.into(), None, Origin::synthetic());
+    let _sum = builder.add(v_min.into(), v_max.into(), None, Origin::synthetic());
+    builder.ret(Some(_sum.into()), Origin::synthetic());
+    builder.exit_region();
+
+    assert!(matches!(func.instructions[2].op, Op::Min(_, _)));
+    assert!(matches!(func.instructions[3].op, Op::Max(_, _)));
+    assert_eq!(func.instructions[2].ty, Type::Int);
+    assert_eq!(func.instructions[3].ty, Type::Int);
+
+    let output = format!("{}", func.display(&st));
+    assert_eq!(
+        output,
+        "func @minmax(int, int) -> int {\n\
+         \x20\x20bb0:\n\
+         \x20\x20\x20\x20v0 = param 0\n\
+         \x20\x20\x20\x20v1 = param 1\n\
+         \x20\x20\x20\x20v2 = min v0, v1\n\
+         \x20\x20\x20\x20v3 = max v0, v1\n\
+         \x20\x20\x20\x20v4 = add v2, v3\n\
+         \x20\x20\x20\x20ret v4\n\
+         }"
+    );
+
+    // Verify passes
+    let result = verify_function(&func, &st);
+    assert!(result.is_ok(), "expected no errors: {result}");
+}

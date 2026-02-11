@@ -278,6 +278,28 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::Shr(a, b), Type::Int, origin, ann)
     }
 
+    /// Integer minimum.
+    pub fn min(
+        &mut self,
+        a: Operand,
+        b: Operand,
+        ann: Option<Annotation>,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::Min(a, b), Type::Int, origin, ann)
+    }
+
+    /// Integer maximum.
+    pub fn max(
+        &mut self,
+        a: Operand,
+        b: Operand,
+        ann: Option<Annotation>,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::Max(a, b), Type::Int, origin, ann)
+    }
+
     // ── Floating point arithmetic ──
 
     /// Floating point addition.

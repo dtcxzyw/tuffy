@@ -252,6 +252,12 @@ fn fmt_inst(
         Op::Shr(a, b) => {
             format!("{v} = shr {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
         }
+        Op::Min(a, b) => {
+            format!("{v} = min {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+        }
+        Op::Max(a, b) => {
+            format!("{v} = max {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+        }
         Op::FAdd(a, b, flags) => {
             format!(
                 "{v} = fadd{} {}, {}",

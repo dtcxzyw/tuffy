@@ -330,7 +330,9 @@ impl FuncVerifier<'_> {
             | Op::Or(a, b)
             | Op::Xor(a, b)
             | Op::Shl(a, b)
-            | Op::Shr(a, b) => {
+            | Op::Shr(a, b)
+            | Op::Min(a, b)
+            | Op::Max(a, b) => {
                 self.check_operand(a, &loc);
                 self.check_operand(b, &loc);
                 self.expect_int(a, "int arith lhs", &loc);
