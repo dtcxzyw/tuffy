@@ -462,6 +462,13 @@ fn select_inst(
             select_select(ctx, vref, cond, tv, fv)?;
         }
 
+        Op::Min(lhs, rhs) => {
+            select_minmax(ctx, vref, lhs, rhs, MinMaxKind::Min)?;
+        }
+        Op::Max(lhs, rhs) => {
+            select_minmax(ctx, vref, lhs, rhs, MinMaxKind::Max)?;
+        }
+
         Op::CountOnes(val) => {
             let src = ctx.ensure_in_reg(val.value)?;
             let dst = ctx.alloc.alloc();
@@ -821,6 +828,62 @@ fn select_select(
             src: tv_vreg,
         });
     }
+    ctx.regs.assign(vref, dst);
+    Some(())
+}
+
+/// Whether we want min or max.
+enum MinMaxKind {
+    Min,
+    Max,
+}
+
+fn select_minmax(
+    ctx: &mut IselCtx,
+    vref: ValueRef,
+    lhs: &Operand,
+    rhs: &Operand,
+    kind: MinMaxKind,
+) -> Option<()> {
+    let lhs_vreg = ctx.ensure_in_reg(lhs.value)?;
+    let rhs_vreg = ctx.ensure_in_reg(rhs.value)?;
+    let dst = ctx.alloc.alloc();
+    // Start with rhs in dst; conditionally move lhs if it's the winner.
+    ctx.out.push(MInst::MovRR {
+        size: OpSize::S64,
+        dst,
+        src: rhs_vreg,
+    });
+    ctx.out.push(MInst::CmpRR {
+        size: OpSize::S64,
+        src1: lhs_vreg,
+        src2: rhs_vreg,
+    });
+    let signed = matches!(lhs.annotation, Some(Annotation::Signed(_)));
+    let cc = match kind {
+        // Min: pick lhs if lhs < rhs
+        MinMaxKind::Min => {
+            if signed {
+                CondCode::L
+            } else {
+                CondCode::B
+            }
+        }
+        // Max: pick lhs if lhs > rhs
+        MinMaxKind::Max => {
+            if signed {
+                CondCode::G
+            } else {
+                CondCode::A
+            }
+        }
+    };
+    ctx.out.push(MInst::CMOVcc {
+        size: OpSize::S64,
+        cc,
+        dst,
+        src: lhs_vreg,
+    });
     ctx.regs.assign(vref, dst);
     Some(())
 }
