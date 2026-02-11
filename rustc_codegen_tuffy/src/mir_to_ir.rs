@@ -796,7 +796,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
                     // Return the sret pointer in RAX (System V convention).
                     self.builder.ret(Some(sret.into()), Origin::synthetic());
-                } else if self.stack_locals.is_stack(ret_local) {
+                } else if self.stack_locals.is_stack(ret_local)
+                    && matches!(
+                        self.locals.get(ret_local).and_then(|v| self.builder.value_type(v).cloned()),
+                        Some(Type::Ptr(_))
+                    )
+                {
                     // Stack-allocated return (e.g., 16-byte struct built via Aggregate).
                     // Load the actual data from the stack slot instead of returning
                     // the slot address (which would be a dangling pointer).
