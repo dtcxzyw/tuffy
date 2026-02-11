@@ -110,6 +110,21 @@ impl<'a> Builder<'a> {
         self.current_block = Some(block);
     }
 
+    /// Query the IR type of a value produced by an instruction or block argument.
+    pub fn value_type(&self, v: ValueRef) -> Option<&Type> {
+        if v.is_block_arg() {
+            self.func
+                .block_args
+                .get(v.index() as usize)
+                .map(|ba| &ba.ty)
+        } else {
+            self.func
+                .instructions
+                .get(v.index() as usize)
+                .map(|i| &i.ty)
+        }
+    }
+
     /// Add a block argument and return its ValueRef.
     pub fn add_block_arg(&mut self, block: BlockRef, ty: Type) -> ValueRef {
         let arg_idx = self.func.block_args.len() as u32;

@@ -1081,10 +1081,18 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     }
 
     fn translate_switch_int(&mut self, discr: &Operand<'tcx>, targets: &mir::SwitchTargets) {
-        let discr_val = match self.translate_operand(discr) {
+        let mut discr_val = match self.translate_operand(discr) {
             Some(v) => v,
             None => return,
         };
+
+        // If the discriminant is a pointer (e.g. nullable pointer optimization),
+        // convert it to an integer so icmp gets Int operands.
+        if matches!(self.builder.value_type(discr_val), Some(Type::Ptr(_))) {
+            discr_val = self
+                .builder
+                .ptrtoaddr(discr_val.into(), Origin::synthetic());
+        }
 
         let all_targets: Vec<_> = targets.iter().collect();
         let otherwise = targets.otherwise();
@@ -1170,6 +1178,35 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 };
                 // For arithmetic/bitwise ops the result type matches the operand type.
                 let res_ann = l_ann;
+
+                // For comparisons, convert pointer operands to integers via ptrtoaddr.
+                let l_is_ptr = matches!(self.builder.value_type(l), Some(Type::Ptr(_)));
+                let r_is_ptr = matches!(self.builder.value_type(r), Some(Type::Ptr(_)));
+                let l_cmp = if l_is_ptr {
+                    let addr = self.builder.ptrtoaddr(l.into(), Origin::synthetic());
+                    IrOperand {
+                        value: addr,
+                        annotation: None,
+                    }
+                } else {
+                    IrOperand {
+                        value: l,
+                        annotation: l_ann,
+                    }
+                };
+                let r_cmp = if r_is_ptr {
+                    let addr = self.builder.ptrtoaddr(r.into(), Origin::synthetic());
+                    IrOperand {
+                        value: addr,
+                        annotation: None,
+                    }
+                } else {
+                    IrOperand {
+                        value: r,
+                        annotation: r_ann,
+                    }
+                };
+
                 let val = match op {
                     BinOp::Add | BinOp::AddWithOverflow => {
                         self.builder.add(l_op, r_op, res_ann, Origin::synthetic())
@@ -1183,37 +1220,37 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     BinOp::Eq => {
                         let cmp = self
                             .builder
-                            .icmp(ICmpOp::Eq, l_op, r_op, Origin::synthetic());
+                            .icmp(ICmpOp::Eq, l_cmp, r_cmp, Origin::synthetic());
                         self.builder.bool_to_int(cmp.into(), Origin::synthetic())
                     }
                     BinOp::Ne => {
                         let cmp = self
                             .builder
-                            .icmp(ICmpOp::Ne, l_op, r_op, Origin::synthetic());
+                            .icmp(ICmpOp::Ne, l_cmp, r_cmp, Origin::synthetic());
                         self.builder.bool_to_int(cmp.into(), Origin::synthetic())
                     }
                     BinOp::Lt => {
                         let cmp = self
                             .builder
-                            .icmp(ICmpOp::Lt, l_op, r_op, Origin::synthetic());
+                            .icmp(ICmpOp::Lt, l_cmp, r_cmp, Origin::synthetic());
                         self.builder.bool_to_int(cmp.into(), Origin::synthetic())
                     }
                     BinOp::Le => {
                         let cmp = self
                             .builder
-                            .icmp(ICmpOp::Le, l_op, r_op, Origin::synthetic());
+                            .icmp(ICmpOp::Le, l_cmp, r_cmp, Origin::synthetic());
                         self.builder.bool_to_int(cmp.into(), Origin::synthetic())
                     }
                     BinOp::Gt => {
                         let cmp = self
                             .builder
-                            .icmp(ICmpOp::Gt, l_op, r_op, Origin::synthetic());
+                            .icmp(ICmpOp::Gt, l_cmp, r_cmp, Origin::synthetic());
                         self.builder.bool_to_int(cmp.into(), Origin::synthetic())
                     }
                     BinOp::Ge => {
                         let cmp = self
                             .builder
-                            .icmp(ICmpOp::Ge, l_op, r_op, Origin::synthetic());
+                            .icmp(ICmpOp::Ge, l_cmp, r_cmp, Origin::synthetic());
                         self.builder.bool_to_int(cmp.into(), Origin::synthetic())
                     }
                     BinOp::Shl | BinOp::ShlUnchecked => {
