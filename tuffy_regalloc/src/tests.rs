@@ -6,6 +6,7 @@ use crate::{OpKind, PReg, RegAllocInst, RegOp, VReg};
 
 /// Simple test instruction for unit tests.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 enum TInst {
     /// def dst
     Def { dst: VReg },
