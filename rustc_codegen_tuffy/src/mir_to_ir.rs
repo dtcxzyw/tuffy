@@ -60,15 +60,23 @@ pub fn translate_function<'tcx>(
     let mut param_anns = Vec::new();
 
     let ret_mir_ty = monomorphize(mir.local_decls[mir::RETURN_PLACE].ty);
-    // Unit-returning functions have no IR return type (ret_ty = None) so that
-    // bare `ret` (no value) is valid.
-    let ret_ty = translate_ty(ret_mir_ty).filter(|t| !matches!(t, Type::Unit));
-    let ret_ann = translate_annotation(ret_mir_ty);
-
     // Detect whether this function returns a large struct via sret.
     // Must be computed before building params so the hidden sret pointer
     // is included in the parameter list.
     let use_sret = needs_indirect_return(tcx, ret_mir_ty);
+
+    // When using sret, the ABI return value is the sret pointer (Ptr),
+    // not the logical Rust return type.
+    let ret_ty = if use_sret {
+        Some(Type::Ptr(0))
+    } else {
+        translate_ty(ret_mir_ty).filter(|t| !matches!(t, Type::Unit))
+    };
+    let ret_ann = if use_sret {
+        None
+    } else {
+        translate_annotation(ret_mir_ty)
+    };
 
     let mut symbols = SymbolTable::new();
     let func_sym = symbols.intern(&name);
@@ -429,6 +437,24 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         )
     }
 
+    /// If `val` is a Ptr, insert ptrtoaddr to coerce it to Int.
+    fn coerce_to_int(&mut self, val: ValueRef) -> ValueRef {
+        if matches!(self.builder.value_type(val), Some(Type::Ptr(_))) {
+            self.builder.ptrtoaddr(val.into(), Origin::synthetic())
+        } else {
+            val
+        }
+    }
+
+    /// If `val` is an Int, insert inttoptr to coerce it to Ptr.
+    fn coerce_to_ptr(&mut self, val: ValueRef) -> ValueRef {
+        if matches!(self.builder.value_type(val), Some(Type::Int)) {
+            self.builder.inttoptr(val.into(), 0, Origin::synthetic())
+        } else {
+            val
+        }
+    }
+
     fn translate_params(&mut self) {
         let mut abi_idx: u32 = 0;
 
@@ -516,12 +542,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // The current value is a pointer; load through it to get the
                     // pointee address. But since we want the *address* of the
                     // deref'd location, the current value IS the address.
-                    // If the local is stack-allocated, addr is already a pointer
-                    // to the slot; we need to load the actual pointer value from it.
-                    if !place.projection.len() == 1 || !self.stack_locals.is_stack(place.local) {
-                        // addr already holds the pointer value — it IS the address
-                        // of the deref'd location. Nothing to do.
-                    }
+                    // Coerce Int→Ptr if the value was stored as an integer.
+                    addr = self.coerce_to_ptr(addr);
                     // Update cur_ty to the pointee type.
                     cur_ty = match cur_ty.kind() {
                         ty::Ref(_, inner, _) | ty::RawPtr(inner, _) => *inner,
@@ -632,6 +654,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             return Some(self.builder.iconst(0, Origin::synthetic()));
         }
         let (addr, projected_ty) = self.translate_place_to_addr(place)?;
+        let addr = self.coerce_to_ptr(addr);
         let bytes = type_size(self.tcx, projected_ty).unwrap_or(8) as u32;
         let ty = translate_ty(projected_ty).unwrap_or(Type::Int);
         Some(
@@ -649,6 +672,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     } else {
                         // Projected destination: compute address and emit Store.
                         if let Some((addr, projected_ty)) = self.translate_place_to_addr(place) {
+                            let addr = self.coerce_to_ptr(addr);
                             let bytes = type_size(self.tcx, projected_ty).unwrap_or(8) as u32;
                             self.builder
                                 .store(val.into(), addr.into(), bytes, Origin::synthetic());
@@ -793,7 +817,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             self.abi_metadata
                                 .mark_secondary_return_move(dummy.index(), fat_val.index());
                         }
-                        self.builder.ret(Some(v.into()), Origin::synthetic());
+                        // Coerce Ptr↔Int to match the declared return type.
+                        let ret_ir_ty = translate_ty(ret_mir_ty);
+                        let coerced = match ret_ir_ty {
+                            Some(Type::Int) => self.coerce_to_int(v),
+                            Some(Type::Ptr(_)) => self.coerce_to_ptr(v),
+                            _ => v,
+                        };
+                        self.builder.ret(Some(coerced.into()), Origin::synthetic());
                     } else {
                         // Return local was never assigned — this path is
                         // unreachable at runtime (diverging function).
@@ -1178,10 +1209,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     ) -> Option<ValueRef> {
         match rvalue {
             Rvalue::BinaryOp(op, box (lhs, rhs)) => {
-                let l = self.translate_operand(lhs)?;
-                let r = self.translate_operand(rhs)?;
+                let l_raw = self.translate_operand(lhs)?;
+                let r_raw = self.translate_operand(rhs)?;
                 let l_ann = operand_annotation(lhs, self.mir);
                 let r_ann = operand_annotation(rhs, self.mir);
+
+                // Coerce pointer operands to integers — needed for both
+                // arithmetic/bitwise ops and comparisons.
+                let l = self.coerce_to_int(l_raw);
+                let r = self.coerce_to_int(r_raw);
                 let l_op = IrOperand {
                     value: l,
                     annotation: l_ann,
@@ -1190,36 +1226,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     value: r,
                     annotation: r_ann,
                 };
-                // For arithmetic/bitwise ops the result type matches the operand type.
                 let res_ann = l_ann;
-
-                // For comparisons, convert pointer operands to integers via ptrtoaddr.
-                let l_is_ptr = matches!(self.builder.value_type(l), Some(Type::Ptr(_)));
-                let r_is_ptr = matches!(self.builder.value_type(r), Some(Type::Ptr(_)));
-                let l_cmp = if l_is_ptr {
-                    let addr = self.builder.ptrtoaddr(l.into(), Origin::synthetic());
-                    IrOperand {
-                        value: addr,
-                        annotation: None,
-                    }
-                } else {
-                    IrOperand {
-                        value: l,
-                        annotation: l_ann,
-                    }
-                };
-                let r_cmp = if r_is_ptr {
-                    let addr = self.builder.ptrtoaddr(r.into(), Origin::synthetic());
-                    IrOperand {
-                        value: addr,
-                        annotation: None,
-                    }
-                } else {
-                    IrOperand {
-                        value: r,
-                        annotation: r_ann,
-                    }
-                };
 
                 let val = match op {
                     BinOp::Add | BinOp::AddWithOverflow => {
@@ -1234,37 +1241,37 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     BinOp::Eq => {
                         let cmp = self
                             .builder
-                            .icmp(ICmpOp::Eq, l_cmp, r_cmp, Origin::synthetic());
+                            .icmp(ICmpOp::Eq, l_op, r_op, Origin::synthetic());
                         self.builder.bool_to_int(cmp.into(), Origin::synthetic())
                     }
                     BinOp::Ne => {
                         let cmp = self
                             .builder
-                            .icmp(ICmpOp::Ne, l_cmp, r_cmp, Origin::synthetic());
+                            .icmp(ICmpOp::Ne, l_op, r_op, Origin::synthetic());
                         self.builder.bool_to_int(cmp.into(), Origin::synthetic())
                     }
                     BinOp::Lt => {
                         let cmp = self
                             .builder
-                            .icmp(ICmpOp::Lt, l_cmp, r_cmp, Origin::synthetic());
+                            .icmp(ICmpOp::Lt, l_op, r_op, Origin::synthetic());
                         self.builder.bool_to_int(cmp.into(), Origin::synthetic())
                     }
                     BinOp::Le => {
                         let cmp = self
                             .builder
-                            .icmp(ICmpOp::Le, l_cmp, r_cmp, Origin::synthetic());
+                            .icmp(ICmpOp::Le, l_op, r_op, Origin::synthetic());
                         self.builder.bool_to_int(cmp.into(), Origin::synthetic())
                     }
                     BinOp::Gt => {
                         let cmp = self
                             .builder
-                            .icmp(ICmpOp::Gt, l_cmp, r_cmp, Origin::synthetic());
+                            .icmp(ICmpOp::Gt, l_op, r_op, Origin::synthetic());
                         self.builder.bool_to_int(cmp.into(), Origin::synthetic())
                     }
                     BinOp::Ge => {
                         let cmp = self
                             .builder
-                            .icmp(ICmpOp::Ge, l_cmp, r_cmp, Origin::synthetic());
+                            .icmp(ICmpOp::Ge, l_op, r_op, Origin::synthetic());
                         self.builder.bool_to_int(cmp.into(), Origin::synthetic())
                     }
                     BinOp::Shl | BinOp::ShlUnchecked => {
