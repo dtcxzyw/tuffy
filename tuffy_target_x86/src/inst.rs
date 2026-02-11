@@ -1,6 +1,14 @@
 //! x86-64 machine instruction definitions.
 
+use std::fmt;
+use std::hash::Hash;
+
 use crate::reg::Gpr;
+
+/// Trait bound for register types used in MInst.
+pub trait RegType: Copy + Clone + PartialEq + Eq + Hash + fmt::Debug {}
+
+impl RegType for Gpr {}
 
 /// Operand size for x86 instructions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,19 +62,25 @@ impl CondCode {
     }
 }
 
-/// A machine-level x86-64 instruction.
+/// Type alias for physical-register instructions (post-regalloc).
+pub type PInst = MInst<Gpr>;
+
+/// A machine-level x86-64 instruction, generic over register type `R`.
+///
+/// Isel emits `MInst<VReg>`, regalloc rewrites to `MInst<Gpr>` (`PInst`),
+/// and the encoder consumes `PInst`.
 #[derive(Debug, Clone)]
-pub enum MInst {
+pub enum MInst<R: RegType> {
     /// mov reg, reg
-    MovRR { size: OpSize, dst: Gpr, src: Gpr },
+    MovRR { size: OpSize, dst: R, src: R },
     /// mov reg, imm32
-    MovRI { size: OpSize, dst: Gpr, imm: i64 },
+    MovRI { size: OpSize, dst: R, imm: i64 },
     /// add dst, src (dst += src)
-    AddRR { size: OpSize, dst: Gpr, src: Gpr },
+    AddRR { size: OpSize, dst: R, src: R },
     /// sub dst, src (dst -= src)
-    SubRR { size: OpSize, dst: Gpr, src: Gpr },
+    SubRR { size: OpSize, dst: R, src: R },
     /// imul dst, src (dst *= src)
-    ImulRR { size: OpSize, dst: Gpr, src: Gpr },
+    ImulRR { size: OpSize, dst: R, src: R },
     /// ret
     Ret,
     /// Label (pseudo-instruction, not emitted as code).
@@ -76,17 +90,17 @@ pub enum MInst {
     /// jcc rel32 (conditional jump to label)
     Jcc { cc: CondCode, target: u32 },
     /// cmp r/m, r (compare two registers, sets flags)
-    CmpRR { size: OpSize, src1: Gpr, src2: Gpr },
+    CmpRR { size: OpSize, src1: R, src2: R },
     /// cmp r/m, imm32 (compare register with immediate)
-    CmpRI { size: OpSize, src: Gpr, imm: i32 },
+    CmpRI { size: OpSize, src: R, imm: i32 },
     /// test r/m, r (AND without storing, sets flags)
-    TestRR { size: OpSize, src1: Gpr, src2: Gpr },
+    TestRR { size: OpSize, src1: R, src2: R },
     /// call to named symbol (uses relocation)
     CallSym { name: String },
     /// push reg onto stack
-    Push { reg: Gpr },
+    Push { reg: R },
     /// pop reg from stack
-    Pop { reg: Gpr },
+    Pop { reg: R },
     /// sub rsp, imm32 (allocate stack space)
     SubSPI { imm: i32 },
     /// add rsp, imm32 (deallocate stack space)
@@ -94,75 +108,75 @@ pub enum MInst {
     /// mov reg, [base+offset] (load from memory)
     MovRM {
         size: OpSize,
-        dst: Gpr,
-        base: Gpr,
+        dst: R,
+        base: R,
         offset: i32,
     },
     /// mov [base+offset], reg (store to memory)
     MovMR {
         size: OpSize,
-        base: Gpr,
+        base: R,
         offset: i32,
-        src: Gpr,
+        src: R,
     },
     /// lea reg, [base+offset] (load effective address)
-    Lea { dst: Gpr, base: Gpr, offset: i32 },
+    Lea { dst: R, base: R, offset: i32 },
     /// mov reg, imm64 (64-bit immediate, REX.W + B8+rd io)
-    MovRI64 { dst: Gpr, imm: i64 },
+    MovRI64 { dst: R, imm: i64 },
     /// mov [base+offset], imm32 (store immediate to memory)
     MovMI {
         size: OpSize,
-        base: Gpr,
+        base: R,
         offset: i32,
         imm: i32,
     },
     /// lea reg, [rip+symbol] (RIP-relative address of named symbol)
-    LeaSymbol { dst: Gpr, symbol: String },
+    LeaSymbol { dst: R, symbol: String },
     /// or dst, src (dst |= src)
-    OrRR { size: OpSize, dst: Gpr, src: Gpr },
+    OrRR { size: OpSize, dst: R, src: R },
     /// and dst, src (dst &= src)
-    AndRR { size: OpSize, dst: Gpr, src: Gpr },
+    AndRR { size: OpSize, dst: R, src: R },
     /// xor dst, src (dst ^= src)
-    XorRR { size: OpSize, dst: Gpr, src: Gpr },
+    XorRR { size: OpSize, dst: R, src: R },
     /// shl dst, cl (dst <<= cl)
-    ShlRCL { size: OpSize, dst: Gpr },
+    ShlRCL { size: OpSize, dst: R },
     /// shr dst, cl (logical right shift by cl)
-    ShrRCL { size: OpSize, dst: Gpr },
+    ShrRCL { size: OpSize, dst: R },
     /// sar dst, cl (arithmetic right shift by cl)
-    SarRCL { size: OpSize, dst: Gpr },
+    SarRCL { size: OpSize, dst: R },
     /// shl dst, imm8 (dst <<= imm8)
-    ShlImm { size: OpSize, dst: Gpr, imm: u8 },
+    ShlImm { size: OpSize, dst: R, imm: u8 },
     /// sar dst, imm8 (arithmetic right shift by immediate)
-    SarImm { size: OpSize, dst: Gpr, imm: u8 },
+    SarImm { size: OpSize, dst: R, imm: u8 },
     /// and dst, imm32 (dst &= imm32)
-    AndRI { size: OpSize, dst: Gpr, imm: i64 },
+    AndRI { size: OpSize, dst: R, imm: i64 },
     /// cmovcc dst, src (conditional move based on condition code)
     CMOVcc {
         size: OpSize,
         cc: CondCode,
-        dst: Gpr,
-        src: Gpr,
+        dst: R,
+        src: R,
     },
     /// setcc dst (set byte based on condition code)
-    SetCC { cc: CondCode, dst: Gpr },
+    SetCC { cc: CondCode, dst: R },
     /// movzx r64, r8 (zero-extend byte to qword)
-    MovzxB { dst: Gpr, src: Gpr },
+    MovzxB { dst: R, src: R },
     /// movzx r64, r16 (zero-extend word to qword)
-    MovzxW { dst: Gpr, src: Gpr },
+    MovzxW { dst: R, src: R },
     /// movsx r64, r8 (sign-extend byte to qword)
-    MovsxB { dst: Gpr, src: Gpr },
+    MovsxB { dst: R, src: R },
     /// movsx r64, r16 (sign-extend word to qword)
-    MovsxW { dst: Gpr, src: Gpr },
+    MovsxW { dst: R, src: R },
     /// movsxd r64, r32 (sign-extend dword to qword)
-    MovsxD { dst: Gpr, src: Gpr },
+    MovsxD { dst: R, src: R },
     /// cqo (sign-extend RAX into RDX:RAX)
     Cqo,
     /// idiv r/m64 (signed divide RDX:RAX by src)
-    Idiv { size: OpSize, src: Gpr },
+    Idiv { size: OpSize, src: R },
     /// div r/m64 (unsigned divide RDX:RAX by src)
-    Div { size: OpSize, src: Gpr },
+    Div { size: OpSize, src: R },
     /// popcnt r64, r64 (population count)
-    Popcnt { dst: Gpr, src: Gpr },
+    Popcnt { dst: R, src: R },
     /// ud2 (undefined instruction trap)
     Ud2,
 }

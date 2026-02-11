@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::inst::{CondCode, MInst, OpSize};
+use crate::inst::{CondCode, MInst, OpSize, PInst};
 use crate::reg::Gpr;
 use num_traits::ToPrimitive;
 use tuffy_ir::function::{CfgNode, Function};
@@ -14,7 +14,7 @@ use tuffy_ir::value::ValueRef;
 /// Result of instruction selection for a single function.
 pub struct IselResult {
     pub name: String,
-    pub insts: Vec<MInst>,
+    pub insts: Vec<PInst>,
 }
 
 /// Map from IR value to physical register.
@@ -166,7 +166,7 @@ fn ensure_in_reg(
     regs: &RegMap,
     stack: &StackMap,
     alloc: &mut RegAlloc,
-    out: &mut Vec<MInst>,
+    out: &mut Vec<PInst>,
 ) -> Option<Gpr> {
     if let Some(reg) = regs.get(val) {
         return Some(reg);
@@ -274,7 +274,7 @@ fn select_inst(
     symbols: &SymbolTable,
     rdx_captures: &HashMap<u32, ()>,
     rdx_moves: &HashMap<u32, u32>,
-    out: &mut Vec<MInst>,
+    out: &mut Vec<PInst>,
 ) -> Option<()> {
     match op {
         Op::Param(idx) => {
@@ -894,7 +894,7 @@ fn select_binop_rr(
     regs: &mut RegMap,
     stack: &StackMap,
     alloc: &mut RegAlloc,
-    out: &mut Vec<MInst>,
+    out: &mut Vec<PInst>,
 ) -> Option<()> {
     let lhs_reg = ensure_in_reg(lhs, regs, stack, alloc, out)?;
     let rhs_reg = ensure_in_reg(rhs, regs, stack, alloc, out)?;
@@ -946,7 +946,7 @@ fn select_bitop_rr(
     regs: &mut RegMap,
     stack: &StackMap,
     alloc: &mut RegAlloc,
-    out: &mut Vec<MInst>,
+    out: &mut Vec<PInst>,
 ) -> Option<()> {
     let lhs_reg = ensure_in_reg(lhs, regs, stack, alloc, out)?;
     let rhs_reg = ensure_in_reg(rhs, regs, stack, alloc, out)?;
@@ -997,7 +997,7 @@ fn select_shift_cl(
     regs: &mut RegMap,
     stack: &StackMap,
     alloc: &mut RegAlloc,
-    out: &mut Vec<MInst>,
+    out: &mut Vec<PInst>,
 ) -> Option<()> {
     let lhs_reg = ensure_in_reg(lhs, regs, stack, alloc, out)?;
     let rhs_reg = ensure_in_reg(rhs, regs, stack, alloc, out)?;
@@ -1054,7 +1054,7 @@ fn select_divrem(
     regs: &mut RegMap,
     stack: &StackMap,
     alloc: &mut RegAlloc,
-    out: &mut Vec<MInst>,
+    out: &mut Vec<PInst>,
 ) -> Option<()> {
     let lhs_reg = ensure_in_reg(lhs.value, regs, stack, alloc, out)?;
     let rhs_reg = ensure_in_reg(rhs.value, regs, stack, alloc, out)?;

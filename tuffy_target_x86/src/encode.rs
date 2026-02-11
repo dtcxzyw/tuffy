@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::inst::{CondCode, MInst, OpSize};
+use crate::inst::{CondCode, MInst, OpSize, PInst};
 use crate::reg::Gpr;
 use tuffy_target::reloc::{EncodeResult, RelocKind, Relocation};
 
@@ -19,7 +19,7 @@ struct JumpFixup {
 /// Uses a two-pass approach: first pass emits code with placeholder jump
 /// offsets, second pass patches the actual relative displacements.
 /// External call relocations are returned separately for the ELF emitter.
-pub fn encode_function(insts: &[MInst]) -> EncodeResult {
+pub fn encode_function(insts: &[PInst]) -> EncodeResult {
     let mut buf = Vec::new();
     let mut labels: HashMap<u32, usize> = HashMap::new();
     let mut fixups: Vec<JumpFixup> = Vec::new();
@@ -45,7 +45,7 @@ pub fn encode_function(insts: &[MInst]) -> EncodeResult {
 }
 
 fn encode_inst(
-    inst: &MInst,
+    inst: &PInst,
     buf: &mut Vec<u8>,
     labels: &mut HashMap<u32, usize>,
     fixups: &mut Vec<JumpFixup>,
