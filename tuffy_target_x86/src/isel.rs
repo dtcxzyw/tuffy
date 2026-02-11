@@ -158,6 +158,40 @@ impl VRegAlloc {
     }
 }
 
+/// Mutable instruction selection state, bundled to reduce parameter counts.
+struct IselCtx {
+    regs: VRegMap,
+    cmps: CmpMap,
+    stack: StackMap,
+    alloc: VRegAlloc,
+    next_label: u32,
+    out: Vec<VInst>,
+}
+
+impl IselCtx {
+    /// Materialize a value into a virtual register.
+    ///
+    /// If the value is already in VRegMap, returns its vreg.
+    /// If the value is a StackSlot (in StackMap), emits LEA to compute
+    /// the address (rbp+offset) into a fresh vreg.
+    fn ensure_in_reg(&mut self, val: ValueRef) -> Option<VReg> {
+        if let Some(vreg) = self.regs.get(val) {
+            return Some(vreg);
+        }
+        if let Some(offset) = self.stack.get(val) {
+            let rbp = self.alloc.alloc_fixed(Gpr::Rbp.to_preg());
+            let dst = self.alloc.alloc();
+            self.out.push(MInst::Lea {
+                dst,
+                base: rbp,
+                offset,
+            });
+            return Some(dst);
+        }
+        None
+    }
+}
+
 /// Convert a byte count to an x86 operand size.
 fn bytes_to_opsize(bytes: u32) -> OpSize {
     match bytes {
@@ -168,35 +202,6 @@ fn bytes_to_opsize(bytes: u32) -> OpSize {
 
 /// System V AMD64 ABI: first 6 integer args in rdi, rsi, rdx, rcx, r8, r9.
 const ARG_REGS: [Gpr; 6] = [Gpr::Rdi, Gpr::Rsi, Gpr::Rdx, Gpr::Rcx, Gpr::R8, Gpr::R9];
-
-/// Materialize a value into a virtual register.
-///
-/// If the value is already in VRegMap, returns its vreg.
-/// If the value is a StackSlot (in StackMap), emits LEA to compute
-/// the address (rbp+offset) into a fresh vreg. The base register (RBP)
-/// is represented as a constrained vreg.
-fn ensure_in_reg(
-    val: ValueRef,
-    regs: &VRegMap,
-    stack: &StackMap,
-    alloc: &mut VRegAlloc,
-    out: &mut Vec<VInst>,
-) -> Option<VReg> {
-    if let Some(vreg) = regs.get(val) {
-        return Some(vreg);
-    }
-    if let Some(offset) = stack.get(val) {
-        let rbp = alloc.alloc_fixed(Gpr::Rbp.to_preg());
-        let dst = alloc.alloc();
-        out.push(MInst::Lea {
-            dst,
-            base: rbp,
-            offset,
-        });
-        return Some(dst);
-    }
-    None
-}
 
 /// Perform instruction selection on a tuffy IR function.
 ///
@@ -210,236 +215,199 @@ pub fn isel(
     rdx_captures: &HashMap<u32, ()>,
     rdx_moves: &HashMap<u32, u32>,
 ) -> Option<IselResult> {
-    let mut body = Vec::new();
     let ba_cap = func.block_args.len();
-    let mut regs = VRegMap::new(func.instructions.len(), ba_cap);
-    let mut cmps = CmpMap::new(func.instructions.len());
-    let mut stack = StackMap::new(func.instructions.len(), ba_cap);
-    let mut alloc = VRegAlloc::new();
-    let mut next_label = func.blocks.len() as u32;
+    let mut ctx = IselCtx {
+        regs: VRegMap::new(func.instructions.len(), ba_cap),
+        cmps: CmpMap::new(func.instructions.len()),
+        stack: StackMap::new(func.instructions.len(), ba_cap),
+        alloc: VRegAlloc::new(),
+        next_label: func.blocks.len() as u32,
+        out: Vec::new(),
+    };
 
     let root = &func.regions[func.root_region.index() as usize];
     for child in &root.children {
         if let CfgNode::Block(block_ref) = child {
-            body.push(MInst::Label {
+            ctx.out.push(MInst::Label {
                 id: block_ref.index(),
             });
             for (vref, inst) in func.block_insts_with_values(*block_ref) {
                 select_inst(
+                    &mut ctx,
                     vref,
                     &inst.op,
                     func,
-                    &mut regs,
-                    &mut cmps,
-                    &mut stack,
-                    &mut alloc,
-                    &mut next_label,
                     symbols,
                     rdx_captures,
                     rdx_moves,
-                    &mut body,
                 )?;
             }
         }
     }
 
-    let has_calls = body.iter().any(|i| matches!(i, MInst::CallSym { .. }));
+    let has_calls = ctx.out.iter().any(|i| matches!(i, MInst::CallSym { .. }));
 
     Some(IselResult {
         name: symbols.resolve(func.name).to_string(),
-        insts: body,
-        vreg_count: alloc.next,
-        constraints: alloc.constraints,
-        isel_frame_size: stack.frame_size,
+        insts: ctx.out,
+        vreg_count: ctx.alloc.next,
+        constraints: ctx.alloc.constraints,
+        isel_frame_size: ctx.stack.frame_size,
         has_calls,
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 fn select_inst(
+    ctx: &mut IselCtx,
     vref: ValueRef,
     op: &Op,
     func: &Function,
-    regs: &mut VRegMap,
-    cmps: &mut CmpMap,
-    stack: &mut StackMap,
-    alloc: &mut VRegAlloc,
-    next_label: &mut u32,
     symbols: &SymbolTable,
     rdx_captures: &HashMap<u32, ()>,
     rdx_moves: &HashMap<u32, u32>,
-    out: &mut Vec<VInst>,
 ) -> Option<()> {
     match op {
         Op::Param(idx) => {
             let arg_gpr = ARG_REGS.get(*idx as usize)?;
-            let vreg = alloc.alloc_fixed(arg_gpr.to_preg());
-            regs.assign(vref, vreg);
+            let vreg = ctx.alloc.alloc_fixed(arg_gpr.to_preg());
+            ctx.regs.assign(vref, vreg);
         }
 
         Op::Const(imm) => {
             if rdx_captures.contains_key(&vref.index()) {
-                let vreg = alloc.alloc_fixed(Gpr::Rdx.to_preg());
-                regs.assign(vref, vreg);
+                let vreg = ctx.alloc.alloc_fixed(Gpr::Rdx.to_preg());
+                ctx.regs.assign(vref, vreg);
             } else if let Some(src_idx) = rdx_moves.get(&vref.index()) {
                 let src_vref = ValueRef::inst_result(*src_idx);
-                let src_vreg = regs.get(src_vref)?;
-                let dst = alloc.alloc_fixed(Gpr::Rdx.to_preg());
-                out.push(MInst::MovRR {
+                let src_vreg = ctx.regs.get(src_vref)?;
+                let dst = ctx.alloc.alloc_fixed(Gpr::Rdx.to_preg());
+                ctx.out.push(MInst::MovRR {
                     size: OpSize::S64,
                     dst,
                     src: src_vreg,
                 });
-                regs.assign(vref, dst);
+                ctx.regs.assign(vref, dst);
             } else {
                 let imm_i64 = imm.to_i64()?;
-                let dst = alloc.alloc();
+                let dst = ctx.alloc.alloc();
                 if imm_i64 >= 0 && imm_i64 <= u32::MAX as i64 {
-                    out.push(MInst::MovRI {
+                    ctx.out.push(MInst::MovRI {
                         size: OpSize::S32,
                         dst,
                         imm: imm_i64,
                     });
                 } else {
-                    out.push(MInst::MovRI64 { dst, imm: imm_i64 });
+                    ctx.out.push(MInst::MovRI64 { dst, imm: imm_i64 });
                 }
-                regs.assign(vref, dst);
+                ctx.regs.assign(vref, dst);
             }
         }
 
         Op::Add(lhs, rhs) => {
-            select_binop_rr(
-                vref,
-                lhs.value,
-                rhs.value,
-                BinOp::Add,
-                regs,
-                stack,
-                alloc,
-                out,
-            )?;
+            select_binop_rr(ctx, vref, lhs.value, rhs.value, BinOp::Add)?;
         }
 
         Op::Sub(lhs, rhs) => {
-            select_binop_rr(
-                vref,
-                lhs.value,
-                rhs.value,
-                BinOp::Sub,
-                regs,
-                stack,
-                alloc,
-                out,
-            )?;
+            select_binop_rr(ctx, vref, lhs.value, rhs.value, BinOp::Sub)?;
         }
 
         Op::Mul(lhs, rhs) => {
-            select_binop_rr(
-                vref,
-                lhs.value,
-                rhs.value,
-                BinOp::Mul,
-                regs,
-                stack,
-                alloc,
-                out,
-            )?;
+            select_binop_rr(ctx, vref, lhs.value, rhs.value, BinOp::Mul)?;
         }
 
         Op::ICmp(cmp_op, lhs, rhs) => {
-            let lhs_vreg = ensure_in_reg(lhs.value, regs, stack, alloc, out)?;
-            let rhs_vreg = ensure_in_reg(rhs.value, regs, stack, alloc, out)?;
-            out.push(MInst::CmpRR {
+            let lhs_vreg = ctx.ensure_in_reg(lhs.value)?;
+            let rhs_vreg = ctx.ensure_in_reg(rhs.value)?;
+            ctx.out.push(MInst::CmpRR {
                 size: OpSize::S64,
                 src1: lhs_vreg,
                 src2: rhs_vreg,
             });
             let cc = icmp_to_cc(*cmp_op, lhs.annotation);
-            cmps.set(vref, cc);
+            ctx.cmps.set(vref, cc);
         }
 
         Op::Br(target, args) => {
             let ba_vrefs = func.block_arg_values(*target);
             for (arg, ba_vref) in args.iter().zip(ba_vrefs.iter()) {
-                let src = ensure_in_reg(arg.value, regs, stack, alloc, out)?;
-                let dst = alloc.alloc();
-                out.push(MInst::MovRR {
+                let src = ctx.ensure_in_reg(arg.value)?;
+                let dst = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRR {
                     size: OpSize::S64,
                     dst,
                     src,
                 });
-                regs.assign(*ba_vref, dst);
+                ctx.regs.assign(*ba_vref, dst);
             }
-            out.push(MInst::Jmp {
+            ctx.out.push(MInst::Jmp {
                 target: target.index(),
             });
         }
 
         Op::BrIf(cond, then_block, then_args, else_block, else_args) => {
             select_brif(
-                cond, then_block, then_args, else_block, else_args, func, regs, cmps, stack, alloc,
-                next_label, out,
+                ctx, cond, then_block, then_args, else_block, else_args, func,
             )?;
         }
 
         Op::Ret(val) => {
             if let Some(v) = val {
-                let src = ensure_in_reg(v.value, regs, stack, alloc, out)?;
-                let rax = alloc.alloc_fixed(Gpr::Rax.to_preg());
-                out.push(MInst::MovRR {
+                let src = ctx.ensure_in_reg(v.value)?;
+                let rax = ctx.alloc.alloc_fixed(Gpr::Rax.to_preg());
+                ctx.out.push(MInst::MovRR {
                     size: OpSize::S64,
                     dst: rax,
                     src,
                 });
             }
-            out.push(MInst::Ret);
+            ctx.out.push(MInst::Ret);
         }
 
         Op::Call(callee, args) => {
-            select_call(vref, callee, args, func, regs, stack, alloc, symbols, out)?;
+            select_call(ctx, vref, callee, args, func, symbols)?;
         }
 
         Op::StackSlot(bytes) => {
-            let _offset = stack.alloc(vref, *bytes);
+            let _offset = ctx.stack.alloc(vref, *bytes);
         }
 
         Op::Load(ptr, bytes) => {
-            let dst = alloc.alloc();
+            let dst = ctx.alloc.alloc();
             let size = bytes_to_opsize(*bytes);
-            if let Some(offset) = stack.get(ptr.value) {
-                let rbp = alloc.alloc_fixed(Gpr::Rbp.to_preg());
-                out.push(MInst::MovRM {
+            if let Some(offset) = ctx.stack.get(ptr.value) {
+                let rbp = ctx.alloc.alloc_fixed(Gpr::Rbp.to_preg());
+                ctx.out.push(MInst::MovRM {
                     size,
                     dst,
                     base: rbp,
                     offset,
                 });
             } else {
-                let ptr_vreg = regs.get(ptr.value)?;
-                out.push(MInst::MovRM {
+                let ptr_vreg = ctx.regs.get(ptr.value)?;
+                ctx.out.push(MInst::MovRM {
                     size,
                     dst,
                     base: ptr_vreg,
                     offset: 0,
                 });
             }
-            regs.assign(vref, dst);
+            ctx.regs.assign(vref, dst);
         }
 
         Op::Store(val, ptr, bytes) => {
-            let val_vreg = ensure_in_reg(val.value, regs, stack, alloc, out)?;
+            let val_vreg = ctx.ensure_in_reg(val.value)?;
             let size = bytes_to_opsize(*bytes);
-            if let Some(offset) = stack.get(ptr.value) {
-                let rbp = alloc.alloc_fixed(Gpr::Rbp.to_preg());
-                out.push(MInst::MovMR {
+            if let Some(offset) = ctx.stack.get(ptr.value) {
+                let rbp = ctx.alloc.alloc_fixed(Gpr::Rbp.to_preg());
+                ctx.out.push(MInst::MovMR {
                     size,
                     base: rbp,
                     offset,
                     src: val_vreg,
                 });
             } else {
-                let ptr_vreg = ensure_in_reg(ptr.value, regs, stack, alloc, out)?;
-                out.push(MInst::MovMR {
+                let ptr_vreg = ctx.ensure_in_reg(ptr.value)?;
+                ctx.out.push(MInst::MovMR {
                     size,
                     base: ptr_vreg,
                     offset: 0,
@@ -449,139 +417,92 @@ fn select_inst(
         }
 
         Op::Or(lhs, rhs) => {
-            select_bitop_rr(
-                vref,
-                lhs.value,
-                rhs.value,
-                BitOp::Or,
-                regs,
-                stack,
-                alloc,
-                out,
-            )?;
+            select_bitop_rr(ctx, vref, lhs.value, rhs.value, BitOp::Or)?;
         }
         Op::And(lhs, rhs) => {
-            select_bitop_rr(
-                vref,
-                lhs.value,
-                rhs.value,
-                BitOp::And,
-                regs,
-                stack,
-                alloc,
-                out,
-            )?;
+            select_bitop_rr(ctx, vref, lhs.value, rhs.value, BitOp::And)?;
         }
         Op::Xor(lhs, rhs) => {
-            select_bitop_rr(
-                vref,
-                lhs.value,
-                rhs.value,
-                BitOp::Xor,
-                regs,
-                stack,
-                alloc,
-                out,
-            )?;
+            select_bitop_rr(ctx, vref, lhs.value, rhs.value, BitOp::Xor)?;
         }
 
         Op::Shl(lhs, rhs) => {
-            select_shift_cl(
-                vref,
-                lhs.value,
-                rhs.value,
-                ShiftOp::Shl,
-                regs,
-                stack,
-                alloc,
-                out,
-            )?;
+            select_shift_cl(ctx, vref, lhs.value, rhs.value, ShiftOp::Shl)?;
         }
         Op::Shr(lhs, rhs) => {
             let shift_op = match lhs.annotation {
                 Some(Annotation::Signed(_)) => ShiftOp::Sar,
                 _ => ShiftOp::Shr,
             };
-            select_shift_cl(
-                vref, lhs.value, rhs.value, shift_op, regs, stack, alloc, out,
-            )?;
+            select_shift_cl(ctx, vref, lhs.value, rhs.value, shift_op)?;
         }
 
         Op::PtrAdd(ptr, offset) => {
-            let ptr_vreg = ensure_in_reg(ptr.value, regs, stack, alloc, out)?;
-            let off_vreg = ensure_in_reg(offset.value, regs, stack, alloc, out)?;
-            let dst = alloc.alloc();
-            out.push(MInst::MovRR {
+            let ptr_vreg = ctx.ensure_in_reg(ptr.value)?;
+            let off_vreg = ctx.ensure_in_reg(offset.value)?;
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
                 size: OpSize::S64,
                 dst,
                 src: ptr_vreg,
             });
-            out.push(MInst::AddRR {
+            ctx.out.push(MInst::AddRR {
                 size: OpSize::S64,
                 dst,
                 src: off_vreg,
             });
-            regs.assign(vref, dst);
+            ctx.regs.assign(vref, dst);
         }
 
         Op::Unreachable | Op::Trap => {
-            out.push(MInst::Ud2);
+            ctx.out.push(MInst::Ud2);
         }
 
         Op::Select(cond, tv, fv) => {
-            select_select(vref, cond, tv, fv, regs, cmps, stack, alloc, out)?;
+            select_select(ctx, vref, cond, tv, fv)?;
         }
 
         Op::CountOnes(val) => {
-            let src = ensure_in_reg(val.value, regs, stack, alloc, out)?;
-            let dst = alloc.alloc();
-            out.push(MInst::Popcnt { dst, src });
-            regs.assign(vref, dst);
+            let src = ctx.ensure_in_reg(val.value)?;
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::Popcnt { dst, src });
+            ctx.regs.assign(vref, dst);
         }
 
         Op::BoolToInt(val) => {
-            if let Some(cc) = cmps.get(val.value) {
-                let dst = alloc.alloc();
-                out.push(MInst::SetCC { cc, dst });
-                out.push(MInst::MovzxB { dst, src: dst });
-                regs.assign(vref, dst);
+            if let Some(cc) = ctx.cmps.get(val.value) {
+                let dst = ctx.alloc.alloc();
+                ctx.out.push(MInst::SetCC { cc, dst });
+                ctx.out.push(MInst::MovzxB { dst, src: dst });
+                ctx.regs.assign(vref, dst);
             } else {
-                let src = regs.get(val.value)?;
-                regs.assign(vref, src);
+                let src = ctx.regs.get(val.value)?;
+                ctx.regs.assign(vref, src);
             }
         }
 
         Op::Bitcast(val) | Op::PtrToInt(val) | Op::PtrToAddr(val) | Op::IntToPtr(val) => {
-            let src = ensure_in_reg(val.value, regs, stack, alloc, out)?;
-            regs.assign(vref, src);
+            let src = ctx.ensure_in_reg(val.value)?;
+            ctx.regs.assign(vref, src);
         }
 
         Op::PtrDiff(lhs, rhs) => {
-            select_binop_rr(
-                vref,
-                lhs.value,
-                rhs.value,
-                BinOp::Sub,
-                regs,
-                stack,
-                alloc,
-                out,
-            )?;
+            select_binop_rr(ctx, vref, lhs.value, rhs.value, BinOp::Sub)?;
         }
 
         Op::Sext(val, _target_bits) => {
-            select_sext(vref, val, regs, stack, alloc, out)?;
+            select_sext(ctx, vref, val)?;
         }
 
         Op::Zext(val, _target_bits) => {
-            select_zext(vref, val, regs, stack, alloc, out)?;
+            select_zext(ctx, vref, val)?;
         }
 
         Op::Div(lhs, rhs) => {
-            select_divrem(vref, lhs, rhs, DivRemKind::Div, regs, stack, alloc, out)?;
+            select_divrem(ctx, vref, lhs, rhs, DivRemKind::Div)?;
         }
         Op::Rem(lhs, rhs) => {
-            select_divrem(vref, lhs, rhs, DivRemKind::Rem, regs, stack, alloc, out)?;
+            select_divrem(ctx, vref, lhs, rhs, DivRemKind::Rem)?;
         }
 
         Op::FAdd(..) | Op::FSub(..) | Op::FMul(..) | Op::FDiv(..) => return None,
@@ -590,12 +511,12 @@ fn select_inst(
         Op::AtomicRmw(..) | Op::AtomicCmpXchg(..) => return None,
 
         Op::SymbolAddr(sym_id) => {
-            let dst = alloc.alloc();
-            out.push(MInst::LeaSymbol {
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::LeaSymbol {
                 dst,
                 symbol: symbols.resolve(*sym_id).to_string(),
             });
-            regs.assign(vref, dst);
+            ctx.regs.assign(vref, dst);
         }
 
         Op::Fence(_) | Op::Continue(_) | Op::RegionYield(_) => return None,
@@ -612,21 +533,17 @@ enum BinOp {
     Mul,
 }
 
-#[allow(clippy::too_many_arguments)]
 fn select_binop_rr(
+    ctx: &mut IselCtx,
     vref: ValueRef,
     lhs: ValueRef,
     rhs: ValueRef,
     op: BinOp,
-    regs: &mut VRegMap,
-    stack: &StackMap,
-    alloc: &mut VRegAlloc,
-    out: &mut Vec<VInst>,
 ) -> Option<()> {
-    let lhs_vreg = ensure_in_reg(lhs, regs, stack, alloc, out)?;
-    let rhs_vreg = ensure_in_reg(rhs, regs, stack, alloc, out)?;
-    let dst = alloc.alloc();
-    out.push(MInst::MovRR {
+    let lhs_vreg = ctx.ensure_in_reg(lhs)?;
+    let rhs_vreg = ctx.ensure_in_reg(rhs)?;
+    let dst = ctx.alloc.alloc();
+    ctx.out.push(MInst::MovRR {
         size: OpSize::S64,
         dst,
         src: lhs_vreg,
@@ -648,8 +565,8 @@ fn select_binop_rr(
             src: rhs_vreg,
         },
     };
-    out.push(inst);
-    regs.assign(vref, dst);
+    ctx.out.push(inst);
+    ctx.regs.assign(vref, dst);
     Some(())
 }
 
@@ -660,28 +577,24 @@ enum ShiftOp {
     Sar,
 }
 
-#[allow(clippy::too_many_arguments)]
 fn select_shift_cl(
+    ctx: &mut IselCtx,
     vref: ValueRef,
     lhs: ValueRef,
     rhs: ValueRef,
     op: ShiftOp,
-    regs: &mut VRegMap,
-    stack: &StackMap,
-    alloc: &mut VRegAlloc,
-    out: &mut Vec<VInst>,
 ) -> Option<()> {
-    let lhs_vreg = ensure_in_reg(lhs, regs, stack, alloc, out)?;
-    let rhs_vreg = ensure_in_reg(rhs, regs, stack, alloc, out)?;
-    let dst = alloc.alloc();
-    out.push(MInst::MovRR {
+    let lhs_vreg = ctx.ensure_in_reg(lhs)?;
+    let rhs_vreg = ctx.ensure_in_reg(rhs)?;
+    let dst = ctx.alloc.alloc();
+    ctx.out.push(MInst::MovRR {
         size: OpSize::S64,
         dst,
         src: lhs_vreg,
     });
     // Move shift amount into a CL-constrained vreg.
-    let rcx = alloc.alloc_fixed(Gpr::Rcx.to_preg());
-    out.push(MInst::MovRR {
+    let rcx = ctx.alloc.alloc_fixed(Gpr::Rcx.to_preg());
+    ctx.out.push(MInst::MovRR {
         size: OpSize::S64,
         dst: rcx,
         src: rhs_vreg,
@@ -700,8 +613,8 @@ fn select_shift_cl(
             dst,
         },
     };
-    out.push(inst);
-    regs.assign(vref, dst);
+    ctx.out.push(inst);
+    ctx.regs.assign(vref, dst);
     Some(())
 }
 /// Helper enum for bitwise operations (OR, AND, XOR).
@@ -711,21 +624,17 @@ enum BitOp {
     Xor,
 }
 
-#[allow(clippy::too_many_arguments)]
 fn select_bitop_rr(
+    ctx: &mut IselCtx,
     vref: ValueRef,
     lhs: ValueRef,
     rhs: ValueRef,
     op: BitOp,
-    regs: &mut VRegMap,
-    stack: &StackMap,
-    alloc: &mut VRegAlloc,
-    out: &mut Vec<VInst>,
 ) -> Option<()> {
-    let lhs_vreg = ensure_in_reg(lhs, regs, stack, alloc, out)?;
-    let rhs_vreg = ensure_in_reg(rhs, regs, stack, alloc, out)?;
-    let dst = alloc.alloc();
-    out.push(MInst::MovRR {
+    let lhs_vreg = ctx.ensure_in_reg(lhs)?;
+    let rhs_vreg = ctx.ensure_in_reg(rhs)?;
+    let dst = ctx.alloc.alloc();
+    ctx.out.push(MInst::MovRR {
         size: OpSize::S64,
         dst,
         src: lhs_vreg,
@@ -747,45 +656,39 @@ fn select_bitop_rr(
             src: rhs_vreg,
         },
     };
-    out.push(inst);
-    regs.assign(vref, dst);
+    ctx.out.push(inst);
+    ctx.regs.assign(vref, dst);
     Some(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn select_brif(
+    ctx: &mut IselCtx,
     cond: &Operand,
     then_block: &tuffy_ir::value::BlockRef,
     then_args: &[Operand],
     else_block: &tuffy_ir::value::BlockRef,
     else_args: &[Operand],
     func: &Function,
-    regs: &mut VRegMap,
-    cmps: &CmpMap,
-    stack: &StackMap,
-    alloc: &mut VRegAlloc,
-    next_label: &mut u32,
-    out: &mut Vec<VInst>,
 ) -> Option<()> {
     let has_args = !then_args.is_empty() || !else_args.is_empty();
 
     if has_args {
-        let intermediate = *next_label;
-        *next_label += 1;
+        let intermediate = ctx.next_label;
+        ctx.next_label += 1;
 
-        if let Some(cc) = cmps.get(cond.value) {
-            out.push(MInst::Jcc {
+        if let Some(cc) = ctx.cmps.get(cond.value) {
+            ctx.out.push(MInst::Jcc {
                 cc,
                 target: intermediate,
             });
         } else {
-            let cond_vreg = regs.get(cond.value)?;
-            out.push(MInst::TestRR {
+            let cond_vreg = ctx.regs.get(cond.value)?;
+            ctx.out.push(MInst::TestRR {
                 size: OpSize::S64,
                 src1: cond_vreg,
                 src2: cond_vreg,
             });
-            out.push(MInst::Jcc {
+            ctx.out.push(MInst::Jcc {
                 cc: CondCode::Ne,
                 target: intermediate,
             });
@@ -794,79 +697,75 @@ fn select_brif(
         // Else path.
         let else_ba_vrefs = func.block_arg_values(*else_block);
         for (arg, ba_vref) in else_args.iter().zip(else_ba_vrefs.iter()) {
-            let src = ensure_in_reg(arg.value, regs, stack, alloc, out)?;
-            let dst = alloc.alloc();
-            out.push(MInst::MovRR {
+            let src = ctx.ensure_in_reg(arg.value)?;
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
                 size: OpSize::S64,
                 dst,
                 src,
             });
-            regs.assign(*ba_vref, dst);
+            ctx.regs.assign(*ba_vref, dst);
         }
-        out.push(MInst::Jmp {
+        ctx.out.push(MInst::Jmp {
             target: else_block.index(),
         });
 
         // Then path.
-        out.push(MInst::Label { id: intermediate });
+        ctx.out.push(MInst::Label { id: intermediate });
         let then_ba_vrefs = func.block_arg_values(*then_block);
         for (arg, ba_vref) in then_args.iter().zip(then_ba_vrefs.iter()) {
-            let src = ensure_in_reg(arg.value, regs, stack, alloc, out)?;
-            let dst = alloc.alloc();
-            out.push(MInst::MovRR {
+            let src = ctx.ensure_in_reg(arg.value)?;
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
                 size: OpSize::S64,
                 dst,
                 src,
             });
-            regs.assign(*ba_vref, dst);
+            ctx.regs.assign(*ba_vref, dst);
         }
-        out.push(MInst::Jmp {
+        ctx.out.push(MInst::Jmp {
             target: then_block.index(),
         });
     } else {
-        if let Some(cc) = cmps.get(cond.value) {
-            out.push(MInst::Jcc {
+        if let Some(cc) = ctx.cmps.get(cond.value) {
+            ctx.out.push(MInst::Jcc {
                 cc,
                 target: then_block.index(),
             });
         } else {
-            let cond_vreg = regs.get(cond.value)?;
-            out.push(MInst::TestRR {
+            let cond_vreg = ctx.regs.get(cond.value)?;
+            ctx.out.push(MInst::TestRR {
                 size: OpSize::S64,
                 src1: cond_vreg,
                 src2: cond_vreg,
             });
-            out.push(MInst::Jcc {
+            ctx.out.push(MInst::Jcc {
                 cc: CondCode::Ne,
                 target: then_block.index(),
             });
         }
-        out.push(MInst::Jmp {
+        ctx.out.push(MInst::Jmp {
             target: else_block.index(),
         });
     }
     Some(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn select_call(
+    ctx: &mut IselCtx,
     vref: ValueRef,
     callee: &Operand,
     args: &[Operand],
     func: &Function,
-    regs: &mut VRegMap,
-    stack: &StackMap,
-    alloc: &mut VRegAlloc,
     symbols: &SymbolTable,
-    out: &mut Vec<VInst>,
 ) -> Option<()> {
     for (i, arg) in args.iter().enumerate() {
         if i >= ARG_REGS.len() {
             return None;
         }
-        let src = ensure_in_reg(arg.value, regs, stack, alloc, out)?;
-        let dst = alloc.alloc_fixed(ARG_REGS[i].to_preg());
-        out.push(MInst::MovRR {
+        let src = ctx.ensure_in_reg(arg.value)?;
+        let dst = ctx.alloc.alloc_fixed(ARG_REGS[i].to_preg());
+        ctx.out.push(MInst::MovRR {
             size: OpSize::S64,
             dst,
             src,
@@ -876,83 +775,71 @@ fn select_call(
     let callee_idx = callee.value.index();
     if let Op::SymbolAddr(sym_id) = &func.inst(callee_idx).op {
         let name = symbols.resolve(*sym_id).to_string();
-        out.push(MInst::CallSym { name });
+        ctx.out.push(MInst::CallSym { name });
     } else {
-        out.push(MInst::Ud2);
+        ctx.out.push(MInst::Ud2);
     }
 
-    let rax = alloc.alloc_fixed(Gpr::Rax.to_preg());
-    regs.assign(vref, rax);
+    let rax = ctx.alloc.alloc_fixed(Gpr::Rax.to_preg());
+    ctx.regs.assign(vref, rax);
     Some(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn select_select(
+    ctx: &mut IselCtx,
     vref: ValueRef,
     cond: &Operand,
     tv: &Operand,
     fv: &Operand,
-    regs: &mut VRegMap,
-    cmps: &CmpMap,
-    stack: &StackMap,
-    alloc: &mut VRegAlloc,
-    out: &mut Vec<VInst>,
 ) -> Option<()> {
-    let tv_vreg = ensure_in_reg(tv.value, regs, stack, alloc, out)?;
-    let fv_vreg = ensure_in_reg(fv.value, regs, stack, alloc, out)?;
-    let dst = alloc.alloc();
-    out.push(MInst::MovRR {
+    let tv_vreg = ctx.ensure_in_reg(tv.value)?;
+    let fv_vreg = ctx.ensure_in_reg(fv.value)?;
+    let dst = ctx.alloc.alloc();
+    ctx.out.push(MInst::MovRR {
         size: OpSize::S64,
         dst,
         src: fv_vreg,
     });
-    if let Some(cc) = cmps.get(cond.value) {
-        out.push(MInst::CMOVcc {
+    if let Some(cc) = ctx.cmps.get(cond.value) {
+        ctx.out.push(MInst::CMOVcc {
             size: OpSize::S64,
             cc,
             dst,
             src: tv_vreg,
         });
     } else {
-        let cond_vreg = regs.get(cond.value)?;
-        out.push(MInst::TestRR {
+        let cond_vreg = ctx.regs.get(cond.value)?;
+        ctx.out.push(MInst::TestRR {
             size: OpSize::S64,
             src1: cond_vreg,
             src2: cond_vreg,
         });
-        out.push(MInst::CMOVcc {
+        ctx.out.push(MInst::CMOVcc {
             size: OpSize::S64,
             cc: CondCode::Ne,
             dst,
             src: tv_vreg,
         });
     }
-    regs.assign(vref, dst);
+    ctx.regs.assign(vref, dst);
     Some(())
 }
 
-fn select_sext(
-    vref: ValueRef,
-    val: &Operand,
-    regs: &mut VRegMap,
-    stack: &StackMap,
-    alloc: &mut VRegAlloc,
-    out: &mut Vec<VInst>,
-) -> Option<()> {
-    let src = ensure_in_reg(val.value, regs, stack, alloc, out)?;
-    let dst = alloc.alloc();
+fn select_sext(ctx: &mut IselCtx, vref: ValueRef, val: &Operand) -> Option<()> {
+    let src = ctx.ensure_in_reg(val.value)?;
+    let dst = ctx.alloc.alloc();
     match val.annotation {
         Some(Annotation::Signed(8)) | Some(Annotation::Unsigned(8)) => {
-            out.push(MInst::MovsxB { dst, src });
+            ctx.out.push(MInst::MovsxB { dst, src });
         }
         Some(Annotation::Signed(16)) | Some(Annotation::Unsigned(16)) => {
-            out.push(MInst::MovsxW { dst, src });
+            ctx.out.push(MInst::MovsxW { dst, src });
         }
         Some(Annotation::Signed(32)) | Some(Annotation::Unsigned(32)) => {
-            out.push(MInst::MovsxD { dst, src });
+            ctx.out.push(MInst::MovsxD { dst, src });
         }
         Some(Annotation::Signed(_)) => {
-            out.push(MInst::MovRR {
+            ctx.out.push(MInst::MovRR {
                 size: OpSize::S64,
                 dst,
                 src,
@@ -960,56 +847,49 @@ fn select_sext(
         }
         Some(Annotation::Unsigned(n)) => {
             let shift = 64 - n;
-            out.push(MInst::MovRR {
+            ctx.out.push(MInst::MovRR {
                 size: OpSize::S64,
                 dst,
                 src,
             });
-            out.push(MInst::ShlImm {
+            ctx.out.push(MInst::ShlImm {
                 size: OpSize::S64,
                 dst,
                 imm: shift as u8,
             });
-            out.push(MInst::SarImm {
+            ctx.out.push(MInst::SarImm {
                 size: OpSize::S64,
                 dst,
                 imm: shift as u8,
             });
         }
         _ => {
-            out.push(MInst::MovsxD { dst, src });
+            ctx.out.push(MInst::MovsxD { dst, src });
         }
     }
-    regs.assign(vref, dst);
+    ctx.regs.assign(vref, dst);
     Some(())
 }
 
-fn select_zext(
-    vref: ValueRef,
-    val: &Operand,
-    regs: &mut VRegMap,
-    stack: &StackMap,
-    alloc: &mut VRegAlloc,
-    out: &mut Vec<VInst>,
-) -> Option<()> {
-    let src = ensure_in_reg(val.value, regs, stack, alloc, out)?;
-    let dst = alloc.alloc();
+fn select_zext(ctx: &mut IselCtx, vref: ValueRef, val: &Operand) -> Option<()> {
+    let src = ctx.ensure_in_reg(val.value)?;
+    let dst = ctx.alloc.alloc();
     match val.annotation {
         Some(Annotation::Signed(8)) | Some(Annotation::Unsigned(8)) => {
-            out.push(MInst::MovzxB { dst, src });
+            ctx.out.push(MInst::MovzxB { dst, src });
         }
         Some(Annotation::Signed(16)) | Some(Annotation::Unsigned(16)) => {
-            out.push(MInst::MovzxW { dst, src });
+            ctx.out.push(MInst::MovzxW { dst, src });
         }
         Some(Annotation::Signed(32)) | Some(Annotation::Unsigned(32)) => {
-            out.push(MInst::MovRR {
+            ctx.out.push(MInst::MovRR {
                 size: OpSize::S32,
                 dst,
                 src,
             });
         }
         Some(Annotation::Unsigned(_)) => {
-            out.push(MInst::MovRR {
+            ctx.out.push(MInst::MovRR {
                 size: OpSize::S64,
                 dst,
                 src,
@@ -1017,26 +897,26 @@ fn select_zext(
         }
         Some(Annotation::Signed(n)) => {
             let mask = (1i64 << n) - 1;
-            out.push(MInst::MovRR {
+            ctx.out.push(MInst::MovRR {
                 size: OpSize::S64,
                 dst,
                 src,
             });
-            out.push(MInst::AndRI {
+            ctx.out.push(MInst::AndRI {
                 size: OpSize::S64,
                 dst,
                 imm: mask,
             });
         }
         _ => {
-            out.push(MInst::MovRR {
+            ctx.out.push(MInst::MovRR {
                 size: OpSize::S32,
                 dst,
                 src,
             });
         }
     }
-    regs.assign(vref, dst);
+    ctx.regs.assign(vref, dst);
     Some(())
 }
 
@@ -1046,52 +926,48 @@ enum DivRemKind {
     Rem,
 }
 
-#[allow(clippy::too_many_arguments)]
 fn select_divrem(
+    ctx: &mut IselCtx,
     vref: ValueRef,
     lhs: &Operand,
     rhs: &Operand,
     kind: DivRemKind,
-    regs: &mut VRegMap,
-    stack: &StackMap,
-    alloc: &mut VRegAlloc,
-    out: &mut Vec<VInst>,
 ) -> Option<()> {
-    let lhs_vreg = ensure_in_reg(lhs.value, regs, stack, alloc, out)?;
-    let rhs_vreg = ensure_in_reg(rhs.value, regs, stack, alloc, out)?;
+    let lhs_vreg = ctx.ensure_in_reg(lhs.value)?;
+    let rhs_vreg = ctx.ensure_in_reg(rhs.value)?;
     let signed = matches!(lhs.annotation, Some(Annotation::Signed(_)));
 
     // Move divisor to an unconstrained vreg to avoid RAX/RDX conflicts.
-    let divisor = alloc.alloc();
-    out.push(MInst::MovRR {
+    let divisor = ctx.alloc.alloc();
+    ctx.out.push(MInst::MovRR {
         size: OpSize::S64,
         dst: divisor,
         src: rhs_vreg,
     });
 
     // Move dividend into RAX-constrained vreg.
-    let rax = alloc.alloc_fixed(Gpr::Rax.to_preg());
-    out.push(MInst::MovRR {
+    let rax = ctx.alloc.alloc_fixed(Gpr::Rax.to_preg());
+    ctx.out.push(MInst::MovRR {
         size: OpSize::S64,
         dst: rax,
         src: lhs_vreg,
     });
 
     if signed {
-        out.push(MInst::Cqo);
-        out.push(MInst::Idiv {
+        ctx.out.push(MInst::Cqo);
+        ctx.out.push(MInst::Idiv {
             size: OpSize::S64,
             src: divisor,
         });
     } else {
         // Zero RDX for unsigned division.
-        let rdx_zero = alloc.alloc_fixed(Gpr::Rdx.to_preg());
-        out.push(MInst::XorRR {
+        let rdx_zero = ctx.alloc.alloc_fixed(Gpr::Rdx.to_preg());
+        ctx.out.push(MInst::XorRR {
             size: OpSize::S32,
             dst: rdx_zero,
             src: rdx_zero,
         });
-        out.push(MInst::Div {
+        ctx.out.push(MInst::Div {
             size: OpSize::S64,
             src: divisor,
         });
@@ -1099,10 +975,10 @@ fn select_divrem(
 
     // Quotient in RAX, remainder in RDX.
     let result = match kind {
-        DivRemKind::Div => alloc.alloc_fixed(Gpr::Rax.to_preg()),
-        DivRemKind::Rem => alloc.alloc_fixed(Gpr::Rdx.to_preg()),
+        DivRemKind::Div => ctx.alloc.alloc_fixed(Gpr::Rax.to_preg()),
+        DivRemKind::Rem => ctx.alloc.alloc_fixed(Gpr::Rdx.to_preg()),
     };
-    regs.assign(vref, result);
+    ctx.regs.assign(vref, result);
     Some(())
 }
 
