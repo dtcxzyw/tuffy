@@ -98,8 +98,15 @@ pub fn translate_function<'tcx>(
         match translate_ty(ty) {
             Some(Type::Unit) | None => continue,
             Some(ir_ty) => {
-                params.push(ir_ty);
-                param_anns.push(translate_annotation(ty));
+                // Large structs (> 16 bytes) are passed by hidden pointer.
+                let param_size = type_size(tcx, ty).unwrap_or(0);
+                if param_size > 16 && matches!(ir_ty, Type::Int) {
+                    params.push(Type::Ptr(0));
+                    param_anns.push(None);
+                } else {
+                    params.push(ir_ty);
+                    param_anns.push(translate_annotation(ty));
+                }
                 param_names.push(all_names.get(i).copied().flatten());
                 // Fat pointers (&str, &[T]) occupy two ABI slots.
                 if is_fat_ptr(ty) {
@@ -495,10 +502,26 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 _ => {}
             }
 
-            let ir_ty = ir_ty.unwrap();
-            let ann = translate_annotation(ty);
-            let val = self.builder.param(abi_idx, ir_ty, ann, Origin::synthetic());
-            self.locals.set(local, val);
+            // Large structs (> 16 bytes) are passed by hidden pointer in
+            // the System V ABI. Declare the param as Ptr and mark the local
+            // as stack-allocated so field access works through the pointer.
+            let param_size = type_size(self.tcx, ty).unwrap_or(0);
+            let large_struct = param_size > 16 && matches!(ir_ty, Some(Type::Int));
+            let (abi_ty, abi_ann) = if large_struct {
+                (Type::Ptr(0), None)
+            } else {
+                (ir_ty.unwrap(), translate_annotation(ty))
+            };
+            let val = self.builder.param(abi_idx, abi_ty, abi_ann, Origin::synthetic());
+            if large_struct {
+                // The param is a pointer to caller-allocated memory.
+                // Mark as stack-allocated so translate_place_to_addr uses
+                // the pointer directly as the base address.
+                self.locals.set(local, val);
+                self.stack_locals.mark(local);
+            } else {
+                self.locals.set(local, val);
+            }
             abi_idx += 1;
 
             // Fat pointer types (&str, &[T]) occupy two ABI registers (ptr + metadata).
