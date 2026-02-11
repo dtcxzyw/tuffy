@@ -1277,6 +1277,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let l_ann = operand_annotation(lhs, self.mir);
                 let r_ann = operand_annotation(rhs, self.mir);
 
+                // Unsupported operand types (e.g. floats) produce Unit — emit
+                // a dummy zero so the IR stays well-typed.
+                if matches!(self.builder.value_type(l_raw), Some(Type::Unit))
+                    || matches!(self.builder.value_type(r_raw), Some(Type::Unit))
+                {
+                    return Some(self.builder.iconst(0, Origin::synthetic()));
+                }
+
                 // Coerce pointer operands to integers — needed for both
                 // arithmetic/bitwise ops and comparisons.
                 let l = self.coerce_to_int(l_raw);
@@ -1467,7 +1475,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         .xor(v.into(), ones.into(), None, Origin::synthetic()),
                 )
             }
-            Rvalue::Discriminant(place) => self.locals.get(place.local),
+            Rvalue::Discriminant(place) => self.translate_place_to_value(place),
             _ => None,
         }
     }
