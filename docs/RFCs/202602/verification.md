@@ -28,7 +28,7 @@ Tuffy uses three layers of verification, with clear trust hierarchy:
 
 | Layer | Role | Trust level |
 |-------|------|-------------|
-| Lean 4 proofs | Gold standard. Machine-checked correctness of every rewrite rule and isel lowering rule | **Authoritative** |
+| Lean 4 proofs | Gold standard. Machine-checked correctness of every rewrite rule, MemSSA refinement rule, annotation propagation rule, isel lowering rule, and MIR translation rule | **Authoritative** |
 | Alive2-style verifier | SMT-based quick check for discovering missed optimizations and regressions | Auxiliary |
 | Interpreter + fuzzer + test suite | End-to-end behavioral testing | Auxiliary |
 
@@ -74,6 +74,45 @@ Steps 1–3 are mandatory. Steps 5–6 are recommended but not gating.
 
 The key insight: by having Lean own both the rule definition and the proof, there is no possibility of the proof and the implementation diverging. The codegen generator only reads what Lean exports.
 
+### Verified MemSSA refinement
+
+MemSSA refinement is a transform that rewrites a load's `mem` operand to point to an
+earlier MemoryDef when alias analysis proves that intervening defs do not clobber the
+load's memory location. This follows the "analysis is also a transformation" principle —
+refinement modifies the IR, not a side table.
+
+Each refinement step is a rewrite rule with a proof obligation:
+
+> Given a load from location L depending on mem token %memN, and an intervening
+> MemoryDef %memK → %memN that does not alias L, the load's mem operand can be
+> rewritten from %memN to %memK without changing observable behavior.
+
+These rules are proven in Lean 4 against the formal memory semantics (evalLoad,
+evalStore, and the four-state byte model). The proof must account for pointer
+provenance — two pointers with different AllocIds never alias, but pointers derived
+via inttoptr may alias any exposed allocation.
+
+### Verified annotation propagation
+
+Value-level analyses (KnownBits, DemandedBits) are transforms that write analysis
+results into IR annotations. Each propagation rule must be proven sound: the annotation
+produced must be a valid over-approximation of the actual value set.
+
+Examples of proof obligations:
+
+- **KnownBits through add**: if `%x` has known_zeros at bits [32:63] and `%y` has
+  known_zeros at bits [32:63], then `add %x, %y` has known_zeros at bits [33:63]
+  (not [32:63] — carry may set bit 32).
+- **DemandedBits through shift**: if only bits [0:7] of `shl %x, 8` are demanded,
+  then no bits of `%x` are demanded (the result is always zero in those positions).
+
+Unsound annotations cause silent miscompilation: downstream passes and instruction
+selection trust annotations to select machine operations. An incorrect `:s32` annotation
+on a value that exceeds 32-bit signed range produces wrong code with no runtime error.
+
+Annotation propagation rules follow the same workflow as optimization rewrite rules:
+defined and proven in Lean 4, exported as declarative descriptions, codegen'd to Rust.
+
 ### Verified instruction selection
 
 Instruction selection lowers tuffy IR (infinite precision integers with annotations) to
@@ -100,6 +139,26 @@ and machine instruction semantics. The proof obligation is:
 The Lean formalization requires a machine-level semantics model (x86-64 integer operations
 on fixed-width registers) in addition to the existing IR semantics.
 
+### Verified MIR translation
+
+MIR translation converts rustc MIR to tuffy IR. If this translation is wrong, all
+downstream verification is meaningless. Key non-trivial translation steps:
+
+- **Integer type translation**: MIR fixed-width integers (u8, i32, u64) → `int` with
+  `:s<N>` / `:u<N>` annotations. Incorrect annotations cause silent miscompilation.
+- **Control flow structuralization**: flat MIR CFG → hierarchical SESE regions.
+- **Aggregate scalarization**: structs, enums, arrays → scalar operations.
+- **mem2reg**: MIR mutable Places → SSA values.
+
+Approach: define a MIR semantic subset in Lean 4 that covers the MIR constructs tuffy
+consumes. This is not a full MIR formalization — it models only the subset relevant to
+translation, independent of rustc's internal MIR definition. Each translation rule is
+proven correct against this subset model and the tuffy IR formal semantics.
+
+When rustc's MIR semantics change, the Lean MIR subset model is updated and affected
+translation proofs are re-verified. The interpreter + fuzzer layer provides additional
+confidence that the subset model faithfully reflects actual MIR behavior.
+
 ### Trust boundary
 
 ```
@@ -111,26 +170,42 @@ on fixed-width registers) in addition to the existing IR semantics.
 │  │               │  │ semantics      │  │
 │  └───────────────┘  └────────────────┘  │
 │  ┌────────────────┐  ┌───────────────┐  │
-│  │ x86-64 machine │  │ Codegen       │  │
-│  │ semantics      │  │ generator     │  │
+│  │ x86-64 machine │  │ MIR semantic  │  │
+│  │ semantics      │  │ subset model  │  │
 │  └────────────────┘  └───────────────┘  │
+│  ┌───────────────┐                      │
+│  │ Codegen       │                      │
+│  │ generator     │                      │
+│  └───────────────┘                      │
 ├─────────────────────────────────────────┤
 │              Verified components         │
 │                                         │
 │  ┌────────────────────────────────────┐  │
-│  │ Each rewrite rule                  │  │
-│  │ (proven correct in Lean 4)         │  │
+│  │ Optimization rewrite rules        │  │
+│  │ (proven correct in Lean 4)        │  │
 │  └────────────────────────────────────┘  │
 │  ┌────────────────────────────────────┐  │
-│  │ Each isel lowering rule            │  │
-│  │ (proven correct in Lean 4)         │  │
+│  │ MemSSA refinement rules           │  │
+│  │ (proven correct in Lean 4)        │  │
+│  └────────────────────────────────────┘  │
+│  ┌────────────────────────────────────┐  │
+│  │ Annotation propagation rules      │  │
+│  │ (proven correct in Lean 4)        │  │
+│  └────────────────────────────────────┘  │
+│  ┌────────────────────────────────────┐  │
+│  │ Isel lowering rules               │  │
+│  │ (proven correct in Lean 4)        │  │
+│  └────────────────────────────────────┘  │
+│  ┌────────────────────────────────────┐  │
+│  │ MIR translation rules             │  │
+│  │ (proven against MIR subset model) │  │
 │  └────────────────────────────────────┘  │
 ├─────────────────────────────────────────┤
 │              Constrained components      │
 │                                         │
 │  ┌────────────────────────────────────┐  │
-│  │ Generated Rust transform code      │  │
-│  │ (type system enforces invariants)  │  │
+│  │ Generated Rust transform code     │  │
+│  │ (type system enforces invariants) │  │
 │  └────────────────────────────────────┘  │
 └─────────────────────────────────────────┘
 ```
@@ -139,13 +214,19 @@ on fixed-width registers) in addition to the existing IR semantics.
 
 The foundation of all proofs is a formal semantics of tuffy IR defined in Lean 4. This includes:
 
-- Type system semantics (infinite precision integers, byte types, pointers, vectors)
+- Type system semantics (infinite precision integers, byte types, pointers, mem tokens, vectors)
 - Instruction semantics (each operation's mathematical definition)
 - Poison propagation rules
-- Memory model (four-state bytes, provenance)
+- Memory model (four-state bytes, provenance, MemSSA token semantics)
+- Annotation semantics (range constraints, KnownBits, DemandedBits soundness conditions)
 - Assert node semantics (assertsext, assertzext)
 
-This formalization is the single source of truth for what the IR means. All rewrite rule proofs reference this definition.
+A separate MIR semantic subset model defines the MIR constructs that tuffy consumes,
+serving as the source semantics for MIR translation proofs.
+
+This formalization is the single source of truth for what the IR means. All rewrite
+rule, MemSSA refinement, annotation propagation, isel, and MIR translation proofs
+reference these definitions.
 
 ### Alive2-style verifier
 
