@@ -1110,8 +1110,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 Origin::synthetic(),
             );
         } else {
-            // Multi-way: chain of brif comparisons, fallthrough to otherwise.
-            for (test_val, target_bb) in &all_targets {
+            // Multi-way: chain of brif comparisons with fallthrough blocks.
+            let otherwise_block = self.block_map.get(otherwise);
+            for (i, (test_val, target_bb)) in all_targets.iter().enumerate() {
                 let const_val = self.builder.iconst(*test_val as i64, Origin::synthetic());
                 let cmp = self.builder.icmp(
                     ICmpOp::Eq,
@@ -1120,20 +1121,31 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     Origin::synthetic(),
                 );
                 let then_block = self.block_map.get(*target_bb);
-                let otherwise_block = self.block_map.get(otherwise);
-                self.builder.brif(
-                    cmp.into(),
-                    then_block,
-                    vec![],
-                    otherwise_block,
-                    vec![],
-                    Origin::synthetic(),
-                );
+
+                if i == all_targets.len() - 1 {
+                    // Last comparison: else goes to otherwise.
+                    self.builder.brif(
+                        cmp.into(),
+                        then_block,
+                        vec![],
+                        otherwise_block,
+                        vec![],
+                        Origin::synthetic(),
+                    );
+                } else {
+                    // Not last: else falls through to a new comparison block.
+                    let next_block = self.builder.create_block();
+                    self.builder.brif(
+                        cmp.into(),
+                        then_block,
+                        vec![],
+                        next_block,
+                        vec![],
+                        Origin::synthetic(),
+                    );
+                    self.builder.switch_to_block(next_block);
+                }
             }
-            // Final fallthrough to otherwise.
-            let otherwise_block = self.block_map.get(otherwise);
-            self.builder
-                .br(otherwise_block, vec![], Origin::synthetic());
         }
     }
 
