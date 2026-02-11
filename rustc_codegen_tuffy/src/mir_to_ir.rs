@@ -1567,18 +1567,51 @@ fn translate_const<'tcx>(
         mir::ConstValue::Scalar(mir::interpret::Scalar::Ptr(ptr, _)) => {
             let (prov, ptr_offset) = ptr.into_raw_parts();
             let alloc_id = prov.alloc_id();
-            let alloc = tcx.global_alloc(alloc_id).unwrap_memory();
-            let alloc = alloc.inner();
-            let offset = ptr_offset.bytes() as usize;
-            let size = alloc.len() - offset;
-            let bytes: Vec<u8> = alloc
-                .inspect_with_uninit_and_ptr_outside_interpreter(offset..offset + size)
-                .to_vec();
-            let sym = format!(".Lconst.{}", static_data.len());
-            let sym_id = symbols.intern(&sym);
-            static_data.push((sym_id, bytes));
-            let val = builder.symbol_addr(sym_id, Origin::synthetic());
-            Some(val)
+            match tcx.global_alloc(alloc_id) {
+                rustc_middle::mir::interpret::GlobalAlloc::Memory(alloc) => {
+                    let alloc = alloc.inner();
+                    let offset = ptr_offset.bytes() as usize;
+                    let size = alloc.len() - offset;
+                    let bytes: Vec<u8> = alloc
+                        .inspect_with_uninit_and_ptr_outside_interpreter(offset..offset + size)
+                        .to_vec();
+                    let sym = format!(".Lconst.{}", static_data.len());
+                    let sym_id = symbols.intern(&sym);
+                    static_data.push((sym_id, bytes));
+                    let base = builder.symbol_addr(sym_id, Origin::synthetic());
+                    Some(base)
+                }
+                rustc_middle::mir::interpret::GlobalAlloc::Static(def_id) => {
+                    let instance = Instance::mono(tcx, def_id);
+                    let sym_name = tcx.symbol_name(instance).name.to_string();
+                    let sym_id = symbols.intern(&sym_name);
+                    let base = builder.symbol_addr(sym_id, Origin::synthetic());
+                    if ptr_offset.bytes() > 0 {
+                        let off = builder.iconst(
+                            ptr_offset.bytes() as i64,
+                            Origin::synthetic(),
+                        );
+                        Some(builder.add(
+                            base.into(),
+                            off.into(),
+                            None,
+                            Origin::synthetic(),
+                        ))
+                    } else {
+                        Some(base)
+                    }
+                }
+                rustc_middle::mir::interpret::GlobalAlloc::Function { instance } => {
+                    let sym_name = tcx.symbol_name(instance).name.to_string();
+                    let sym_id = symbols.intern(&sym_name);
+                    Some(builder.symbol_addr(sym_id, Origin::synthetic()))
+                }
+                rustc_middle::mir::interpret::GlobalAlloc::VTable(..)
+                | rustc_middle::mir::interpret::GlobalAlloc::TypeId { .. } => {
+                    // VTables and TypeIds are opaque pointers; emit a zero placeholder.
+                    Some(builder.iconst(0, Origin::synthetic()))
+                }
+            }
         }
         mir::ConstValue::Scalar(scalar) => translate_scalar(scalar, ty, builder),
         mir::ConstValue::ZeroSized => Some(builder.iconst(0, Origin::synthetic())),
@@ -1646,7 +1679,11 @@ fn translate_const_slice<'tcx>(
     symbols: &mut SymbolTable,
     static_data: &mut Vec<(SymbolId, Vec<u8>)>,
 ) -> Option<ValueRef> {
-    let alloc = tcx.global_alloc(alloc_id).unwrap_memory();
+    let rustc_middle::mir::interpret::GlobalAlloc::Memory(alloc) =
+        tcx.global_alloc(alloc_id)
+    else {
+        return None;
+    };
     let alloc = alloc.inner();
     let bytes: Vec<u8> = alloc
         .inspect_with_uninit_and_ptr_outside_interpreter(0..alloc.len())
