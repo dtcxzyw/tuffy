@@ -7,6 +7,7 @@ pub mod frame;
 pub mod inst;
 pub mod isel;
 pub mod reg;
+pub mod regalloc_impl;
 
 #[cfg(test)]
 mod tests;
