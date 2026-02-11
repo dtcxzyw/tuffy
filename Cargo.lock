@@ -271,6 +271,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "tuffy_regalloc"
+version = "0.1.0"
+
+[[package]]
 name = "tuffy_target"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,5 @@
+[package]
+name = "tuffy_regalloc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true

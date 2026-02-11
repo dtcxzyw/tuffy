@@ -4,6 +4,7 @@ members = [
     "tuffy_ir",
     "tuffy_ir_interp",
     "tuffy_opt",
+    "tuffy_regalloc",
     "tuffy_target",
     "tuffy_target_x86",
     "tuffy_codegen",
