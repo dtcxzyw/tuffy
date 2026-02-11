@@ -691,7 +691,33 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             StatementKind::Assign(box (place, rvalue)) => {
                 if let Some(val) = self.translate_rvalue(rvalue, place) {
                     if place.projection.is_empty() {
-                        self.locals.set(place.local, val);
+                        // For stack-allocated locals, store the value into the
+                        // existing stack slot instead of overwriting the pointer.
+                        // This preserves the slot address for later loads (e.g.,
+                        // sret return copy, field access).
+                        if self.stack_locals.is_stack(place.local) {
+                            if let Some(slot) = self.locals.get(place.local) {
+                                if matches!(self.builder.value_type(slot), Some(Type::Ptr(_))) {
+                                    let ty = self.monomorphize(
+                                        self.mir.local_decls[place.local].ty,
+                                    );
+                                    let bytes =
+                                        type_size(self.tcx, ty).unwrap_or(8) as u32;
+                                    self.builder.store(
+                                        val.into(),
+                                        slot.into(),
+                                        bytes,
+                                        Origin::synthetic(),
+                                    );
+                                } else {
+                                    self.locals.set(place.local, val);
+                                }
+                            } else {
+                                self.locals.set(place.local, val);
+                            }
+                        } else {
+                            self.locals.set(place.local, val);
+                        }
                     } else {
                         // Projected destination: compute address and emit Store.
                         if let Some((addr, projected_ty)) = self.translate_place_to_addr(place) {
