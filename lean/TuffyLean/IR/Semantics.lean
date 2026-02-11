@@ -51,6 +51,12 @@ def evalShl (a b : Int) : Value :=
 def evalShr (a b : Int) : Value :=
   if b < 0 then .poison else .int (a >>> b.toNat)
 
+/-- Integer minimum. -/
+def evalMin (a b : Int) : Int := if a ≤ b then a else b
+
+/-- Integer maximum. -/
+def evalMax (a b : Int) : Int := if a ≥ b then a else b
+
 -- Pointer operation semantics
 
 /-- Pointer addition: offset a pointer by an integer amount.
