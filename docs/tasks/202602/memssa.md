@@ -53,6 +53,11 @@ MemoryUse — consumes a `mem` token, does not produce one:
 
 A `mem` def is allowed to have no uses (no artificial consumers needed).
 
+Other external side effects beyond memory (e.g., I/O, system calls, inline assembly)
+are also modeled as MemoryDef/MemoryUse, treated as accesses to inaccessible memory.
+This unifies all side-effect ordering into the single `mem` token chain, so control
+flow is the only dependency not captured by `mem` tokens.
+
 #### Entry, exit, and phi
 
 - Entry: the entry block receives the initial memory state as a block parameter of
