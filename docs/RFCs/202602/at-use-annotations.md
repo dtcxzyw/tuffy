@@ -303,6 +303,33 @@ Keep assert nodes for result-side constraints, add use-side annotations only for
 analysis results. This avoids changing the instruction set but retains the instruction
 bloat problem and the artificial SSA value issue.
 
+### Why signed/unsigned is a binary choice
+
+A natural question is whether annotations should support expressing both signed and
+unsigned constraints simultaneously — e.g., a value that is both `:s32` and `:u16`.
+The answer is no, because the intersection of any two range annotations is always
+expressible as a single annotation:
+
+| Intersection | Result | Reasoning |
+|---|---|---|
+| `:s<M>` ∩ `:s<N>` | `:s<min(M,N)>` | Smaller signed range is a subset of the larger |
+| `:u<M>` ∩ `:u<N>` | `:u<min(M,N)>` | Smaller unsigned range is a subset of the larger |
+| `:s<M>` ∩ `:u<N>` | `:u<min(M-1, N)>` | The non-negative portion of `:s<M>` is `[0, 2^(M-1)-1]`, which equals `:u<M-1>` |
+
+The third case is the key insight. A signed N-bit value is in `[-2^(N-1), 2^(N-1)-1]`.
+An unsigned M-bit value is in `[0, 2^M-1]`. Their intersection is
+`[0, min(2^(N-1)-1, 2^M-1)]`, which is always an unsigned range expressible as
+`:u<min(N-1, M)>`.
+
+Since any combination of signed and unsigned constraints collapses to a single
+annotation, supporting both simultaneously adds no expressive power — it only adds
+implementation complexity.
+
+For constraints that range annotations genuinely cannot express (e.g., "bit 3 is
+known to be 1" or "bits above 8 are don't-care"), the `KnownBits` extension is the
+correct generalization. `KnownBits` subsumes range annotations entirely: `:s32` and
+`:u32` are sugar over specific `KnownBits` patterns.
+
 ### Impact of not doing this
 
 Without this change, the IR would need both assert nodes (for range constraints) and
