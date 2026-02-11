@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 tuffy_ir = { path = "../tuffy_ir" }
+tuffy_regalloc = { path = "../tuffy_regalloc" }
 tuffy_target = { path = "../tuffy_target" }
 object = { version = "0.36", features = ["write"] }
 num-bigint = "0.4"

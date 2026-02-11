@@ -4,11 +4,16 @@ use std::fmt;
 use std::hash::Hash;
 
 use crate::reg::Gpr;
+use tuffy_regalloc::VReg;
 
 /// Trait bound for register types used in MInst.
 pub trait RegType: Copy + Clone + PartialEq + Eq + Hash + fmt::Debug {}
 
 impl RegType for Gpr {}
+impl RegType for VReg {}
+
+/// Type alias for virtual-register instructions (pre-regalloc).
+pub type VInst = MInst<VReg>;
 
 /// Operand size for x86 instructions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -9,7 +9,7 @@ use tuffy_ir::function::{Function, RegionKind};
 use tuffy_ir::instruction::{Operand, Origin};
 use tuffy_ir::module::SymbolTable;
 use tuffy_ir::types::{Annotation, Type};
-use tuffy_target_x86::{emit, encode, isel};
+use tuffy_target_x86::{backend, emit, encode, isel};
 
 fn build_add_func() -> (Function, SymbolTable) {
     let s32 = Some(Annotation::Signed(32));
@@ -55,7 +55,8 @@ fn compile_add_func() -> Vec<u8> {
     let no_rdx_moves = HashMap::new();
     let result = isel::isel(&func, &symbols, &no_rdx_captures, &no_rdx_moves)
         .expect("isel should succeed for add");
-    let enc = encode::encode_function(&result.insts);
+    let pinsts = backend::lower_isel_result(&result);
+    let enc = encode::encode_function(&pinsts);
     emit::emit_elf(&result.name, &enc.code, &enc.relocations)
 }
 

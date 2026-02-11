@@ -290,6 +290,7 @@ dependencies = [
  "object",
  "tempfile",
  "tuffy_ir",
+ "tuffy_regalloc",
  "tuffy_target",
 ]
 

@@ -1,5 +1,7 @@
 //! x86-64 register definitions.
 
+use tuffy_regalloc::PReg;
+
 /// x86-64 general-purpose registers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
@@ -76,4 +78,34 @@ impl Gpr {
             Gpr::R15 => "r15",
         }
     }
+
+    /// Convert to target-agnostic physical register.
+    pub fn to_preg(self) -> PReg {
+        PReg(self as u8)
+    }
+
+    /// Convert from target-agnostic physical register.
+    pub fn from_preg(preg: PReg) -> Self {
+        ALL_GPRS[preg.0 as usize]
+    }
 }
+
+/// All 16 GPRs indexed by hardware encoding.
+const ALL_GPRS: [Gpr; 16] = [
+    Gpr::Rax,
+    Gpr::Rcx,
+    Gpr::Rdx,
+    Gpr::Rbx,
+    Gpr::Rsp,
+    Gpr::Rbp,
+    Gpr::Rsi,
+    Gpr::Rdi,
+    Gpr::R8,
+    Gpr::R9,
+    Gpr::R10,
+    Gpr::R11,
+    Gpr::R12,
+    Gpr::R13,
+    Gpr::R14,
+    Gpr::R15,
+];

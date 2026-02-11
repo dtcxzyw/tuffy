@@ -3,6 +3,7 @@
 pub mod backend;
 pub mod emit;
 pub mod encode;
+pub mod frame;
 pub mod inst;
 pub mod isel;
 pub mod reg;
