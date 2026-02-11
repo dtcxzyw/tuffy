@@ -134,7 +134,7 @@ fn liveness_branch() {
     assert_eq!(ranges.len(), 1);
     let r0 = ranges.iter().find(|r| r.vreg == v(0)).unwrap();
     // v0 must be live from def (0) through use (3) → [0, 4)
-    assert!(r0.start <= 0);
+    assert_eq!(r0.start, 0);
     assert!(r0.end >= 4);
 }
 
