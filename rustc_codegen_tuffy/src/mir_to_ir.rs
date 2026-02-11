@@ -473,9 +473,19 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let mut addr = self.locals.get(place.local)?;
         let mut cur_ty = self.mir.local_decls[place.local].ty;
 
-        // If the base local is not stack-allocated and has projections starting
-        // with something other than Deref, we need to spill it first.
-        // But for now, we handle each projection element in sequence.
+        // If the base local is not stack-allocated and the first projection
+        // needs an address (Field, Index, etc.), spill the scalar value to a
+        // temporary stack slot so we can compute sub-field addresses.
+        if !self.stack_locals.is_stack(place.local)
+            && !place.projection.is_empty()
+            && !matches!(place.projection[0], PlaceElem::Deref)
+        {
+            let size = type_size(self.tcx, cur_ty).unwrap_or(8) as u32;
+            let slot = self.builder.stack_slot(size, Origin::synthetic());
+            self.builder
+                .store(addr.into(), slot.into(), size, Origin::synthetic());
+            addr = slot;
+        }
 
         for elem in place.projection.iter() {
             match elem {
@@ -600,9 +610,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         }
         let (addr, projected_ty) = self.translate_place_to_addr(place)?;
         let bytes = type_size(self.tcx, projected_ty).unwrap_or(8) as u32;
+        let ty = translate_ty(projected_ty).unwrap_or(Type::Int);
         Some(
             self.builder
-                .load(addr.into(), bytes, Type::Int, None, Origin::synthetic()),
+                .load(addr.into(), bytes, ty, None, Origin::synthetic()),
         )
     }
 
