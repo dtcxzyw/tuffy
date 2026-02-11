@@ -364,27 +364,29 @@ Parameter annotations are caller guarantees; return annotations are callee guara
 
 ## Memory Operations
 
+All memory operations participate in Memory SSA. Operations that modify memory state
+consume a `mem` token and produce a new one. Plain loads consume a `mem` token but do
+not produce one. See [types.md](types.md#mem) for details on the `mem` type.
+
 ### `load`
 
 ```
-vN = load vPtr, <size>
+vN = load.<size> vPtr, vMem
 ```
 
-Load `size` bytes from the address pointed to by `vPtr`. Returns a `bytes` value
-(`List AbstractByte`). Memory access operates at the byte level only — the result
-is raw bytes with no type interpretation. To obtain a typed value (integer, float),
-use `bytecast` as a separate step.
+Load `size` bytes from the address pointed to by `vPtr`. Takes a `mem` token as input
+(MemoryUse). Returns a data value only — does not produce a new `mem` token.
 
 **Semantics**: `evalLoad(mem, addr, size) = bytes [mem[addr], mem[addr+1], ..., mem[addr+size-1]]`
 
 ### `store`
 
 ```
-store vVal, vPtr
+vN = store.<size> vVal, vPtr, vMem
 ```
 
-Store a `bytes` value (`List AbstractByte`) to the address pointed to by `vPtr`.
-The operand `vVal` must be a bytes value. Does not produce a meaningful result value.
+Store a value to the address pointed to by `vPtr`. Takes a `mem` token as input
+(MemoryDef) and produces a new `mem` token as its result.
 
 **Semantics**: `evalStore(mem, addr, bs) = mem[addr..addr+len(bs)] := bs`
 
@@ -428,50 +430,52 @@ concurrency model (e.g., based on C11) is TBD.
 ### `load.atomic`
 
 ```
-vN = load.atomic.<ordering> vPtr
+vM, vN = load.atomic.<ordering> vPtr, vMem
 ```
 
-Atomic load from pointer `vPtr` with the specified memory ordering.
-**Semantics**: Sequentially equivalent to `evalLoad`.
+Atomic load from pointer `vPtr` with the specified memory ordering. Takes a `mem`
+token as input (MemoryDef) and produces two results: a new `mem` token and the
+loaded data value.
 
 ### `store.atomic`
 
 ```
-store.atomic.<ordering> vVal, vPtr
+vN = store.atomic.<ordering> vVal, vPtr, vMem
 ```
 
 Atomic store of `vVal` to pointer `vPtr` with the specified memory ordering.
-Does not produce a meaningful result value.
-**Semantics**: Sequentially equivalent to `evalStore`.
+Takes a `mem` token as input (MemoryDef) and produces a new `mem` token.
 
 ### `rmw`
 
 ```
-vN = rmw.<op>.<ordering> vPtr, vVal
+vM, vN = rmw.<op>.<ordering> vPtr, vVal, vMem
 ```
 
 Atomic read-modify-write. Atomically reads the value at `vPtr`, applies `<op>`
-with `vVal`, writes the result back, and returns the original value.
+with `vVal`, writes the result back. Takes a `mem` token as input (MemoryDef) and
+produces two results: a new `mem` token and the original value.
 
 ### `cmpxchg`
 
 ```
-vN = cmpxchg.<success_ord>.<failure_ord> vPtr, vExpected, vDesired
+vM, vN = cmpxchg.<success_ord>.<failure_ord> vPtr, vExpected, vDesired, vMem
 ```
 
 Atomic compare-and-exchange. Atomically compares the value at `vPtr` with
-`vExpected`; if equal, writes `vDesired`. Returns the old value regardless of
-success. The caller uses `icmp` to determine whether the exchange succeeded.
+`vExpected`; if equal, writes `vDesired`. Takes a `mem` token as input (MemoryDef)
+and produces two results: a new `mem` token and the old value. The caller uses
+`icmp` to determine whether the exchange succeeded.
 `<success_ord>` applies on successful exchange; `<failure_ord>` applies on failure.
 
 ### `fence`
 
 ```
-fence.<ordering>
+vN = fence.<ordering> vMem
 ```
 
 Memory fence. Establishes ordering constraints without accessing memory.
-Does not produce a meaningful result value.
+Takes a `mem` token as input (MemoryDef) and produces a new `mem` token.
 
 ## Type Conversion
 
@@ -603,11 +607,13 @@ than a side-channel mapping.
 ### `call`
 
 ```
-vN = call vCallee(vArg0, vArg1, ...)
+vM = call vCallee(vArg0, vArg1, ...), vMem
+vM, vN = call vCallee(vArg0, vArg1, ...), vMem -> <ret_type>
 ```
 
-Call the function pointed to by `vCallee` with the given arguments. The result type
-is the return type of the callee.
+Call the function pointed to by `vCallee` with the given arguments. Takes a `mem`
+token as input (MemoryDef). For void calls, produces a single `mem` token result.
+For non-void calls, produces two results: a new `mem` token and the return value.
 
 ## Terminators
 
@@ -617,12 +623,13 @@ By convention, they are the last instruction in a block.
 ### `ret`
 
 ```
-ret vA
-ret
+ret vA, vMem
+ret vMem
 ```
 
-Return from the function. Optionally returns a value. A function with a return type
-must return a value; a void function uses bare `ret`.
+Return from the function. Takes a `mem` token as the final memory state operand.
+Optionally returns a data value. A function with a return type must return a value;
+a void function uses `ret vMem` with only the mem token.
 
 ### `br`
 

@@ -35,6 +35,17 @@ Pointer with address space AS. Address space 0 is the default. Pointers carry pr
 (allocation ID + offset). Different address spaces may have different pointer sizes and
 semantics.
 
+## `mem`
+
+Abstract memory state token for Memory SSA. Memory tokens flow through the function as
+regular SSA values, making memory dependencies explicit. The entry block receives the
+initial memory state as a block parameter of type `mem`; `ret` carries the final `mem`
+token as an operand.
+
+Memory-producing operations (`store`, `call`, `fence`, atomics) consume a `mem` token
+and produce a new one. Plain `load` consumes a `mem` token but does not produce one.
+At CFG join points, memory versions merge via regular block parameters of type `mem`.
+
 ## `float`
 
 IEEE 754 floating point type. Variants: `bf16` (bfloat16), `f16` (half), `f32` (single),

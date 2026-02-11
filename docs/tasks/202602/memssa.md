@@ -1,6 +1,6 @@
 # Memory SSA
 
-- Status: Draft
+- Status: In Progress
 - Created: 2026-02-08
 - Completed: N/A
 - Parent: N/A
