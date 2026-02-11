@@ -130,6 +130,12 @@ pub enum MInst {
     ShrRCL { size: OpSize, dst: Gpr },
     /// sar dst, cl (arithmetic right shift by cl)
     SarRCL { size: OpSize, dst: Gpr },
+    /// shl dst, imm8 (dst <<= imm8)
+    ShlImm { size: OpSize, dst: Gpr, imm: u8 },
+    /// sar dst, imm8 (arithmetic right shift by immediate)
+    SarImm { size: OpSize, dst: Gpr, imm: u8 },
+    /// and dst, imm32 (dst &= imm32)
+    AndRI { size: OpSize, dst: Gpr, imm: i64 },
     /// cmovcc dst, src (conditional move based on condition code)
     CMOVcc {
         size: OpSize,

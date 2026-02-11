@@ -192,3 +192,106 @@ fn build_branch_func() -> (Function, SymbolTable) {
 
     (func, st)
 }
+
+// --- Non-standard annotation width tests ---
+
+#[test]
+fn isel_sext_nonstandard_unsigned_width() {
+    let (func, symbols) = build_extend_func("sext_u17", Annotation::Unsigned(17), true);
+    let captures: HashMap<u32, ()> = HashMap::new();
+    let moves: HashMap<u32, u32> = HashMap::new();
+    let result = isel::isel(&func, &symbols, &captures, &moves).expect("isel should succeed");
+
+    let has_shl = result
+        .insts
+        .iter()
+        .any(|i| matches!(i, crate::inst::MInst::ShlImm { imm: 47, .. }));
+    let has_sar = result
+        .insts
+        .iter()
+        .any(|i| matches!(i, crate::inst::MInst::SarImm { imm: 47, .. }));
+    assert!(has_shl, "sext :u17 should emit ShlImm(47)");
+    assert!(has_sar, "sext :u17 should emit SarImm(47)");
+}
+
+#[test]
+fn isel_sext_nonstandard_signed_is_noop() {
+    let (func, symbols) = build_extend_func("sext_s17", Annotation::Signed(17), true);
+    let captures: HashMap<u32, ()> = HashMap::new();
+    let moves: HashMap<u32, u32> = HashMap::new();
+    let result = isel::isel(&func, &symbols, &captures, &moves).expect("isel should succeed");
+
+    let has_shift = result.insts.iter().any(|i| {
+        matches!(
+            i,
+            crate::inst::MInst::ShlImm { .. } | crate::inst::MInst::SarImm { .. }
+        )
+    });
+    assert!(!has_shift, "sext :s17 should NOT emit shift sequence");
+}
+
+#[test]
+fn isel_zext_nonstandard_signed_width() {
+    let (func, symbols) = build_extend_func("zext_s13", Annotation::Signed(13), false);
+    let captures: HashMap<u32, ()> = HashMap::new();
+    let moves: HashMap<u32, u32> = HashMap::new();
+    let result = isel::isel(&func, &symbols, &captures, &moves).expect("isel should succeed");
+
+    let has_and = result
+        .insts
+        .iter()
+        .any(|i| matches!(i, crate::inst::MInst::AndRI { imm: 0x1FFF, .. }));
+    assert!(has_and, "zext :s13 should emit AndRI(0x1FFF)");
+}
+
+#[test]
+fn isel_zext_nonstandard_unsigned_is_noop() {
+    let (func, symbols) = build_extend_func("zext_u13", Annotation::Unsigned(13), false);
+    let captures: HashMap<u32, ()> = HashMap::new();
+    let moves: HashMap<u32, u32> = HashMap::new();
+    let result = isel::isel(&func, &symbols, &captures, &moves).expect("isel should succeed");
+
+    let has_and = result
+        .insts
+        .iter()
+        .any(|i| matches!(i, crate::inst::MInst::AndRI { .. }));
+    assert!(!has_and, "zext :u13 should NOT emit AND mask");
+}
+
+/// Build: fn name(a: int :ann) -> int { sext/zext a to 64 }
+fn build_extend_func(name: &str, ann: Annotation, is_sext: bool) -> (Function, SymbolTable) {
+    let s64 = Some(Annotation::Signed(64));
+    let src_ann = Some(ann);
+    let mut st = SymbolTable::new();
+    let sym = st.intern(name);
+    let mut func = Function::new(
+        sym,
+        vec![Type::Int],
+        vec![src_ann],
+        vec![],
+        Some(Type::Int),
+        s64,
+    );
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+
+    let entry = builder.create_block();
+    builder.switch_to_block(entry);
+
+    let a = builder.param(0, Type::Int, src_ann, Origin::synthetic());
+    let extended = if is_sext {
+        builder.sext(Operand::annotated(a, ann), 64, Origin::synthetic())
+    } else {
+        builder.zext(Operand::annotated(a, ann), 64, Origin::synthetic())
+    };
+    builder.ret(
+        Some(Operand::annotated(extended, Annotation::Signed(64))),
+        Origin::synthetic(),
+    );
+
+    builder.exit_region();
+
+    (func, st)
+}

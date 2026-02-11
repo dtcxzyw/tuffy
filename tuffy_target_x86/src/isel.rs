@@ -743,6 +743,7 @@ fn select_inst(
             let src = ensure_in_reg(val.value, regs, stack, alloc, out)?;
             let dst = alloc.alloc();
             match val.annotation {
+                // Standard widths: use native movsx instructions.
                 Some(Annotation::Signed(8)) | Some(Annotation::Unsigned(8)) => {
                     out.push(MInst::MovsxB { dst, src });
                 }
@@ -752,8 +753,37 @@ fn select_inst(
                 Some(Annotation::Signed(32)) | Some(Annotation::Unsigned(32)) => {
                     out.push(MInst::MovsxD { dst, src });
                 }
+                // Signed source: value is already sign-extended, sext is a no-op.
+                Some(Annotation::Signed(_)) => {
+                    out.push(MInst::MovRR {
+                        size: OpSize::S64,
+                        dst,
+                        src,
+                    });
+                }
+                // Unsigned source with non-standard width: shl then sar to
+                // sign-extend from bit N.
+                Some(Annotation::Unsigned(n)) => {
+                    let shift = 64 - n;
+                    if src != dst {
+                        out.push(MInst::MovRR {
+                            size: OpSize::S64,
+                            dst,
+                            src,
+                        });
+                    }
+                    out.push(MInst::ShlImm {
+                        size: OpSize::S64,
+                        dst,
+                        imm: shift as u8,
+                    });
+                    out.push(MInst::SarImm {
+                        size: OpSize::S64,
+                        dst,
+                        imm: shift as u8,
+                    });
+                }
                 _ => {
-                    // Default: assume 32-bit source.
                     out.push(MInst::MovsxD { dst, src });
                 }
             }
@@ -764,14 +794,47 @@ fn select_inst(
             let src = ensure_in_reg(val.value, regs, stack, alloc, out)?;
             let dst = alloc.alloc();
             match val.annotation {
+                // Standard widths: use native movzx / implicit zero-extend.
                 Some(Annotation::Signed(8)) | Some(Annotation::Unsigned(8)) => {
                     out.push(MInst::MovzxB { dst, src });
                 }
                 Some(Annotation::Signed(16)) | Some(Annotation::Unsigned(16)) => {
                     out.push(MInst::MovzxW { dst, src });
                 }
+                Some(Annotation::Signed(32)) | Some(Annotation::Unsigned(32)) => {
+                    // mov r32 implicitly zero-extends to 64-bit.
+                    out.push(MInst::MovRR {
+                        size: OpSize::S32,
+                        dst,
+                        src,
+                    });
+                }
+                // Unsigned source: value already in [0, 2^N-1], zext is a no-op.
+                Some(Annotation::Unsigned(_)) => {
+                    out.push(MInst::MovRR {
+                        size: OpSize::S64,
+                        dst,
+                        src,
+                    });
+                }
+                // Signed source with non-standard width: mask off sign bits.
+                Some(Annotation::Signed(n)) => {
+                    let mask = (1i64 << n) - 1;
+                    if src != dst {
+                        out.push(MInst::MovRR {
+                            size: OpSize::S64,
+                            dst,
+                            src,
+                        });
+                    }
+                    out.push(MInst::AndRI {
+                        size: OpSize::S64,
+                        dst,
+                        imm: mask,
+                    });
+                }
                 _ => {
-                    // 32→64 zero-extend: mov r32 implicitly zero-extends.
+                    // No annotation: assume 32-bit, implicit zero-extend.
                     out.push(MInst::MovRR {
                         size: OpSize::S32,
                         dst,

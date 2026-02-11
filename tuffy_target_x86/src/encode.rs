@@ -163,6 +163,15 @@ fn encode_inst(
         MInst::SarRCL { size, dst } => {
             encode_shift_cl(7, *size, *dst, buf);
         }
+        MInst::ShlImm { size, dst, imm } => {
+            encode_shift_imm(4, *size, *dst, *imm, buf);
+        }
+        MInst::SarImm { size, dst, imm } => {
+            encode_shift_imm(7, *size, *dst, *imm, buf);
+        }
+        MInst::AndRI { size, dst, imm } => {
+            encode_alu_ri(4, *size, *dst, *imm as i32, buf);
+        }
         MInst::CMOVcc { size, cc, dst, src } => {
             encode_cmovcc(*size, *cc, *dst, *src, buf);
         }
@@ -377,6 +386,36 @@ fn encode_shift_cl(reg_field: u8, size: OpSize, dst: Gpr, buf: &mut Vec<u8>) {
     }
     buf.push(0xd3);
     buf.push(modrm(reg_field, dst.encoding()));
+}
+
+/// Encode a shift-by-immediate instruction (SHL/SAR r/m, imm8).
+/// Opcode C1 /reg_field ib (REX.W for 64-bit).
+fn encode_shift_imm(reg_field: u8, size: OpSize, dst: Gpr, imm: u8, buf: &mut Vec<u8>) {
+    let w = matches!(size, OpSize::S64);
+    let b_bit = if dst.needs_rex() { 0x01 } else { 0 };
+    let w_bit = if w { 0x08 } else { 0 };
+    let rex_bits = w_bit | b_bit;
+    if rex_bits != 0 {
+        buf.push(0x40 | rex_bits);
+    }
+    buf.push(0xc1);
+    buf.push(modrm(reg_field, dst.encoding()));
+    buf.push(imm);
+}
+
+/// Encode ALU r/m, imm32 (AND/OR/etc with immediate).
+/// Opcode 81 /reg_field id (REX.W for 64-bit).
+fn encode_alu_ri(reg_field: u8, size: OpSize, dst: Gpr, imm: i32, buf: &mut Vec<u8>) {
+    let w = matches!(size, OpSize::S64);
+    let b_bit = if dst.needs_rex() { 0x01 } else { 0 };
+    let w_bit = if w { 0x08 } else { 0 };
+    let rex_bits = w_bit | b_bit;
+    if rex_bits != 0 {
+        buf.push(0x40 | rex_bits);
+    }
+    buf.push(0x81);
+    buf.push(modrm(reg_field, dst.encoding()));
+    buf.extend_from_slice(&imm.to_le_bytes());
 }
 
 fn encode_mov_mi(size: OpSize, base: Gpr, offset: i32, imm: i32, buf: &mut Vec<u8>) {
