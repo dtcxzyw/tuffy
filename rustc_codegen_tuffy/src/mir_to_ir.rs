@@ -56,9 +56,6 @@ pub fn translate_function<'tcx>(
         )
     };
 
-    // Extract parameter types from MIR local declarations.
-    // This works for all callable types (functions, closures, coroutines).
-    // Skip parameters whose type is untranslatable (None) or zero-sized (Unit).
     let mut params = Vec::new();
     let mut param_anns = Vec::new();
 
@@ -68,12 +65,24 @@ pub fn translate_function<'tcx>(
     let ret_ty = translate_ty(ret_mir_ty).filter(|t| !matches!(t, Type::Unit));
     let ret_ann = translate_annotation(ret_mir_ty);
 
+    // Detect whether this function returns a large struct via sret.
+    // Must be computed before building params so the hidden sret pointer
+    // is included in the parameter list.
+    let use_sret = needs_indirect_return(tcx, ret_mir_ty);
+
     let mut symbols = SymbolTable::new();
     let func_sym = symbols.intern(&name);
 
     // Build all-args name map first, then filter to match params.
     let all_names = extract_param_names(mir, &mut symbols);
     let mut param_names = Vec::new();
+
+    // If sret, the first ABI parameter is a hidden pointer for the return value.
+    if use_sret {
+        params.push(Type::Ptr(0));
+        param_anns.push(None);
+        param_names.push(None);
+    }
 
     for i in 0..mir.arg_count {
         let local = mir::Local::from_usize(i + 1);
@@ -84,6 +93,12 @@ pub fn translate_function<'tcx>(
                 params.push(ir_ty);
                 param_anns.push(translate_annotation(ty));
                 param_names.push(all_names.get(i).copied().flatten());
+                // Fat pointers (&str, &[T]) occupy two ABI slots.
+                if is_fat_ptr(ty) {
+                    params.push(Type::Int);
+                    param_anns.push(None);
+                    param_names.push(None);
+                }
             }
         }
     }
@@ -91,9 +106,6 @@ pub fn translate_function<'tcx>(
     let mut func = Function::new(func_sym, params, param_anns, param_names, ret_ty, ret_ann);
     let mut builder = Builder::new(&mut func);
     let abi_metadata = session.new_metadata();
-
-    // Detect whether this function returns a large struct via sret.
-    let use_sret = needs_indirect_return(tcx, ret_mir_ty);
 
     let root = builder.create_region(RegionKind::Function);
     builder.enter_region(root);
