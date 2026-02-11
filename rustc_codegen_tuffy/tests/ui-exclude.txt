@@ -280,7 +280,6 @@ lint/issue-81218.rs
 lint/keyword-idents/multi-file.rs
 lint/must_not_suspend/issue-89562.rs
 lint/non-snake-case/non-snake-ffi-issue-31924.rs
-lint/rfc-2383-lint-reason/derive-expect-issue-150553.rs
 lint/rfc-2383-lint-reason/fulfilled_expectation_early_lints.rs
 lint/unsafe_code/forge_unsafe_block.rs
 lint/unused/const-local-var.rs
