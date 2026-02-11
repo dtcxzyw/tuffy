@@ -168,4 +168,18 @@ impl Function {
             .enumerate()
             .map(move |(i, inst)| (ValueRef::inst_result(start + i as u32), inst))
     }
+
+    /// Get the type of a value (instruction result or block argument).
+    /// For secondary results, returns the secondary_ty of the instruction.
+    pub fn value_type(&self, v: ValueRef) -> Option<&Type> {
+        if v.is_block_arg() {
+            self.block_args.get(v.index() as usize).map(|ba| &ba.ty)
+        } else if v.is_secondary_result() {
+            self.instructions
+                .get(v.inst_index() as usize)
+                .and_then(|i| i.secondary_ty.as_ref())
+        } else {
+            self.instructions.get(v.index() as usize).map(|i| &i.ty)
+        }
+    }
 }

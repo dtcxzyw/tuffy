@@ -124,6 +124,11 @@ impl<'a> FuncVerifier<'a> {
                 .block_args
                 .get(v.index() as usize)
                 .map(|ba| &ba.ty)
+        } else if v.is_secondary_result() {
+            self.func
+                .instructions
+                .get(v.inst_index() as usize)
+                .and_then(|i| i.secondary_ty.as_ref())
         } else {
             self.func
                 .instructions
@@ -151,7 +156,7 @@ impl<'a> FuncVerifier<'a> {
     fn is_terminator(op: &Op) -> bool {
         matches!(
             op,
-            Op::Ret(_)
+            Op::Ret(..)
                 | Op::Br(_, _)
                 | Op::BrIf(..)
                 | Op::Continue(_)
@@ -216,6 +221,10 @@ impl<'a> FuncVerifier<'a> {
             self.result
                 .error(loc.clone(), format!("{ctx}: expected Float, got {ty:?}"));
         }
+    }
+
+    fn expect_mem(&mut self, op: &Operand, ctx: &str, loc: &Location) {
+        self.expect_type(op, &Type::Mem, ctx, loc);
     }
 
     fn expect_same_type(&mut self, a: &Operand, b: &Operand, ctx: &str, loc: &Location) {
@@ -407,18 +416,22 @@ impl FuncVerifier<'_> {
     fn verify_instruction_rest(&mut self, inst: &Instruction, loc: &Location) {
         match &inst.op {
             // -- Memory --
-            Op::Load(ptr, _bytes) => {
+            Op::Load(ptr, _bytes, mem) => {
                 self.check_operand(ptr, loc);
+                self.check_operand(mem, loc);
                 self.expect_ptr(ptr, "load ptr", loc);
+                self.expect_mem(mem, "load mem", loc);
             }
-            Op::Store(val, ptr, _bytes) => {
+            Op::Store(val, ptr, _bytes, mem) => {
                 self.check_operand(val, loc);
                 self.check_operand(ptr, loc);
+                self.check_operand(mem, loc);
                 self.expect_ptr(ptr, "store ptr", loc);
-                if inst.ty != Type::Unit {
+                self.expect_mem(mem, "store mem", loc);
+                if inst.ty != Type::Mem {
                     self.result.error(
                         loc.clone(),
-                        format!("store result must be Unit, got {:?}", inst.ty),
+                        format!("store result must be Mem, got {:?}", inst.ty),
                     );
                 }
             }
@@ -432,51 +445,90 @@ impl FuncVerifier<'_> {
             }
 
             // -- Atomic memory --
-            Op::LoadAtomic(ptr, ord) => {
+            Op::LoadAtomic(ptr, ord, mem) => {
                 self.check_operand(ptr, loc);
+                self.check_operand(mem, loc);
                 self.expect_ptr(ptr, "load.atomic ptr", loc);
+                self.expect_mem(mem, "load.atomic mem", loc);
                 self.check_load_ordering(ord, loc);
-            }
-            Op::StoreAtomic(val, ptr, ord) => {
-                self.check_operand(val, loc);
-                self.check_operand(ptr, loc);
-                self.expect_ptr(ptr, "store.atomic ptr", loc);
-                self.check_store_ordering(ord, loc);
-                if inst.ty != Type::Unit {
+                if inst.ty != Type::Mem {
                     self.result.error(
                         loc.clone(),
-                        format!("store.atomic result must be Unit, got {:?}", inst.ty),
+                        format!("load.atomic primary result must be Mem, got {:?}", inst.ty),
+                    );
+                }
+                if inst.secondary_ty.is_none() {
+                    self.result
+                        .error(loc.clone(), "load.atomic must have a secondary result type");
+                }
+            }
+            Op::StoreAtomic(val, ptr, ord, mem) => {
+                self.check_operand(val, loc);
+                self.check_operand(ptr, loc);
+                self.check_operand(mem, loc);
+                self.expect_ptr(ptr, "store.atomic ptr", loc);
+                self.expect_mem(mem, "store.atomic mem", loc);
+                self.check_store_ordering(ord, loc);
+                if inst.ty != Type::Mem {
+                    self.result.error(
+                        loc.clone(),
+                        format!("store.atomic result must be Mem, got {:?}", inst.ty),
                     );
                 }
             }
-            Op::AtomicRmw(_, ptr, val, _ord) => {
+            Op::AtomicRmw(_, ptr, val, _ord, mem) => {
                 self.check_operand(ptr, loc);
                 self.check_operand(val, loc);
+                self.check_operand(mem, loc);
                 self.expect_ptr(ptr, "rmw ptr", loc);
+                self.expect_mem(mem, "rmw mem", loc);
+                if inst.ty != Type::Mem {
+                    self.result.error(
+                        loc.clone(),
+                        format!("rmw primary result must be Mem, got {:?}", inst.ty),
+                    );
+                }
+                if inst.secondary_ty.is_none() {
+                    self.result
+                        .error(loc.clone(), "rmw must have a secondary result type");
+                }
             }
-            Op::AtomicCmpXchg(ptr, expected, desired, _succ, fail) => {
+            Op::AtomicCmpXchg(ptr, expected, desired, _succ, fail, mem) => {
                 self.check_operand(ptr, loc);
                 self.check_operand(expected, loc);
                 self.check_operand(desired, loc);
+                self.check_operand(mem, loc);
                 self.expect_ptr(ptr, "cmpxchg ptr", loc);
+                self.expect_mem(mem, "cmpxchg mem", loc);
                 self.expect_same_type(expected, desired, "cmpxchg expected/desired", loc);
-                // Failure ordering cannot be Release or AcqRel.
                 if matches!(fail, MemoryOrdering::Release | MemoryOrdering::AcqRel) {
                     self.result.error(
                         loc.clone(),
                         format!("cmpxchg failure ordering cannot be {:?}", fail),
                     );
                 }
+                if inst.ty != Type::Mem {
+                    self.result.error(
+                        loc.clone(),
+                        format!("cmpxchg primary result must be Mem, got {:?}", inst.ty),
+                    );
+                }
+                if inst.secondary_ty.is_none() {
+                    self.result
+                        .error(loc.clone(), "cmpxchg must have a secondary result type");
+                }
             }
-            Op::Fence(ord) => {
+            Op::Fence(ord, mem) => {
+                self.check_operand(mem, loc);
+                self.expect_mem(mem, "fence mem", loc);
                 if matches!(ord, MemoryOrdering::Relaxed) {
                     self.result
                         .error(loc.clone(), "fence cannot use Relaxed ordering");
                 }
-                if inst.ty != Type::Unit {
+                if inst.ty != Type::Mem {
                     self.result.error(
                         loc.clone(),
-                        format!("fence result must be Unit, got {:?}", inst.ty),
+                        format!("fence result must be Mem, got {:?}", inst.ty),
                     );
                 }
             }
@@ -602,9 +654,17 @@ impl FuncVerifier<'_> {
                     );
                 }
             }
-            Op::Call(callee, args) => {
+            Op::Call(callee, args, mem) => {
                 self.check_operand(callee, loc);
                 self.check_operands(args, loc);
+                self.check_operand(mem, loc);
+                self.expect_mem(mem, "call mem", loc);
+                if inst.ty != Type::Mem {
+                    self.result.error(
+                        loc.clone(),
+                        format!("call primary result must be Mem, got {:?}", inst.ty),
+                    );
+                }
             }
 
             // -- Type conversion --
@@ -622,7 +682,9 @@ impl FuncVerifier<'_> {
             }
 
             // -- Terminators --
-            Op::Ret(val) => {
+            Op::Ret(val, mem) => {
+                self.check_operand(mem, loc);
+                self.expect_mem(mem, "ret mem", loc);
                 if let Some(op) = val {
                     self.check_operand(op, loc);
                     if let Some(ret_ty) = &self.func.ret_ty {

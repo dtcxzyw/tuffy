@@ -117,6 +117,11 @@ impl<'a> Builder<'a> {
                 .block_args
                 .get(v.index() as usize)
                 .map(|ba| &ba.ty)
+        } else if v.is_secondary_result() {
+            self.func
+                .instructions
+                .get(v.inst_index() as usize)
+                .and_then(|i| i.secondary_ty.as_ref())
         } else {
             self.func
                 .instructions
@@ -135,11 +140,19 @@ impl<'a> Builder<'a> {
 
     // ── Instruction emission ──
 
-    fn push_inst(&mut self, op: Op, ty: Type, origin: Origin, ann: Option<Annotation>) -> ValueRef {
+    fn push_inst(
+        &mut self,
+        op: Op,
+        ty: Type,
+        secondary_ty: Option<Type>,
+        origin: Origin,
+        ann: Option<Annotation>,
+    ) -> ValueRef {
         let idx = self.func.instructions.len() as u32;
         self.func.instructions.push(Instruction {
             op,
             ty,
+            secondary_ty,
             origin,
             result_annotation: ann,
         });
@@ -159,12 +172,12 @@ impl<'a> Builder<'a> {
         ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::Param(index), ty, origin, ann)
+        self.push_inst(Op::Param(index), ty, None, origin, ann)
     }
 
     /// Integer constant.
     pub fn iconst(&mut self, val: impl Into<BigInt>, origin: Origin) -> ValueRef {
-        self.push_inst(Op::Const(val.into()), Type::Int, origin, None)
+        self.push_inst(Op::Const(val.into()), Type::Int, None, origin, None)
     }
 
     /// Integer addition.
@@ -175,7 +188,7 @@ impl<'a> Builder<'a> {
         ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::Add(a, b), Type::Int, origin, ann)
+        self.push_inst(Op::Add(a, b), Type::Int, None, origin, ann)
     }
 
     /// Integer subtraction.
@@ -186,7 +199,7 @@ impl<'a> Builder<'a> {
         ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::Sub(a, b), Type::Int, origin, ann)
+        self.push_inst(Op::Sub(a, b), Type::Int, None, origin, ann)
     }
 
     /// Integer multiplication.
@@ -197,7 +210,7 @@ impl<'a> Builder<'a> {
         ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::Mul(a, b), Type::Int, origin, ann)
+        self.push_inst(Op::Mul(a, b), Type::Int, None, origin, ann)
     }
 
     /// Integer division (poison on division by zero).
@@ -208,7 +221,7 @@ impl<'a> Builder<'a> {
         ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::Div(a, b), Type::Int, origin, ann)
+        self.push_inst(Op::Div(a, b), Type::Int, None, origin, ann)
     }
 
     /// Integer remainder (poison on division by zero).
@@ -219,7 +232,7 @@ impl<'a> Builder<'a> {
         ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::Rem(a, b), Type::Int, origin, ann)
+        self.push_inst(Op::Rem(a, b), Type::Int, None, origin, ann)
     }
 
     /// Bitwise AND.
@@ -230,7 +243,7 @@ impl<'a> Builder<'a> {
         ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::And(a, b), Type::Int, origin, ann)
+        self.push_inst(Op::And(a, b), Type::Int, None, origin, ann)
     }
 
     /// Bitwise OR.
@@ -241,7 +254,7 @@ impl<'a> Builder<'a> {
         ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::Or(a, b), Type::Int, origin, ann)
+        self.push_inst(Op::Or(a, b), Type::Int, None, origin, ann)
     }
 
     /// Bitwise XOR.
@@ -252,7 +265,7 @@ impl<'a> Builder<'a> {
         ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::Xor(a, b), Type::Int, origin, ann)
+        self.push_inst(Op::Xor(a, b), Type::Int, None, origin, ann)
     }
 
     /// Left shift (poison if shift amount is negative).
@@ -263,7 +276,7 @@ impl<'a> Builder<'a> {
         ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::Shl(a, b), Type::Int, origin, ann)
+        self.push_inst(Op::Shl(a, b), Type::Int, None, origin, ann)
     }
 
     /// Right shift (poison if shift amount is negative).
@@ -275,7 +288,7 @@ impl<'a> Builder<'a> {
         ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::Shr(a, b), Type::Int, origin, ann)
+        self.push_inst(Op::Shr(a, b), Type::Int, None, origin, ann)
     }
 
     /// Integer minimum.
@@ -286,7 +299,7 @@ impl<'a> Builder<'a> {
         ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::Min(a, b), Type::Int, origin, ann)
+        self.push_inst(Op::Min(a, b), Type::Int, None, origin, ann)
     }
 
     /// Integer maximum.
@@ -297,7 +310,7 @@ impl<'a> Builder<'a> {
         ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::Max(a, b), Type::Int, origin, ann)
+        self.push_inst(Op::Max(a, b), Type::Int, None, origin, ann)
     }
 
     // ── Floating point arithmetic ──
@@ -311,7 +324,7 @@ impl<'a> Builder<'a> {
         ty: Type,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::FAdd(a, b, flags), ty, origin, None)
+        self.push_inst(Op::FAdd(a, b, flags), ty, None, origin, None)
     }
 
     /// Floating point subtraction.
@@ -323,7 +336,7 @@ impl<'a> Builder<'a> {
         ty: Type,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::FSub(a, b, flags), ty, origin, None)
+        self.push_inst(Op::FSub(a, b, flags), ty, None, origin, None)
     }
 
     /// Floating point multiplication.
@@ -335,7 +348,7 @@ impl<'a> Builder<'a> {
         ty: Type,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::FMul(a, b, flags), ty, origin, None)
+        self.push_inst(Op::FMul(a, b, flags), ty, None, origin, None)
     }
 
     /// Floating point division.
@@ -347,29 +360,29 @@ impl<'a> Builder<'a> {
         ty: Type,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::FDiv(a, b, flags), ty, origin, None)
+        self.push_inst(Op::FDiv(a, b, flags), ty, None, origin, None)
     }
 
     /// Copy sign: magnitude from first operand, sign from second.
     pub fn copysign(&mut self, mag: Operand, sign: Operand, ty: Type, origin: Origin) -> ValueRef {
-        self.push_inst(Op::CopySign(mag, sign), ty, origin, None)
+        self.push_inst(Op::CopySign(mag, sign), ty, None, origin, None)
     }
 
     /// Floating point negation.
     pub fn fneg(&mut self, val: Operand, ty: Type, origin: Origin) -> ValueRef {
-        self.push_inst(Op::FNeg(val), ty, origin, None)
+        self.push_inst(Op::FNeg(val), ty, None, origin, None)
     }
 
     /// Floating point absolute value.
     pub fn fabs(&mut self, val: Operand, ty: Type, origin: Origin) -> ValueRef {
-        self.push_inst(Op::FAbs(val), ty, origin, None)
+        self.push_inst(Op::FAbs(val), ty, None, origin, None)
     }
 
     // ── Comparison ──
 
     /// Integer comparison. Returns Bool.
     pub fn icmp(&mut self, op: ICmpOp, a: Operand, b: Operand, origin: Origin) -> ValueRef {
-        self.push_inst(Op::ICmp(op, a, b), Type::Bool, origin, None)
+        self.push_inst(Op::ICmp(op, a, b), Type::Bool, None, origin, None)
     }
 
     /// Conditional select: if cond then true_val else false_val.
@@ -381,73 +394,105 @@ impl<'a> Builder<'a> {
         ty: Type,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::Select(cond, true_val, false_val), ty, origin, None)
-    }
-
-    /// Convert Bool to Int: true → 1, false → 0.
-    pub fn bool_to_int(&mut self, val: Operand, origin: Origin) -> ValueRef {
-        self.push_inst(Op::BoolToInt(val), Type::Int, origin, None)
-    }
-
-    /// Population count: count the number of set bits.
-    pub fn count_ones(&mut self, val: Operand, origin: Origin) -> ValueRef {
-        self.push_inst(Op::CountOnes(val), Type::Int, origin, None)
-    }
-
-    // ── Memory ──
-
-    /// Load from pointer. `bytes` is the access width in bytes.
-    pub fn load(
-        &mut self,
-        ptr: Operand,
-        bytes: u32,
-        ty: Type,
-        ann: Option<Annotation>,
-        origin: Origin,
-    ) -> ValueRef {
-        self.push_inst(Op::Load(ptr, bytes), ty, origin, ann)
-    }
-
-    /// Store value to pointer. `bytes` is the access width in bytes.
-    pub fn store(&mut self, val: Operand, ptr: Operand, bytes: u32, origin: Origin) -> ValueRef {
-        self.push_inst(Op::Store(val, ptr, bytes), Type::Unit, origin, None)
-    }
-
-    /// Allocate stack slot of n bytes.
-    pub fn stack_slot(&mut self, bytes: u32, origin: Origin) -> ValueRef {
-        self.push_inst(Op::StackSlot(bytes), Type::Ptr(0), origin, None)
-    }
-
-    // ── Atomic memory operations ──
-
-    /// Atomic load from pointer.
-    pub fn load_atomic(
-        &mut self,
-        ptr: Operand,
-        ty: Type,
-        ordering: MemoryOrdering,
-        origin: Origin,
-    ) -> ValueRef {
-        self.push_inst(Op::LoadAtomic(ptr, ordering), ty, origin, None)
-    }
-
-    /// Atomic store value to pointer.
-    pub fn store_atomic(
-        &mut self,
-        val: Operand,
-        ptr: Operand,
-        ordering: MemoryOrdering,
-        origin: Origin,
-    ) -> ValueRef {
         self.push_inst(
-            Op::StoreAtomic(val, ptr, ordering),
-            Type::Unit,
+            Op::Select(cond, true_val, false_val),
+            ty,
+            None,
             origin,
             None,
         )
     }
 
-    /// Atomic read-modify-write.
+    /// Convert Bool to Int: true → 1, false → 0.
+    pub fn bool_to_int(&mut self, val: Operand, origin: Origin) -> ValueRef {
+        self.push_inst(Op::BoolToInt(val), Type::Int, None, origin, None)
+    }
+
+    /// Population count: count the number of set bits.
+    pub fn count_ones(&mut self, val: Operand, origin: Origin) -> ValueRef {
+        self.push_inst(Op::CountOnes(val), Type::Int, None, origin, None)
+    }
+
+    // ── Memory ──
+
+    /// Load from pointer. `bytes` is the access width in bytes. Takes mem token input.
+    pub fn load(
+        &mut self,
+        ptr: Operand,
+        bytes: u32,
+        ty: Type,
+        mem: Operand,
+        ann: Option<Annotation>,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::Load(ptr, bytes, mem), ty, None, origin, ann)
+    }
+
+    /// Store value to pointer. `bytes` is the access width. Takes mem token, returns mem token.
+    pub fn store(
+        &mut self,
+        val: Operand,
+        ptr: Operand,
+        bytes: u32,
+        mem: Operand,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(
+            Op::Store(val, ptr, bytes, mem),
+            Type::Mem,
+            None,
+            origin,
+            None,
+        )
+    }
+
+    /// Allocate stack slot of n bytes.
+    pub fn stack_slot(&mut self, bytes: u32, origin: Origin) -> ValueRef {
+        self.push_inst(Op::StackSlot(bytes), Type::Ptr(0), None, origin, None)
+    }
+
+    // ── Atomic memory operations ──
+
+    /// Atomic load from pointer. Returns (mem_out, data_value).
+    pub fn load_atomic(
+        &mut self,
+        ptr: Operand,
+        ty: Type,
+        ordering: MemoryOrdering,
+        mem: Operand,
+        origin: Origin,
+    ) -> (ValueRef, ValueRef) {
+        let primary = self.push_inst(
+            Op::LoadAtomic(ptr, ordering, mem),
+            Type::Mem,
+            Some(ty),
+            origin,
+            None,
+        );
+        let secondary = ValueRef::inst_secondary_result(primary.index());
+        (primary, secondary)
+    }
+
+    /// Atomic store value to pointer. Returns mem token.
+    pub fn store_atomic(
+        &mut self,
+        val: Operand,
+        ptr: Operand,
+        ordering: MemoryOrdering,
+        mem: Operand,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(
+            Op::StoreAtomic(val, ptr, ordering, mem),
+            Type::Mem,
+            None,
+            origin,
+            None,
+        )
+    }
+
+    /// Atomic read-modify-write. Returns (mem_out, old_value).
+    #[allow(clippy::too_many_arguments)]
     pub fn atomic_rmw(
         &mut self,
         op: AtomicRmwOp,
@@ -455,12 +500,21 @@ impl<'a> Builder<'a> {
         val: Operand,
         ty: Type,
         ordering: MemoryOrdering,
+        mem: Operand,
         origin: Origin,
-    ) -> ValueRef {
-        self.push_inst(Op::AtomicRmw(op, ptr, val, ordering), ty, origin, None)
+    ) -> (ValueRef, ValueRef) {
+        let primary = self.push_inst(
+            Op::AtomicRmw(op, ptr, val, ordering, mem),
+            Type::Mem,
+            Some(ty),
+            origin,
+            None,
+        );
+        let secondary = ValueRef::inst_secondary_result(primary.index());
+        (primary, secondary)
     }
 
-    /// Atomic compare-and-exchange. Returns the old value.
+    /// Atomic compare-and-exchange. Returns (mem_out, old_value).
     #[allow(clippy::too_many_arguments)]
     pub fn atomic_cmpxchg(
         &mut self,
@@ -470,40 +524,62 @@ impl<'a> Builder<'a> {
         ty: Type,
         success_ord: MemoryOrdering,
         failure_ord: MemoryOrdering,
+        mem: Operand,
         origin: Origin,
-    ) -> ValueRef {
-        self.push_inst(
-            Op::AtomicCmpXchg(ptr, expected, desired, success_ord, failure_ord),
-            ty,
+    ) -> (ValueRef, ValueRef) {
+        let primary = self.push_inst(
+            Op::AtomicCmpXchg(ptr, expected, desired, success_ord, failure_ord, mem),
+            Type::Mem,
+            Some(ty),
             origin,
             None,
-        )
+        );
+        let secondary = ValueRef::inst_secondary_result(primary.index());
+        (primary, secondary)
     }
 
-    /// Memory fence.
-    pub fn fence(&mut self, ordering: MemoryOrdering, origin: Origin) -> ValueRef {
-        self.push_inst(Op::Fence(ordering), Type::Unit, origin, None)
+    /// Memory fence. Returns mem token.
+    pub fn fence(&mut self, ordering: MemoryOrdering, mem: Operand, origin: Origin) -> ValueRef {
+        self.push_inst(Op::Fence(ordering, mem), Type::Mem, None, origin, None)
     }
 
     // ── Symbol ──
 
     /// Load the address of a symbol (function or static data).
     pub fn symbol_addr(&mut self, sym: SymbolId, origin: Origin) -> ValueRef {
-        self.push_inst(Op::SymbolAddr(sym), Type::Ptr(0), origin, None)
+        self.push_inst(Op::SymbolAddr(sym), Type::Ptr(0), None, origin, None)
     }
 
     // ── Call ──
 
-    /// Call function with arguments.
+    /// Call function with arguments. Takes mem token.
+    /// For void calls, returns mem token only.
+    /// For non-void calls, returns (mem_out, data_value).
+    #[allow(clippy::too_many_arguments)]
     pub fn call(
         &mut self,
         callee: Operand,
         args: Vec<Operand>,
         ret_ty: Type,
+        mem: Operand,
         ann: Option<Annotation>,
         origin: Origin,
-    ) -> ValueRef {
-        self.push_inst(Op::Call(callee, args), ret_ty, origin, ann)
+    ) -> (ValueRef, Option<ValueRef>) {
+        if ret_ty == Type::Unit {
+            let primary =
+                self.push_inst(Op::Call(callee, args, mem), Type::Mem, None, origin, None);
+            (primary, None)
+        } else {
+            let primary = self.push_inst(
+                Op::Call(callee, args, mem),
+                Type::Mem,
+                Some(ret_ty),
+                origin,
+                ann,
+            );
+            let secondary = ValueRef::inst_secondary_result(primary.index());
+            (primary, Some(secondary))
+        }
     }
 
     // ── Type conversion ──
@@ -516,17 +592,17 @@ impl<'a> Builder<'a> {
         ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::Bitcast(val), ty, origin, ann)
+        self.push_inst(Op::Bitcast(val), ty, None, origin, ann)
     }
 
     /// Sign-extend to n bits.
     pub fn sext(&mut self, val: Operand, bits: u32, origin: Origin) -> ValueRef {
-        self.push_inst(Op::Sext(val, bits), Type::Int, origin, None)
+        self.push_inst(Op::Sext(val, bits), Type::Int, None, origin, None)
     }
 
     /// Zero-extend to n bits.
     pub fn zext(&mut self, val: Operand, bits: u32, origin: Origin) -> ValueRef {
-        self.push_inst(Op::Zext(val, bits), Type::Int, origin, None)
+        self.push_inst(Op::Zext(val, bits), Type::Int, None, origin, None)
     }
 
     // ── Pointer operations ──
@@ -539,40 +615,46 @@ impl<'a> Builder<'a> {
         addr_space: u32,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::PtrAdd(ptr, offset), Type::Ptr(addr_space), origin, None)
+        self.push_inst(
+            Op::PtrAdd(ptr, offset),
+            Type::Ptr(addr_space),
+            None,
+            origin,
+            None,
+        )
     }
 
     /// Pointer difference (same allocation).
     pub fn ptrdiff(&mut self, a: Operand, b: Operand, origin: Origin) -> ValueRef {
-        self.push_inst(Op::PtrDiff(a, b), Type::Int, origin, None)
+        self.push_inst(Op::PtrDiff(a, b), Type::Int, None, origin, None)
     }
 
     /// Pointer to integer with provenance capture.
     pub fn ptrtoint(&mut self, ptr: Operand, origin: Origin) -> ValueRef {
-        self.push_inst(Op::PtrToInt(ptr), Type::Int, origin, None)
+        self.push_inst(Op::PtrToInt(ptr), Type::Int, None, origin, None)
     }
 
     /// Pointer to address (discard provenance).
     pub fn ptrtoaddr(&mut self, ptr: Operand, origin: Origin) -> ValueRef {
-        self.push_inst(Op::PtrToAddr(ptr), Type::Int, origin, None)
+        self.push_inst(Op::PtrToAddr(ptr), Type::Int, None, origin, None)
     }
 
     /// Integer to pointer (no valid provenance).
     pub fn inttoptr(&mut self, val: Operand, addr_space: u32, origin: Origin) -> ValueRef {
-        self.push_inst(Op::IntToPtr(val), Type::Ptr(addr_space), origin, None)
+        self.push_inst(Op::IntToPtr(val), Type::Ptr(addr_space), None, origin, None)
     }
 
     // ── Terminators ──
 
-    /// Return from function.
-    pub fn ret(&mut self, val: Option<Operand>, origin: Origin) -> ValueRef {
+    /// Return from function. Takes mem token output.
+    pub fn ret(&mut self, val: Option<Operand>, mem: Operand, origin: Origin) -> ValueRef {
         let ty = self.func.ret_ty.clone().unwrap_or(Type::Unit);
-        self.push_inst(Op::Ret(val), ty, origin, None)
+        self.push_inst(Op::Ret(val, mem), ty, None, origin, None)
     }
 
     /// Unconditional branch with block arguments.
     pub fn br(&mut self, target: BlockRef, args: Vec<Operand>, origin: Origin) -> ValueRef {
-        self.push_inst(Op::Br(target, args), Type::Unit, origin, None)
+        self.push_inst(Op::Br(target, args), Type::Unit, None, origin, None)
     }
 
     /// Conditional branch.
@@ -588,6 +670,7 @@ impl<'a> Builder<'a> {
         self.push_inst(
             Op::BrIf(cond, then_block, then_args, else_block, else_args),
             Type::Unit,
+            None,
             origin,
             None,
         )
@@ -595,22 +678,22 @@ impl<'a> Builder<'a> {
 
     /// Loop backedge.
     pub fn continue_(&mut self, values: Vec<Operand>, origin: Origin) -> ValueRef {
-        self.push_inst(Op::Continue(values), Type::Unit, origin, None)
+        self.push_inst(Op::Continue(values), Type::Unit, None, origin, None)
     }
 
     /// Exit region with values.
     pub fn region_yield(&mut self, values: Vec<Operand>, origin: Origin) -> ValueRef {
-        self.push_inst(Op::RegionYield(values), Type::Unit, origin, None)
+        self.push_inst(Op::RegionYield(values), Type::Unit, None, origin, None)
     }
 
     /// Unreachable: indicates control flow should never reach this point.
     pub fn unreachable(&mut self, origin: Origin) -> ValueRef {
-        self.push_inst(Op::Unreachable, Type::Unit, origin, None)
+        self.push_inst(Op::Unreachable, Type::Unit, None, origin, None)
     }
 
     /// Trap: unconditionally abort execution.
     pub fn trap(&mut self, origin: Origin) -> ValueRef {
-        self.push_inst(Op::Trap, Type::Unit, origin, None)
+        self.push_inst(Op::Trap, Type::Unit, None, origin, None)
     }
 
     /// Returns `true` if the current block already ends with a terminator.
@@ -626,7 +709,7 @@ impl<'a> Builder<'a> {
         let last_op = &self.func.instructions[last_idx].op;
         matches!(
             last_op,
-            Op::Ret(_)
+            Op::Ret(..)
                 | Op::Br(_, _)
                 | Op::BrIf(..)
                 | Op::Continue(_)

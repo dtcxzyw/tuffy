@@ -62,6 +62,8 @@ pub enum Type {
     Float(FloatType),
     /// Vector type parameterized by total bit-width.
     Vec(VectorType),
+    /// Abstract memory state token for MemSSA.
+    Mem,
 }
 
 /// Bitmask of excluded IEEE 754 floating-point value classes.

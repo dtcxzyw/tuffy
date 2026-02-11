@@ -61,9 +61,18 @@ impl Origin {
 pub struct Instruction {
     pub op: Op,
     pub ty: Type,
+    /// Secondary result type for multi-result instructions (e.g., load.atomic produces mem + data).
+    pub secondary_ty: Option<Type>,
     pub origin: Origin,
     /// Result-side annotation. Violation causes this instruction to produce poison.
     pub result_annotation: Option<Annotation>,
+}
+
+impl Instruction {
+    /// Number of results this instruction produces (1 or 2).
+    pub fn result_count(&self) -> u8 {
+        if self.secondary_ty.is_some() { 2 } else { 1 }
+    }
 }
 
 /// Integer comparison predicates.
@@ -147,25 +156,32 @@ pub enum Op {
     BoolToInt(Operand),
 
     // -- Memory --
-    /// Load from pointer. Second field is byte count.
-    Load(Operand, u32),
-    /// Store value to pointer: store val, ptr. Third field is byte count.
-    Store(Operand, Operand, u32),
+    /// Load from pointer. Second field is byte count. Third is mem token input.
+    Load(Operand, u32, Operand),
+    /// Store value to pointer: store val, ptr. Third field is byte count. Fourth is mem token input.
+    Store(Operand, Operand, u32, Operand),
     /// Allocate n bytes on stack, returns pointer.
     StackSlot(u32),
 
     // -- Atomic memory operations --
-    /// Atomic load from pointer with memory ordering.
-    LoadAtomic(Operand, MemoryOrdering),
-    /// Atomic store value to pointer: store.atomic val, ptr, ordering.
-    StoreAtomic(Operand, Operand, MemoryOrdering),
-    /// Atomic read-modify-write: rmw op, ptr, val, ordering.
-    AtomicRmw(AtomicRmwOp, Operand, Operand, MemoryOrdering),
+    /// Atomic load from pointer with memory ordering. Third is mem token input.
+    LoadAtomic(Operand, MemoryOrdering, Operand),
+    /// Atomic store value to pointer: store.atomic val, ptr, ordering. Fourth is mem token input.
+    StoreAtomic(Operand, Operand, MemoryOrdering, Operand),
+    /// Atomic read-modify-write: rmw op, ptr, val, ordering. Fifth is mem token input.
+    AtomicRmw(AtomicRmwOp, Operand, Operand, MemoryOrdering, Operand),
     /// Atomic compare-and-exchange: cmpxchg ptr, expected, desired, success_ord, failure_ord.
-    /// Returns the old value; caller uses icmp to check success.
-    AtomicCmpXchg(Operand, Operand, Operand, MemoryOrdering, MemoryOrdering),
-    /// Memory fence with ordering.
-    Fence(MemoryOrdering),
+    /// Returns the old value; caller uses icmp to check success. Sixth is mem token input.
+    AtomicCmpXchg(
+        Operand,
+        Operand,
+        Operand,
+        MemoryOrdering,
+        MemoryOrdering,
+        Operand,
+    ),
+    /// Memory fence with ordering. Second is mem token input.
+    Fence(MemoryOrdering, Operand),
 
     // -- Symbol --
     /// Load the address of a symbol (function or static data).
@@ -173,8 +189,8 @@ pub enum Op {
     SymbolAddr(SymbolId),
 
     // -- Call --
-    /// Call function with arguments.
-    Call(Operand, Vec<Operand>),
+    /// Call function with arguments. Third is mem token input.
+    Call(Operand, Vec<Operand>, Operand),
 
     // -- Type conversion --
     /// Bitcast (reinterpret bits).
@@ -213,8 +229,8 @@ pub enum Op {
     IntToPtr(Operand),
 
     // -- Terminators (by convention, placed last in a basic block) --
-    /// Return value from function.
-    Ret(Option<Operand>),
+    /// Return value from function. Second is mem token output.
+    Ret(Option<Operand>, Operand),
     /// Unconditional branch with block arguments.
     Br(BlockRef, Vec<Operand>),
     /// Conditional branch: brif cond, then_block(args...), else_block(args...).

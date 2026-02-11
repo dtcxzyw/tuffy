@@ -114,6 +114,7 @@ fn fmt_type(ty: &Type) -> String {
             VectorType::Fixed(w) => format!("vec<{w}>"),
             VectorType::Scalable(bw) => format!("vec<vscale x {bw}>"),
         },
+        Type::Mem => "mem".to_string(),
     }
 }
 
@@ -182,6 +183,7 @@ fn fmt_region_kind(kind: &RegionKind) -> &'static str {
 
 /// First pass: assign display numbers to all values in region tree order.
 /// Block args get numbered before instructions within each block.
+/// Secondary results of multi-result instructions get their own numbers.
 fn assign_values(func: &Function, region: RegionRef, ctx: &mut DisplayCtx) {
     let reg = &func.regions[region.index() as usize];
     for child in &reg.children {
@@ -192,7 +194,11 @@ fn assign_values(func: &Function, region: RegionRef, ctx: &mut DisplayCtx) {
                     ctx.assign(ValueRef::block_arg(bb.arg_start + i));
                 }
                 for i in 0..bb.inst_count {
-                    ctx.assign(ValueRef::inst_result(bb.inst_start + i));
+                    let idx = bb.inst_start + i;
+                    ctx.assign(ValueRef::inst_result(idx));
+                    if func.inst(idx).secondary_ty.is_some() {
+                        ctx.assign(ValueRef::inst_secondary_result(idx));
+                    }
                 }
             }
             CfgNode::Region(rref) => {
@@ -206,12 +212,20 @@ fn assign_values(func: &Function, region: RegionRef, ctx: &mut DisplayCtx) {
 fn fmt_inst(
     func: &Function,
     vref: ValueRef,
-    op: &Op,
-    ty: &Type,
-    result_ann: &Option<Annotation>,
+    inst: &crate::instruction::Instruction,
     ctx: &DisplayCtx,
 ) -> String {
+    let op = &inst.op;
+    let _ty = &inst.ty;
+    let result_ann = &inst.result_annotation;
     let v = ctx.fmt_val_ann(vref, result_ann);
+    // For multi-result instructions, format "v0, v1 = ..."
+    let multi_v = if inst.secondary_ty.is_some() {
+        let sec = ValueRef::inst_secondary_result(vref.index());
+        format!("{}, {}", ctx.fmt_val(vref), ctx.fmt_val(sec))
+    } else {
+        String::new()
+    };
     match op {
         Op::Param(idx) => {
             let name = func.param_names.get(*idx as usize).and_then(|n| *n);
@@ -319,50 +333,67 @@ fn fmt_inst(
         Op::BoolToInt(val) => {
             format!("{v} = bool_to_int {}", ctx.fmt_operand(val))
         }
-        Op::Load(ptr, bytes) => format!("{v} = load.{bytes} {}", ctx.fmt_operand(ptr)),
-        Op::Store(val, ptr, bytes) => {
+        Op::Load(ptr, bytes, mem) => {
             format!(
-                "store.{bytes} {}, {}",
+                "{v} = load.{bytes} {}, {}",
+                ctx.fmt_operand(ptr),
+                ctx.fmt_operand(mem)
+            )
+        }
+        Op::Store(val, ptr, bytes, mem) => {
+            format!(
+                "{v} = store.{bytes} {}, {}, {}",
                 ctx.fmt_operand(val),
-                ctx.fmt_operand(ptr)
+                ctx.fmt_operand(ptr),
+                ctx.fmt_operand(mem)
             )
         }
         Op::StackSlot(bytes) => format!("{v} = stack_slot {bytes}"),
-        Op::LoadAtomic(ptr, ord) => {
+        Op::LoadAtomic(ptr, ord, mem) => {
             format!(
-                "{v} = load.atomic.{} {}",
+                "{multi_v} = load.atomic.{} {}, {}",
                 fmt_memory_ordering(ord),
-                ctx.fmt_operand(ptr)
+                ctx.fmt_operand(ptr),
+                ctx.fmt_operand(mem)
             )
         }
-        Op::StoreAtomic(val, ptr, ord) => {
+        Op::StoreAtomic(val, ptr, ord, mem) => {
             format!(
-                "store.atomic.{} {}, {}",
+                "{v} = store.atomic.{} {}, {}, {}",
                 fmt_memory_ordering(ord),
                 ctx.fmt_operand(val),
-                ctx.fmt_operand(ptr)
+                ctx.fmt_operand(ptr),
+                ctx.fmt_operand(mem)
             )
         }
-        Op::AtomicRmw(rmw_op, ptr, val, ord) => {
+        Op::AtomicRmw(rmw_op, ptr, val, ord, mem) => {
             format!(
-                "{v} = rmw.{}.{} {}, {}",
+                "{multi_v} = rmw.{}.{} {}, {}, {}",
                 fmt_atomic_rmw_op(rmw_op),
                 fmt_memory_ordering(ord),
                 ctx.fmt_operand(ptr),
-                ctx.fmt_operand(val)
+                ctx.fmt_operand(val),
+                ctx.fmt_operand(mem)
             )
         }
-        Op::AtomicCmpXchg(ptr, expected, desired, succ, fail) => {
+        Op::AtomicCmpXchg(ptr, expected, desired, succ, fail, mem) => {
             format!(
-                "{v} = cmpxchg.{}.{} {}, {}, {}",
+                "{multi_v} = cmpxchg.{}.{} {}, {}, {}, {}",
                 fmt_memory_ordering(succ),
                 fmt_memory_ordering(fail),
                 ctx.fmt_operand(ptr),
                 ctx.fmt_operand(expected),
-                ctx.fmt_operand(desired)
+                ctx.fmt_operand(desired),
+                ctx.fmt_operand(mem)
             )
         }
-        Op::Fence(ord) => format!("fence.{}", fmt_memory_ordering(ord)),
+        Op::Fence(ord, mem) => {
+            format!(
+                "{v} = fence.{} {}",
+                fmt_memory_ordering(ord),
+                ctx.fmt_operand(mem)
+            )
+        }
         Op::SymbolAddr(sym_id) => {
             let name = match ctx.symbols {
                 Some(symbols) => format!("@{}", symbols.resolve(*sym_id)),
@@ -370,22 +401,26 @@ fn fmt_inst(
             };
             format!("{v} = symbol_addr {name}")
         }
-        Op::Call(callee, args) => {
-            let ret_suffix = match result_ann {
-                Some(a) => format!(" -> {}{}", fmt_type(ty), fmt_annotation(a)),
-                None => format!(" -> {}", fmt_type(ty)),
-            };
-            if *ty == Type::Unit {
+        Op::Call(callee, args, mem) => {
+            if let Some(sec_ty) = &inst.secondary_ty {
+                // Non-void call: multi-result (mem, data)
+                let ret_suffix = match result_ann {
+                    Some(a) => format!(" -> {}{}", fmt_type(sec_ty), fmt_annotation(a)),
+                    None => format!(" -> {}", fmt_type(sec_ty)),
+                };
                 format!(
-                    "call {}({})",
+                    "{multi_v} = call {}({}), {}{ret_suffix}",
                     ctx.fmt_operand(callee),
-                    ctx.fmt_operands(args)
+                    ctx.fmt_operands(args),
+                    ctx.fmt_operand(mem)
                 )
             } else {
+                // Void call: primary result is mem only
                 format!(
-                    "{v} = call {}({}){ret_suffix}",
+                    "{v} = call {}({}), {}",
                     ctx.fmt_operand(callee),
-                    ctx.fmt_operands(args)
+                    ctx.fmt_operands(args),
+                    ctx.fmt_operand(mem)
                 )
             }
         }
@@ -409,9 +444,9 @@ fn fmt_inst(
         Op::PtrToInt(ptr) => format!("{v} = ptrtoint {}", ctx.fmt_operand(ptr)),
         Op::PtrToAddr(ptr) => format!("{v} = ptrtoaddr {}", ctx.fmt_operand(ptr)),
         Op::IntToPtr(val) => format!("{v} = inttoptr {}", ctx.fmt_operand(val)),
-        Op::Ret(val) => match val {
-            Some(o) => format!("ret {}", ctx.fmt_operand(o)),
-            None => "ret".to_string(),
+        Op::Ret(val, mem) => match val {
+            Some(o) => format!("ret {}, {}", ctx.fmt_operand(o), ctx.fmt_operand(mem)),
+            None => format!("ret {}", ctx.fmt_operand(mem)),
         },
         Op::Br(target, args) => {
             if args.is_empty() {
@@ -489,11 +524,7 @@ fn write_block(
     for i in 0..bb.inst_count {
         let vref = ValueRef::inst_result(bb.inst_start + i);
         let inst = func.inst(bb.inst_start + i);
-        writeln!(
-            f,
-            "{inst_pad}{}",
-            fmt_inst(func, vref, &inst.op, &inst.ty, &inst.result_annotation, ctx)
-        )?;
+        writeln!(f, "{inst_pad}{}", fmt_inst(func, vref, inst, ctx))?;
     }
     Ok(())
 }
