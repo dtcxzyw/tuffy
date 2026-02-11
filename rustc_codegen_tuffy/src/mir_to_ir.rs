@@ -210,7 +210,7 @@ impl FatLocalMap {
 
 fn translate_ty(ty: ty::Ty<'_>) -> Option<Type> {
     match ty.kind() {
-        ty::Int(ty::IntTy::I8) | ty::Uint(ty::UintTy::U8) | ty::Bool => Some(Type::Byte(1)),
+        ty::Bool | ty::Int(ty::IntTy::I8) | ty::Uint(ty::UintTy::U8) => Some(Type::Int),
         ty::Int(ty::IntTy::I16) | ty::Uint(ty::UintTy::U16) => Some(Type::Int),
         ty::Int(ty::IntTy::I32) | ty::Uint(ty::UintTy::U32) | ty::Char => Some(Type::Int),
         ty::Int(ty::IntTy::I64)
