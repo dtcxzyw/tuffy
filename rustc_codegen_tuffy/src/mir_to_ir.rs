@@ -136,6 +136,9 @@ pub fn translate_function<'tcx>(
     let entry = block_map.get(BasicBlock::from_u32(0));
     builder.switch_to_block(entry);
 
+    // Create the initial memory token as a block argument on the entry block.
+    let initial_mem = builder.add_block_arg(entry, Type::Mem);
+
     let mut ctx = TranslationCtx {
         tcx,
         mir,
@@ -150,6 +153,7 @@ pub fn translate_function<'tcx>(
         instance,
         sret_ptr: None,
         use_sret,
+        current_mem: initial_mem,
     };
 
     // Emit params into the entry block.
@@ -432,6 +436,8 @@ struct TranslationCtx<'a, 'tcx> {
     instance: Instance<'tcx>,
     sret_ptr: Option<ValueRef>,
     use_sret: bool,
+    /// Current memory token for MemSSA threading.
+    current_mem: ValueRef,
 }
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
@@ -554,8 +560,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         {
             let size = type_size(self.tcx, cur_ty).unwrap_or(8) as u32;
             let slot = self.builder.stack_slot(size, Origin::synthetic());
-            self.builder
-                .store(addr.into(), slot.into(), size, Origin::synthetic());
+            self.current_mem = self.builder
+                .store(addr.into(), slot.into(), size, self.current_mem.into(), Origin::synthetic());
             addr = slot;
         }
 
@@ -682,7 +688,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let ty = translate_ty(projected_ty).unwrap_or(Type::Int);
         Some(
             self.builder
-                .load(addr.into(), bytes, ty, None, Origin::synthetic()),
+                .load(addr.into(), bytes, ty, self.current_mem.into(), None, Origin::synthetic()),
         )
     }
 
@@ -703,10 +709,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     );
                                     let bytes =
                                         type_size(self.tcx, ty).unwrap_or(8) as u32;
-                                    self.builder.store(
+                                    self.current_mem = self.builder.store(
                                         val.into(),
                                         slot.into(),
                                         bytes,
+                                        self.current_mem.into(),
                                         Origin::synthetic(),
                                     );
                                 } else {
@@ -723,8 +730,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         if let Some((addr, projected_ty)) = self.translate_place_to_addr(place) {
                             let addr = self.coerce_to_ptr(addr);
                             let bytes = type_size(self.tcx, projected_ty).unwrap_or(8) as u32;
-                            self.builder
-                                .store(val.into(), addr.into(), bytes, Origin::synthetic());
+                            self.current_mem = self.builder
+                                .store(val.into(), addr.into(), bytes, self.current_mem.into(), Origin::synthetic());
                         }
                     }
                 }
@@ -805,6 +812,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             load_addr.into(),
                             8,
                             Type::Int,
+                            self.current_mem.into(),
                             None,
                             Origin::synthetic(),
                         );
@@ -815,15 +823,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             self.builder
                                 .ptradd(sret.into(), off.into(), 0, Origin::synthetic())
                         };
-                        self.builder
-                            .store(word.into(), store_addr.into(), 8, Origin::synthetic());
+                        self.current_mem = self.builder
+                            .store(word.into(), store_addr.into(), 8, self.current_mem.into(), Origin::synthetic());
                     }
 
                     // Return the sret pointer in RAX (System V convention).
-                    self.builder.ret(Some(sret.into()), Origin::synthetic());
+                    self.builder.ret(Some(sret.into()), self.current_mem.into(), Origin::synthetic());
                 } else if matches!(translate_ty(ret_mir_ty), Some(Type::Unit) | None) {
                     // Unit-returning or untranslatable return type: bare ret, no value.
-                    self.builder.ret(None, Origin::synthetic());
+                    self.builder.ret(None, self.current_mem.into(), Origin::synthetic());
                 } else if self.stack_locals.is_stack(ret_local)
                     && matches!(
                         self.locals.get(ret_local).and_then(|v| self.builder.value_type(v).cloned()),
@@ -843,7 +851,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // First 8 bytes → RAX.
                     let word0 =
                         self.builder
-                            .load(slot.into(), 8, Type::Int, None, Origin::synthetic());
+                            .load(slot.into(), 8, Type::Int, self.current_mem.into(), None, Origin::synthetic());
 
                     if size > 8 {
                         // Second 8 bytes → secondary return register.
@@ -855,6 +863,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             addr1.into(),
                             8,
                             Type::Int,
+                            self.current_mem.into(),
                             None,
                             Origin::synthetic(),
                         );
@@ -870,7 +879,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         _ => word0,
                     };
                     self.builder
-                        .ret(Some(coerced_word0.into()), Origin::synthetic());
+                        .ret(Some(coerced_word0.into()), self.current_mem.into(), Origin::synthetic());
                 } else {
                     // Normal scalar return.
                     let val = self.locals.values[ret_local.as_usize()];
@@ -887,7 +896,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             Some(Type::Ptr(_)) => self.coerce_to_ptr(v),
                             _ => v,
                         };
-                        self.builder.ret(Some(coerced.into()), Origin::synthetic());
+                        self.builder.ret(Some(coerced.into()), self.current_mem.into(), Origin::synthetic());
                     } else {
                         // Return local was never assigned — this path is
                         // unreachable at runtime (diverging function).
@@ -1015,8 +1024,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 &mut self.builder,
                 &mut self.locals,
                 &mut self.symbols,
+                self.current_mem,
             );
-            if mem_handled {
+            if let Some(new_mem) = mem_handled {
+                self.current_mem = new_mem;
                 if let Some(target) = target {
                     let target_block = self.block_map.get(*target);
                     self.builder.br(target_block, vec![], Origin::synthetic());
@@ -1074,6 +1085,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 v.into(),
                                 8,
                                 Type::Int,
+                                self.current_mem.into(),
                                 None,
                                 Origin::synthetic(),
                             );
@@ -1090,6 +1102,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     addr1.into(),
                                     8,
                                     Type::Int,
+                                    self.current_mem.into(),
                                     None,
                                     Origin::synthetic(),
                                 );
@@ -1134,13 +1147,18 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             self.builder.iconst(0, Origin::synthetic())
         };
         let call_ret_ty = translate_ty(dest_ty).unwrap_or(Type::Unit);
-        let call_vref = self.builder.call(
+        let (call_mem, call_data) = self.builder.call(
             callee_val.into(),
             ir_args,
             call_ret_ty,
+            self.current_mem.into(),
             None,
             Origin::synthetic(),
         );
+        self.current_mem = call_mem;
+        // For non-void calls, call_data is Some(data_vref).
+        // For void calls, call_data is None — use a dummy zero.
+        let call_vref = call_data.unwrap_or_else(|| self.builder.iconst(0, Origin::synthetic()));
 
         if callee_sret {
             // For sret calls, the result is in the stack slot we allocated.
@@ -1155,8 +1173,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // downstream code gets a valid pointer to the struct.
             let size = dest_size.unwrap();
             let slot = self.builder.stack_slot(size as u32, Origin::synthetic());
-            self.builder
-                .store(call_vref.into(), slot.into(), 8, Origin::synthetic());
+            self.current_mem = self.builder
+                .store(call_vref.into(), slot.into(), 8, self.current_mem.into(), Origin::synthetic());
 
             let rdx_val = self.builder.iconst(0, Origin::synthetic());
             self.abi_metadata
@@ -1165,8 +1183,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             let addr1 = self
                 .builder
                 .ptradd(slot.into(), off.into(), 0, Origin::synthetic());
-            self.builder
-                .store(rdx_val.into(), addr1.into(), 8, Origin::synthetic());
+            self.current_mem = self.builder
+                .store(rdx_val.into(), addr1.into(), 8, self.current_mem.into(), Origin::synthetic());
 
             self.locals.set(destination.local, slot);
             self.stack_locals.mark(destination.local);
@@ -1384,8 +1402,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 } else {
                     if let Some(val) = self.locals.get(place.local) {
                         let slot = self.builder.stack_slot(8, Origin::synthetic());
-                        self.builder
-                            .store(val.into(), slot.into(), 8, Origin::synthetic());
+                        self.current_mem = self.builder
+                            .store(val.into(), slot.into(), 8, self.current_mem.into(), Origin::synthetic());
                         Some(slot)
                     } else {
                         None
@@ -1431,8 +1449,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let bytes = field_ty.and_then(|t| type_size(self.tcx, t)).unwrap_or(8) as u32;
                     let offset = field_offset(self.tcx, agg_ty, i).unwrap_or(i as u64 * 8);
                     if offset == 0 {
-                        self.builder
-                            .store(val.into(), slot.into(), bytes, Origin::synthetic());
+                        self.current_mem = self.builder
+                            .store(val.into(), slot.into(), bytes, self.current_mem.into(), Origin::synthetic());
                     } else {
                         let off_val = self.builder.iconst(offset as i64, Origin::synthetic());
                         let addr = self.builder.ptradd(
@@ -1441,8 +1459,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             0,
                             Origin::synthetic(),
                         );
-                        self.builder
-                            .store(val.into(), addr.into(), bytes, Origin::synthetic());
+                        self.current_mem = self.builder
+                            .store(val.into(), addr.into(), bytes, self.current_mem.into(), Origin::synthetic());
                     }
                 }
                 // Mark the destination local as stack-allocated.
@@ -1751,7 +1769,7 @@ fn translate_intrinsic(
 
 /// Lower memory intrinsics to libc calls with adjusted arguments.
 /// Handles write_bytes, copy_nonoverlapping, copy, and raw_eq.
-/// Returns true if the intrinsic was handled.
+/// Returns `Some(new_mem)` if the intrinsic was handled, `None` to fall through.
 #[allow(clippy::too_many_arguments)]
 fn translate_memory_intrinsic<'tcx>(
     tcx: TyCtxt<'tcx>,
@@ -1762,18 +1780,19 @@ fn translate_memory_intrinsic<'tcx>(
     builder: &mut Builder<'_>,
     locals: &mut LocalMap,
     symbols: &mut SymbolTable,
-) -> bool {
+    current_mem: ValueRef,
+) -> Option<ValueRef> {
     // Extract the type parameter T and compute its size.
     let elem_size = match substs.first().and_then(|a| a.as_type()) {
         Some(t) => type_size(tcx, t).unwrap_or(0),
-        None => return false,
+        None => return None,
     };
 
     match name {
         // write_bytes<T>(dst, val, count) → memset(dst, val, count * sizeof(T))
         "write_bytes" | "volatile_set_memory" => {
             if ir_args.len() < 3 {
-                return false;
+                return None;
             }
             let dst = ir_args[0];
             let val = ir_args[1];
@@ -1786,21 +1805,24 @@ fn translate_memory_intrinsic<'tcx>(
             };
             let sym_id = symbols.intern("memset");
             let callee = builder.symbol_addr(sym_id, Origin::synthetic());
-            let call = builder.call(
+            let (mem_out, data) = builder.call(
                 callee.into(),
                 vec![dst.into(), val.into(), byte_count.into()],
                 Type::Int,
+                current_mem.into(),
                 None,
                 Origin::synthetic(),
             );
-            locals.set(destination_local, call);
-            true
+            if let Some(d) = data {
+                locals.set(destination_local, d);
+            }
+            Some(mem_out)
         }
 
         // copy_nonoverlapping<T>(src, dst, count) → memcpy(dst, src, count * sizeof(T))
         "copy_nonoverlapping" | "volatile_copy_nonoverlapping_memory" => {
             if ir_args.len() < 3 {
-                return false;
+                return None;
             }
             let src = ir_args[0];
             let dst = ir_args[1];
@@ -1814,21 +1836,24 @@ fn translate_memory_intrinsic<'tcx>(
             // memcpy(dst, src, n) — note swapped argument order.
             let sym_id = symbols.intern("memcpy");
             let callee = builder.symbol_addr(sym_id, Origin::synthetic());
-            let call = builder.call(
+            let (mem_out, data) = builder.call(
                 callee.into(),
                 vec![dst.into(), src.into(), byte_count.into()],
                 Type::Int,
+                current_mem.into(),
                 None,
                 Origin::synthetic(),
             );
-            locals.set(destination_local, call);
-            true
+            if let Some(d) = data {
+                locals.set(destination_local, d);
+            }
+            Some(mem_out)
         }
 
         // copy<T>(src, dst, count) → memmove(dst, src, count * sizeof(T))
         "copy" | "volatile_copy_memory" => {
             if ir_args.len() < 3 {
-                return false;
+                return None;
             }
             let src = ir_args[0];
             let dst = ir_args[1];
@@ -1841,35 +1866,40 @@ fn translate_memory_intrinsic<'tcx>(
             };
             let sym_id = symbols.intern("memmove");
             let callee = builder.symbol_addr(sym_id, Origin::synthetic());
-            let call = builder.call(
+            let (mem_out, data) = builder.call(
                 callee.into(),
                 vec![dst.into(), src.into(), byte_count.into()],
                 Type::Int,
+                current_mem.into(),
                 None,
                 Origin::synthetic(),
             );
-            locals.set(destination_local, call);
-            true
+            if let Some(d) = data {
+                locals.set(destination_local, d);
+            }
+            Some(mem_out)
         }
 
         // raw_eq<T>(a, b) → memcmp(a, b, sizeof(T)) == 0
         "raw_eq" => {
             if ir_args.len() < 2 {
-                return false;
+                return None;
             }
             let a = ir_args[0];
             let b = ir_args[1];
             let sz = builder.iconst(elem_size as i64, Origin::synthetic());
             let sym_id = symbols.intern("memcmp");
             let callee = builder.symbol_addr(sym_id, Origin::synthetic());
-            let cmp_result = builder.call(
+            let (mem_out, data) = builder.call(
                 callee.into(),
                 vec![a.into(), b.into(), sz.into()],
                 Type::Int,
+                current_mem.into(),
                 None,
                 Origin::synthetic(),
             );
             // raw_eq returns bool (0 or 1): true when memcmp returns 0.
+            let cmp_result = data.unwrap_or_else(|| builder.iconst(0, Origin::synthetic()));
             let zero = builder.iconst(0, Origin::synthetic());
             let eq = builder.icmp(
                 tuffy_ir::instruction::ICmpOp::Eq,
@@ -1878,10 +1908,10 @@ fn translate_memory_intrinsic<'tcx>(
                 Origin::synthetic(),
             );
             locals.set(destination_local, eq);
-            true
+            Some(mem_out)
         }
 
-        _ => false,
+        _ => None,
     }
 }
 
