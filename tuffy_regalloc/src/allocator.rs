@@ -7,7 +7,7 @@
 use std::collections::{BTreeSet, HashSet};
 
 use crate::liveness::{LiveRange, compute_live_ranges};
-use crate::{PReg, RegAllocInst, VReg};
+use crate::{PReg, RegAllocInst};
 
 /// Result of register allocation.
 pub struct AllocResult {
@@ -113,10 +113,10 @@ fn expire_old(
 ) {
     active.retain(|&(end, vi)| {
         if end <= pos {
-            if let Some(preg) = assignments[vi as usize] {
-                if alloc_set.contains(&preg.0) {
-                    free.insert(preg.0);
-                }
+            if let Some(preg) = assignments[vi as usize]
+                && alloc_set.contains(&preg.0)
+            {
+                free.insert(preg.0);
             }
             false
         } else {
@@ -142,10 +142,12 @@ fn conflicts_with(
 ) -> bool {
     for r in ranges {
         let ri = r.vreg.0 as usize;
-        if let Some(preg) = assignments[ri] {
-            if preg.0 == candidate && r.start < end && r.end > start {
-                return true;
-            }
+        if let Some(preg) = assignments[ri]
+            && preg.0 == candidate
+            && r.start < end
+            && r.end > start
+        {
+            return true;
         }
     }
     false

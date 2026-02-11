@@ -39,18 +39,18 @@ fn build_blocks<I: RegAllocInst>(insts: &[I]) -> Vec<Block> {
         let i = i as u32;
 
         // A label after block_start begins a new block.
-        if i > block_start {
-            if let Some(lid) = inst.label_id() {
-                blocks.push(Block {
-                    start: block_start,
-                    end: i - 1,
-                    label,
-                    successors: vec![],
-                });
-                block_start = i;
-                label = Some(lid);
-                continue;
-            }
+        if i > block_start
+            && let Some(lid) = inst.label_id()
+        {
+            blocks.push(Block {
+                start: block_start,
+                end: i - 1,
+                label,
+                successors: vec![],
+            });
+            block_start = i;
+            label = Some(lid);
+            continue;
         }
 
         // A terminator ends the current block.
