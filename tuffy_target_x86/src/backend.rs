@@ -241,6 +241,7 @@ fn rewrite_inst(inst: &VInst, assignments: &[PReg]) -> PInst {
 /// Public for use in tests.
 pub fn lower_isel_result(isel_result: &isel::IselResult) -> Vec<PInst> {
     let alloc_result = tuffy_regalloc::allocator::allocate(
+        &isel_result.insts,
         isel_result.vreg_count,
         &isel_result.constraints,
         &ALLOC_REGS,
@@ -275,6 +276,7 @@ impl Backend for X86Backend {
 
         // 2. Register allocation → VReg assignments
         let alloc_result = tuffy_regalloc::allocator::allocate(
+            &isel_result.insts,
             isel_result.vreg_count,
             &isel_result.constraints,
             &ALLOC_REGS,
