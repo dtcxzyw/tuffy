@@ -155,6 +155,7 @@ inductive Value where
   | bytes (bs : List AbstractByte)
   | ptr (p : Pointer)
   | poison
+  | mem
   deriving Repr
 
 /-- Memory: a map from addresses to abstract bytes -/
