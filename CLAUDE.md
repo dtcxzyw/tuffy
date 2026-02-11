@@ -50,6 +50,8 @@ Changes to different components must be committed separately. Each individual co
 
 Automatically decide when to commit based on logical units of work. Do not ask the user for permission to commit — just commit when a coherent change is complete.
 
+Never amend previous commits (`git commit --amend`). Always create new commits to keep a linear, auditable history.
+
 ## Build Commands
 
 ```
