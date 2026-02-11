@@ -173,4 +173,9 @@ impl RegAllocInst for VInst {
             MInst::Ret | MInst::Jmp { .. } | MInst::Jcc { .. } | MInst::Ud2
         )
     }
+
+    fn falls_through(&self) -> bool {
+        // Jcc falls through (conditional); Jmp/Ret/Ud2 do not.
+        !matches!(self, MInst::Ret | MInst::Jmp { .. } | MInst::Ud2)
+    }
 }

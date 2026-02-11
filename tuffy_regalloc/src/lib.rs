@@ -47,6 +47,10 @@ pub trait RegAllocInst {
 
     /// Whether this instruction is a terminator (ret, jmp, etc.).
     fn is_terminator(&self) -> bool;
+
+    /// Whether execution can fall through to the next instruction.
+    /// False for unconditional jumps and returns; true for conditional branches.
+    fn falls_through(&self) -> bool;
 }
 
 /// A virtual register produced by instruction selection.
