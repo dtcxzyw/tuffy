@@ -886,6 +886,7 @@ fn select_call(
     Some(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn select_select(
     vref: ValueRef,
     cond: &Operand,
