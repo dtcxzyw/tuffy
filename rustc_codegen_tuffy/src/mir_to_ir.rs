@@ -437,12 +437,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         )
     }
 
-    /// If `val` is a Ptr, insert ptrtoaddr to coerce it to Int.
+    /// If `val` is a Ptr or Bool, coerce it to Int.
     fn coerce_to_int(&mut self, val: ValueRef) -> ValueRef {
-        if matches!(self.builder.value_type(val), Some(Type::Ptr(_))) {
-            self.builder.ptrtoaddr(val.into(), Origin::synthetic())
-        } else {
-            val
+        match self.builder.value_type(val) {
+            Some(Type::Ptr(_)) => self.builder.ptrtoaddr(val.into(), Origin::synthetic()),
+            Some(Type::Bool) => self.builder.bool_to_int(val.into(), Origin::synthetic()),
+            _ => val,
         }
     }
 
@@ -807,7 +807,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             .mark_secondary_return_move(dummy.index(), word1.index());
                     }
 
-                    self.builder.ret(Some(word0.into()), Origin::synthetic());
+                    // Coerce to match declared return type (e.g., Ptr for &T returns).
+                    let ret_ir_ty = translate_ty(ret_mir_ty);
+                    let coerced_word0 = match ret_ir_ty {
+                        Some(Type::Ptr(_)) => self.coerce_to_ptr(word0),
+                        _ => word0,
+                    };
+                    self.builder
+                        .ret(Some(coerced_word0.into()), Origin::synthetic());
                 } else {
                     // Normal scalar return.
                     let val = self.locals.values[ret_local.as_usize()];
