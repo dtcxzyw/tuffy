@@ -4,7 +4,7 @@
 //! Respects fixed-register constraints from instruction selection and spills
 //! to stack slots when register pressure exceeds available registers.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 
 use crate::liveness::{LiveRange, compute_live_ranges};
 use crate::{PReg, RegAllocInst, VReg};
@@ -41,6 +41,7 @@ pub fn allocate<I: RegAllocInst>(
 
     // Track which PRegs are free, keyed by PReg encoding.
     let mut free: BTreeSet<u8> = allocatable.iter().map(|p| p.0).collect();
+    let alloc_set: HashSet<u8> = allocatable.iter().map(|p| p.0).collect();
 
     // Active intervals sorted by end point: (end, vreg_index).
     let mut active: Vec<(u32, u32)> = Vec::new();
@@ -49,18 +50,32 @@ pub fn allocate<I: RegAllocInst>(
         let vi = range.vreg.0 as usize;
 
         // Expire intervals that ended before this one starts.
-        expire_old(&mut active, &mut free, &assignments, range.start);
+        expire_old(
+            &mut active,
+            &mut free,
+            &assignments,
+            range.start,
+            &alloc_set,
+        );
 
         if let Some(fixed) = constraints[vi] {
-            // Fixed constraint: must use this specific PReg.
-            handle_fixed(
-                fixed,
-                range,
-                &mut active,
-                &mut free,
-                &mut assignments,
-                allocatable,
-            );
+            if !alloc_set.contains(&fixed.0) {
+                // Non-allocatable fixed register (e.g. RBP): assign directly.
+                // These don't compete for allocatable registers and multiple
+                // VRegs can share the same non-allocatable register.
+                assignments[vi] = Some(fixed);
+            } else {
+                // Allocatable fixed constraint: must use this specific PReg.
+                handle_fixed(
+                    fixed,
+                    range,
+                    &mut active,
+                    &mut free,
+                    &mut assignments,
+                    allocatable,
+                    &ranges,
+                );
+            }
         } else if let Some(preg) = pick_free(&free) {
             // Free register available.
             free.remove(&preg);
@@ -88,17 +103,20 @@ pub fn allocate<I: RegAllocInst>(
 }
 
 /// Remove intervals from `active` whose end point <= `pos`, returning their
-/// registers to the free pool.
+/// registers to the free pool (only if the register is allocatable).
 fn expire_old(
     active: &mut Vec<(u32, u32)>,
     free: &mut BTreeSet<u8>,
     assignments: &[Option<PReg>],
     pos: u32,
+    alloc_set: &HashSet<u8>,
 ) {
     active.retain(|&(end, vi)| {
         if end <= pos {
             if let Some(preg) = assignments[vi as usize] {
-                free.insert(preg.0);
+                if alloc_set.contains(&preg.0) {
+                    free.insert(preg.0);
+                }
             }
             false
         } else {
@@ -112,8 +130,29 @@ fn pick_free(free: &BTreeSet<u8>) -> Option<u8> {
     free.iter().next().copied()
 }
 
+/// Check whether `candidate` PReg conflicts with any interval that overlaps
+/// the range [start, end). An interval conflicts if it has already been
+/// assigned `candidate` and its range overlaps.
+fn conflicts_with(
+    candidate: u8,
+    start: u32,
+    end: u32,
+    assignments: &[Option<PReg>],
+    ranges: &[LiveRange],
+) -> bool {
+    for r in ranges {
+        let ri = r.vreg.0 as usize;
+        if let Some(preg) = assignments[ri] {
+            if preg.0 == candidate && r.start < end && r.end > start {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Handle a fixed-constraint interval. If the required PReg is occupied,
-/// evict the conflicting interval.
+/// evict the conflicting interval and reassign it to a safe register.
 fn handle_fixed(
     fixed: PReg,
     range: &LiveRange,
@@ -121,6 +160,7 @@ fn handle_fixed(
     free: &mut BTreeSet<u8>,
     assignments: &mut [Option<PReg>],
     allocatable: &[PReg],
+    ranges: &[LiveRange],
 ) {
     let vi = range.vreg.0 as usize;
 
@@ -138,16 +178,33 @@ fn handle_fixed(
         .position(|&(_, avi)| assignments[avi as usize] == Some(fixed))
     {
         let (evict_end, evict_vi) = active.remove(pos);
-        // Reassign the evicted interval to any free register.
-        if let Some(alt) = pick_free(free) {
-            free.remove(&alt);
-            assignments[evict_vi as usize] = Some(PReg(alt));
-            active.push((evict_end, evict_vi));
-            active.sort_by_key(|&(end, _)| end);
-        } else {
-            // No free register for evicted interval — assign first allocatable
-            // as fallback (will produce incorrect code if register pressure is
-            // truly exceeded, but matches current non-spilling behavior).
+        // Find the evicted interval's full range for conflict checking.
+        let evict_range = ranges
+            .iter()
+            .find(|r| r.vreg.0 == evict_vi)
+            .expect("evicted vreg must have a range");
+
+        // Find a free register that doesn't conflict with any interval
+        // overlapping the evicted interval's full range.
+        let mut reassigned = false;
+        for &candidate in free.iter() {
+            if !conflicts_with(
+                candidate,
+                evict_range.start,
+                evict_range.end,
+                assignments,
+                ranges,
+            ) {
+                free.remove(&candidate);
+                assignments[evict_vi as usize] = Some(PReg(candidate));
+                active.push((evict_end, evict_vi));
+                active.sort_by_key(|&(end, _)| end);
+                reassigned = true;
+                break;
+            }
+        }
+        if !reassigned {
+            // No conflict-free register available — fallback.
             assignments[evict_vi as usize] = Some(allocatable[0]);
         }
     }
@@ -162,7 +219,7 @@ fn handle_fixed(
 fn spill_at(
     range: &LiveRange,
     active: &mut Vec<(u32, u32)>,
-    free: &mut BTreeSet<u8>,
+    _free: &mut BTreeSet<u8>,
     assignments: &mut [Option<PReg>],
     allocatable: &[PReg],
 ) {
