@@ -936,7 +936,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let callee_sym = resolve_call_symbol(self.tcx, func, self.instance);
 
         // Check if the callee returns a large struct (needs sret on caller side).
-        let dest_ty = self.mir.local_decls[destination.local].ty;
+        let dest_ty = self.monomorphize(self.mir.local_decls[destination.local].ty);
         let dest_size = type_size(self.tcx, dest_ty);
         let callee_sret = needs_indirect_return(self.tcx, dest_ty);
 
@@ -957,9 +957,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // Skip zero-sized (Unit) and untranslatable args — they don't
             // occupy an ABI slot, matching the callee's param skipping.
             let arg_ty = match &arg.node {
-                Operand::Copy(place) | Operand::Move(place) => self.mir.local_decls[place.local].ty,
-                Operand::Constant(c) => c.ty(),
-                _ => self.mir.local_decls[mir::Local::from_usize(0)].ty,
+                Operand::Copy(place) | Operand::Move(place) => {
+                    self.monomorphize(self.mir.local_decls[place.local].ty)
+                }
+                Operand::Constant(c) => self.monomorphize(c.ty()),
+                _ => self.monomorphize(self.mir.local_decls[mir::Local::from_usize(0)].ty),
             };
             if matches!(translate_ty(arg_ty), Some(Type::Unit) | None) {
                 continue;
