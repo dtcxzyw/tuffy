@@ -24,14 +24,78 @@ be updated to carry memory version tokens.
 - Support progressive refinement as alias analysis improves
 - Integrate with the optimizer for memory-aware transformations
 
-### Design Considerations
+### Design
 
-- Memory tokens should be optional during early IR construction and required after
-  MemSSA construction
-- Atomic operations with ordering constraints impose additional ordering on memory
-  tokens beyond simple data dependencies
-- Fence operations create memory barriers that affect token ordering
-- The MemSSA representation should support both may-alias and must-alias information
+#### `mem` type
+
+Introduce a new `mem` type as a first-class SSA value type, alongside `int`, `ptr`,
+and `b<N>`. Memory tokens flow through the function as regular SSA values, using the
+same mechanisms as other values: block parameters for phi, function entry parameter
+for initial memory state, and return operand for function exit.
+
+Single memory partition — no memory partitioning. Precision is recovered via alias
+analysis backed refinement (clobber walking), not upfront partitioning. This follows
+LLVM MemorySSA's design: precise partitioning is impractical and not worth the cost.
+
+#### Instruction classification
+
+MemoryDef — consumes a `mem` token, produces a new `mem` token:
+- `store`
+- `store.atomic`
+- `load.atomic` (has ordering constraints, treated as def)
+- `rmw`
+- `cmpxchg`
+- `fence`
+- `call` (all calls, including readonly — conservative default)
+
+MemoryUse — consumes a `mem` token, does not produce one:
+- `load` (plain, non-atomic)
+
+A `mem` def is allowed to have no uses (no artificial consumers needed).
+
+#### Entry, exit, and phi
+
+- Entry: the entry block receives the initial memory state as a block parameter of
+  type `mem`.
+- Exit: `ret` carries the final `mem` token as an operand. This prevents DCE from
+  incorrectly eliminating stores.
+- Phi: memory version merging at CFG join points uses regular block parameters of
+  type `mem`, not a special `mem.phi` instruction.
+
+#### Refinement as transformation
+
+MemSSA refinement follows the "analysis is also a transformation" principle. When
+alias analysis proves that an intervening MemoryDef does not clobber a load's memory
+location, the load's `mem` operand is rewritten to point to an earlier def. This is
+a regular IR transformation — no side tables, no special update protocol.
+
+#### IR example
+
+```
+func @example() {
+entry(%mem0: mem):
+  %mem1 = store b32 %v, ptr %p, %mem0
+  %x = load b32, ptr %q, %mem1
+  %mem2, %y = load.atomic b32, ptr %r, acquire, %mem1
+  %mem3 = store b32 %x, ptr %s, %mem2
+  br cond, bb1, bb2
+
+bb1:
+  %mem4 = store b32 %a, ptr %t, %mem3
+  br bb3(%mem4)
+
+bb2:
+  br bb3(%mem3)
+
+bb3(%mem5: mem):
+  ret %mem5
+}
+```
+
+#### Reference
+
+- [LLVM MemorySSA](https://llvm.org/docs/MemorySSA.html) — single partition design,
+  MemoryDef/MemoryUse/MemoryPhi, clobber walker with alias analysis.
 
 ## Subtasks
 
