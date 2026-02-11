@@ -775,10 +775,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let ret_local = mir::Local::from_usize(0);
                 let ret_mir_ty = self.monomorphize(self.mir.local_decls[ret_local].ty);
 
-                // Unit-returning or untranslatable return type: bare ret, no value.
-                if matches!(translate_ty(ret_mir_ty), Some(Type::Unit) | None) {
-                    self.builder.ret(None, Origin::synthetic());
-                } else if self.use_sret {
+                // sret path must be checked first: for coroutines/closures,
+                // translate_ty returns None but the ABI still uses sret.
+                if self.use_sret {
                     // Large struct return: copy _0's data to the caller's sret pointer,
                     // then return the sret pointer in RAX.
                     let sret = self
@@ -822,6 +821,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
                     // Return the sret pointer in RAX (System V convention).
                     self.builder.ret(Some(sret.into()), Origin::synthetic());
+                } else if matches!(translate_ty(ret_mir_ty), Some(Type::Unit) | None) {
+                    // Unit-returning or untranslatable return type: bare ret, no value.
+                    self.builder.ret(None, Origin::synthetic());
                 } else if self.stack_locals.is_stack(ret_local)
                     && matches!(
                         self.locals.get(ret_local).and_then(|v| self.builder.value_type(v).cloned()),
