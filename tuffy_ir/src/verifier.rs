@@ -365,6 +365,28 @@ impl FuncVerifier<'_> {
                 }
             }
 
+            Op::CountLeadingZeros(a) => {
+                self.check_operand(a, &loc);
+                self.expect_int(a, "count_leading_zeros", &loc);
+                if inst.ty != Type::Int {
+                    self.result.error(
+                        loc,
+                        format!("count_leading_zeros result must be Int, got {:?}", inst.ty),
+                    );
+                }
+            }
+
+            Op::CountTrailingZeros(a) => {
+                self.check_operand(a, &loc);
+                self.expect_int(a, "count_trailing_zeros", &loc);
+                if inst.ty != Type::Int {
+                    self.result.error(
+                        loc,
+                        format!("count_trailing_zeros result must be Int, got {:?}", inst.ty),
+                    );
+                }
+            }
+
             Op::Const(_) => {
                 if inst.ty != Type::Int {
                     self.result

@@ -423,6 +423,16 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::CountOnes(val), Type::Int, None, origin, None)
     }
 
+    /// Count leading zeros.
+    pub fn count_leading_zeros(&mut self, val: Operand, origin: Origin) -> ValueRef {
+        self.push_inst(Op::CountLeadingZeros(val), Type::Int, None, origin, None)
+    }
+
+    /// Count trailing zeros.
+    pub fn count_trailing_zeros(&mut self, val: Operand, origin: Origin) -> ValueRef {
+        self.push_inst(Op::CountTrailingZeros(val), Type::Int, None, origin, None)
+    }
+
     // ── Memory ──
 
     /// Load from pointer. `bytes` is the access width in bytes. Takes mem token input.

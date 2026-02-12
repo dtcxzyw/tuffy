@@ -482,6 +482,12 @@ fn fmt_inst(
         Op::CountOnes(val) => {
             format!("{v} = count_ones {}", ctx.fmt_operand(val))
         }
+        Op::CountLeadingZeros(val) => {
+            format!("{v} = count_leading_zeros {}", ctx.fmt_operand(val))
+        }
+        Op::CountTrailingZeros(val) => {
+            format!("{v} = count_trailing_zeros {}", ctx.fmt_operand(val))
+        }
         Op::Unreachable => "unreachable".to_string(),
         Op::Trap => "trap".to_string(),
     }
