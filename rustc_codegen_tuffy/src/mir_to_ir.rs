@@ -1501,8 +1501,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             Rvalue::UnaryOp(mir::UnOp::PtrMetadata, _) => None,
             Rvalue::UnaryOp(mir::UnOp::Neg, operand) => {
                 let v = self.translate_operand(operand)?;
-                // Unsupported operand types (e.g. floats) may produce Unit
-                // or typeless values — emit a dummy zero.
+                // Coerce Bool/Ptr to Int; reject unsupported types (floats → Unit).
+                let v = self.coerce_to_int(v);
                 if !matches!(self.builder.value_type(v), Some(Type::Int)) {
                     return Some(self.builder.iconst(0, Origin::synthetic()));
                 }
@@ -1514,16 +1514,23 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             }
             Rvalue::UnaryOp(mir::UnOp::Not, operand) => {
                 let v = self.translate_operand(operand)?;
-                // Unsupported operand types (e.g. floats) may produce Unit
-                // or typeless values — emit a dummy zero.
-                if !matches!(self.builder.value_type(v), Some(Type::Int)) {
-                    return Some(self.builder.iconst(0, Origin::synthetic()));
+                match self.builder.value_type(v) {
+                    Some(Type::Bool) => {
+                        // Boolean NOT: bool_to_int then XOR 1.
+                        let int_v = self.builder.bool_to_int(v.into(), Origin::synthetic());
+                        let one = self.builder.iconst(1, Origin::synthetic());
+                        Some(self.builder.xor(int_v.into(), one.into(), None, Origin::synthetic()))
+                    }
+                    Some(Type::Int) => {
+                        // Bitwise NOT: XOR with -1.
+                        let ones = self.builder.iconst(-1, Origin::synthetic());
+                        Some(self.builder.xor(v.into(), ones.into(), None, Origin::synthetic()))
+                    }
+                    _ => {
+                        // Unsupported type (e.g. float) — emit dummy zero.
+                        Some(self.builder.iconst(0, Origin::synthetic()))
+                    }
                 }
-                let ones = self.builder.iconst(-1, Origin::synthetic());
-                Some(
-                    self.builder
-                        .xor(v.into(), ones.into(), None, Origin::synthetic()),
-                )
             }
             Rvalue::Discriminant(place) => self.translate_place_to_value(place),
             _ => None,
