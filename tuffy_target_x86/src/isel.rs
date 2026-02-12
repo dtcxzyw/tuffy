@@ -300,8 +300,18 @@ fn select_inst(
     match op {
         Op::Param(idx) => {
             let arg_gpr = ARG_REGS.get(*idx as usize)?;
-            let vreg = ctx.alloc.alloc_fixed(arg_gpr.to_preg());
-            ctx.regs.assign(vref, vreg);
+            let fixed = ctx.alloc.alloc_fixed(arg_gpr.to_preg());
+            // Immediately copy the argument register into a fresh unconstrained
+            // vreg. This lets the register allocator assign it to a callee-saved
+            // register when the value is live across calls (which clobber
+            // caller-saved argument registers like rdi, rsi, etc.).
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst,
+                src: fixed,
+            });
+            ctx.regs.assign(vref, dst);
         }
 
         Op::Const(imm) => {

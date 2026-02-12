@@ -341,6 +341,8 @@ impl Backend for X86Backend {
             name: isel_result.name,
             code: enc.code,
             relocations: enc.relocations,
+            weak: false,
+            local: false,
         })
     }
 
@@ -365,12 +367,16 @@ impl Backend for X86Backend {
                 name: export_name.to_string(),
                 code,
                 relocations,
+                weak: false,
+                local: false,
             });
         }
         funcs.push(CompiledFunction {
             name: shim_marker.to_string(),
             code: vec![0xc3],
             relocations: vec![],
+            weak: false,
+            local: false,
         });
         funcs
     }
@@ -414,11 +420,15 @@ impl Backend for X86Backend {
                 name: "main".to_string(),
                 code: main_code,
                 relocations: main_relocs,
+                weak: false,
+                local: false,
             },
             CompiledFunction {
                 name: start_sym.to_string(),
                 code: start_code,
                 relocations: vec![],
+                weak: false,
+                local: false,
             },
         ]
     }

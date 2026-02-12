@@ -7,6 +7,13 @@ pub struct CompiledFunction {
     pub name: String,
     pub code: Vec<u8>,
     pub relocations: Vec<Relocation>,
+    /// If true, emit with weak binding (STB_WEAK) so the linker can
+    /// deduplicate identical instantiations across codegen units.
+    pub weak: bool,
+    /// If true, emit with local scope (STB_LOCAL) so the symbol is
+    /// file-local and won't conflict with identically-named symbols
+    /// in other object files.
+    pub local: bool,
 }
 
 /// A static data blob to be placed in a read-only section.

@@ -17,6 +17,8 @@ pub fn emit_elf(name: &str, code: &[u8], relocations: &[Relocation]) -> Vec<u8> 
         name: name.to_string(),
         code: code.to_vec(),
         relocations: relocations.to_vec(),
+        weak: false,
+        local: false,
     }])
 }
 
@@ -118,21 +120,34 @@ pub fn emit_elf_with_data(functions: &[CompiledFunction], statics: &[StaticData]
         }
     }
 
+    // Pass 1: Emit all function code and create symbols. This must happen
+    // before processing relocations so that local (STB_LOCAL) symbols are
+    // already in sym_map when another function in the same object file
+    // references them.
+    let mut code_offsets: Vec<u64> = Vec::with_capacity(functions.len());
     for func in functions {
         let code_offset = obj.append_section_data(text, &func.code, 16);
+        code_offsets.push(code_offset);
 
         let func_sid = obj.add_symbol(Symbol {
             name: func.name.as_bytes().to_vec(),
             value: code_offset,
             size: func.code.len() as u64,
             kind: SymbolKind::Text,
-            scope: SymbolScope::Linkage,
-            weak: false,
+            scope: if func.local {
+                SymbolScope::Compilation
+            } else {
+                SymbolScope::Linkage
+            },
+            weak: func.weak,
             section: SymbolSection::Section(text),
             flags: SymbolFlags::None,
         });
         sym_map.insert(func.name.clone(), func_sid);
+    }
 
+    // Pass 2: Add relocations now that all symbols are defined.
+    for (func, &code_offset) in functions.iter().zip(code_offsets.iter()) {
         for reloc in &func.relocations {
             // Reuse the symbol ID if the target is already defined in this
             // object file (e.g. a .Lconst or .Lstr data blob, or another
