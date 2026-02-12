@@ -7,6 +7,8 @@ pub enum RelocKind {
     Call,
     /// PC-relative data reference (e.g., R_X86_64_PC32 on x86-64).
     PcRel,
+    /// Absolute 64-bit address (e.g., R_X86_64_64 on x86-64).
+    Abs64,
 }
 
 /// A relocation for an external symbol reference (e.g., CALL or LEA).

@@ -13,4 +13,6 @@ pub struct CompiledFunction {
 pub struct StaticData {
     pub name: String,
     pub data: Vec<u8>,
+    /// Relocations within the data (e.g. function pointers in vtables).
+    pub relocations: Vec<Relocation>,
 }
