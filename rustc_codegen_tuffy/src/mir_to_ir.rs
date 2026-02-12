@@ -898,11 +898,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             self.abi_metadata
                                 .mark_secondary_return_move(dummy.index(), fat_val.index());
                         }
-                        // Coerce Ptr↔Int to match the declared return type.
+                        // Coerce to match the declared return type.
                         let ret_ir_ty = translate_ty(ret_mir_ty);
-                        let coerced = match ret_ir_ty {
-                            Some(Type::Int) => self.coerce_to_int(v),
-                            Some(Type::Ptr(_)) => self.coerce_to_ptr(v),
+                        let coerced = match (ret_ir_ty, self.builder.value_type(v).cloned()) {
+                            (Some(Type::Int), _) => self.coerce_to_int(v),
+                            (Some(Type::Ptr(_)), _) => self.coerce_to_ptr(v),
+                            (Some(Type::Bool), Some(Type::Int)) => {
+                                self.builder.int_to_bool(v.into(), Origin::synthetic())
+                            }
                             _ => v,
                         };
                         self.builder.ret(Some(coerced.into()), self.current_mem.into(), Origin::synthetic());
@@ -1312,10 +1315,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let l_ann = operand_annotation(lhs, self.mir);
                 let r_ann = operand_annotation(rhs, self.mir);
 
-                // Unsupported operand types (e.g. floats) produce Unit — emit
-                // a dummy zero so the IR stays well-typed.
-                if matches!(self.builder.value_type(l_raw), Some(Type::Unit))
-                    || matches!(self.builder.value_type(r_raw), Some(Type::Unit))
+                // Unsupported operand types (e.g. floats) produce Unit or
+                // typeless values — emit a dummy zero so the IR stays well-typed.
+                if !matches!(self.builder.value_type(l_raw), Some(Type::Int | Type::Ptr(_) | Type::Bool))
+                    || !matches!(self.builder.value_type(r_raw), Some(Type::Int | Type::Ptr(_) | Type::Bool))
                 {
                     return Some(self.builder.iconst(0, Origin::synthetic()));
                 }
@@ -1498,6 +1501,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             Rvalue::UnaryOp(mir::UnOp::PtrMetadata, _) => None,
             Rvalue::UnaryOp(mir::UnOp::Neg, operand) => {
                 let v = self.translate_operand(operand)?;
+                // Unsupported operand types (e.g. floats) may produce Unit
+                // or typeless values — emit a dummy zero.
+                if !matches!(self.builder.value_type(v), Some(Type::Int)) {
+                    return Some(self.builder.iconst(0, Origin::synthetic()));
+                }
                 let zero = self.builder.iconst(0, Origin::synthetic());
                 Some(
                     self.builder
@@ -1506,6 +1514,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             }
             Rvalue::UnaryOp(mir::UnOp::Not, operand) => {
                 let v = self.translate_operand(operand)?;
+                // Unsupported operand types (e.g. floats) may produce Unit
+                // or typeless values — emit a dummy zero.
+                if !matches!(self.builder.value_type(v), Some(Type::Int)) {
+                    return Some(self.builder.iconst(0, Origin::synthetic()));
+                }
                 let ones = self.builder.iconst(-1, Origin::synthetic());
                 Some(
                     self.builder
