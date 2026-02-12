@@ -287,6 +287,7 @@ rfcs/rfc-2565-param-attrs/param-attrs-pretty.rs
 rust-2018/proc-macro-crate-in-paths.rs
 rust-2024/prelude2024.rs
 simd/generics.rs
+simd/intrinsic/inlining-issue67557-ice.rs
 simd/intrinsic/ptr-cast.rs
 simd/intrinsic/splat.rs
 simd/issue-89193.rs
