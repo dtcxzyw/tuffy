@@ -933,6 +933,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let cond_val = self.translate_operand(cond);
                 let target_block = self.block_map.get(*target);
                 if let Some(cond_v) = cond_val {
+                    let cond_v = self.coerce_to_int(cond_v);
                     let expected_val = self
                         .builder
                         .iconst(if *expected { 1 } else { 0 }, Origin::synthetic());
