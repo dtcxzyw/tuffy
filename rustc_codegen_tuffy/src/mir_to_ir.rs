@@ -26,15 +26,17 @@ use tuffy_ir::module::{SymbolId, SymbolTable};
 use tuffy_ir::types::{Annotation, Type};
 use tuffy_ir::value::{BlockRef, ValueRef};
 
+/// Static data entry: (symbol_id, bytes, relocations).
+/// Relocations are (offset_in_bytes, target_symbol_name) for function pointers in vtables.
+type StaticDataVec = Vec<(SymbolId, Vec<u8>, Vec<(usize, String)>)>;
+
 /// Result of MIR → IR translation.
 pub struct TranslationResult {
     pub func: Function,
     /// Interned symbol table shared across the codegen unit.
     pub symbols: SymbolTable,
     /// Static data blobs to emit in .rodata, keyed by SymbolId.
-    /// Each entry is (symbol_id, bytes, relocations) where relocations
-    /// are (offset_in_bytes, target_symbol_name) for function pointers in vtables.
-    pub static_data: Vec<(SymbolId, Vec<u8>, Vec<(usize, String)>)>,
+    pub static_data: StaticDataVec,
     /// Target-specific ABI metadata (e.g., secondary return register info).
     pub abi_metadata: AbiMetadataBox,
 }
@@ -448,7 +450,7 @@ struct TranslationCtx<'a, 'tcx> {
     fat_locals: FatLocalMap,
     stack_locals: StackLocalSet,
     symbols: SymbolTable,
-    static_data: Vec<(SymbolId, Vec<u8>, Vec<(usize, String)>)>,
+    static_data: StaticDataVec,
     block_map: BlockMap,
     /// MemSSA block arguments: one `Type::Mem` arg per MIR basic block.
     block_mem_args: Vec<ValueRef>,
@@ -1040,7 +1042,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 ref tag_encoding,
                 tag_field,
                 ..
-            } => (tag.clone(), tag_encoding.clone(), tag_field),
+            } => (*tag, tag_encoding.clone(), tag_field),
         };
 
         // Compute the tag value to store.
@@ -1134,7 +1136,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 ref tag_encoding,
                 tag_field,
                 ..
-            } => (tag.clone(), tag_encoding.clone(), tag_field),
+            } => (*tag, tag_encoding.clone(), tag_field),
         };
 
         let tag_val: i64 = match &tag_encoding {
@@ -1205,10 +1207,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // Cast of a fat local: propagate, or generate vtable for Unsize coercion.
             Rvalue::Cast(cast_kind, op, target_ty) => {
                 // First try propagating existing fat component from source.
-                if let Operand::Copy(place) | Operand::Move(place) = op {
-                    if let Some(fat) = self.fat_locals.get(place.local) {
-                        return Some(fat);
-                    }
+                if let Operand::Copy(place) | Operand::Move(place) = op
+                    && let Some(fat) = self.fat_locals.get(place.local)
+                {
+                    return Some(fat);
                 }
                 // For Unsize coercions to trait objects, generate the vtable pointer.
                 if let CastKind::PointerCoercion(pc, _) = cast_kind {
@@ -1219,8 +1221,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         ty::RawPtr(inner, _) => Some(*inner),
                         _ => None,
                     };
-                    if let Some(inner) = target_inner {
-                        if let ty::Dynamic(predicates, _) = inner.kind() {
+                    if let Some(inner) = target_inner
+                        && let ty::Dynamic(predicates, _) = inner.kind()
+                    {
                             // This is an unsizing coercion to a trait object.
                             // Get the concrete source type.
                             let src_ty = match op {
@@ -1276,7 +1279,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 return Some(self.builder.symbol_addr(sym_id, Origin::synthetic()));
                             }
                         }
-                    }
                     let _ = pc; // suppress unused warning
                 }
                 None
@@ -1732,12 +1734,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // first argument (self) — the actual method only takes the data ptr.
                     let skip_fat =
                         is_virtual && ir_args.len() == 1 + if callee_sret { 1 } else { 0 };
-                    if !skip_fat {
-                        if let Operand::Copy(place) | Operand::Move(place) = &arg.node
-                            && let Some(fat_v) = self.fat_locals.get(place.local)
-                        {
-                            ir_args.push(fat_v.into());
-                        }
+                    if !skip_fat
+                        && let Operand::Copy(place) | Operand::Move(place) = &arg.node
+                        && let Some(fat_v) = self.fat_locals.get(place.local)
+                    {
+                        ir_args.push(fat_v.into());
                     }
                     // If this arg is a constant slice, the length was emitted
                     // right after the pointer. Check if it's in the constant.
@@ -2421,7 +2422,7 @@ fn translate_const<'tcx>(
     constant: &mir::ConstOperand<'tcx>,
     builder: &mut Builder<'_>,
     symbols: &mut SymbolTable,
-    static_data: &mut Vec<(SymbolId, Vec<u8>, Vec<(usize, String)>)>,
+    static_data: &mut StaticDataVec,
 ) -> Option<ValueRef> {
     // Monomorphize the constant using the instance's substitutions so that
     // associated type projections (e.g. <B as Flags>::Bits) are resolved
@@ -2551,7 +2552,6 @@ fn translate_const<'tcx>(
                 None
             }
         }
-        _ => None,
     }
 }
 
@@ -2566,7 +2566,7 @@ fn extract_alloc_relocs<'tcx>(
     byte_offset: usize,
     byte_len: usize,
     symbols: &mut SymbolTable,
-    static_data: &mut Vec<(SymbolId, Vec<u8>, Vec<(usize, String)>)>,
+    static_data: &mut StaticDataVec,
 ) -> Vec<(usize, String)> {
     let mut relocs = Vec::new();
     for (offset, prov) in alloc.provenance().ptrs().iter() {
@@ -2691,7 +2691,7 @@ fn translate_const_slice<'tcx>(
     meta: u64,
     builder: &mut Builder<'_>,
     symbols: &mut SymbolTable,
-    static_data: &mut Vec<(SymbolId, Vec<u8>, Vec<(usize, String)>)>,
+    static_data: &mut StaticDataVec,
 ) -> Option<ValueRef> {
     let rustc_middle::mir::interpret::GlobalAlloc::Memory(alloc) = tcx.global_alloc(alloc_id)
     else {
