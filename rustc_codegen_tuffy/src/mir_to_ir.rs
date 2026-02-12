@@ -491,7 +491,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     fn translate_params(&mut self) {
         let mut abi_idx: u32 = 0;
         let fn_name = self.tcx.symbol_name(self.instance).name.to_string();
-        eprintln!("[params] fn={fn_name} arg_count={} use_sret={}", self.mir.arg_count, self.use_sret);
+        eprintln!(
+            "[params] fn={fn_name} arg_count={} use_sret={}",
+            self.mir.arg_count, self.use_sret
+        );
 
         // If the function returns a large struct, the caller passes a hidden
         // pointer as the first argument (sret). We consume it here and use it
@@ -517,7 +520,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             let local = mir::Local::from_usize(i + 1);
             let ty = self.monomorphize(self.mir.local_decls[local].ty);
             let ir_ty = translate_ty(ty);
-            eprintln!("[params] i={i} local={local:?} ty={ty:?} ir_ty={ir_ty:?} abi_idx={abi_idx} fat={}", is_fat_ptr(ty));
+            eprintln!(
+                "[params] i={i} local={local:?} ty={ty:?} ir_ty={ir_ty:?} abi_idx={abi_idx} fat={}",
+                is_fat_ptr(ty)
+            );
 
             // Skip zero-sized (Unit) and untranslatable params — they don't
             // occupy an ABI slot. Assign a dummy iconst 0 so downstream MIR
@@ -541,7 +547,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             } else {
                 (ir_ty.unwrap(), translate_annotation(ty))
             };
-            let val = self.builder.param(abi_idx, abi_ty, abi_ann, Origin::synthetic());
+            let val = self
+                .builder
+                .param(abi_idx, abi_ty, abi_ann, Origin::synthetic());
             if large_struct {
                 // The param is a pointer to caller-allocated memory.
                 // Mark as stack-allocated so translate_place_to_addr uses
@@ -583,8 +591,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         {
             let size = type_size(self.tcx, cur_ty).unwrap_or(8) as u32;
             let slot = self.builder.stack_slot(size, Origin::synthetic());
-            self.current_mem = self.builder
-                .store(addr.into(), slot.into(), size, self.current_mem.into(), Origin::synthetic());
+            self.current_mem = self.builder.store(
+                addr.into(),
+                slot.into(),
+                size,
+                self.current_mem.into(),
+                Origin::synthetic(),
+            );
             addr = slot;
         }
 
@@ -709,10 +722,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let addr = self.coerce_to_ptr(addr);
         let bytes = type_size(self.tcx, projected_ty).unwrap_or(8) as u32;
         let ty = translate_ty(projected_ty).unwrap_or(Type::Int);
-        Some(
-            self.builder
-                .load(addr.into(), bytes, ty, self.current_mem.into(), None, Origin::synthetic()),
-        )
+        Some(self.builder.load(
+            addr.into(),
+            bytes,
+            ty,
+            self.current_mem.into(),
+            None,
+            Origin::synthetic(),
+        ))
     }
 
     /// Compute the discriminant of an enum at `place`.
@@ -723,16 +740,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     /// - `Variants::Multiple` with `TagEncoding::Niche`: load the niche field
     ///   and compute the variant index via wrapping arithmetic + select.
     fn translate_discriminant(&mut self, place: &Place<'tcx>) -> Option<ValueRef> {
-        let place_ty = self.monomorphize(
-            place.ty(&self.mir.local_decls, self.tcx).ty,
-        );
+        let place_ty = self.monomorphize(place.ty(&self.mir.local_decls, self.tcx).ty);
         let typing_env = ty::TypingEnv::fully_monomorphized();
-        let layout = self.tcx.layout_of(typing_env.as_query_input(place_ty)).ok()?;
+        let layout = self
+            .tcx
+            .layout_of(typing_env.as_query_input(place_ty))
+            .ok()?;
 
         match layout.variants {
-            rustc_abi::Variants::Empty => {
-                Some(self.builder.iconst(0, Origin::synthetic()))
-            }
+            rustc_abi::Variants::Empty => Some(self.builder.iconst(0, Origin::synthetic())),
             rustc_abi::Variants::Single { index } => {
                 let discr_val = match place_ty.kind() {
                     ty::Adt(adt_def, _) if adt_def.is_enum() => {
@@ -758,8 +774,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let size = layout.size.bytes() as u32;
                         let slot = self.builder.stack_slot(size, Origin::synthetic());
                         self.current_mem = self.builder.store(
-                            val.into(), slot.into(), size,
-                            self.current_mem.into(), Origin::synthetic(),
+                            val.into(),
+                            slot.into(),
+                            size,
+                            self.current_mem.into(),
+                            Origin::synthetic(),
                         );
                         slot
                     }
@@ -778,13 +797,18 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
                 let tag_addr = if tag_offset != 0 {
                     let off = self.builder.iconst(tag_offset as i64, Origin::synthetic());
-                    self.builder.ptradd(base_addr.into(), off.into(), 0, Origin::synthetic())
+                    self.builder
+                        .ptradd(base_addr.into(), off.into(), 0, Origin::synthetic())
                 } else {
                     base_addr
                 };
                 let tag_val = self.builder.load(
-                    tag_addr.into(), tag_size, Type::Int,
-                    self.current_mem.into(), None, Origin::synthetic(),
+                    tag_addr.into(),
+                    tag_size,
+                    Type::Int,
+                    self.current_mem.into(),
+                    None,
+                    Origin::synthetic(),
                 );
 
                 match tag_encoding {
@@ -803,43 +827,59 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             // Common case: Option-like niche (tag == 0 → None).
                             let zero = self.builder.iconst(0, Origin::synthetic());
                             let is_niche = self.builder.icmp(
-                                ICmpOp::Eq, tag_val.into(), zero.into(),
+                                ICmpOp::Eq,
+                                tag_val.into(),
+                                zero.into(),
                                 Origin::synthetic(),
                             );
-                            let niche_discr = self.builder.iconst(
-                                variants_start as i64, Origin::synthetic(),
-                            );
-                            let untag_discr = self.builder.iconst(
-                                untagged_discr, Origin::synthetic(),
-                            );
+                            let niche_discr = self
+                                .builder
+                                .iconst(variants_start as i64, Origin::synthetic());
+                            let untag_discr =
+                                self.builder.iconst(untagged_discr, Origin::synthetic());
                             Some(self.builder.select(
-                                is_niche.into(), niche_discr.into(), untag_discr.into(),
-                                Type::Int, Origin::synthetic(),
+                                is_niche.into(),
+                                niche_discr.into(),
+                                untag_discr.into(),
+                                Type::Int,
+                                Origin::synthetic(),
                             ))
                         } else {
                             // General niche: i = tag.wrapping_sub(niche_start) + start
-                            let ns = self.builder.iconst(*niche_start as i64, Origin::synthetic());
+                            let ns = self
+                                .builder
+                                .iconst(*niche_start as i64, Origin::synthetic());
                             let relative = self.builder.sub(
-                                tag_val.into(), ns.into(), None, Origin::synthetic(),
+                                tag_val.into(),
+                                ns.into(),
+                                None,
+                                Origin::synthetic(),
                             );
-                            let start_c = self.builder.iconst(
-                                variants_start as i64, Origin::synthetic(),
-                            );
+                            let start_c = self
+                                .builder
+                                .iconst(variants_start as i64, Origin::synthetic());
                             let variant_idx = self.builder.add(
-                                relative.into(), start_c.into(), None, Origin::synthetic(),
+                                relative.into(),
+                                start_c.into(),
+                                None,
+                                Origin::synthetic(),
                             );
                             // Check relative < num_niche (unsigned).
                             let num_c = self.builder.iconst(num_niche as i64, Origin::synthetic());
                             let in_range = self.builder.icmp(
-                                ICmpOp::Lt, relative.into(), num_c.into(),
+                                ICmpOp::Lt,
+                                relative.into(),
+                                num_c.into(),
                                 Origin::synthetic(),
                             );
-                            let untag_discr = self.builder.iconst(
-                                untagged_discr, Origin::synthetic(),
-                            );
+                            let untag_discr =
+                                self.builder.iconst(untagged_discr, Origin::synthetic());
                             Some(self.builder.select(
-                                in_range.into(), variant_idx.into(), untag_discr.into(),
-                                Type::Int, Origin::synthetic(),
+                                in_range.into(),
+                                variant_idx.into(),
+                                untag_discr.into(),
+                                Type::Int,
+                                Origin::synthetic(),
                             ))
                         }
                     }
@@ -851,7 +891,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     fn translate_statement(&mut self, stmt: &mir::Statement<'tcx>) {
         match &stmt.kind {
             StatementKind::Assign(box (place, rvalue)) => {
-                if let Some(val) = self.translate_rvalue(rvalue, place) {
+                let rval_result = self.translate_rvalue(rvalue, place);
+                if let Some(val) = rval_result {
                     if place.projection.is_empty() {
                         // For stack-allocated locals, store the value into the
                         // existing stack slot instead of overwriting the pointer.
@@ -860,17 +901,21 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         if self.stack_locals.is_stack(place.local) {
                             if let Some(slot) = self.locals.get(place.local) {
                                 if matches!(self.builder.value_type(slot), Some(Type::Ptr(_))) {
-                                    let ty = self.monomorphize(
-                                        self.mir.local_decls[place.local].ty,
-                                    );
-                                    let bytes =
-                                        type_size(self.tcx, ty).unwrap_or(8) as u32;
+                                    let ty =
+                                        self.monomorphize(self.mir.local_decls[place.local].ty);
+                                    let bytes = type_size(self.tcx, ty).unwrap_or(8) as u32;
                                     // If val is also a pointer (e.g. stack slot from
                                     // Aggregate) and the type is larger than 8 bytes,
                                     // do a word-by-word copy of the DATA instead of
                                     // storing the pointer value.
                                     let val_ty = self.builder.value_type(val).cloned();
-                                    eprintln!("[tuffy-assign] local={:?} val_ty={:?} slot_ty={:?} bytes={bytes} stack={}", place.local, val_ty, self.builder.value_type(slot), self.stack_locals.is_stack(place.local));
+                                    eprintln!(
+                                        "[tuffy-assign] local={:?} val_ty={:?} slot_ty={:?} bytes={bytes} stack={}",
+                                        place.local,
+                                        val_ty,
+                                        self.builder.value_type(slot),
+                                        self.stack_locals.is_stack(place.local)
+                                    );
                                     if matches!(val_ty.as_ref(), Some(Type::Ptr(_))) && bytes > 8 {
                                         let num_words = (bytes as u64).div_ceil(8);
                                         for i in 0..num_words {
@@ -878,24 +923,50 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                             let src_addr = if byte_off == 0 {
                                                 val
                                             } else {
-                                                let off = self.builder.iconst(byte_off as i64, Origin::synthetic());
-                                                self.builder.ptradd(val.into(), off.into(), 0, Origin::synthetic())
+                                                let off = self
+                                                    .builder
+                                                    .iconst(byte_off as i64, Origin::synthetic());
+                                                self.builder.ptradd(
+                                                    val.into(),
+                                                    off.into(),
+                                                    0,
+                                                    Origin::synthetic(),
+                                                )
                                             };
                                             let word = self.builder.load(
-                                                src_addr.into(), 8, Type::Int, self.current_mem.into(), None, Origin::synthetic(),
+                                                src_addr.into(),
+                                                8,
+                                                Type::Int,
+                                                self.current_mem.into(),
+                                                None,
+                                                Origin::synthetic(),
                                             );
                                             let dst_addr = if byte_off == 0 {
                                                 slot
                                             } else {
-                                                let off = self.builder.iconst(byte_off as i64, Origin::synthetic());
-                                                self.builder.ptradd(slot.into(), off.into(), 0, Origin::synthetic())
+                                                let off = self
+                                                    .builder
+                                                    .iconst(byte_off as i64, Origin::synthetic());
+                                                self.builder.ptradd(
+                                                    slot.into(),
+                                                    off.into(),
+                                                    0,
+                                                    Origin::synthetic(),
+                                                )
                                             };
                                             self.current_mem = self.builder.store(
-                                                word.into(), dst_addr.into(), 8, self.current_mem.into(), Origin::synthetic(),
+                                                word.into(),
+                                                dst_addr.into(),
+                                                8,
+                                                self.current_mem.into(),
+                                                Origin::synthetic(),
                                             );
                                         }
                                     } else {
-                                        eprintln!("[tuffy-assign] FALLBACK store.{bytes} for local={:?}", place.local);
+                                        eprintln!(
+                                            "[tuffy-assign] FALLBACK store.{bytes} for local={:?}",
+                                            place.local
+                                        );
                                         self.current_mem = self.builder.store(
                                             val.into(),
                                             slot.into(),
@@ -918,8 +989,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         if let Some((addr, projected_ty)) = self.translate_place_to_addr(place) {
                             let addr = self.coerce_to_ptr(addr);
                             let bytes = type_size(self.tcx, projected_ty).unwrap_or(8) as u32;
-                            self.current_mem = self.builder
-                                .store(val.into(), addr.into(), bytes, self.current_mem.into(), Origin::synthetic());
+                            self.current_mem = self.builder.store(
+                                val.into(),
+                                addr.into(),
+                                bytes,
+                                self.current_mem.into(),
+                                Origin::synthetic(),
+                            );
                         }
                     }
                 }
@@ -929,7 +1005,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 }
             }
             StatementKind::StorageLive(_) | StatementKind::StorageDead(_) | StatementKind::Nop => {}
-            StatementKind::SetDiscriminant { box place, variant_index } => {
+            StatementKind::SetDiscriminant {
+                box place,
+                variant_index,
+            } => {
                 self.translate_set_discriminant(place, *variant_index);
             }
             _ => {}
@@ -947,15 +1026,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         place: &Place<'tcx>,
         variant_index: rustc_abi::VariantIdx,
     ) {
-        let place_ty = self.monomorphize(
-            place.ty(&self.mir.local_decls, self.tcx).ty,
-        );
+        let place_ty = self.monomorphize(place.ty(&self.mir.local_decls, self.tcx).ty);
         let typing_env = ty::TypingEnv::fully_monomorphized();
         let layout = match self.tcx.layout_of(typing_env.as_query_input(place_ty)) {
             Ok(l) => l,
             Err(_) => return,
         };
-
 
         let (tag, tag_encoding, tag_field) = match layout.variants {
             rustc_abi::Variants::Single { .. } | rustc_abi::Variants::Empty => return,
@@ -969,14 +1045,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
         // Compute the tag value to store.
         let tag_val: i64 = match &tag_encoding {
-            rustc_abi::TagEncoding::Direct => {
-                match place_ty.kind() {
-                    ty::Adt(adt_def, _) => {
-                        adt_def.discriminant_for_variant(self.tcx, variant_index).val as i64
-                    }
-                    _ => variant_index.as_u32() as i64,
+            rustc_abi::TagEncoding::Direct => match place_ty.kind() {
+                ty::Adt(adt_def, _) => {
+                    adt_def
+                        .discriminant_for_variant(self.tcx, variant_index)
+                        .val as i64
                 }
-            }
+                _ => variant_index.as_u32() as i64,
+            },
             rustc_abi::TagEncoding::Niche {
                 untagged_variant,
                 niche_variants,
@@ -1019,15 +1095,19 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
         let tag_addr = if tag_offset != 0 {
             let off = self.builder.iconst(tag_offset as i64, Origin::synthetic());
-            self.builder.ptradd(base_addr.into(), off.into(), 0, Origin::synthetic())
+            self.builder
+                .ptradd(base_addr.into(), off.into(), 0, Origin::synthetic())
         } else {
             base_addr
         };
 
         let tag_const = self.builder.iconst(tag_val, Origin::synthetic());
         self.current_mem = self.builder.store(
-            tag_const.into(), tag_addr.into(), tag_size,
-            self.current_mem.into(), Origin::synthetic(),
+            tag_const.into(),
+            tag_addr.into(),
+            tag_size,
+            self.current_mem.into(),
+            Origin::synthetic(),
         );
     }
 
@@ -1058,14 +1138,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         };
 
         let tag_val: i64 = match &tag_encoding {
-            rustc_abi::TagEncoding::Direct => {
-                match enum_ty.kind() {
-                    ty::Adt(adt_def, _) => {
-                        adt_def.discriminant_for_variant(self.tcx, variant_index).val as i64
-                    }
-                    _ => variant_index.as_u32() as i64,
+            rustc_abi::TagEncoding::Direct => match enum_ty.kind() {
+                ty::Adt(adt_def, _) => {
+                    adt_def
+                        .discriminant_for_variant(self.tcx, variant_index)
+                        .val as i64
                 }
-            }
+                _ => variant_index.as_u32() as i64,
+            },
             rustc_abi::TagEncoding::Niche {
                 untagged_variant,
                 niche_variants,
@@ -1087,19 +1167,21 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             _ => 8,
         };
 
-
-
         let tag_addr = if tag_offset != 0 {
             let off = self.builder.iconst(tag_offset as i64, Origin::synthetic());
-            self.builder.ptradd(slot.into(), off.into(), 0, Origin::synthetic())
+            self.builder
+                .ptradd(slot.into(), off.into(), 0, Origin::synthetic())
         } else {
             slot
         };
 
         let tag_const = self.builder.iconst(tag_val, Origin::synthetic());
         self.current_mem = self.builder.store(
-            tag_const.into(), tag_addr.into(), tag_size,
-            self.current_mem.into(), Origin::synthetic(),
+            tag_const.into(),
+            tag_addr.into(),
+            tag_size,
+            self.current_mem.into(),
+            Origin::synthetic(),
         );
     }
 
@@ -1179,9 +1261,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 );
                                 let sym_id = self.symbols.intern(&sym);
                                 let mut relocs = Vec::new();
-                                for (offset, prov) in
-                                    inner_alloc.provenance().ptrs().iter()
-                                {
+                                for (offset, prov) in inner_alloc.provenance().ptrs().iter() {
                                     let target_alloc_id = prov.alloc_id();
                                     if let rustc_middle::mir::interpret::GlobalAlloc::Function {
                                         instance,
@@ -1193,9 +1273,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     }
                                 }
                                 self.static_data.push((sym_id, bytes, relocs));
-                                return Some(
-                                    self.builder.symbol_addr(sym_id, Origin::synthetic()),
-                                );
+                                return Some(self.builder.symbol_addr(sym_id, Origin::synthetic()));
                             }
                         }
                     }
@@ -1258,18 +1336,30 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             self.builder
                                 .ptradd(sret.into(), off.into(), 0, Origin::synthetic())
                         };
-                        self.current_mem = self.builder
-                            .store(word.into(), store_addr.into(), 8, self.current_mem.into(), Origin::synthetic());
+                        self.current_mem = self.builder.store(
+                            word.into(),
+                            store_addr.into(),
+                            8,
+                            self.current_mem.into(),
+                            Origin::synthetic(),
+                        );
                     }
 
                     // Return the sret pointer in RAX (System V convention).
-                    self.builder.ret(Some(sret.into()), self.current_mem.into(), Origin::synthetic());
+                    self.builder.ret(
+                        Some(sret.into()),
+                        self.current_mem.into(),
+                        Origin::synthetic(),
+                    );
                 } else if matches!(translate_ty(ret_mir_ty), Some(Type::Unit) | None) {
                     // Unit-returning or untranslatable return type: bare ret, no value.
-                    self.builder.ret(None, self.current_mem.into(), Origin::synthetic());
+                    self.builder
+                        .ret(None, self.current_mem.into(), Origin::synthetic());
                 } else if self.stack_locals.is_stack(ret_local)
                     && matches!(
-                        self.locals.get(ret_local).and_then(|v| self.builder.value_type(v).cloned()),
+                        self.locals
+                            .get(ret_local)
+                            .and_then(|v| self.builder.value_type(v).cloned()),
                         Some(Type::Ptr(_))
                     )
                 {
@@ -1284,9 +1374,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let size = type_size(self.tcx, ret_ty).unwrap_or(8);
 
                     // First 8 bytes → RAX.
-                    let word0 =
-                        self.builder
-                            .load(slot.into(), 8, Type::Int, self.current_mem.into(), None, Origin::synthetic());
+                    let word0 = self.builder.load(
+                        slot.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
+                    );
 
                     if size > 8 {
                         // Second 8 bytes → secondary return register.
@@ -1313,8 +1408,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         Some(Type::Ptr(_)) => self.coerce_to_ptr(word0),
                         _ => word0,
                     };
-                    self.builder
-                        .ret(Some(coerced_word0.into()), self.current_mem.into(), Origin::synthetic());
+                    self.builder.ret(
+                        Some(coerced_word0.into()),
+                        self.current_mem.into(),
+                        Origin::synthetic(),
+                    );
                 } else {
                     // Normal scalar return.
                     let val = self.locals.values[ret_local.as_usize()];
@@ -1334,7 +1432,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             }
                             _ => v,
                         };
-                        self.builder.ret(Some(coerced.into()), self.current_mem.into(), Origin::synthetic());
+                        self.builder.ret(
+                            Some(coerced.into()),
+                            self.current_mem.into(),
+                            Origin::synthetic(),
+                        );
                     } else {
                         // Return local was never assigned — this path is
                         // unreachable at runtime (diverging function).
@@ -1344,7 +1446,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             }
             TerminatorKind::Goto { target } => {
                 let target_block = self.block_map.get(*target);
-                self.builder.br(target_block, vec![self.current_mem.into()], Origin::synthetic());
+                self.builder.br(
+                    target_block,
+                    vec![self.current_mem.into()],
+                    Origin::synthetic(),
+                );
             }
             TerminatorKind::SwitchInt { discr, targets } => {
                 self.translate_switch_int(discr, targets);
@@ -1383,7 +1489,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     self.builder.switch_to_block(trap_block);
                     self.builder.trap(Origin::synthetic());
                 } else {
-                    self.builder.br(target_block, vec![self.current_mem.into()], Origin::synthetic());
+                    self.builder.br(
+                        target_block,
+                        vec![self.current_mem.into()],
+                        Origin::synthetic(),
+                    );
                 }
             }
             TerminatorKind::Unreachable => {
@@ -1392,15 +1502,27 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             TerminatorKind::Drop { target, .. } => {
                 // Skip drop glue for now — just branch to the target.
                 let target_block = self.block_map.get(*target);
-                self.builder.br(target_block, vec![self.current_mem.into()], Origin::synthetic());
+                self.builder.br(
+                    target_block,
+                    vec![self.current_mem.into()],
+                    Origin::synthetic(),
+                );
             }
             TerminatorKind::FalseEdge { real_target, .. } => {
                 let target_block = self.block_map.get(*real_target);
-                self.builder.br(target_block, vec![self.current_mem.into()], Origin::synthetic());
+                self.builder.br(
+                    target_block,
+                    vec![self.current_mem.into()],
+                    Origin::synthetic(),
+                );
             }
             TerminatorKind::FalseUnwind { real_target, .. } => {
                 let target_block = self.block_map.get(*real_target);
-                self.builder.br(target_block, vec![self.current_mem.into()], Origin::synthetic());
+                self.builder.br(
+                    target_block,
+                    vec![self.current_mem.into()],
+                    Origin::synthetic(),
+                );
             }
             TerminatorKind::Call {
                 func,
@@ -1449,7 +1571,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             if handled {
                 if let Some(target) = target {
                     let target_block = self.block_map.get(*target);
-                    self.builder.br(target_block, vec![self.current_mem.into()], Origin::synthetic());
+                    self.builder.br(
+                        target_block,
+                        vec![self.current_mem.into()],
+                        Origin::synthetic(),
+                    );
                 }
                 return;
             }
@@ -1470,7 +1596,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 self.current_mem = new_mem;
                 if let Some(target) = target {
                     let target_block = self.block_map.get(*target);
-                    self.builder.br(target_block, vec![self.current_mem.into()], Origin::synthetic());
+                    self.builder.br(
+                        target_block,
+                        vec![self.current_mem.into()],
+                        Origin::synthetic(),
+                    );
                 }
                 return;
             }
@@ -1488,9 +1618,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // Get the vtable pointer from fat_locals.
             let self_arg = &args[0].node;
             let vtable_ptr = match self_arg {
-                Operand::Copy(place) | Operand::Move(place) => {
-                    self.fat_locals.get(place.local)
-                }
+                Operand::Copy(place) | Operand::Move(place) => self.fat_locals.get(place.local),
                 _ => None,
             };
             if let Some(vtable) = vtable_ptr {
@@ -1498,12 +1626,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // Method at index `idx` is at offset (3 + idx) * 8.
                 let offset = (3 + idx) * 8;
                 let off_val = self.builder.iconst(offset as i64, Origin::synthetic());
-                let fn_addr = self.builder.ptradd(
-                    vtable.into(),
-                    off_val.into(),
-                    0,
-                    Origin::synthetic(),
-                );
+                let fn_addr =
+                    self.builder
+                        .ptradd(vtable.into(), off_val.into(), 0, Origin::synthetic());
                 let fn_ptr = self.builder.load(
                     fn_addr.into(),
                     8,
@@ -1605,7 +1730,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // If this arg is a Copy/Move of a fat local, also pass the high part.
                     // Exception: for virtual dispatch, skip the vtable pointer on the
                     // first argument (self) — the actual method only takes the data ptr.
-                    let skip_fat = is_virtual && ir_args.len() == 1 + if callee_sret { 1 } else { 0 };
+                    let skip_fat =
+                        is_virtual && ir_args.len() == 1 + if callee_sret { 1 } else { 0 };
                     if !skip_fat {
                         if let Operand::Copy(place) | Operand::Move(place) = &arg.node
                             && let Some(fat_v) = self.fat_locals.get(place.local)
@@ -1662,8 +1788,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // downstream code gets a valid pointer to the struct.
             let size = dest_size.unwrap();
             let slot = self.builder.stack_slot(size as u32, Origin::synthetic());
-            self.current_mem = self.builder
-                .store(call_vref.into(), slot.into(), 8, self.current_mem.into(), Origin::synthetic());
+            self.current_mem = self.builder.store(
+                call_vref.into(),
+                slot.into(),
+                8,
+                self.current_mem.into(),
+                Origin::synthetic(),
+            );
 
             let rdx_val = self.builder.iconst(0, Origin::synthetic());
             self.abi_metadata
@@ -1672,8 +1803,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             let addr1 = self
                 .builder
                 .ptradd(slot.into(), off.into(), 0, Origin::synthetic());
-            self.current_mem = self.builder
-                .store(rdx_val.into(), addr1.into(), 8, self.current_mem.into(), Origin::synthetic());
+            self.current_mem = self.builder.store(
+                rdx_val.into(),
+                addr1.into(),
+                8,
+                self.current_mem.into(),
+                Origin::synthetic(),
+            );
 
             self.locals.set(destination.local, slot);
             self.stack_locals.mark(destination.local);
@@ -1681,24 +1817,41 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // Scalar return (≤ 8 bytes): store directly.
             self.locals.set(destination.local, call_vref);
 
-            // Capture secondary return register for fat pointer returns (e.g., &str).
-            let rdx_val = self.builder.iconst(0, Origin::synthetic());
-            self.abi_metadata
-                .mark_secondary_return_capture(rdx_val.index());
-            self.fat_locals.set(destination.local, rdx_val);
+            // Capture secondary return register only for fat pointer returns
+            // (e.g., &str, &[T]) where RDX carries the second word (length/vtable).
+            // Non-fat types must NOT get a fat_locals entry, otherwise the
+            // spurious high-part value will be injected as an extra argument
+            // when this local is later passed to another function call.
+            if is_fat_ptr(dest_ty) {
+                let rdx_val = self.builder.iconst(0, Origin::synthetic());
+                self.abi_metadata
+                    .mark_secondary_return_capture(rdx_val.index());
+                self.fat_locals.set(destination.local, rdx_val);
+            }
         }
 
         // Branch to the continuation block if present.
         if let Some(target_bb) = target {
             let target_block = self.block_map.get(*target_bb);
-            self.builder.br(target_block, vec![self.current_mem.into()], Origin::synthetic());
+            self.builder.br(
+                target_block,
+                vec![self.current_mem.into()],
+                Origin::synthetic(),
+            );
         }
     }
 
     fn translate_switch_int(&mut self, discr: &Operand<'tcx>, targets: &mir::SwitchTargets) {
         let mut discr_val = match self.translate_operand(discr) {
             Some(v) => v,
-            None => return,
+            None => {
+                // The discriminant local has no value yet (e.g. defined in a
+                // later MIR block that hasn't been translated).  Use zero as
+                // a conservative default — this is correct for the common
+                // case of `is_val_statically_known` (always false/0).
+                // TODO: process blocks in reverse post-order to avoid this.
+                self.builder.iconst(0, Origin::synthetic())
+            }
         };
 
         // If the discriminant is a pointer (e.g. nullable pointer optimization),
@@ -1793,9 +1946,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
                 // Unsupported operand types (e.g. floats) produce Unit or
                 // typeless values — emit a dummy zero so the IR stays well-typed.
-                if !matches!(self.builder.value_type(l_raw), Some(Type::Int | Type::Ptr(_) | Type::Bool))
-                    || !matches!(self.builder.value_type(r_raw), Some(Type::Int | Type::Ptr(_) | Type::Bool))
-                {
+                if !matches!(
+                    self.builder.value_type(l_raw),
+                    Some(Type::Int | Type::Ptr(_) | Type::Bool)
+                ) || !matches!(
+                    self.builder.value_type(r_raw),
+                    Some(Type::Int | Type::Ptr(_) | Type::Bool)
+                ) {
                     return Some(self.builder.iconst(0, Origin::synthetic()));
                 }
 
@@ -1891,9 +2048,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     CastKind::PointerCoercion(..) => {
                         // Convert a zero-sized function item / closure to a function pointer.
                         let src_ty = match operand {
-                            Operand::Copy(p) | Operand::Move(p) => {
-                                self.mir.local_decls[p.local].ty
-                            }
+                            Operand::Copy(p) | Operand::Move(p) => self.mir.local_decls[p.local].ty,
                             Operand::Constant(c) => c.ty(),
                             _ => return Some(val),
                         };
@@ -1930,8 +2085,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 } else {
                     if let Some(val) = self.locals.get(place.local) {
                         let slot = self.builder.stack_slot(8, Origin::synthetic());
-                        self.current_mem = self.builder
-                            .store(val.into(), slot.into(), 8, self.current_mem.into(), Origin::synthetic());
+                        self.current_mem = self.builder.store(
+                            val.into(),
+                            slot.into(),
+                            8,
+                            self.current_mem.into(),
+                            Origin::synthetic(),
+                        );
                         Some(slot)
                     } else {
                         None
@@ -1942,7 +2102,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // Extract enum variant index when constructing an enum.
                 let enum_variant_idx = match kind.as_ref() {
                     mir::AggregateKind::Adt(def_id, variant_idx, _, _, _)
-                        if self.tcx.adt_def(*def_id).is_enum() => Some(*variant_idx),
+                        if self.tcx.adt_def(*def_id).is_enum() =>
+                    {
+                        Some(*variant_idx)
+                    }
                     _ => None,
                 };
 
@@ -1964,9 +2127,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     }
                     _ => self.mir.local_decls[dest_place.local].ty,
                 };
-                let total_size = type_size(self.tcx, agg_ty).unwrap_or(
-                    if operands.is_empty() { 8 } else { 8 * operands.len() as u64 }
-                );
+                let total_size = type_size(self.tcx, agg_ty).unwrap_or(if operands.is_empty() {
+                    8
+                } else {
+                    8 * operands.len() as u64
+                });
                 if total_size == 0 {
                     return Some(self.builder.iconst(0, Origin::synthetic()));
                 }
@@ -1977,19 +2142,34 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     if let Some(existing) = self.locals.get(dest_place.local) {
                         let ety = self.builder.value_type(existing).cloned();
                         if matches!(ety, Some(Type::Ptr(_))) {
-                            eprintln!("[tuffy-agg] REUSE dest={:?} existing_ty={:?} size={total_size}", dest_place.local, ety);
+                            eprintln!(
+                                "[tuffy-agg] REUSE dest={:?} existing_ty={:?} size={total_size}",
+                                dest_place.local, ety
+                            );
                             existing
                         } else {
-                            eprintln!("[tuffy-agg] NEW (non-ptr) dest={:?} existing_ty={:?} size={total_size}", dest_place.local, ety);
-                            self.builder.stack_slot(total_size as u32, Origin::synthetic())
+                            eprintln!(
+                                "[tuffy-agg] NEW (non-ptr) dest={:?} existing_ty={:?} size={total_size}",
+                                dest_place.local, ety
+                            );
+                            self.builder
+                                .stack_slot(total_size as u32, Origin::synthetic())
                         }
                     } else {
-                        eprintln!("[tuffy-agg] NEW (no-slot) dest={:?} size={total_size}", dest_place.local);
-                        self.builder.stack_slot(total_size as u32, Origin::synthetic())
+                        eprintln!(
+                            "[tuffy-agg] NEW (no-slot) dest={:?} size={total_size}",
+                            dest_place.local
+                        );
+                        self.builder
+                            .stack_slot(total_size as u32, Origin::synthetic())
                     }
                 } else {
-                    eprintln!("[tuffy-agg] NEW (projected) dest={:?} size={total_size}", dest_place.local);
-                    self.builder.stack_slot(total_size as u32, Origin::synthetic())
+                    eprintln!(
+                        "[tuffy-agg] NEW (projected) dest={:?} size={total_size}",
+                        dest_place.local
+                    );
+                    self.builder
+                        .stack_slot(total_size as u32, Origin::synthetic())
                 };
 
                 // Zero-initialize the aggregate slot for enum variants.
@@ -2004,10 +2184,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             slot
                         } else {
                             let off = self.builder.iconst(byte_off as i64, Origin::synthetic());
-                            self.builder.ptradd(slot.into(), off.into(), 0, Origin::synthetic())
+                            self.builder
+                                .ptradd(slot.into(), off.into(), 0, Origin::synthetic())
                         };
                         self.current_mem = self.builder.store(
-                            zero.into(), dst.into(), 8, self.current_mem.into(), Origin::synthetic(),
+                            zero.into(),
+                            dst.into(),
+                            8,
+                            self.current_mem.into(),
+                            Origin::synthetic(),
                         );
                     }
                 }
@@ -2039,15 +2224,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         slot
                     } else {
                         let off_val = self.builder.iconst(offset as i64, Origin::synthetic());
-                        self.builder.ptradd(
-                            slot.into(),
-                            off_val.into(),
-                            0,
-                            Origin::synthetic(),
-                        )
+                        self.builder
+                            .ptradd(slot.into(), off_val.into(), 0, Origin::synthetic())
                     };
 
-                    if is_stack_op && matches!(self.builder.value_type(val), Some(Type::Ptr(_))) && bytes > 0 {
+                    if is_stack_op
+                        && matches!(self.builder.value_type(val), Some(Type::Ptr(_)))
+                        && bytes > 0
+                    {
                         // val is a pointer to the operand's stack slot.
                         // Copy the DATA word-by-word instead of storing the pointer.
                         let num_words = (bytes as u64).div_ceil(8);
@@ -2058,24 +2242,44 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 val
                             } else {
                                 let off = self.builder.iconst(byte_off as i64, Origin::synthetic());
-                                self.builder.ptradd(val.into(), off.into(), 0, Origin::synthetic())
+                                self.builder
+                                    .ptradd(val.into(), off.into(), 0, Origin::synthetic())
                             };
                             let word = self.builder.load(
-                                src.into(), word_size, Type::Int, self.current_mem.into(), None, Origin::synthetic(),
+                                src.into(),
+                                word_size,
+                                Type::Int,
+                                self.current_mem.into(),
+                                None,
+                                Origin::synthetic(),
                             );
                             let dst = if byte_off == 0 {
                                 dst_addr
                             } else {
                                 let off = self.builder.iconst(byte_off as i64, Origin::synthetic());
-                                self.builder.ptradd(dst_addr.into(), off.into(), 0, Origin::synthetic())
+                                self.builder.ptradd(
+                                    dst_addr.into(),
+                                    off.into(),
+                                    0,
+                                    Origin::synthetic(),
+                                )
                             };
                             self.current_mem = self.builder.store(
-                                word.into(), dst.into(), word_size, self.current_mem.into(), Origin::synthetic(),
+                                word.into(),
+                                dst.into(),
+                                word_size,
+                                self.current_mem.into(),
+                                Origin::synthetic(),
                             );
                         }
                     } else {
-                        self.current_mem = self.builder
-                            .store(val.into(), dst_addr.into(), bytes, self.current_mem.into(), Origin::synthetic());
+                        self.current_mem = self.builder.store(
+                            val.into(),
+                            dst_addr.into(),
+                            bytes,
+                            self.current_mem.into(),
+                            Origin::synthetic(),
+                        );
                     }
                 }
 
@@ -2118,12 +2322,18 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         // Boolean NOT: bool_to_int then XOR 1.
                         let int_v = self.builder.bool_to_int(v.into(), Origin::synthetic());
                         let one = self.builder.iconst(1, Origin::synthetic());
-                        Some(self.builder.xor(int_v.into(), one.into(), None, Origin::synthetic()))
+                        Some(
+                            self.builder
+                                .xor(int_v.into(), one.into(), None, Origin::synthetic()),
+                        )
                     }
                     Some(Type::Int) => {
                         // Bitwise NOT: XOR with -1.
                         let ones = self.builder.iconst(-1, Origin::synthetic());
-                        Some(self.builder.xor(v.into(), ones.into(), None, Origin::synthetic()))
+                        Some(
+                            self.builder
+                                .xor(v.into(), ones.into(), None, Origin::synthetic()),
+                        )
                     }
                     _ => {
                         // Unsupported type (e.g. float) — emit dummy zero.
@@ -2245,11 +2455,13 @@ fn translate_const<'tcx>(
                     let bytes: Vec<u8> = alloc
                         .inspect_with_uninit_and_ptr_outside_interpreter(offset..offset + size)
                         .to_vec();
-                    let sym = format!(".Lconst.{}", STATIC_DATA_COUNTER.fetch_add(1, Ordering::Relaxed));
-                    let sym_id = symbols.intern(&sym);
-                    let relocs = extract_alloc_relocs(
-                        tcx, alloc, offset, size, symbols, static_data,
+                    let sym = format!(
+                        ".Lconst.{}",
+                        STATIC_DATA_COUNTER.fetch_add(1, Ordering::Relaxed)
                     );
+                    let sym_id = symbols.intern(&sym);
+                    let relocs =
+                        extract_alloc_relocs(tcx, alloc, offset, size, symbols, static_data);
                     static_data.push((sym_id, bytes, relocs));
                     let base = builder.symbol_addr(sym_id, Origin::synthetic());
                     Some(base)
@@ -2260,16 +2472,8 @@ fn translate_const<'tcx>(
                     let sym_id = symbols.intern(&sym_name);
                     let base = builder.symbol_addr(sym_id, Origin::synthetic());
                     if ptr_offset.bytes() > 0 {
-                        let off = builder.iconst(
-                            ptr_offset.bytes() as i64,
-                            Origin::synthetic(),
-                        );
-                        Some(builder.add(
-                            base.into(),
-                            off.into(),
-                            None,
-                            Origin::synthetic(),
-                        ))
+                        let off = builder.iconst(ptr_offset.bytes() as i64, Origin::synthetic());
+                        Some(builder.add(base.into(), off.into(), None, Origin::synthetic()))
                     } else {
                         Some(base)
                     }
@@ -2291,12 +2495,14 @@ fn translate_const<'tcx>(
                         let bytes = inner
                             .inspect_with_uninit_and_ptr_outside_interpreter(0..size)
                             .to_vec();
-                        let sym = format!(".Lvtable.{}", STATIC_DATA_COUNTER.fetch_add(1, Ordering::Relaxed));
+                        let sym = format!(
+                            ".Lvtable.{}",
+                            STATIC_DATA_COUNTER.fetch_add(1, Ordering::Relaxed)
+                        );
                         let sym_id = symbols.intern(&sym);
 
-                        let relocs = extract_alloc_relocs(
-                            tcx, inner, 0, size, symbols, static_data,
-                        );
+                        let relocs =
+                            extract_alloc_relocs(tcx, inner, 0, size, symbols, static_data);
 
                         static_data.push((sym_id, bytes, relocs));
                         let base = builder.symbol_addr(sym_id, Origin::synthetic());
@@ -2314,6 +2520,36 @@ fn translate_const<'tcx>(
         mir::ConstValue::ZeroSized => Some(builder.iconst(0, Origin::synthetic())),
         mir::ConstValue::Slice { alloc_id, meta } => {
             translate_const_slice(tcx, alloc_id, meta, builder, symbols, static_data)
+        }
+        mir::ConstValue::Indirect { alloc_id, offset } => {
+            // Multi-byte constant stored in an allocation (e.g. Option::<&str>::None).
+            // Emit the bytes as static data and return a pointer.
+            let alloc = tcx.global_alloc(alloc_id);
+            if let rustc_middle::mir::interpret::GlobalAlloc::Memory(mem_alloc) = alloc {
+                let inner = mem_alloc.inner();
+                let byte_offset = offset.bytes() as usize;
+                let typing_env = ty::TypingEnv::fully_monomorphized();
+                let size = tcx
+                    .layout_of(typing_env.as_query_input(ty))
+                    .map(|l| l.size.bytes() as usize)
+                    .unwrap_or(inner.len() - byte_offset);
+                let bytes: Vec<u8> = inner
+                    .inspect_with_uninit_and_ptr_outside_interpreter(
+                        byte_offset..byte_offset + size,
+                    )
+                    .to_vec();
+                let sym = format!(
+                    ".Lconst.{}",
+                    STATIC_DATA_COUNTER.fetch_add(1, Ordering::Relaxed)
+                );
+                let sym_id = symbols.intern(&sym);
+                let relocs =
+                    extract_alloc_relocs(tcx, inner, byte_offset, size, symbols, static_data);
+                static_data.push((sym_id, bytes, relocs));
+                Some(builder.symbol_addr(sym_id, Origin::synthetic()))
+            } else {
+                None
+            }
         }
         _ => None,
     }
@@ -2333,7 +2569,6 @@ fn extract_alloc_relocs<'tcx>(
     static_data: &mut Vec<(SymbolId, Vec<u8>, Vec<(usize, String)>)>,
 ) -> Vec<(usize, String)> {
     let mut relocs = Vec::new();
-    eprintln!("[extract_alloc_relocs] byte_offset={byte_offset} byte_len={byte_len} provenance_count={}", alloc.provenance().ptrs().iter().count());
     for (offset, prov) in alloc.provenance().ptrs().iter() {
         let abs_offset = offset.bytes() as usize;
         if abs_offset < byte_offset || abs_offset >= byte_offset + byte_len {
@@ -2342,23 +2577,14 @@ fn extract_alloc_relocs<'tcx>(
         let rel_offset = abs_offset - byte_offset;
         let target_alloc_id = prov.alloc_id();
         let ga = tcx.global_alloc(target_alloc_id);
-        eprintln!("[extract_alloc_relocs]   offset={abs_offset} rel={rel_offset} kind={}", match &ga {
-            rustc_middle::mir::interpret::GlobalAlloc::Function { .. } => "Function",
-            rustc_middle::mir::interpret::GlobalAlloc::Static(_) => "Static",
-            rustc_middle::mir::interpret::GlobalAlloc::Memory(_) => "Memory",
-            rustc_middle::mir::interpret::GlobalAlloc::VTable(..) => "VTable",
-            rustc_middle::mir::interpret::GlobalAlloc::TypeId { .. } => "TypeId",
-        });
         match ga {
             rustc_middle::mir::interpret::GlobalAlloc::Function { instance } => {
                 let fn_sym = tcx.symbol_name(instance).name.to_string();
-                eprintln!("[extract_alloc_relocs]     -> fn {fn_sym}");
                 relocs.push((rel_offset, fn_sym));
             }
             rustc_middle::mir::interpret::GlobalAlloc::Static(def_id) => {
                 let instance = Instance::mono(tcx, def_id);
                 let sym_name = tcx.symbol_name(instance).name.to_string();
-                eprintln!("[extract_alloc_relocs]     -> static {sym_name}");
                 relocs.push((rel_offset, sym_name));
             }
             rustc_middle::mir::interpret::GlobalAlloc::Memory(target_alloc) => {
@@ -2378,11 +2604,11 @@ fn extract_alloc_relocs<'tcx>(
             }
             rustc_middle::mir::interpret::GlobalAlloc::VTable(vtable_ty, vtable_trait_ref) => {
                 let principal = vtable_trait_ref.principal().map(|p| p.skip_binder());
-                if let Ok(vtable_alloc_id) = std::panic::catch_unwind(
-                    std::panic::AssertUnwindSafe(|| {
+                if let Ok(vtable_alloc_id) =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         tcx.vtable_allocation((vtable_ty, principal))
-                    }),
-                ) {
+                    }))
+                {
                     let vtable_alloc = tcx.global_alloc(vtable_alloc_id);
                     if let rustc_middle::mir::interpret::GlobalAlloc::Memory(va) = vtable_alloc {
                         let inner = va.inner();
@@ -2435,9 +2661,7 @@ fn translate_scalar(
             let val = BigInt::from(bits);
             Some(builder.iconst(val, Origin::synthetic()))
         }
-        ty::Bool => {
-            Some(builder.bconst(bits != 0, Origin::synthetic()))
-        }
+        ty::Bool => Some(builder.bconst(bits != 0, Origin::synthetic())),
         ty::Char => {
             let val = BigInt::from(bits as u32);
             Some(builder.iconst(val, Origin::synthetic()))
@@ -2469,8 +2693,7 @@ fn translate_const_slice<'tcx>(
     symbols: &mut SymbolTable,
     static_data: &mut Vec<(SymbolId, Vec<u8>, Vec<(usize, String)>)>,
 ) -> Option<ValueRef> {
-    let rustc_middle::mir::interpret::GlobalAlloc::Memory(alloc) =
-        tcx.global_alloc(alloc_id)
+    let rustc_middle::mir::interpret::GlobalAlloc::Memory(alloc) = tcx.global_alloc(alloc_id)
     else {
         return None;
     };
@@ -2480,7 +2703,10 @@ fn translate_const_slice<'tcx>(
         .to_vec();
 
     // Create a unique symbol name for this data blob.
-    let sym = format!(".Lstr.{}", STATIC_DATA_COUNTER.fetch_add(1, Ordering::Relaxed));
+    let sym = format!(
+        ".Lstr.{}",
+        STATIC_DATA_COUNTER.fetch_add(1, Ordering::Relaxed)
+    );
     let sym_id = symbols.intern(&sym);
     static_data.push((sym_id, bytes, vec![]));
 
@@ -2782,7 +3008,9 @@ fn resolve_call_target<'tcx>(
             if instance.args.has_non_region_param() {
                 return None;
             }
-            Some(CallTarget::Direct(tcx.symbol_name(instance).name.to_string()))
+            Some(CallTarget::Direct(
+                tcx.symbol_name(instance).name.to_string(),
+            ))
         }
         _ => None,
     }

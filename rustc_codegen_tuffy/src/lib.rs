@@ -117,13 +117,14 @@ impl CodegenBackend for TuffyCodegenBackend {
                             all_static_data.push(StaticData {
                                 name: result.symbols.resolve(*sym_id).to_string(),
                                 data: data.clone(),
-                                relocations: relocs.iter().map(|(offset, sym)| {
-                                    tuffy_target::reloc::Relocation {
+                                relocations: relocs
+                                    .iter()
+                                    .map(|(offset, sym)| tuffy_target::reloc::Relocation {
                                         offset: *offset,
                                         symbol: sym.clone(),
                                         kind: tuffy_target::reloc::RelocKind::Abs64,
-                                    }
-                                }).collect(),
+                                    })
+                                    .collect(),
                             });
                         }
 
