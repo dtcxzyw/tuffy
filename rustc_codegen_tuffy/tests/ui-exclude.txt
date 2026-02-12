@@ -332,3 +332,13 @@ simd/simd-bitmask.rs
 # MIR opt level / polonius flags cause expected compilation errors in lib mode.
 nll/polonius/array-literal-index-oob-2024.rs
 simd/intrinsic/inlining-issue67557.rs
+
+# Tuffy panics (unsupported trait/coercion features).
+lint/issue-108155.rs
+traits/next-solver/coercion/trait-upcast-lhs-needs-normalization.rs
+
+# Compilation failures (layout, coroutine, import, stdlib features not yet supported).
+coroutine/uninhabited-field.rs
+imports/overwrite-different-vis-2.rs
+layout/rigid-alias-no-params.rs
+stdlib-unit-tests/matches2021.rs
