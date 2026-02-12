@@ -127,17 +127,20 @@ pub fn translate_function<'tcx>(
 
     // Create IR blocks for all MIR basic blocks upfront so branches can
     // reference target blocks before they are translated.
+    // Each block gets a Type::Mem block argument for MemSSA threading.
     let mut block_map = BlockMap::new(mir.basic_blocks.len());
+    let mut block_mem_args = Vec::with_capacity(mir.basic_blocks.len());
     for (bb, _) in mir.basic_blocks.iter_enumerated() {
         let ir_block = builder.create_block();
         block_map.set(bb, ir_block);
+        let mem_arg = builder.add_block_arg(ir_block, Type::Mem);
+        block_mem_args.push(mem_arg);
     }
 
     let entry = block_map.get(BasicBlock::from_u32(0));
     builder.switch_to_block(entry);
 
-    // Create the initial memory token as a block argument on the entry block.
-    let initial_mem = builder.add_block_arg(entry, Type::Mem);
+    let initial_mem = block_mem_args[0];
 
     let mut ctx = TranslationCtx {
         tcx,
@@ -149,6 +152,7 @@ pub fn translate_function<'tcx>(
         symbols,
         static_data: Vec::new(),
         block_map,
+        block_mem_args,
         abi_metadata,
         instance,
         sret_ptr: None,
@@ -163,6 +167,8 @@ pub fn translate_function<'tcx>(
     for (bb, bb_data) in mir.basic_blocks.iter_enumerated() {
         let ir_block = ctx.block_map.get(bb);
         ctx.builder.switch_to_block(ir_block);
+        // Pick up the memory token from this block's MemSSA block argument.
+        ctx.current_mem = ctx.block_mem_args[bb.as_usize()];
 
         for stmt in &bb_data.statements {
             ctx.translate_statement(stmt);
@@ -432,6 +438,8 @@ struct TranslationCtx<'a, 'tcx> {
     symbols: SymbolTable,
     static_data: Vec<(SymbolId, Vec<u8>)>,
     block_map: BlockMap,
+    /// MemSSA block arguments: one `Type::Mem` arg per MIR basic block.
+    block_mem_args: Vec<ValueRef>,
     abi_metadata: AbiMetadataBox,
     instance: Instance<'tcx>,
     sret_ptr: Option<ValueRef>,
@@ -906,7 +914,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             }
             TerminatorKind::Goto { target } => {
                 let target_block = self.block_map.get(*target);
-                self.builder.br(target_block, vec![], Origin::synthetic());
+                self.builder.br(target_block, vec![self.current_mem.into()], Origin::synthetic());
             }
             TerminatorKind::SwitchInt { discr, targets } => {
                 self.translate_switch_int(discr, targets);
@@ -932,18 +940,19 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     );
                     // Create a trap block for the failure path.
                     let trap_block = self.builder.create_block();
+                    let _trap_mem = self.builder.add_block_arg(trap_block, Type::Mem);
                     self.builder.brif(
                         cmp.into(),
                         target_block,
-                        vec![],
+                        vec![self.current_mem.into()],
                         trap_block,
-                        vec![],
+                        vec![self.current_mem.into()],
                         Origin::synthetic(),
                     );
                     self.builder.switch_to_block(trap_block);
                     self.builder.trap(Origin::synthetic());
                 } else {
-                    self.builder.br(target_block, vec![], Origin::synthetic());
+                    self.builder.br(target_block, vec![self.current_mem.into()], Origin::synthetic());
                 }
             }
             TerminatorKind::Unreachable => {
@@ -952,15 +961,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             TerminatorKind::Drop { target, .. } => {
                 // Skip drop glue for now — just branch to the target.
                 let target_block = self.block_map.get(*target);
-                self.builder.br(target_block, vec![], Origin::synthetic());
+                self.builder.br(target_block, vec![self.current_mem.into()], Origin::synthetic());
             }
             TerminatorKind::FalseEdge { real_target, .. } => {
                 let target_block = self.block_map.get(*real_target);
-                self.builder.br(target_block, vec![], Origin::synthetic());
+                self.builder.br(target_block, vec![self.current_mem.into()], Origin::synthetic());
             }
             TerminatorKind::FalseUnwind { real_target, .. } => {
                 let target_block = self.block_map.get(*real_target);
-                self.builder.br(target_block, vec![], Origin::synthetic());
+                self.builder.br(target_block, vec![self.current_mem.into()], Origin::synthetic());
             }
             TerminatorKind::Call {
                 func,
@@ -1009,7 +1018,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             if handled {
                 if let Some(target) = target {
                     let target_block = self.block_map.get(*target);
-                    self.builder.br(target_block, vec![], Origin::synthetic());
+                    self.builder.br(target_block, vec![self.current_mem.into()], Origin::synthetic());
                 }
                 return;
             }
@@ -1030,7 +1039,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 self.current_mem = new_mem;
                 if let Some(target) = target {
                     let target_block = self.block_map.get(*target);
-                    self.builder.br(target_block, vec![], Origin::synthetic());
+                    self.builder.br(target_block, vec![self.current_mem.into()], Origin::synthetic());
                 }
                 return;
             }
@@ -1202,7 +1211,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         // Branch to the continuation block if present.
         if let Some(target_bb) = target {
             let target_block = self.block_map.get(*target_bb);
-            self.builder.br(target_block, vec![], Origin::synthetic());
+            self.builder.br(target_block, vec![self.current_mem.into()], Origin::synthetic());
         }
     }
 
@@ -1238,9 +1247,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             self.builder.brif(
                 cmp.into(),
                 then_block,
-                vec![],
+                vec![self.current_mem.into()],
                 else_block,
-                vec![],
+                vec![self.current_mem.into()],
                 Origin::synthetic(),
             );
         } else {
@@ -1261,23 +1270,25 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     self.builder.brif(
                         cmp.into(),
                         then_block,
-                        vec![],
+                        vec![self.current_mem.into()],
                         otherwise_block,
-                        vec![],
+                        vec![self.current_mem.into()],
                         Origin::synthetic(),
                     );
                 } else {
                     // Not last: else falls through to a new comparison block.
                     let next_block = self.builder.create_block();
+                    let next_mem = self.builder.add_block_arg(next_block, Type::Mem);
                     self.builder.brif(
                         cmp.into(),
                         then_block,
-                        vec![],
+                        vec![self.current_mem.into()],
                         next_block,
-                        vec![],
+                        vec![self.current_mem.into()],
                         Origin::synthetic(),
                     );
                     self.builder.switch_to_block(next_block);
+                    self.current_mem = next_mem;
                 }
             }
         }
