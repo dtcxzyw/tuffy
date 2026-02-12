@@ -133,4 +133,12 @@ pub enum EmitInst {
         dst: RegRef,
         src: RegRef,
     },
+    Lzcnt {
+        dst: RegRef,
+        src: RegRef,
+    },
+    Tzcnt {
+        dst: RegRef,
+        src: RegRef,
+    },
 }

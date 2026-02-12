@@ -266,6 +266,20 @@ fn emit_inst(out: &mut String, inst: &EmitInst, env: &mut RegEnv) {
             let fs = field("src", &s);
             format!("    ctx.out.push(MInst::Popcnt {{ {fd}, {fs} }});")
         }
+        EmitInst::Lzcnt { dst, src } => {
+            let d = env.resolve(dst, &mut alloc_buf);
+            let s = env.resolve(src, &mut alloc_buf);
+            let fd = field("dst", &d);
+            let fs = field("src", &s);
+            format!("    ctx.out.push(MInst::Lzcnt {{ {fd}, {fs} }});")
+        }
+        EmitInst::Tzcnt { dst, src } => {
+            let d = env.resolve(dst, &mut alloc_buf);
+            let s = env.resolve(src, &mut alloc_buf);
+            let fd = field("dst", &d);
+            let fs = field("src", &s);
+            format!("    ctx.out.push(MInst::Tzcnt {{ {fd}, {fs} }});")
+        }
     };
 
     out.push_str(&alloc_buf);
@@ -454,6 +468,8 @@ fn op_variant_pattern(op_name: &str) -> &'static str {
         "Min" => "Op::Min(lhs, rhs)",
         "Max" => "Op::Max(lhs, rhs)",
         "CountOnes" => "Op::CountOnes(val)",
+        "CountLeadingZeros" => "Op::CountLeadingZeros(val)",
+        "CountTrailingZeros" => "Op::CountTrailingZeros(val)",
         "PtrAdd" => "Op::PtrAdd(ptr, offset)",
         "PtrDiff" => "Op::PtrDiff(lhs, rhs)",
         _ => panic!("unknown op: {op_name}"),
@@ -470,7 +486,9 @@ fn op_operand_names(op_name: &str) -> Vec<(String, String)> {
                 ("r".to_string(), "rhs".to_string()),
             ]
         }
-        "CountOnes" => vec![("s".to_string(), "val".to_string())],
+        "CountOnes" | "CountLeadingZeros" | "CountTrailingZeros" => {
+            vec![("s".to_string(), "val".to_string())]
+        }
         "PtrAdd" => vec![
             ("p".to_string(), "ptr".to_string()),
             ("o".to_string(), "offset".to_string()),
