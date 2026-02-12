@@ -427,7 +427,7 @@ fn select_inst(
                     ptr.value.index(),
                     bytes
                 );
-                let ptr_vreg = ctx.regs.get(ptr.value)?;
+                let ptr_vreg = ctx.ensure_in_reg(ptr.value)?;
                 ctx.out.push(MInst::MovRM {
                     size,
                     dst,
@@ -680,25 +680,45 @@ fn select_call(
         });
     }
 
+    // The primary result of a call is the mem token (no register needed).
+    // If the call returns a value, it's the secondary result — assign rax to it.
+    // We emit an explicit MovRR from the rax-fixed vreg to an unconstrained
+    // vreg so the return value doesn't conflict with other rax-constrained
+    // vregs (e.g. the Ret handler also allocates a fixed rax vreg).
+    let inst = func.inst(vref.index());
+    let ret_vreg = if inst.secondary_ty.is_some() {
+        let rax = ctx.alloc.alloc_fixed(Gpr::Rax.to_preg());
+        Some(rax)
+    } else {
+        None
+    };
+
     let callee_idx = callee.value.index();
     if let Op::SymbolAddr(sym_id) = &func.inst(callee_idx).op {
         let name = symbols.resolve(*sym_id).to_string();
-        ctx.out.push(MInst::CallSym { name });
+        ctx.out.push(MInst::CallSym {
+            name,
+            ret: ret_vreg,
+        });
     } else {
         // Indirect call through a register (e.g. virtual dispatch).
         let callee_vreg = ctx.ensure_in_reg(callee.value)?;
         ctx.out.push(MInst::CallReg {
             callee: callee_vreg,
+            ret: ret_vreg,
         });
     }
 
-    // The primary result of a call is the mem token (no register needed).
-    // If the call returns a value, it's the secondary result — assign rax to it.
-    let inst = func.inst(vref.index());
-    if inst.secondary_ty.is_some() {
-        let rax = ctx.alloc.alloc_fixed(Gpr::Rax.to_preg());
+    // Copy the rax-fixed vreg into an unconstrained vreg for downstream use.
+    if let Some(rax) = ret_vreg {
+        let dst = ctx.alloc.alloc();
+        ctx.out.push(MInst::MovRR {
+            size: OpSize::S64,
+            dst,
+            src: rax,
+        });
         let secondary = ValueRef::inst_secondary_result(vref.index());
-        ctx.regs.assign(secondary, rax);
+        ctx.regs.assign(secondary, dst);
     }
     Some(())
 }

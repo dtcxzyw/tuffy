@@ -114,8 +114,14 @@ fn rewrite_inst(inst: &VInst, assignments: &[PReg]) -> PInst {
             src1: r(src1),
             src2: r(src2),
         },
-        MInst::CallSym { name } => MInst::CallSym { name: name.clone() },
-        MInst::CallReg { callee } => MInst::CallReg { callee: r(callee) },
+        MInst::CallSym { name, ret } => MInst::CallSym {
+            name: name.clone(),
+            ret: ret.map(|v| r(&v)),
+        },
+        MInst::CallReg { callee, ret } => MInst::CallReg {
+            callee: r(callee),
+            ret: ret.map(|v| r(&v)),
+        },
         MInst::Push { reg } => MInst::Push { reg: r(reg) },
         MInst::Pop { reg } => MInst::Pop { reg: r(reg) },
         MInst::SubSPI { imm } => MInst::SubSPI { imm: *imm },

@@ -136,15 +136,23 @@ impl RegAllocInst for VInst {
                 ops.push(use_op(*src));
             }
             // Indirect call: callee register is a use operand
-            MInst::CallReg { callee } => {
+            MInst::CallReg { callee, ret } => {
                 ops.push(use_op(*callee));
+                if let Some(r) = ret {
+                    ops.push(def_op(*r));
+                }
+            }
+            // Direct call: return vreg is a def operand
+            MInst::CallSym { ret, .. } => {
+                if let Some(r) = ret {
+                    ops.push(def_op(*r));
+                }
             }
             // No register operands
             MInst::Ret
             | MInst::Label { .. }
             | MInst::Jmp { .. }
             | MInst::Jcc { .. }
-            | MInst::CallSym { .. }
             | MInst::SubSPI { .. }
             | MInst::AddSPI { .. }
             | MInst::Cqo

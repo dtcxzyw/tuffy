@@ -91,7 +91,7 @@ fn encode_inst(
         MInst::TestRR { size, src1, src2 } => {
             emit_rex_and_opcode(*size, *src2, *src1, 0x85, buf);
         }
-        MInst::CallSym { name } => {
+        MInst::CallSym { name, .. } => {
             buf.push(0xe8);
             relocations.push(Relocation {
                 offset: buf.len(),
@@ -100,7 +100,7 @@ fn encode_inst(
             });
             buf.extend_from_slice(&[0; 4]);
         }
-        MInst::CallReg { callee } => {
+        MInst::CallReg { callee, .. } => {
             // FF /2 = call *%reg
             if callee.needs_rex() {
                 buf.push(0x41); // REX.B
