@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "tuffy_ir",
     "tuffy_ir_interp",
+    "tuffy_isel_gen",
     "tuffy_opt",
     "tuffy_regalloc",
     "tuffy_target",
