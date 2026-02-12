@@ -247,7 +247,8 @@ impl FatLocalMap {
 
 fn translate_ty(ty: ty::Ty<'_>) -> Option<Type> {
     match ty.kind() {
-        ty::Bool | ty::Int(ty::IntTy::I8) | ty::Uint(ty::UintTy::U8) => Some(Type::Int),
+        ty::Bool => Some(Type::Bool),
+        ty::Int(ty::IntTy::I8) | ty::Uint(ty::UintTy::U8) => Some(Type::Int),
         ty::Int(ty::IntTy::I16) | ty::Uint(ty::UintTy::U16) => Some(Type::Int),
         ty::Int(ty::IntTy::I32) | ty::Uint(ty::UintTy::U32) | ty::Char => Some(Type::Int),
         ty::Int(ty::IntTy::I64)
@@ -267,7 +268,7 @@ fn translate_ty(ty: ty::Ty<'_>) -> Option<Type> {
 
 fn translate_annotation(ty: ty::Ty<'_>) -> Option<Annotation> {
     match ty.kind() {
-        ty::Bool => Some(Annotation::Unsigned(8)),
+        ty::Bool => None,
         ty::Int(ty::IntTy::I8) => Some(Annotation::Signed(8)),
         ty::Uint(ty::UintTy::U8) => Some(Annotation::Unsigned(8)),
         ty::Int(ty::IntTy::I16) => Some(Annotation::Signed(16)),
@@ -1223,10 +1224,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
         // If the discriminant is a pointer (e.g. nullable pointer optimization),
         // convert it to an integer so icmp gets Int operands.
+        // Similarly, Bool discriminants need BoolToInt for icmp.
         if matches!(self.builder.value_type(discr_val), Some(Type::Ptr(_))) {
             discr_val = self
                 .builder
                 .ptrtoaddr(discr_val.into(), Origin::synthetic());
+        } else if matches!(self.builder.value_type(discr_val), Some(Type::Bool)) {
+            discr_val = self
+                .builder
+                .bool_to_int(discr_val.into(), Origin::synthetic());
         }
 
         let all_targets: Vec<_> = targets.iter().collect();
@@ -1399,6 +1405,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             Operand::Constant(c) => c.ty(),
                             _ => return Some(val),
                         };
+                        // Bool is Type::Bool in IR but IntToInt casts need Int operands.
+                        let val = self.coerce_to_int(val);
                         translate_int_to_int_cast(src_ty, *target_ty, val, &mut self.builder)
                     }
                     // Pointer casts and transmutes are bitwise moves.
@@ -1680,8 +1688,7 @@ fn translate_scalar(
             Some(builder.iconst(val, Origin::synthetic()))
         }
         ty::Bool => {
-            let val = if bits != 0 { 1i64 } else { 0i64 };
-            Some(builder.iconst(val, Origin::synthetic()))
+            Some(builder.bconst(bits != 0, Origin::synthetic()))
         }
         ty::Char => {
             let val = BigInt::from(bits as u32);
