@@ -11,7 +11,7 @@ use num_traits::ToPrimitive;
 use tuffy_ir::function::{CfgNode, Function};
 use tuffy_ir::instruction::{ICmpOp, Op, Operand};
 use tuffy_ir::module::SymbolTable;
-use tuffy_ir::types::Annotation;
+use tuffy_ir::types::{Annotation, Type};
 use tuffy_ir::value::ValueRef;
 use tuffy_regalloc::{PReg, VReg};
 
@@ -340,6 +340,10 @@ fn select_inst(
         Op::Br(target, args) => {
             let ba_vrefs = func.block_arg_values(*target);
             for (arg, ba_vref) in args.iter().zip(ba_vrefs.iter()) {
+                // Skip mem-typed block arguments — they have no runtime register.
+                if func.value_type(*ba_vref) == Some(&Type::Mem) {
+                    continue;
+                }
                 let src = ctx.ensure_in_reg(arg.value)?;
                 let dst = ctx.alloc.alloc();
                 ctx.out.push(MInst::MovRR {
@@ -735,6 +739,9 @@ fn select_brif(
         // Else path.
         let else_ba_vrefs = func.block_arg_values(*else_block);
         for (arg, ba_vref) in else_args.iter().zip(else_ba_vrefs.iter()) {
+            if func.value_type(*ba_vref) == Some(&Type::Mem) {
+                continue;
+            }
             let src = ctx.ensure_in_reg(arg.value)?;
             let dst = ctx.alloc.alloc();
             ctx.out.push(MInst::MovRR {
@@ -752,6 +759,9 @@ fn select_brif(
         ctx.out.push(MInst::Label { id: intermediate });
         let then_ba_vrefs = func.block_arg_values(*then_block);
         for (arg, ba_vref) in then_args.iter().zip(then_ba_vrefs.iter()) {
+            if func.value_type(*ba_vref) == Some(&Type::Mem) {
+                continue;
+            }
             let src = ctx.ensure_in_reg(arg.value)?;
             let dst = ctx.alloc.alloc();
             ctx.out.push(MInst::MovRR {
@@ -818,8 +828,14 @@ fn select_call(
         ctx.out.push(MInst::Ud2);
     }
 
-    let rax = ctx.alloc.alloc_fixed(Gpr::Rax.to_preg());
-    ctx.regs.assign(vref, rax);
+    // The primary result of a call is the mem token (no register needed).
+    // If the call returns a value, it's the secondary result — assign rax to it.
+    let inst = func.inst(vref.index());
+    if inst.secondary_ty.is_some() {
+        let rax = ctx.alloc.alloc_fixed(Gpr::Rax.to_preg());
+        let secondary = ValueRef::inst_secondary_result(vref.index());
+        ctx.regs.assign(secondary, rax);
+    }
     Some(())
 }
 

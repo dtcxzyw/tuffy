@@ -54,7 +54,7 @@ pub fn emit_elf_with_data(functions: &[CompiledFunction], statics: &[StaticData]
             value: code_offset,
             size: func.code.len() as u64,
             kind: SymbolKind::Text,
-            scope: SymbolScope::Dynamic,
+            scope: SymbolScope::Linkage,
             weak: false,
             section: SymbolSection::Section(text),
             flags: SymbolFlags::None,
