@@ -158,7 +158,7 @@ fn alloc_simple_no_conflicts() {
     ];
     let constraints = vec![None, None];
     let regs = vec![PReg(0), PReg(1)];
-    let result = allocate(&insts, 2, &constraints, &regs);
+    let result = allocate(&insts, 2, &constraints, &regs, &[]);
 
     assert_eq!(result.assignments.len(), 2);
     // Both should get valid registers from the pool.
@@ -180,7 +180,7 @@ fn alloc_fixed_constraint() {
     ];
     let constraints = vec![Some(PReg(1)), None];
     let regs = vec![PReg(0), PReg(1)];
-    let result = allocate(&insts, 2, &constraints, &regs);
+    let result = allocate(&insts, 2, &constraints, &regs, &[]);
 
     assert_eq!(result.assignments[0], PReg(1));
     assert!(regs.contains(&result.assignments[1]));
@@ -198,7 +198,7 @@ fn alloc_overlapping_intervals() {
     ];
     let constraints = vec![None, None];
     let regs = vec![PReg(0), PReg(1)];
-    let result = allocate(&insts, 2, &constraints, &regs);
+    let result = allocate(&insts, 2, &constraints, &regs, &[]);
 
     assert_eq!(result.assignments.len(), 2);
     // They must get different registers since they overlap.
