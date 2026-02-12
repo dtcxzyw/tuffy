@@ -50,6 +50,8 @@ inductive EmitInst where
   | cmpRR (size : OpSize) (src1 src2 : RegRef)
   | cmovCC (size : OpSize) (cc : CondCode) (dst src : RegRef)
   | popcnt (dst src : RegRef)
+  | lzcnt (dst src : RegRef)
+  | tzcnt (dst src : RegRef)
   deriving Repr, BEq, Hashable
 
 end TuffyLean.Target.X86

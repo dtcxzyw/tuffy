@@ -129,12 +129,26 @@ def maxUnsignedRule : IselRule := {
   result := .reg "dst"
 }
 
--- CountOnes (popcnt)
+-- CountOnes (popcnt), CountLeadingZeros (lzcnt), CountTrailingZeros (tzcnt)
 
 def countOnesRule : IselRule := {
   name := "count_ones"
   pattern := .unop "CountOnes" ⟨"src", .any⟩
   emit := [popcnt (.fresh "dst") (.named "src")]
+  result := .reg "dst"
+}
+
+def countLeadingZerosRule : IselRule := {
+  name := "count_leading_zeros"
+  pattern := .unop "CountLeadingZeros" ⟨"src", .any⟩
+  emit := [lzcnt (.fresh "dst") (.named "src")]
+  result := .reg "dst"
+}
+
+def countTrailingZerosRule : IselRule := {
+  name := "count_trailing_zeros"
+  pattern := .unop "CountTrailingZeros" ⟨"src", .any⟩
+  emit := [tzcnt (.fresh "dst") (.named "src")]
   result := .reg "dst"
 }
 
@@ -174,7 +188,7 @@ def allRules : List IselRule := [
   shlRule, shrSignedRule, shrUnsignedRule,
   minSignedRule, minUnsignedRule,
   maxSignedRule, maxUnsignedRule,
-  countOnesRule,
+  countOnesRule, countLeadingZerosRule, countTrailingZerosRule,
   icmpRule,
   ptrAddRule, ptrDiffRule
 ]

@@ -100,6 +100,12 @@ private def emitInstToJson : EmitInst → String
   | .popcnt dst src =>
     jsonObj [("inst", quote "Popcnt"),
              ("dst", regRefToJson dst), ("src", regRefToJson src)]
+  | .lzcnt dst src =>
+    jsonObj [("inst", quote "Lzcnt"),
+             ("dst", regRefToJson dst), ("src", regRefToJson src)]
+  | .tzcnt dst src =>
+    jsonObj [("inst", quote "Tzcnt"),
+             ("dst", regRefToJson dst), ("src", regRefToJson src)]
 
 private def irPatternToJson : IrPattern → String
   | .binop op lhs rhs =>
