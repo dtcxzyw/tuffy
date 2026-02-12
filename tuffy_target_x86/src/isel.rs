@@ -3,6 +3,9 @@
 //! Emits `MInst<VReg>` (virtual register instructions). The register allocator
 //! later rewrites these to `MInst<Gpr>` (physical register instructions).
 
+#[path = "isel_gen.rs"]
+mod isel_gen;
+
 use std::collections::HashMap;
 
 use crate::inst::{CondCode, MInst, OpSize, VInst};
@@ -266,6 +269,11 @@ fn select_inst(
     rdx_captures: &HashMap<u32, ()>,
     rdx_moves: &HashMap<u32, u32>,
 ) -> Option<()> {
+    // Try generated rules first (covers Add, Sub, Mul, Or, And, Xor,
+    // Shl, Shr, Min, Max, CountOnes, ICmp, PtrAdd, PtrDiff).
+    if isel_gen::try_select_generated(ctx, vref, op).is_some() {
+        return Some(());
+    }
     match op {
         Op::Param(idx) => {
             let arg_gpr = ARG_REGS.get(*idx as usize)?;
@@ -311,30 +319,6 @@ fn select_inst(
                 imm: if *val { 1 } else { 0 },
             });
             ctx.regs.assign(vref, dst);
-        }
-
-        Op::Add(lhs, rhs) => {
-            select_binop_rr(ctx, vref, lhs.value, rhs.value, BinOp::Add)?;
-        }
-
-        Op::Sub(lhs, rhs) => {
-            select_binop_rr(ctx, vref, lhs.value, rhs.value, BinOp::Sub)?;
-        }
-
-        Op::Mul(lhs, rhs) => {
-            select_binop_rr(ctx, vref, lhs.value, rhs.value, BinOp::Mul)?;
-        }
-
-        Op::ICmp(cmp_op, lhs, rhs) => {
-            let lhs_vreg = ctx.ensure_in_reg(lhs.value)?;
-            let rhs_vreg = ctx.ensure_in_reg(rhs.value)?;
-            ctx.out.push(MInst::CmpRR {
-                size: OpSize::S64,
-                src1: lhs_vreg,
-                src2: rhs_vreg,
-            });
-            let cc = icmp_to_cc(*cmp_op, lhs.annotation);
-            ctx.cmps.set(vref, cc);
         }
 
         Op::Br(target, args) => {
@@ -430,64 +414,12 @@ fn select_inst(
             }
         }
 
-        Op::Or(lhs, rhs) => {
-            select_bitop_rr(ctx, vref, lhs.value, rhs.value, BitOp::Or)?;
-        }
-        Op::And(lhs, rhs) => {
-            select_bitop_rr(ctx, vref, lhs.value, rhs.value, BitOp::And)?;
-        }
-        Op::Xor(lhs, rhs) => {
-            select_bitop_rr(ctx, vref, lhs.value, rhs.value, BitOp::Xor)?;
-        }
-
-        Op::Shl(lhs, rhs) => {
-            select_shift_cl(ctx, vref, lhs.value, rhs.value, ShiftOp::Shl)?;
-        }
-        Op::Shr(lhs, rhs) => {
-            let shift_op = match lhs.annotation {
-                Some(Annotation::Signed(_)) => ShiftOp::Sar,
-                _ => ShiftOp::Shr,
-            };
-            select_shift_cl(ctx, vref, lhs.value, rhs.value, shift_op)?;
-        }
-
-        Op::PtrAdd(ptr, offset) => {
-            let ptr_vreg = ctx.ensure_in_reg(ptr.value)?;
-            let off_vreg = ctx.ensure_in_reg(offset.value)?;
-            let dst = ctx.alloc.alloc();
-            ctx.out.push(MInst::MovRR {
-                size: OpSize::S64,
-                dst,
-                src: ptr_vreg,
-            });
-            ctx.out.push(MInst::AddRR {
-                size: OpSize::S64,
-                dst,
-                src: off_vreg,
-            });
-            ctx.regs.assign(vref, dst);
-        }
-
         Op::Unreachable | Op::Trap => {
             ctx.out.push(MInst::Ud2);
         }
 
         Op::Select(cond, tv, fv) => {
             select_select(ctx, vref, cond, tv, fv)?;
-        }
-
-        Op::Min(lhs, rhs) => {
-            select_minmax(ctx, vref, lhs, rhs, MinMaxKind::Min)?;
-        }
-        Op::Max(lhs, rhs) => {
-            select_minmax(ctx, vref, lhs, rhs, MinMaxKind::Max)?;
-        }
-
-        Op::CountOnes(val) => {
-            let src = ctx.ensure_in_reg(val.value)?;
-            let dst = ctx.alloc.alloc();
-            ctx.out.push(MInst::Popcnt { dst, src });
-            ctx.regs.assign(vref, dst);
         }
 
         Op::BoolToInt(val) => {
@@ -528,10 +460,6 @@ fn select_inst(
             ctx.regs.assign(vref, src);
         }
 
-        Op::PtrDiff(lhs, rhs) => {
-            select_binop_rr(ctx, vref, lhs.value, rhs.value, BinOp::Sub)?;
-        }
-
         Op::Sext(val, _target_bits) => {
             select_sext(ctx, vref, val)?;
         }
@@ -562,146 +490,14 @@ fn select_inst(
         }
 
         Op::Fence(..) | Op::Continue(_) | Op::RegionYield(_) => return None,
+
+        // Ops handled by isel_gen::try_select_generated above.
+        _ => return None,
     }
     Some(())
 }
 
 // --- Helper functions ---
-
-/// Helper enum for binary ALU operations.
-enum BinOp {
-    Add,
-    Sub,
-    Mul,
-}
-
-fn select_binop_rr(
-    ctx: &mut IselCtx,
-    vref: ValueRef,
-    lhs: ValueRef,
-    rhs: ValueRef,
-    op: BinOp,
-) -> Option<()> {
-    let lhs_vreg = ctx.ensure_in_reg(lhs)?;
-    let rhs_vreg = ctx.ensure_in_reg(rhs)?;
-    let dst = ctx.alloc.alloc();
-    ctx.out.push(MInst::MovRR {
-        size: OpSize::S64,
-        dst,
-        src: lhs_vreg,
-    });
-    let inst = match op {
-        BinOp::Add => MInst::AddRR {
-            size: OpSize::S64,
-            dst,
-            src: rhs_vreg,
-        },
-        BinOp::Sub => MInst::SubRR {
-            size: OpSize::S64,
-            dst,
-            src: rhs_vreg,
-        },
-        BinOp::Mul => MInst::ImulRR {
-            size: OpSize::S64,
-            dst,
-            src: rhs_vreg,
-        },
-    };
-    ctx.out.push(inst);
-    ctx.regs.assign(vref, dst);
-    Some(())
-}
-
-/// Helper enum for shift operations.
-enum ShiftOp {
-    Shl,
-    Shr,
-    Sar,
-}
-
-fn select_shift_cl(
-    ctx: &mut IselCtx,
-    vref: ValueRef,
-    lhs: ValueRef,
-    rhs: ValueRef,
-    op: ShiftOp,
-) -> Option<()> {
-    let lhs_vreg = ctx.ensure_in_reg(lhs)?;
-    let rhs_vreg = ctx.ensure_in_reg(rhs)?;
-    let dst = ctx.alloc.alloc();
-    ctx.out.push(MInst::MovRR {
-        size: OpSize::S64,
-        dst,
-        src: lhs_vreg,
-    });
-    // Move shift amount into a CL-constrained vreg.
-    let rcx = ctx.alloc.alloc_fixed(Gpr::Rcx.to_preg());
-    ctx.out.push(MInst::MovRR {
-        size: OpSize::S64,
-        dst: rcx,
-        src: rhs_vreg,
-    });
-    let inst = match op {
-        ShiftOp::Shl => MInst::ShlRCL {
-            size: OpSize::S64,
-            dst,
-        },
-        ShiftOp::Shr => MInst::ShrRCL {
-            size: OpSize::S64,
-            dst,
-        },
-        ShiftOp::Sar => MInst::SarRCL {
-            size: OpSize::S64,
-            dst,
-        },
-    };
-    ctx.out.push(inst);
-    ctx.regs.assign(vref, dst);
-    Some(())
-}
-/// Helper enum for bitwise operations (OR, AND, XOR).
-enum BitOp {
-    Or,
-    And,
-    Xor,
-}
-
-fn select_bitop_rr(
-    ctx: &mut IselCtx,
-    vref: ValueRef,
-    lhs: ValueRef,
-    rhs: ValueRef,
-    op: BitOp,
-) -> Option<()> {
-    let lhs_vreg = ctx.ensure_in_reg(lhs)?;
-    let rhs_vreg = ctx.ensure_in_reg(rhs)?;
-    let dst = ctx.alloc.alloc();
-    ctx.out.push(MInst::MovRR {
-        size: OpSize::S64,
-        dst,
-        src: lhs_vreg,
-    });
-    let inst = match op {
-        BitOp::Or => MInst::OrRR {
-            size: OpSize::S64,
-            dst,
-            src: rhs_vreg,
-        },
-        BitOp::And => MInst::AndRR {
-            size: OpSize::S64,
-            dst,
-            src: rhs_vreg,
-        },
-        BitOp::Xor => MInst::XorRR {
-            size: OpSize::S64,
-            dst,
-            src: rhs_vreg,
-        },
-    };
-    ctx.out.push(inst);
-    ctx.regs.assign(vref, dst);
-    Some(())
-}
 
 fn select_brif(
     ctx: &mut IselCtx,
@@ -875,62 +671,6 @@ fn select_select(
             src: tv_vreg,
         });
     }
-    ctx.regs.assign(vref, dst);
-    Some(())
-}
-
-/// Whether we want min or max.
-enum MinMaxKind {
-    Min,
-    Max,
-}
-
-fn select_minmax(
-    ctx: &mut IselCtx,
-    vref: ValueRef,
-    lhs: &Operand,
-    rhs: &Operand,
-    kind: MinMaxKind,
-) -> Option<()> {
-    let lhs_vreg = ctx.ensure_in_reg(lhs.value)?;
-    let rhs_vreg = ctx.ensure_in_reg(rhs.value)?;
-    let dst = ctx.alloc.alloc();
-    // Start with rhs in dst; conditionally move lhs if it's the winner.
-    ctx.out.push(MInst::MovRR {
-        size: OpSize::S64,
-        dst,
-        src: rhs_vreg,
-    });
-    ctx.out.push(MInst::CmpRR {
-        size: OpSize::S64,
-        src1: lhs_vreg,
-        src2: rhs_vreg,
-    });
-    let signed = matches!(lhs.annotation, Some(Annotation::Signed(_)));
-    let cc = match kind {
-        // Min: pick lhs if lhs < rhs
-        MinMaxKind::Min => {
-            if signed {
-                CondCode::L
-            } else {
-                CondCode::B
-            }
-        }
-        // Max: pick lhs if lhs > rhs
-        MinMaxKind::Max => {
-            if signed {
-                CondCode::G
-            } else {
-                CondCode::A
-            }
-        }
-    };
-    ctx.out.push(MInst::CMOVcc {
-        size: OpSize::S64,
-        cc,
-        dst,
-        src: lhs_vreg,
-    });
     ctx.regs.assign(vref, dst);
     Some(())
 }
