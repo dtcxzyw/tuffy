@@ -270,7 +270,8 @@ fn select_inst(
     rdx_moves: &HashMap<u32, u32>,
 ) -> Option<()> {
     // Try generated rules first (covers Add, Sub, Mul, Or, And, Xor,
-    // Shl, Shr, Min, Max, CountOnes, ICmp, PtrAdd, PtrDiff).
+    // Shl, Shr, Min, Max, CountOnes, CountLeadingZeros, CountTrailingZeros,
+    // ICmp, PtrAdd, PtrDiff).
     if isel_gen::try_select_generated(ctx, vref, op).is_some() {
         return Some(());
     }

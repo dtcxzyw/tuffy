@@ -233,6 +233,14 @@ fn rewrite_inst(inst: &VInst, assignments: &[PReg]) -> PInst {
             dst: r(dst),
             src: r(src),
         },
+        MInst::Lzcnt { dst, src } => MInst::Lzcnt {
+            dst: r(dst),
+            src: r(src),
+        },
+        MInst::Tzcnt { dst, src } => MInst::Tzcnt {
+            dst: r(dst),
+            src: r(src),
+        },
         MInst::Ud2 => MInst::Ud2,
     }
 }

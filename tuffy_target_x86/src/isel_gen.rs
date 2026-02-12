@@ -261,6 +261,20 @@ fn gen_count_ones(ctx: &mut super::IselCtx, vref: ValueRef, src: VReg) -> Option
     Some(())
 }
 
+fn gen_count_leading_zeros(ctx: &mut super::IselCtx, vref: ValueRef, src: VReg) -> Option<()> {
+    let v0 = ctx.alloc.alloc();
+    ctx.out.push(MInst::Lzcnt { dst: v0, src });
+    ctx.regs.assign(vref, v0);
+    Some(())
+}
+
+fn gen_count_trailing_zeros(ctx: &mut super::IselCtx, vref: ValueRef, src: VReg) -> Option<()> {
+    let v0 = ctx.alloc.alloc();
+    ctx.out.push(MInst::Tzcnt { dst: v0, src });
+    ctx.regs.assign(vref, v0);
+    Some(())
+}
+
 fn gen_icmp(
     ctx: &mut super::IselCtx,
     vref: ValueRef,
@@ -383,6 +397,14 @@ pub(super) fn try_select_generated(
         Op::CountOnes(val) => {
             let s = ctx.ensure_in_reg(val.value)?;
             gen_count_ones(ctx, vref, s)
+        }
+        Op::CountLeadingZeros(val) => {
+            let s = ctx.ensure_in_reg(val.value)?;
+            gen_count_leading_zeros(ctx, vref, s)
+        }
+        Op::CountTrailingZeros(val) => {
+            let s = ctx.ensure_in_reg(val.value)?;
+            gen_count_trailing_zeros(ctx, vref, s)
         }
         Op::PtrAdd(ptr, offset) => {
             let p = ctx.ensure_in_reg(ptr.value)?;

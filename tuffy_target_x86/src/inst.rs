@@ -182,6 +182,10 @@ pub enum MInst<R: RegType> {
     Div { size: OpSize, src: R },
     /// popcnt r64, r64 (population count)
     Popcnt { dst: R, src: R },
+    /// lzcnt r64, r64 (count leading zeros)
+    Lzcnt { dst: R, src: R },
+    /// tzcnt r64, r64 (count trailing zeros)
+    Tzcnt { dst: R, src: R },
     /// ud2 (undefined instruction trap)
     Ud2,
 }

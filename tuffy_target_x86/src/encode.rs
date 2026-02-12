@@ -205,6 +205,12 @@ fn encode_inst(
         MInst::Popcnt { dst, src } => {
             encode_popcnt(*dst, *src, buf);
         }
+        MInst::Lzcnt { dst, src } => {
+            encode_lzcnt(*dst, *src, buf);
+        }
+        MInst::Tzcnt { dst, src } => {
+            encode_tzcnt(*dst, *src, buf);
+        }
     }
 }
 
@@ -554,5 +560,31 @@ fn encode_popcnt(dst: Gpr, src: Gpr, buf: &mut Vec<u8>) {
     }
     buf.push(0x0f);
     buf.push(0xb8);
+    buf.push(modrm(dst.encoding(), src.encoding()));
+}
+
+/// Encode LZCNT r64, r64 (F3 REX.W 0F BD /r).
+fn encode_lzcnt(dst: Gpr, src: Gpr, buf: &mut Vec<u8>) {
+    buf.push(0xf3);
+    if let Some(r) = rex(true, dst, src) {
+        buf.push(r);
+    } else {
+        buf.push(0x48);
+    }
+    buf.push(0x0f);
+    buf.push(0xbd);
+    buf.push(modrm(dst.encoding(), src.encoding()));
+}
+
+/// Encode TZCNT r64, r64 (F3 REX.W 0F BC /r).
+fn encode_tzcnt(dst: Gpr, src: Gpr, buf: &mut Vec<u8>) {
+    buf.push(0xf3);
+    if let Some(r) = rex(true, dst, src) {
+        buf.push(r);
+    } else {
+        buf.push(0x48);
+    }
+    buf.push(0x0f);
+    buf.push(0xbc);
     buf.push(modrm(dst.encoding(), src.encoding()));
 }

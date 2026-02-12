@@ -118,7 +118,9 @@ impl RegAllocInst for VInst {
             | MInst::MovsxB { dst, src }
             | MInst::MovsxW { dst, src }
             | MInst::MovsxD { dst, src }
-            | MInst::Popcnt { dst, src } => {
+            | MInst::Popcnt { dst, src }
+            | MInst::Lzcnt { dst, src }
+            | MInst::Tzcnt { dst, src } => {
                 ops.push(def_op(*dst));
                 ops.push(use_op(*src));
             }
