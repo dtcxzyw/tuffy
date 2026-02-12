@@ -372,6 +372,15 @@ impl FuncVerifier<'_> {
                 }
             }
 
+            Op::BConst(_) => {
+                if inst.ty != Type::Bool {
+                    self.result.error(
+                        loc,
+                        format!("bconst result must be Bool, got {:?}", inst.ty),
+                    );
+                }
+            }
+
             Op::ICmp(_, a, b) => {
                 self.check_operand(a, &loc);
                 self.check_operand(b, &loc);
@@ -398,6 +407,17 @@ impl FuncVerifier<'_> {
                     self.result.error(
                         loc,
                         format!("bool_to_int result must be Int, got {:?}", inst.ty),
+                    );
+                }
+            }
+
+            Op::IntToBool(a) => {
+                self.check_operand(a, &loc);
+                self.expect_int(a, "int_to_bool", &loc);
+                if inst.ty != Type::Bool {
+                    self.result.error(
+                        loc,
+                        format!("int_to_bool result must be Bool, got {:?}", inst.ty),
                     );
                 }
             }

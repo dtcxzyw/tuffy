@@ -144,6 +144,8 @@ pub enum Op {
     CountOnes(Operand),
     /// Integer constant (arbitrary precision, matching Lean `Int`).
     Const(BigInt),
+    /// Boolean constant: true or false.
+    BConst(bool),
 
     // -- Comparison --
     /// Integer comparison. Returns Bool.
@@ -154,6 +156,8 @@ pub enum Op {
     Select(Operand, Operand, Operand),
     /// Convert Bool to Int: true → 1, false → 0.
     BoolToInt(Operand),
+    /// Convert Int to Bool: 0 → false, non-zero → true.
+    IntToBool(Operand),
 
     // -- Memory --
     /// Load from pointer. Second field is byte count. Third is mem token input.

@@ -314,6 +314,7 @@ fn fmt_inst(
             )
         }
         Op::Const(imm) => format!("{v} = iconst {imm}"),
+        Op::BConst(val) => format!("{v} = bconst {val}"),
         Op::ICmp(cmp, a, b) => {
             format!(
                 "{v} = icmp.{} {}, {}",
@@ -332,6 +333,9 @@ fn fmt_inst(
         }
         Op::BoolToInt(val) => {
             format!("{v} = bool_to_int {}", ctx.fmt_operand(val))
+        }
+        Op::IntToBool(val) => {
+            format!("{v} = int_to_bool {}", ctx.fmt_operand(val))
         }
         Op::Load(ptr, bytes, mem) => {
             format!(

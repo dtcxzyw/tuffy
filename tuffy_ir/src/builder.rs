@@ -180,6 +180,11 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::Const(val.into()), Type::Int, None, origin, None)
     }
 
+    /// Boolean constant.
+    pub fn bconst(&mut self, val: bool, origin: Origin) -> ValueRef {
+        self.push_inst(Op::BConst(val), Type::Bool, None, origin, None)
+    }
+
     /// Integer addition.
     pub fn add(
         &mut self,
@@ -406,6 +411,11 @@ impl<'a> Builder<'a> {
     /// Convert Bool to Int: true → 1, false → 0.
     pub fn bool_to_int(&mut self, val: Operand, origin: Origin) -> ValueRef {
         self.push_inst(Op::BoolToInt(val), Type::Int, None, origin, None)
+    }
+
+    /// Convert Int to Bool: 0 → false, non-zero → true.
+    pub fn int_to_bool(&mut self, val: Operand, origin: Origin) -> ValueRef {
+        self.push_inst(Op::IntToBool(val), Type::Bool, None, origin, None)
     }
 
     /// Population count: count the number of set bits.
