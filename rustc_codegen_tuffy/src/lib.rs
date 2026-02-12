@@ -8,6 +8,7 @@
 #![feature(rustc_private)]
 #![feature(box_patterns)]
 
+extern crate rustc_abi;
 extern crate rustc_codegen_ssa;
 extern crate rustc_data_structures;
 extern crate rustc_driver;
@@ -81,6 +82,10 @@ impl CodegenBackend for TuffyCodegenBackend {
             let mut all_static_data: Vec<StaticData> = Vec::new();
 
             for (mono_item, _item_data) in &mono_items {
+                let item_name = mono_item.symbol_name(tcx).name;
+                if item_name.contains("write_str") || item_name.contains("Write") {
+                    eprintln!("[tuffy] MonoItem: {item_name}");
+                }
                 if let MonoItem::Fn(instance) = mono_item {
                     // Skip lang_start — tuffy can't compile the trait object
                     // construction it requires. We emit a hand-crafted version
@@ -88,9 +93,14 @@ impl CodegenBackend for TuffyCodegenBackend {
                     if Some(instance.def_id()) == tcx.lang_items().start_fn() {
                         continue;
                     }
-                    if let Some(result) = mir_to_ir::translate_function(tcx, *instance, &session) {
+                    let result_opt = mir_to_ir::translate_function(tcx, *instance, &session);
+                    if result_opt.is_none() {
+                        let name = tcx.symbol_name(*instance);
+                        eprintln!("[tuffy] MIR translation failed for: {name}");
+                    }
+                    if let Some(result) = result_opt {
                         if dump_ir {
-                            for (sym_id, data) in &result.static_data {
+                            for (sym_id, data, _relocs) in &result.static_data {
                                 let name = result.symbols.resolve(*sym_id);
                                 eprintln!(
                                     "{}",
@@ -106,10 +116,17 @@ impl CodegenBackend for TuffyCodegenBackend {
                             panic!("IR verification failed for {func_name}:\n{vr}");
                         }
 
-                        for (sym_id, data) in &result.static_data {
+                        for (sym_id, data, relocs) in &result.static_data {
                             all_static_data.push(StaticData {
                                 name: result.symbols.resolve(*sym_id).to_string(),
                                 data: data.clone(),
+                                relocations: relocs.iter().map(|(offset, sym)| {
+                                    tuffy_target::reloc::Relocation {
+                                        offset: *offset,
+                                        symbol: sym.clone(),
+                                        kind: tuffy_target::reloc::RelocKind::Abs64,
+                                    }
+                                }).collect(),
                             });
                         }
 
