@@ -306,3 +306,29 @@ type-alias-impl-trait/imply_bounds_from_bounds_param.rs
 type-alias-impl-trait/type-alias-impl-trait-with-cycle-error-4.rs
 underscore-imports/duplicate.rs
 wasm/wasm-stable-target-features.rs
+
+# Dead-code lint failures: -D warnings / -D unused + --crate-type lib
+# triggers dead_code for fn main() and similar items.
+cfg/cfg-in-crate-1.rs
+cfg/path-kw-as-cfg-pred-cli-raw-allow.rs
+const_prop/inline_spans_lint_attribute.rs
+const_prop/inline_spans.rs
+lint/group-denied-lint-allowed.rs
+lint/unknown-lints-at-crate-level.rs
+
+# Tests for invalid compiler flags (expected to fail).
+compile-flags/invalid/codegen-option-without-group.rs
+compile-flags/invalid/debug-option-without-group.rs
+compile-flags/invalid/print-without-arg.rs
+
+# Missing auxiliary/minisimd.rs (not in sparse checkout).
+simd/intrinsic/generic-bswap-byte.rs
+simd/intrinsic/generic-cast-pass.rs
+simd/intrinsic/generic-cast-pointer-width.rs
+simd/intrinsic/generic-comparison-pass.rs
+simd/intrinsic/generic-elements-pass.rs
+simd/simd-bitmask.rs
+
+# MIR opt level / polonius flags cause expected compilation errors in lib mode.
+nll/polonius/array-literal-index-oob-2024.rs
+simd/intrinsic/inlining-issue67557.rs
