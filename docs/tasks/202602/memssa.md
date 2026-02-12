@@ -105,14 +105,14 @@ bb3(%mem5: mem):
 ## Subtasks
 
 - Define MemSSA token type in Lean formal model
-- Add MemSSA token fields to Rust IR load/store/atomic operations
-- Implement MemSSA construction pass
-- Update display format to show memory tokens
-- Add tests for MemSSA construction and refinement
+- ~~Add MemSSA token fields to Rust IR load/store/atomic operations~~
+- ~~Implement MemSSA construction~~ (done in MIR→IR translation, not a separate pass)
+- ~~Update display format to show memory tokens~~
+- ~~Add tests for MemSSA construction and refinement~~
 
 ## Affected Modules
 
 - `lean/TuffyLean/IR/` — formal model for memory tokens
 - `tuffy_ir/` — token type, instruction fields, builder, display
-- `tuffy_opt/` — MemSSA construction pass
+- `rustc_codegen_tuffy/` — MemSSA threading in MIR→IR translation
 - `docs/spec.md` — specification update
