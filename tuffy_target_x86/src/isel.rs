@@ -303,6 +303,16 @@ fn select_inst(
             }
         }
 
+        Op::BConst(val) => {
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRI {
+                size: OpSize::S32,
+                dst,
+                imm: if *val { 1 } else { 0 },
+            });
+            ctx.regs.assign(vref, dst);
+        }
+
         Op::Add(lhs, rhs) => {
             select_binop_rr(ctx, vref, lhs.value, rhs.value, BinOp::Add)?;
         }
@@ -486,6 +496,27 @@ fn select_inst(
                 let src = ctx.regs.get(val.value)?;
                 ctx.regs.assign(vref, src);
             }
+        }
+
+        Op::IntToBool(val) => {
+            // Int to Bool: test the integer and store the condition code.
+            // If the value is already in a register, TEST it against itself;
+            // downstream BrIf/Select will consume the condition code directly.
+            let src = ctx.ensure_in_reg(val.value)?;
+            ctx.out.push(MInst::TestRR {
+                size: OpSize::S64,
+                src1: src,
+                src2: src,
+            });
+            ctx.cmps.set(vref, CondCode::Ne);
+            // Also materialize into a register for non-flag consumers.
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::SetCC {
+                cc: CondCode::Ne,
+                dst,
+            });
+            ctx.out.push(MInst::MovzxB { dst, src: dst });
+            ctx.regs.assign(vref, dst);
         }
 
         Op::Bitcast(val) | Op::PtrToInt(val) | Op::PtrToAddr(val) | Op::IntToPtr(val) => {
