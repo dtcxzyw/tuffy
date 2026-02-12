@@ -135,6 +135,10 @@ impl RegAllocInst for VInst {
             MInst::Idiv { src, .. } | MInst::Div { src, .. } => {
                 ops.push(use_op(*src));
             }
+            // Indirect call: callee register is a use operand
+            MInst::CallReg { callee } => {
+                ops.push(use_op(*callee));
+            }
             // No register operands
             MInst::Ret
             | MInst::Label { .. }
@@ -164,7 +168,7 @@ impl RegAllocInst for VInst {
     }
 
     fn clobbers(&self, clobbers: &mut Vec<PReg>) {
-        if matches!(self, MInst::CallSym { .. }) {
+        if matches!(self, MInst::CallSym { .. } | MInst::CallReg { .. }) {
             clobbers.extend_from_slice(&CALL_CLOBBERS);
         }
     }

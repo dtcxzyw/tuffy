@@ -100,6 +100,14 @@ fn encode_inst(
             });
             buf.extend_from_slice(&[0; 4]);
         }
+        MInst::CallReg { callee } => {
+            // FF /2 = call *%reg
+            if callee.needs_rex() {
+                buf.push(0x41); // REX.B
+            }
+            buf.push(0xff);
+            buf.push(0xd0 | callee.encoding());
+        }
         MInst::Push { reg } => {
             encode_push(*reg, buf);
         }
@@ -118,6 +126,10 @@ fn encode_inst(
             base,
             offset,
         } => {
+            eprintln!(
+                "[encode] MovRM size={size:?} dst={dst:?} base={base:?} offset={offset} at byte_offset={}",
+                buf.len()
+            );
             encode_mov_rm(*size, *dst, *base, *offset, buf);
         }
         MInst::MovMR {
@@ -129,6 +141,10 @@ fn encode_inst(
             encode_mov_mr(*size, *base, *offset, *src, buf);
         }
         MInst::Lea { dst, base, offset } => {
+            eprintln!(
+                "[encode] Lea dst={dst:?} base={base:?} offset={offset} at byte_offset={}",
+                buf.len()
+            );
             encode_lea(*dst, *base, *offset, buf);
         }
         MInst::MovRI64 { dst, imm } => {

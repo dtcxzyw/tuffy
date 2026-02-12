@@ -16,8 +16,10 @@ use crate::inst::{MInst, PInst, VInst};
 use crate::isel;
 use crate::reg::Gpr;
 
-/// Caller-saved registers available for allocation.
-const ALLOC_REGS: [PReg; 9] = [
+/// Registers available for allocation.
+/// Caller-saved registers are listed first (preferred for short-lived values),
+/// followed by callee-saved registers (used for values live across calls).
+const ALLOC_REGS: [PReg; 14] = [
     PReg(0),  // Rax
     PReg(1),  // Rcx
     PReg(2),  // Rdx
@@ -27,6 +29,21 @@ const ALLOC_REGS: [PReg; 9] = [
     PReg(11), // R11
     PReg(6),  // Rsi
     PReg(7),  // Rdi
+    // Callee-saved registers (for values live across calls).
+    PReg(3),  // Rbx
+    PReg(12), // R12
+    PReg(13), // R13
+    PReg(14), // R14
+    PReg(15), // R15
+];
+
+/// Callee-saved registers that must be preserved across function calls.
+const CALLEE_SAVED_REGS: [PReg; 5] = [
+    PReg(3),  // Rbx
+    PReg(12), // R12
+    PReg(13), // R13
+    PReg(14), // R14
+    PReg(15), // R15
 ];
 
 /// X86-64 ABI metadata tracking secondary return register (RDX) usage.
@@ -98,6 +115,7 @@ fn rewrite_inst(inst: &VInst, assignments: &[PReg]) -> PInst {
             src2: r(src2),
         },
         MInst::CallSym { name } => MInst::CallSym { name: name.clone() },
+        MInst::CallReg { callee } => MInst::CallReg { callee: r(callee) },
         MInst::Push { reg } => MInst::Push { reg: r(reg) },
         MInst::Pop { reg } => MInst::Pop { reg: r(reg) },
         MInst::SubSPI { imm } => MInst::SubSPI { imm: *imm },
@@ -253,6 +271,7 @@ pub fn lower_isel_result(isel_result: &isel::IselResult) -> Vec<PInst> {
         isel_result.vreg_count,
         &isel_result.constraints,
         &ALLOC_REGS,
+        &CALLEE_SAVED_REGS,
     );
     let pinsts: Vec<PInst> = isel_result
         .insts
@@ -264,6 +283,7 @@ pub fn lower_isel_result(isel_result: &isel::IselResult) -> Vec<PInst> {
         isel_result.isel_frame_size,
         alloc_result.spill_slots,
         isel_result.has_calls,
+        &alloc_result.used_callee_saved,
     )
 }
 
@@ -280,7 +300,15 @@ impl Backend for X86Backend {
         metadata: &X86AbiMetadata,
     ) -> Option<CompiledFunction> {
         // 1. Instruction selection → MInst<VReg>
-        let isel_result = isel::isel(func, symbols, &metadata.rdx_captures, &metadata.rdx_moves)?;
+        let isel_result =
+            match isel::isel(func, symbols, &metadata.rdx_captures, &metadata.rdx_moves) {
+                Some(r) => r,
+                None => {
+                    let name = symbols.resolve(func.name);
+                    eprintln!("[tuffy] isel failed for: {name}");
+                    return None;
+                }
+            };
 
         // 2. Register allocation → VReg assignments
         let alloc_result = tuffy_regalloc::allocator::allocate(
@@ -288,6 +316,7 @@ impl Backend for X86Backend {
             isel_result.vreg_count,
             &isel_result.constraints,
             &ALLOC_REGS,
+            &CALLEE_SAVED_REGS,
         );
 
         // 3. Rewrite VReg → Gpr
@@ -303,6 +332,7 @@ impl Backend for X86Backend {
             isel_result.isel_frame_size,
             alloc_result.spill_slots,
             isel_result.has_calls,
+            &alloc_result.used_callee_saved,
         );
 
         // 5. Encode to machine code

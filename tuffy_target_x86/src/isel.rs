@@ -169,6 +169,10 @@ struct IselCtx {
     alloc: VRegAlloc,
     next_label: u32,
     out: Vec<VInst>,
+    /// Deferred symbol addresses: value index → symbol name.
+    /// `LeaSymbol` is only emitted when `ensure_in_reg` is called,
+    /// avoiding dead code when the symbol is only used as a direct call callee.
+    sym_addrs: HashMap<u32, String>,
 }
 
 impl IselCtx {
@@ -182,6 +186,11 @@ impl IselCtx {
             return Some(vreg);
         }
         if let Some(offset) = self.stack.get(val) {
+            eprintln!(
+                "[isel-ensure] val={} is stack_slot offset={} -> LEA",
+                val.index(),
+                offset
+            );
             let rbp = self.alloc.alloc_fixed(Gpr::Rbp.to_preg());
             let dst = self.alloc.alloc();
             self.out.push(MInst::Lea {
@@ -189,6 +198,12 @@ impl IselCtx {
                 base: rbp,
                 offset,
             });
+            return Some(dst);
+        }
+        if let Some(symbol) = self.sym_addrs.get(&val.index()).cloned() {
+            let dst = self.alloc.alloc();
+            self.out.push(MInst::LeaSymbol { dst, symbol });
+            self.regs.assign(val, dst);
             return Some(dst);
         }
         None
@@ -226,6 +241,7 @@ pub fn isel(
         alloc: VRegAlloc::new(),
         next_label: func.blocks.len() as u32,
         out: Vec::new(),
+        sym_addrs: HashMap::new(),
     };
 
     let root = &func.regions[func.root_region.index() as usize];
@@ -235,7 +251,7 @@ pub fn isel(
                 id: block_ref.index(),
             });
             for (vref, inst) in func.block_insts_with_values(*block_ref) {
-                select_inst(
+                if select_inst(
                     &mut ctx,
                     vref,
                     &inst.op,
@@ -243,7 +259,13 @@ pub fn isel(
                     symbols,
                     rdx_captures,
                     rdx_moves,
-                )?;
+                )
+                .is_none()
+                {
+                    let fname = symbols.resolve(func.name);
+                    eprintln!("[tuffy] isel failed for op {:?} in {fname}", inst.op);
+                    return None;
+                }
             }
         }
     }
@@ -297,7 +319,7 @@ fn select_inst(
                 });
                 ctx.regs.assign(vref, dst);
             } else {
-                let imm_i64 = imm.to_i64()?;
+                let imm_i64 = imm.to_i64().or_else(|| imm.to_u64().map(|v| v as i64))?;
                 let dst = ctx.alloc.alloc();
                 if imm_i64 >= 0 && imm_i64 <= u32::MAX as i64 {
                     ctx.out.push(MInst::MovRI {
@@ -374,6 +396,13 @@ fn select_inst(
             let dst = ctx.alloc.alloc();
             let size = bytes_to_opsize(*bytes);
             if let Some(offset) = ctx.stack.get(ptr.value) {
+                eprintln!(
+                    "[isel-load] vref={} ptr={} bytes={} stack_offset={} -> MovRM",
+                    vref.index(),
+                    ptr.value.index(),
+                    bytes,
+                    offset
+                );
                 let rbp = ctx.alloc.alloc_fixed(Gpr::Rbp.to_preg());
                 ctx.out.push(MInst::MovRM {
                     size,
@@ -382,6 +411,12 @@ fn select_inst(
                     offset,
                 });
             } else {
+                eprintln!(
+                    "[isel-load] vref={} ptr={} bytes={} -> MovRM(reg)",
+                    vref.index(),
+                    ptr.value.index(),
+                    bytes
+                );
                 let ptr_vreg = ctx.regs.get(ptr.value)?;
                 ctx.out.push(MInst::MovRM {
                     size,
@@ -482,12 +517,11 @@ fn select_inst(
         Op::AtomicRmw(..) | Op::AtomicCmpXchg(..) => return None,
 
         Op::SymbolAddr(sym_id) => {
-            let dst = ctx.alloc.alloc();
-            ctx.out.push(MInst::LeaSymbol {
-                dst,
-                symbol: symbols.resolve(*sym_id).to_string(),
-            });
-            ctx.regs.assign(vref, dst);
+            // Defer LeaSymbol emission — only emit when ensure_in_reg is called.
+            // This avoids dead code when the symbol is only used as a direct call callee
+            // (select_call emits CallSym directly without needing the address in a register).
+            ctx.sym_addrs
+                .insert(vref.index(), symbols.resolve(*sym_id).to_string());
         }
 
         Op::Fence(..) | Op::Continue(_) | Op::RegionYield(_) => return None,
@@ -604,16 +638,35 @@ fn select_call(
     func: &Function,
     symbols: &SymbolTable,
 ) -> Option<()> {
+    // Phase 1: materialize all args into unconstrained vregs.
+    // This must happen before any fixed-register moves, otherwise
+    // ensure_in_reg may emit LEA/MOV instructions whose destinations
+    // get allocated to argument registers (e.g. rdx), clobbering
+    // values already placed there by earlier fixed-register moves.
+    let mut arg_vregs = Vec::new();
     for (i, arg) in args.iter().enumerate() {
         if i >= ARG_REGS.len() {
             return None;
         }
         let src = ctx.ensure_in_reg(arg.value)?;
-        let dst = ctx.alloc.alloc_fixed(ARG_REGS[i].to_preg());
+        arg_vregs.push(src);
+    }
+    // Phase 2: move to fixed argument registers.
+    // If the source vreg is already constrained to the target register,
+    // skip the redundant MovRR to avoid register allocator conflicts
+    // (e.g. param1 fixed to rsi being evicted when a new rsi vreg is created).
+    for (i, src) in arg_vregs.iter().enumerate() {
+        let target_preg = ARG_REGS[i].to_preg();
+        let already_there = ctx.alloc.constraints.get(src.0 as usize) == Some(&Some(target_preg));
+        if already_there {
+            // Source is already in the right register — no move needed.
+            continue;
+        }
+        let dst = ctx.alloc.alloc_fixed(target_preg);
         ctx.out.push(MInst::MovRR {
             size: OpSize::S64,
             dst,
-            src,
+            src: *src,
         });
     }
 
@@ -622,7 +675,11 @@ fn select_call(
         let name = symbols.resolve(*sym_id).to_string();
         ctx.out.push(MInst::CallSym { name });
     } else {
-        ctx.out.push(MInst::Ud2);
+        // Indirect call through a register (e.g. virtual dispatch).
+        let callee_vreg = ctx.ensure_in_reg(callee.value)?;
+        ctx.out.push(MInst::CallReg {
+            callee: callee_vreg,
+        });
     }
 
     // The primary result of a call is the mem token (no register needed).
