@@ -1243,6 +1243,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             if src_inner.has_escaping_bound_vars() {
                                 return None;
                             }
+                            // Skip trait upcasting: source is already a dyn trait,
+                            // vtable_allocation panics on unsized types.
+                            if src_inner.is_trait() {
+                                return None;
+                            }
                             let principal = predicates.principal().map(ty::Binder::skip_binder);
                             if principal.is_some_and(|p| p.has_escaping_bound_vars()) {
                                 return None;
