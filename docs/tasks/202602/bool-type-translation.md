@@ -1,8 +1,8 @@
 # Translate Rust bool as Type::Bool instead of Type::Int
 
-- Status: Draft
+- Status: Completed
 - Created: 2026-02-11
-- Completed: N/A
+- Completed: 2026-02-12
 - Parent: N/A
 
 ## Description
