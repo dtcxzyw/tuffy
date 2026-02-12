@@ -12,6 +12,7 @@ extern crate rustc_abi;
 extern crate rustc_codegen_ssa;
 extern crate rustc_data_structures;
 extern crate rustc_driver;
+extern crate rustc_hir;
 extern crate rustc_middle;
 extern crate rustc_session;
 extern crate rustc_span;
@@ -81,11 +82,7 @@ impl CodegenBackend for TuffyCodegenBackend {
             let mut compiled_funcs: Vec<CompiledFunction> = Vec::new();
             let mut all_static_data: Vec<StaticData> = Vec::new();
 
-            for (mono_item, _item_data) in &mono_items {
-                let item_name = mono_item.symbol_name(tcx).name;
-                if item_name.contains("write_str") || item_name.contains("Write") {
-                    eprintln!("[tuffy] MonoItem: {item_name}");
-                }
+            for (mono_item, item_data) in &mono_items {
                 if let MonoItem::Fn(instance) = mono_item {
                     // Skip lang_start — tuffy can't compile the trait object
                     // construction it requires. We emit a hand-crafted version
@@ -130,11 +127,20 @@ impl CodegenBackend for TuffyCodegenBackend {
                             });
                         }
 
-                        if let Some(cf) = session.compile_function(
+                        if let Some(mut cf) = session.compile_function(
                             &result.func,
                             &result.symbols,
                             &result.abi_metadata,
                         ) {
+                            use rustc_hir::attrs::Linkage;
+                            cf.weak = matches!(
+                                item_data.linkage,
+                                Linkage::Internal
+                                    | Linkage::LinkOnceODR
+                                    | Linkage::WeakODR
+                                    | Linkage::LinkOnceAny
+                                    | Linkage::WeakAny
+                            );
                             compiled_funcs.push(cf);
                         }
                     }

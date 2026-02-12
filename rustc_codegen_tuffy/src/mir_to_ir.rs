@@ -929,8 +929,178 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 }
             }
             StatementKind::StorageLive(_) | StatementKind::StorageDead(_) | StatementKind::Nop => {}
+            StatementKind::SetDiscriminant { box place, variant_index } => {
+                self.translate_set_discriminant(place, *variant_index);
+            }
             _ => {}
         }
+    }
+
+    /// Write the discriminant tag for an enum variant.
+    ///
+    /// Handles both `TagEncoding::Direct` (write the discriminant value) and
+    /// `TagEncoding::Niche` (compute niche_start + offset and write to the
+    /// niche field).  For niche encoding, the untagged variant is a no-op
+    /// because the payload already distinguishes it.
+    fn translate_set_discriminant(
+        &mut self,
+        place: &Place<'tcx>,
+        variant_index: rustc_abi::VariantIdx,
+    ) {
+        let place_ty = self.monomorphize(
+            place.ty(&self.mir.local_decls, self.tcx).ty,
+        );
+        let typing_env = ty::TypingEnv::fully_monomorphized();
+        let layout = match self.tcx.layout_of(typing_env.as_query_input(place_ty)) {
+            Ok(l) => l,
+            Err(_) => return,
+        };
+
+
+        let (tag, tag_encoding, tag_field) = match layout.variants {
+            rustc_abi::Variants::Single { .. } | rustc_abi::Variants::Empty => return,
+            rustc_abi::Variants::Multiple {
+                ref tag,
+                ref tag_encoding,
+                tag_field,
+                ..
+            } => (tag.clone(), tag_encoding.clone(), tag_field),
+        };
+
+        // Compute the tag value to store.
+        let tag_val: i64 = match &tag_encoding {
+            rustc_abi::TagEncoding::Direct => {
+                match place_ty.kind() {
+                    ty::Adt(adt_def, _) => {
+                        adt_def.discriminant_for_variant(self.tcx, variant_index).val as i64
+                    }
+                    _ => variant_index.as_u32() as i64,
+                }
+            }
+            rustc_abi::TagEncoding::Niche {
+                untagged_variant,
+                niche_variants,
+                niche_start,
+            } => {
+                if variant_index == *untagged_variant {
+                    // The payload already encodes this variant — nothing to write.
+                    return;
+                }
+                let variant_u128 = variant_index.as_u32() as u128;
+                let start_u128 = niche_variants.start().as_u32() as u128;
+                niche_start.wrapping_add(variant_u128 - start_u128) as i64
+            }
+        };
+
+        // Resolve the base address of the enum.
+        let base_addr = if place.projection.is_empty() {
+            if self.stack_locals.is_stack(place.local) {
+                match self.locals.get(place.local) {
+                    Some(v) => v,
+                    None => return,
+                }
+            } else {
+                return;
+            }
+        } else {
+            match self.translate_place_to_addr(place) {
+                Some((addr, _)) => self.coerce_to_ptr(addr),
+                None => return,
+            }
+        };
+
+        // Tag field offset and store size.
+        let tag_offset = layout.fields.offset(tag_field.as_usize()).bytes();
+        let tag_size = match tag.primitive() {
+            rustc_abi::Primitive::Int(int, _) => int.size().bytes() as u32,
+            rustc_abi::Primitive::Pointer(_) => 8,
+            _ => 8,
+        };
+
+        let tag_addr = if tag_offset != 0 {
+            let off = self.builder.iconst(tag_offset as i64, Origin::synthetic());
+            self.builder.ptradd(base_addr.into(), off.into(), 0, Origin::synthetic())
+        } else {
+            base_addr
+        };
+
+        let tag_const = self.builder.iconst(tag_val, Origin::synthetic());
+        self.current_mem = self.builder.store(
+            tag_const.into(), tag_addr.into(), tag_size,
+            self.current_mem.into(), Origin::synthetic(),
+        );
+    }
+
+    /// Write the discriminant tag for an enum variant into a slot pointer.
+    ///
+    /// Called from the `Rvalue::Aggregate` handler to set the correct
+    /// discriminant after storing variant fields.
+    fn write_enum_tag(
+        &mut self,
+        slot: ValueRef,
+        enum_ty: ty::Ty<'tcx>,
+        variant_index: rustc_abi::VariantIdx,
+    ) {
+        let typing_env = ty::TypingEnv::fully_monomorphized();
+        let layout = match self.tcx.layout_of(typing_env.as_query_input(enum_ty)) {
+            Ok(l) => l,
+            Err(_) => return,
+        };
+
+        let (tag, tag_encoding, tag_field) = match layout.variants {
+            rustc_abi::Variants::Single { .. } | rustc_abi::Variants::Empty => return,
+            rustc_abi::Variants::Multiple {
+                ref tag,
+                ref tag_encoding,
+                tag_field,
+                ..
+            } => (tag.clone(), tag_encoding.clone(), tag_field),
+        };
+
+        let tag_val: i64 = match &tag_encoding {
+            rustc_abi::TagEncoding::Direct => {
+                match enum_ty.kind() {
+                    ty::Adt(adt_def, _) => {
+                        adt_def.discriminant_for_variant(self.tcx, variant_index).val as i64
+                    }
+                    _ => variant_index.as_u32() as i64,
+                }
+            }
+            rustc_abi::TagEncoding::Niche {
+                untagged_variant,
+                niche_variants,
+                niche_start,
+            } => {
+                if variant_index == *untagged_variant {
+                    return;
+                }
+                let variant_u128 = variant_index.as_u32() as u128;
+                let start_u128 = niche_variants.start().as_u32() as u128;
+                niche_start.wrapping_add(variant_u128 - start_u128) as i64
+            }
+        };
+
+        let tag_offset = layout.fields.offset(tag_field.as_usize()).bytes();
+        let tag_size = match tag.primitive() {
+            rustc_abi::Primitive::Int(int, _) => int.size().bytes() as u32,
+            rustc_abi::Primitive::Pointer(_) => 8,
+            _ => 8,
+        };
+
+
+
+        let tag_addr = if tag_offset != 0 {
+            let off = self.builder.iconst(tag_offset as i64, Origin::synthetic());
+            self.builder.ptradd(slot.into(), off.into(), 0, Origin::synthetic())
+        } else {
+            slot
+        };
+
+        let tag_const = self.builder.iconst(tag_val, Origin::synthetic());
+        self.current_mem = self.builder.store(
+            tag_const.into(), tag_addr.into(), tag_size,
+            self.current_mem.into(), Origin::synthetic(),
+        );
     }
 
     /// Extract the "high" component of a fat pointer rvalue.
@@ -983,7 +1153,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 ty::RawPtr(inner, _) => *inner,
                                 _ => src_ty,
                             };
+                            // Skip vtable generation for types with escaping
+                            // bound vars (e.g. closures with unresolved generics).
+                            if src_inner.has_escaping_bound_vars() {
+                                return None;
+                            }
                             let principal = predicates.principal().map(ty::Binder::skip_binder);
+                            if principal.is_some_and(|p| p.has_escaping_bound_vars()) {
+                                return None;
+                            }
                             let vtable_alloc_id =
                                 self.tcx.vtable_allocation((src_inner, principal));
                             let vtable_alloc = self.tcx.global_alloc(vtable_alloc_id);
@@ -1052,8 +1230,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         .locals
                         .get(ret_local)
                         .expect("return local _0 must be set");
-                    let ret_ty = self.mir.local_decls[ret_local].ty;
-                    let size = type_size(self.tcx, ret_ty).unwrap_or(8);
+                    let size = type_size(self.tcx, ret_mir_ty).unwrap_or(8);
 
                     // Word-by-word copy from local _0's stack slot to sret pointer.
                     let num_words = size.div_ceil(8);
@@ -1762,24 +1939,34 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 }
             }
             Rvalue::Aggregate(kind, operands) => {
-                if operands.is_empty() {
+                // Extract enum variant index when constructing an enum.
+                let enum_variant_idx = match kind.as_ref() {
+                    mir::AggregateKind::Adt(def_id, variant_idx, _, _, _)
+                        if self.tcx.adt_def(*def_id).is_enum() => Some(*variant_idx),
+                    _ => None,
+                };
+
+                // For non-enum aggregates with no operands, return zero.
+                if operands.is_empty() && enum_variant_idx.is_none() {
                     return Some(self.builder.iconst(0, Origin::synthetic()));
                 }
+
                 // Determine the aggregate type for layout queries.
                 let agg_ty = match kind.as_ref() {
                     mir::AggregateKind::Tuple => self.mir.local_decls[dest_place.local].ty,
-                    mir::AggregateKind::Adt(def_id, variant_idx, args, _, _) => {
+                    mir::AggregateKind::Adt(def_id, _, args, _, _) => {
                         let adt_def = self.tcx.adt_def(*def_id);
                         if adt_def.is_enum() {
                             self.mir.local_decls[dest_place.local].ty
                         } else {
-                            let _ = variant_idx;
                             ty::Ty::new_adt(self.tcx, adt_def, args)
                         }
                     }
                     _ => self.mir.local_decls[dest_place.local].ty,
                 };
-                let total_size = type_size(self.tcx, agg_ty).unwrap_or(8 * operands.len() as u64);
+                let total_size = type_size(self.tcx, agg_ty).unwrap_or(
+                    if operands.is_empty() { 8 } else { 8 * operands.len() as u64 }
+                );
                 if total_size == 0 {
                     return Some(self.builder.iconst(0, Origin::synthetic()));
                 }
@@ -1804,6 +1991,27 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     eprintln!("[tuffy-agg] NEW (projected) dest={:?} size={total_size}", dest_place.local);
                     self.builder.stack_slot(total_size as u32, Origin::synthetic())
                 };
+
+                // Zero-initialize the aggregate slot for enum variants.
+                // This ensures padding bytes and unset niche fields start at
+                // zero.  The correct discriminant tag is written below.
+                if enum_variant_idx.is_some() && total_size > 0 {
+                    let zero = self.builder.iconst(0, Origin::synthetic());
+                    let num_words = total_size.div_ceil(8);
+                    for w in 0..num_words {
+                        let byte_off = w * 8;
+                        let dst = if byte_off == 0 {
+                            slot
+                        } else {
+                            let off = self.builder.iconst(byte_off as i64, Origin::synthetic());
+                            self.builder.ptradd(slot.into(), off.into(), 0, Origin::synthetic())
+                        };
+                        self.current_mem = self.builder.store(
+                            zero.into(), dst.into(), 8, self.current_mem.into(), Origin::synthetic(),
+                        );
+                    }
+                }
+
                 for (i, op) in operands.iter().enumerate() {
                     let val = self
                         .translate_operand(op)
@@ -1870,6 +2078,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             .store(val.into(), dst_addr.into(), bytes, self.current_mem.into(), Origin::synthetic());
                     }
                 }
+
+                // Write the discriminant tag for enum aggregates.
+                if let Some(variant_idx) = enum_variant_idx {
+                    self.write_enum_tag(slot, agg_ty, variant_idx);
+                }
+
                 // Mark the destination local as stack-allocated.
                 if dest_place.projection.is_empty() {
                     self.stack_locals.mark(dest_place.local);
@@ -2033,7 +2247,10 @@ fn translate_const<'tcx>(
                         .to_vec();
                     let sym = format!(".Lconst.{}", STATIC_DATA_COUNTER.fetch_add(1, Ordering::Relaxed));
                     let sym_id = symbols.intern(&sym);
-                    static_data.push((sym_id, bytes, vec![]));
+                    let relocs = extract_alloc_relocs(
+                        tcx, alloc, offset, size, symbols, static_data,
+                    );
+                    static_data.push((sym_id, bytes, relocs));
                     let base = builder.symbol_addr(sym_id, Origin::synthetic());
                     Some(base)
                 }
@@ -2077,18 +2294,9 @@ fn translate_const<'tcx>(
                         let sym = format!(".Lvtable.{}", STATIC_DATA_COUNTER.fetch_add(1, Ordering::Relaxed));
                         let sym_id = symbols.intern(&sym);
 
-                        // Extract function pointer relocations from the allocation's provenance.
-                        let mut relocs = Vec::new();
-                        for (offset, prov) in inner.provenance().ptrs().iter() {
-                            let target_alloc_id = prov.alloc_id();
-                            match tcx.global_alloc(target_alloc_id) {
-                                rustc_middle::mir::interpret::GlobalAlloc::Function { instance } => {
-                                    let fn_sym = tcx.symbol_name(instance).name.to_string();
-                                    relocs.push((offset.bytes() as usize, fn_sym));
-                                }
-                                _ => {}
-                            }
-                        }
+                        let relocs = extract_alloc_relocs(
+                            tcx, inner, 0, size, symbols, static_data,
+                        );
 
                         static_data.push((sym_id, bytes, relocs));
                         let base = builder.symbol_addr(sym_id, Origin::synthetic());
@@ -2109,6 +2317,94 @@ fn translate_const<'tcx>(
         }
         _ => None,
     }
+}
+
+/// Extract relocations from an allocation's provenance table.
+///
+/// Walks the provenance entries in the given byte range and resolves each
+/// pointer target to a symbol name. For `Memory` targets, the target
+/// allocation is recursively emitted as static data.
+fn extract_alloc_relocs<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    alloc: &rustc_middle::mir::interpret::Allocation,
+    byte_offset: usize,
+    byte_len: usize,
+    symbols: &mut SymbolTable,
+    static_data: &mut Vec<(SymbolId, Vec<u8>, Vec<(usize, String)>)>,
+) -> Vec<(usize, String)> {
+    let mut relocs = Vec::new();
+    eprintln!("[extract_alloc_relocs] byte_offset={byte_offset} byte_len={byte_len} provenance_count={}", alloc.provenance().ptrs().iter().count());
+    for (offset, prov) in alloc.provenance().ptrs().iter() {
+        let abs_offset = offset.bytes() as usize;
+        if abs_offset < byte_offset || abs_offset >= byte_offset + byte_len {
+            continue;
+        }
+        let rel_offset = abs_offset - byte_offset;
+        let target_alloc_id = prov.alloc_id();
+        let ga = tcx.global_alloc(target_alloc_id);
+        eprintln!("[extract_alloc_relocs]   offset={abs_offset} rel={rel_offset} kind={}", match &ga {
+            rustc_middle::mir::interpret::GlobalAlloc::Function { .. } => "Function",
+            rustc_middle::mir::interpret::GlobalAlloc::Static(_) => "Static",
+            rustc_middle::mir::interpret::GlobalAlloc::Memory(_) => "Memory",
+            rustc_middle::mir::interpret::GlobalAlloc::VTable(..) => "VTable",
+            rustc_middle::mir::interpret::GlobalAlloc::TypeId { .. } => "TypeId",
+        });
+        match ga {
+            rustc_middle::mir::interpret::GlobalAlloc::Function { instance } => {
+                let fn_sym = tcx.symbol_name(instance).name.to_string();
+                eprintln!("[extract_alloc_relocs]     -> fn {fn_sym}");
+                relocs.push((rel_offset, fn_sym));
+            }
+            rustc_middle::mir::interpret::GlobalAlloc::Static(def_id) => {
+                let instance = Instance::mono(tcx, def_id);
+                let sym_name = tcx.symbol_name(instance).name.to_string();
+                eprintln!("[extract_alloc_relocs]     -> static {sym_name}");
+                relocs.push((rel_offset, sym_name));
+            }
+            rustc_middle::mir::interpret::GlobalAlloc::Memory(target_alloc) => {
+                let inner = target_alloc.inner();
+                let bytes = inner
+                    .inspect_with_uninit_and_ptr_outside_interpreter(0..inner.len())
+                    .to_vec();
+                let sym = format!(
+                    ".Lconst.{}",
+                    STATIC_DATA_COUNTER.fetch_add(1, Ordering::Relaxed)
+                );
+                let sym_id = symbols.intern(&sym);
+                let nested_relocs =
+                    extract_alloc_relocs(tcx, inner, 0, inner.len(), symbols, static_data);
+                static_data.push((sym_id, bytes, nested_relocs));
+                relocs.push((rel_offset, symbols.resolve(sym_id).to_string()));
+            }
+            rustc_middle::mir::interpret::GlobalAlloc::VTable(vtable_ty, vtable_trait_ref) => {
+                let principal = vtable_trait_ref.principal().map(|p| p.skip_binder());
+                if let Ok(vtable_alloc_id) = std::panic::catch_unwind(
+                    std::panic::AssertUnwindSafe(|| {
+                        tcx.vtable_allocation((vtable_ty, principal))
+                    }),
+                ) {
+                    let vtable_alloc = tcx.global_alloc(vtable_alloc_id);
+                    if let rustc_middle::mir::interpret::GlobalAlloc::Memory(va) = vtable_alloc {
+                        let inner = va.inner();
+                        let bytes = inner
+                            .inspect_with_uninit_and_ptr_outside_interpreter(0..inner.len())
+                            .to_vec();
+                        let sym = format!(
+                            ".Lvtable.{}",
+                            STATIC_DATA_COUNTER.fetch_add(1, Ordering::Relaxed)
+                        );
+                        let sym_id = symbols.intern(&sym);
+                        let nested_relocs =
+                            extract_alloc_relocs(tcx, inner, 0, inner.len(), symbols, static_data);
+                        static_data.push((sym_id, bytes, nested_relocs));
+                        relocs.push((rel_offset, symbols.resolve(sym_id).to_string()));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    relocs
 }
 
 fn translate_scalar(
@@ -2149,6 +2445,12 @@ fn translate_scalar(
         ty::Ref(..) | ty::RawPtr(..) | ty::FnPtr(..) => {
             // Scalar::Int reference/pointer (e.g., null pointer constant)
             let val = bits as i64;
+            Some(builder.iconst(val, Origin::synthetic()))
+        }
+        ty::Adt(..) => {
+            // Newtype structs (e.g., ExitCode(u8)) are represented as
+            // scalars. Treat the raw bits as an unsigned integer.
+            let val = BigInt::from(bits);
             Some(builder.iconst(val, Origin::synthetic()))
         }
         _ => None,
