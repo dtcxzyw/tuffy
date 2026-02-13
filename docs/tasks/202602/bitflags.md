@@ -1,8 +1,8 @@
 # Bitflags: Compile and Run bitflags Crate with Debug Formatting
 
-- Status: In Progress
+- Status: Completed
 - Created: 2026-02-12
-- Completed: N/A
+- Completed: 2026-02-13
 - Parent: N/A
 
 ## Description
@@ -13,9 +13,8 @@ Basic bitwise operations (`|`, `&`, `contains()`) already work correctly after f
 
 ### Current Status
 
-- Bitwise operations produce correct results: `e1=5, e2=6, e3=7`
-- `println!("{:?}", e3)` segfaults at address `0x555500000007` — the flags value (7) is being executed as code, meaning a function pointer in the `fmt::Argument` struct gets corrupted
-- `Argument::new_debug` appears to correctly construct `[&Flags, fmt_fn_ptr]`, but the value is corrupted before `core::fmt::write` uses it
+- All success criteria met: `println!("{:?}", e3)` prints `Flags(A | B | C)` and the binary exits cleanly
+- Root cause: when assigning a stack-allocated enum (Ptr value) to a stack local with `bytes <= 8`, the assignment handler stored the pointer itself instead of loading the pointed-to data. Fixed by changing the threshold from `bytes > 8` to `bytes > 0` in both the direct-local and projected-destination assignment paths in `mir_to_ir.rs`.
 
 ### Success Criteria
 
