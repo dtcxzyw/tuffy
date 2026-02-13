@@ -1882,7 +1882,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         }
 
         // Resolve callee from the function operand's type.
-        let callee_target = resolve_call_target(self.tcx, func, self.instance);
+        let callee_target = resolve_call_target(self.tcx, func, self.instance, self.mir);
 
         // For virtual dispatch, extract the vtable pointer from the first
         // argument (a fat pointer: data_ptr + vtable_ptr) and load the
@@ -3496,13 +3496,14 @@ fn resolve_call_target<'tcx>(
     tcx: TyCtxt<'tcx>,
     func_op: &Operand<'tcx>,
     caller: Instance<'tcx>,
+    mir: &mir::Body<'tcx>,
 ) -> Option<CallTarget> {
     let ty = match func_op {
         Operand::Constant(c) => c.ty(),
         Operand::Copy(place) | Operand::Move(place) => {
-            // Indirect call through a local — we can't resolve statically.
-            let _ = place;
-            return None;
+            // Look up the local's type — ZST function items (FnDef) can
+            // be resolved statically even though the operand is a local.
+            mir.local_decls[place.local].ty
         }
         _ => return None,
     };
