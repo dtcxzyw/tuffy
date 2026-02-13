@@ -342,21 +342,75 @@ fn rex_mem(w: bool, reg: Gpr, base: Gpr) -> Option<u8> {
 }
 
 fn encode_mov_rm(size: OpSize, dst: Gpr, base: Gpr, offset: i32, buf: &mut Vec<u8>) {
-    let w = matches!(size, OpSize::S64);
-    if let Some(r) = rex_mem(w, dst, base) {
-        buf.push(r);
+    match size {
+        OpSize::S8 => {
+            // movzbl [mem], r32 — zero-extend byte to 32-bit (implicitly zeros upper 32).
+            // REX prefix needed if dst or base is r8-r15.
+            if let Some(r) = rex_mem(false, dst, base) {
+                buf.push(r);
+            }
+            buf.push(0x0f);
+            buf.push(0xb6);
+            modrm_mem(dst.encoding(), base, offset, buf);
+        }
+        OpSize::S16 => {
+            // movzwl [mem], r32 — zero-extend word to 32-bit.
+            if let Some(r) = rex_mem(false, dst, base) {
+                buf.push(r);
+            }
+            buf.push(0x0f);
+            buf.push(0xb7);
+            modrm_mem(dst.encoding(), base, offset, buf);
+        }
+        _ => {
+            let w = matches!(size, OpSize::S64);
+            if let Some(r) = rex_mem(w, dst, base) {
+                buf.push(r);
+            }
+            buf.push(0x8b);
+            modrm_mem(dst.encoding(), base, offset, buf);
+        }
     }
-    buf.push(0x8b);
-    modrm_mem(dst.encoding(), base, offset, buf);
 }
 
 fn encode_mov_mr(size: OpSize, base: Gpr, offset: i32, src: Gpr, buf: &mut Vec<u8>) {
-    let w = matches!(size, OpSize::S64);
-    if let Some(r) = rex_mem(w, src, base) {
-        buf.push(r);
+    match size {
+        OpSize::S8 => {
+            // mov [mem], r8 — byte store.
+            // Always emit REX when src encoding >= 4 to get SPL/BPL/SIL/DIL
+            // instead of AH/CH/DH/BH.
+            let need_rex = src.needs_rex() || base.needs_rex() || src.encoding() >= 4;
+            if need_rex {
+                let mut r = 0x40u8;
+                if src.needs_rex() {
+                    r |= 0x04;
+                }
+                if base.needs_rex() {
+                    r |= 0x01;
+                }
+                buf.push(r);
+            }
+            buf.push(0x88);
+            modrm_mem(src.encoding(), base, offset, buf);
+        }
+        OpSize::S16 => {
+            // 0x66 prefix for 16-bit operand size.
+            buf.push(0x66);
+            if let Some(r) = rex_mem(false, src, base) {
+                buf.push(r);
+            }
+            buf.push(0x89);
+            modrm_mem(src.encoding(), base, offset, buf);
+        }
+        _ => {
+            let w = matches!(size, OpSize::S64);
+            if let Some(r) = rex_mem(w, src, base) {
+                buf.push(r);
+            }
+            buf.push(0x89);
+            modrm_mem(src.encoding(), base, offset, buf);
+        }
     }
-    buf.push(0x89);
-    modrm_mem(src.encoding(), base, offset, buf);
 }
 
 fn encode_lea(dst: Gpr, base: Gpr, offset: i32, buf: &mut Vec<u8>) {
@@ -433,16 +487,39 @@ fn encode_alu_ri(reg_field: u8, size: OpSize, dst: Gpr, imm: i32, buf: &mut Vec<
 }
 
 fn encode_mov_mi(size: OpSize, base: Gpr, offset: i32, imm: i32, buf: &mut Vec<u8>) {
-    let w = matches!(size, OpSize::S64);
-    let b_bit = if base.needs_rex() { 0x01 } else { 0 };
-    let w_bit = if w { 0x08 } else { 0 };
-    let rex_bits = w_bit | b_bit;
-    if rex_bits != 0 {
-        buf.push(0x40 | rex_bits);
+    match size {
+        OpSize::S8 => {
+            let b_bit = if base.needs_rex() { 0x01 } else { 0 };
+            if b_bit != 0 {
+                buf.push(0x40 | b_bit);
+            }
+            buf.push(0xc6);
+            modrm_mem(0, base, offset, buf);
+            buf.push(imm as u8);
+        }
+        OpSize::S16 => {
+            buf.push(0x66);
+            let b_bit = if base.needs_rex() { 0x01 } else { 0 };
+            if b_bit != 0 {
+                buf.push(0x40 | b_bit);
+            }
+            buf.push(0xc7);
+            modrm_mem(0, base, offset, buf);
+            buf.extend_from_slice(&(imm as i16).to_le_bytes());
+        }
+        _ => {
+            let w = matches!(size, OpSize::S64);
+            let b_bit = if base.needs_rex() { 0x01 } else { 0 };
+            let w_bit = if w { 0x08 } else { 0 };
+            let rex_bits = w_bit | b_bit;
+            if rex_bits != 0 {
+                buf.push(0x40 | rex_bits);
+            }
+            buf.push(0xc7);
+            modrm_mem(0, base, offset, buf);
+            buf.extend_from_slice(&imm.to_le_bytes());
+        }
     }
-    buf.push(0xc7);
-    modrm_mem(0, base, offset, buf);
-    buf.extend_from_slice(&imm.to_le_bytes());
 }
 
 /// Encode CMOVcc r64, r/m64 (0F 40+cc /r with REX.W).

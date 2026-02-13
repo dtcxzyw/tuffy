@@ -66,6 +66,8 @@ impl IselCtx {
 /// Convert a byte count to an x86 operand size.
 fn bytes_to_opsize(bytes: u32) -> OpSize {
     match bytes {
+        1 => OpSize::S8,
+        2 => OpSize::S16,
         4 => OpSize::S32,
         _ => OpSize::S64,
     }
