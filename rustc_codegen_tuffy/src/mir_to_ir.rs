@@ -187,6 +187,45 @@ pub fn translate_function<'tcx>(
     // Emit params into the entry block.
     ctx.translate_params();
 
+    // Pre-scan: find scalar locals assigned in more than one basic block.
+    // These need stack slots so that mutations in loop bodies are visible
+    // at loop headers (SSA values can't be mutated in place).
+    {
+        let mut assign_bb: Vec<Option<BasicBlock>> = vec![None; mir.local_decls.len()];
+        for (bb, bb_data) in mir.basic_blocks.iter_enumerated() {
+            for stmt in &bb_data.statements {
+                if let StatementKind::Assign(box (place, _)) = &stmt.kind {
+                    if place.projection.is_empty() {
+                        let local = place.local;
+                        // Skip _0 (return place) and function params.
+                        if local.as_usize() == 0 || local.as_usize() <= mir.arg_count {
+                            continue;
+                        }
+                        let ty = monomorphize(mir.local_decls[local].ty);
+                        let size = type_size(tcx, ty).unwrap_or(0);
+                        // Only promote small scalars (<=8 bytes); large types
+                        // already use stack slots via the aggregate path.
+                        if size > 8 || size == 0 {
+                            continue;
+                        }
+                        if let Some(prev_bb) = assign_bb[local.as_usize()] {
+                            if prev_bb != bb && !ctx.stack_locals.is_stack(local) {
+                                let slot = ctx.builder.stack_slot(
+                                    std::cmp::max(size as u32, 1),
+                                    Origin::synthetic(),
+                                );
+                                ctx.locals.set(local, slot);
+                                ctx.stack_locals.mark(local);
+                            }
+                        } else {
+                            assign_bb[local.as_usize()] = Some(bb);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Translate each basic block.
     for (bb, bb_data) in mir.basic_blocks.iter_enumerated() {
         let ir_block = ctx.block_map.get(bb);
@@ -1046,13 +1085,77 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         if let Some((addr, projected_ty)) = self.translate_place_to_addr(place) {
                             let addr = self.coerce_to_ptr(addr);
                             let bytes = type_size(self.tcx, projected_ty).unwrap_or(8) as u32;
-                            self.current_mem = self.builder.store(
-                                val.into(),
-                                addr.into(),
-                                bytes,
-                                self.current_mem.into(),
-                                Origin::synthetic(),
-                            );
+                            let val_ty = self.builder.value_type(val).cloned();
+                            if matches!(val_ty.as_ref(), Some(Type::Ptr(_))) && bytes > 8 {
+                                // val is a pointer to multi-word data (e.g.
+                                // symbol_addr of an Indirect constant like a
+                                // slice reference).  Copy word-by-word from
+                                // the source address.
+                                let src_base = match rvalue {
+                                    Rvalue::Use(
+                                        Operand::Copy(src_place)
+                                        | Operand::Move(src_place),
+                                    ) if !src_place.projection.is_empty() => {
+                                        self.translate_place_to_addr(src_place)
+                                            .map(|(a, _)| self.coerce_to_ptr(a))
+                                    }
+                                    _ => None,
+                                };
+                                let src_base = src_base.unwrap_or(val);
+                                let num_words = (bytes as u64).div_ceil(8);
+                                for i in 0..num_words {
+                                    let byte_off = i * 8;
+                                    let src_addr = if byte_off == 0 {
+                                        src_base
+                                    } else {
+                                        let off = self
+                                            .builder
+                                            .iconst(byte_off as i64, Origin::synthetic());
+                                        self.builder.ptradd(
+                                            src_base.into(),
+                                            off.into(),
+                                            0,
+                                            Origin::synthetic(),
+                                        )
+                                    };
+                                    let word = self.builder.load(
+                                        src_addr.into(),
+                                        8,
+                                        Type::Int,
+                                        self.current_mem.into(),
+                                        None,
+                                        Origin::synthetic(),
+                                    );
+                                    let dst_addr = if byte_off == 0 {
+                                        addr
+                                    } else {
+                                        let off = self
+                                            .builder
+                                            .iconst(byte_off as i64, Origin::synthetic());
+                                        self.builder.ptradd(
+                                            addr.into(),
+                                            off.into(),
+                                            0,
+                                            Origin::synthetic(),
+                                        )
+                                    };
+                                    self.current_mem = self.builder.store(
+                                        word.into(),
+                                        dst_addr.into(),
+                                        8,
+                                        self.current_mem.into(),
+                                        Origin::synthetic(),
+                                    );
+                                }
+                            } else {
+                                self.current_mem = self.builder.store(
+                                    val.into(),
+                                    addr.into(),
+                                    bytes,
+                                    self.current_mem.into(),
+                                    Origin::synthetic(),
+                                );
+                            }
                         }
                     }
                 }
@@ -2458,12 +2561,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             .ptradd(slot.into(), off_val.into(), 0, Origin::synthetic())
                     };
 
-                    if is_stack_op
-                        && matches!(self.builder.value_type(val), Some(Type::Ptr(_)))
-                        && bytes > 0
-                    {
-                        // val is a pointer to the operand's stack slot.
-                        // Copy the DATA word-by-word instead of storing the pointer.
+                    let is_ptr_val = matches!(self.builder.value_type(val), Some(Type::Ptr(_)));
+                    if is_ptr_val && ((is_stack_op && bytes > 0) || bytes > 8) {
+                        // val is a pointer to multi-word data (stack slot or
+                        // symbol_addr of an Indirect constant like a slice
+                        // reference).  Copy word-by-word from the source.
                         let num_words = (bytes as u64).div_ceil(8);
                         for w in 0..num_words {
                             let byte_off = w * 8;
@@ -2580,7 +2682,33 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         match operand {
             Operand::Copy(place) | Operand::Move(place) => {
                 if place.projection.is_empty() {
-                    self.locals.get(place.local)
+                    let val = self.locals.get(place.local);
+                    // For scalar locals promoted to stack slots (multi-BB
+                    // mutation), load the current value from the slot.
+                    if self.stack_locals.is_stack(place.local) {
+                        if let Some(slot) = val {
+                            let ty = self.monomorphize(self.mir.local_decls[place.local].ty);
+                            let size = type_size(self.tcx, ty).unwrap_or(8);
+                            if size <= 8
+                                && matches!(
+                                    self.builder.value_type(slot),
+                                    Some(Type::Ptr(_))
+                                )
+                            {
+                                let ir_ty = translate_ty(ty).unwrap_or(Type::Int);
+                                let loaded = self.builder.load(
+                                    slot.into(),
+                                    size as u32,
+                                    ir_ty,
+                                    self.current_mem.into(),
+                                    None,
+                                    Origin::synthetic(),
+                                );
+                                return Some(loaded);
+                            }
+                        }
+                    }
+                    val
                 } else {
                     self.translate_place_to_value(place)
                 }
