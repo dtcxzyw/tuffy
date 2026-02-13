@@ -55,12 +55,11 @@ def clzN (n : Nat) (val : Nat) : Nat :=
   else n - Nat.log2 val - 1
 
 /-- Count leading zeros after truncating to n bits.
-    Negative values or n = 0 produce poison. The value is truncated to
-    n bits (low n bits via modular reduction) before counting. -/
+    n = 0 produces poison. The value is reduced modulo 2^n (extracting
+    the low n bits in two's complement) before counting. -/
 def evalCountLeadingZeros (a : Int) (n : Nat) : Value :=
-  if a < 0 then .poison
-  else if n = 0 then .poison
-  else .int (clzN n (a.toNat % (2 ^ n)))
+  if n = 0 then .poison
+  else .int (clzN n ((a % (2 ^ n : Int)).toNat))
 
 /-- Count trailing zeros. Defined for non-negative integers; negative values
     and zero produce poison. -/
