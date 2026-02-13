@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use tuffy_ir::function::Function;
 use tuffy_ir::module::SymbolTable;
-use tuffy_regalloc::PReg;
+use tuffy_regalloc::{OpKind, PReg, RegAllocInst};
 use tuffy_target::backend::{AbiMetadata, Backend};
 use tuffy_target::reloc::{RelocKind, Relocation};
 use tuffy_target::types::{CompiledFunction, StaticData};
@@ -12,21 +12,23 @@ use tuffy_target::types::{CompiledFunction, StaticData};
 use crate::emit::emit_elf_with_data;
 use crate::encode::encode_function;
 use crate::frame::insert_prologue_epilogue;
-use crate::inst::{MInst, PInst, VInst};
+use tuffy_regalloc::allocator::AllocResult;
+
+use crate::inst::{MInst, OpSize, PInst, VInst};
 use crate::isel;
 use crate::reg::Gpr;
 
 /// Registers available for allocation.
 /// Caller-saved registers are listed first (preferred for short-lived values),
 /// followed by callee-saved registers (used for values live across calls).
-const ALLOC_REGS: [PReg; 14] = [
+/// R11 is reserved as the spill temp register.
+const ALLOC_REGS: [PReg; 13] = [
     PReg(0),  // Rax
     PReg(1),  // Rcx
     PReg(2),  // Rdx
     PReg(8),  // R8
     PReg(9),  // R9
     PReg(10), // R10
-    PReg(11), // R11
     PReg(6),  // Rsi
     PReg(7),  // Rdi
     // Callee-saved registers (for values live across calls).
@@ -36,6 +38,9 @@ const ALLOC_REGS: [PReg; 14] = [
     PReg(14), // R14
     PReg(15), // R15
 ];
+
+/// Register reserved for spill loads/stores. Must NOT be in ALLOC_REGS.
+const SPILL_REG: PReg = PReg(11); // R11
 
 /// Callee-saved registers that must be preserved across function calls.
 const CALLEE_SAVED_REGS: [PReg; 5] = [
@@ -269,6 +274,72 @@ fn rewrite_inst(inst: &VInst, assignments: &[PReg]) -> PInst {
     }
 }
 
+/// Rewrite VReg instructions to Gpr instructions, inserting spill loads/stores
+/// for any VRegs that were spilled to stack slots by the register allocator.
+///
+/// Spilled VRegs are assigned to `SPILL_REG` (R11) by the allocator. This
+/// function inserts:
+/// - `MovRM` (load from stack → R11) before instructions that USE a spilled VReg
+/// - `MovMR` (store R11 → stack) after instructions that DEF a spilled VReg
+///
+/// Spill slot N lives at `[RBP - isel_frame_size - (N+1)*8]`.
+fn rewrite_with_spills(
+    insts: &[VInst],
+    alloc_result: &AllocResult,
+    isel_frame_size: i32,
+) -> Vec<PInst> {
+    let mut out = Vec::with_capacity(insts.len() * 2);
+    let mut ops_buf = Vec::new();
+
+    for inst in insts {
+        ops_buf.clear();
+        inst.reg_operands(&mut ops_buf);
+
+        // Collect spill loads (Use/UseDef) and stores (Def/UseDef).
+        let mut loads: Vec<i32> = Vec::new();
+        let mut stores: Vec<i32> = Vec::new();
+
+        for op in &ops_buf {
+            if let Some(&slot) = alloc_result.spill_map.get(&op.vreg.0) {
+                let offset = -(isel_frame_size + (slot as i32 + 1) * 8);
+                match op.kind {
+                    OpKind::Use => loads.push(offset),
+                    OpKind::Def => stores.push(offset),
+                    OpKind::UseDef => {
+                        loads.push(offset);
+                        stores.push(offset);
+                    }
+                }
+            }
+        }
+
+        // Emit spill loads before the instruction.
+        for &offset in &loads {
+            out.push(MInst::MovRM {
+                size: OpSize::S64,
+                dst: Gpr::R11,
+                base: Gpr::Rbp,
+                offset,
+            });
+        }
+
+        // Rewrite the instruction (spilled vregs map to R11 via assignments).
+        out.push(rewrite_inst(inst, &alloc_result.assignments));
+
+        // Emit spill stores after the instruction.
+        for &offset in &stores {
+            out.push(MInst::MovMR {
+                size: OpSize::S64,
+                base: Gpr::Rbp,
+                offset,
+                src: Gpr::R11,
+            });
+        }
+    }
+
+    out
+}
+
 /// Run regalloc + rewrite + prologue/epilogue on an IselResult.
 /// Public for use in tests.
 pub fn lower_isel_result(isel_result: &isel::IselResult) -> Vec<PInst> {
@@ -278,12 +349,13 @@ pub fn lower_isel_result(isel_result: &isel::IselResult) -> Vec<PInst> {
         &isel_result.constraints,
         &ALLOC_REGS,
         &CALLEE_SAVED_REGS,
+        SPILL_REG,
     );
-    let pinsts: Vec<PInst> = isel_result
-        .insts
-        .iter()
-        .map(|inst| rewrite_inst(inst, &alloc_result.assignments))
-        .collect();
+    let pinsts = rewrite_with_spills(
+        &isel_result.insts,
+        &alloc_result,
+        isel_result.isel_frame_size,
+    );
     insert_prologue_epilogue(
         pinsts,
         isel_result.isel_frame_size,
@@ -323,14 +395,15 @@ impl Backend for X86Backend {
             &isel_result.constraints,
             &ALLOC_REGS,
             &CALLEE_SAVED_REGS,
+            SPILL_REG,
         );
 
-        // 3. Rewrite VReg → Gpr
-        let pinsts: Vec<PInst> = isel_result
-            .insts
-            .iter()
-            .map(|inst| rewrite_inst(inst, &alloc_result.assignments))
-            .collect();
+        // 3. Rewrite VReg → Gpr, inserting spill loads/stores
+        let pinsts = rewrite_with_spills(
+            &isel_result.insts,
+            &alloc_result,
+            isel_result.isel_frame_size,
+        );
 
         // 4. Insert prologue/epilogue
         let final_insts = insert_prologue_epilogue(

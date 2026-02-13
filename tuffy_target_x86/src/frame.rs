@@ -47,7 +47,15 @@ pub fn insert_prologue_epilogue(
         return body;
     }
 
-    let aligned = (total_frame + 15) & !15;
+    // The sub amount must be chosen so that after both the sub and the
+    // callee-saved pushes, RSP is 16-byte aligned.  After `push %rbp` +
+    // `mov %rsp, %rbp`, RBP (== RSP) is 16-byte aligned.  We need:
+    //   sub_amount + num_callee_saved * 8  ≡  0  (mod 16)
+    let callee_save_bytes = callee_saved.len() as i32 * 8;
+    let total_needed = total_frame + callee_save_bytes;
+    let aligned_total = (total_needed + 15) & !15;
+    let sub_amount = aligned_total - callee_save_bytes;
+
     let mut out = Vec::with_capacity(body.len() + 6 + callee_saved.len() * 2);
 
     // Prologue: push rbp, set up frame, allocate stack, save callee-saved regs.
@@ -57,7 +65,7 @@ pub fn insert_prologue_epilogue(
         dst: Gpr::Rbp,
         src: Gpr::Rsp,
     });
-    out.push(MInst::SubSPI { imm: aligned });
+    out.push(MInst::SubSPI { imm: sub_amount });
     for &p in callee_saved {
         out.push(MInst::Push {
             reg: preg_to_gpr(p),
@@ -72,7 +80,7 @@ pub fn insert_prologue_epilogue(
                     reg: preg_to_gpr(p),
                 });
             }
-            out.push(MInst::AddSPI { imm: aligned });
+            out.push(MInst::AddSPI { imm: sub_amount });
             out.push(MInst::Pop { reg: Gpr::Rbp });
         }
         out.push(inst);

@@ -654,29 +654,47 @@ fn select_call(
     // get allocated to argument registers (e.g. rdx), clobbering
     // values already placed there by earlier fixed-register moves.
     let mut arg_vregs = Vec::new();
-    for (i, arg) in args.iter().enumerate() {
-        if i >= ARG_REGS.len() {
-            return None;
-        }
+    for arg in args.iter() {
         let src = ctx.ensure_in_reg(arg.value)?;
         arg_vregs.push(src);
     }
-    // Phase 2: move to fixed argument registers.
+
+    // Phase 2: push stack arguments (args beyond the 6 register slots).
+    // System V AMD64 ABI: args 7+ go on the stack, pushed right-to-left.
+    // RSP must be 16-byte aligned before the call instruction.
+    let num_stack_args = arg_vregs.len().saturating_sub(ARG_REGS.len());
+    let stack_cleanup = if num_stack_args > 0 {
+        // Pad for 16-byte alignment if odd number of stack args.
+        let padding = if num_stack_args % 2 != 0 { 8 } else { 0 };
+        if padding > 0 {
+            ctx.out.push(MInst::SubSPI { imm: padding });
+        }
+        // Push in reverse order so arg[6] ends up at lowest address (top of stack).
+        for i in (ARG_REGS.len()..arg_vregs.len()).rev() {
+            ctx.out.push(MInst::Push { reg: arg_vregs[i] });
+        }
+        (num_stack_args as i32 * 8) + padding
+    } else {
+        0
+    };
+
+    // Phase 3: move register arguments to fixed argument registers.
     // If the source vreg is already constrained to the target register,
     // skip the redundant MovRR to avoid register allocator conflicts
     // (e.g. param1 fixed to rsi being evicted when a new rsi vreg is created).
-    for (i, src) in arg_vregs.iter().enumerate() {
+    let reg_arg_count = arg_vregs.len().min(ARG_REGS.len());
+    for i in 0..reg_arg_count {
+        let src = arg_vregs[i];
         let target_preg = ARG_REGS[i].to_preg();
         let already_there = ctx.alloc.constraints.get(src.0 as usize) == Some(&Some(target_preg));
         if already_there {
-            // Source is already in the right register — no move needed.
             continue;
         }
         let dst = ctx.alloc.alloc_fixed(target_preg);
         ctx.out.push(MInst::MovRR {
             size: OpSize::S64,
             dst,
-            src: *src,
+            src,
         });
     }
 
@@ -720,6 +738,12 @@ fn select_call(
         let secondary = ValueRef::inst_secondary_result(vref.index());
         ctx.regs.assign(secondary, dst);
     }
+
+    // Clean up stack arguments after the call.
+    if stack_cleanup > 0 {
+        ctx.out.push(MInst::AddSPI { imm: stack_cleanup });
+    }
+
     Some(())
 }
 
