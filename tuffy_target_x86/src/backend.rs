@@ -13,6 +13,7 @@ use crate::emit::emit_elf_with_data;
 use crate::encode::encode_function;
 use crate::frame::insert_prologue_epilogue;
 use tuffy_regalloc::allocator::AllocResult;
+use tuffy_target::isel::IselResult;
 
 use crate::inst::{MInst, OpSize, PInst, VInst};
 use crate::isel;
@@ -342,7 +343,7 @@ fn rewrite_with_spills(
 
 /// Run regalloc + rewrite + prologue/epilogue on an IselResult.
 /// Public for use in tests.
-pub fn lower_isel_result(isel_result: &isel::IselResult) -> Vec<PInst> {
+pub fn lower_isel_result(isel_result: &IselResult<VInst>) -> Vec<PInst> {
     let alloc_result = tuffy_regalloc::allocator::allocate(
         &isel_result.insts,
         isel_result.vreg_count,

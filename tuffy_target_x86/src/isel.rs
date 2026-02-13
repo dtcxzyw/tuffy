@@ -16,155 +16,13 @@ use tuffy_ir::instruction::{ICmpOp, Op, Operand};
 use tuffy_ir::module::SymbolTable;
 use tuffy_ir::types::{Annotation, Type};
 use tuffy_ir::value::ValueRef;
-use tuffy_regalloc::{PReg, VReg};
-
-/// Result of instruction selection for a single function.
-pub struct IselResult {
-    pub name: String,
-    pub insts: Vec<VInst>,
-    /// Number of virtual registers allocated.
-    pub vreg_count: u32,
-    /// Fixed physical register constraint per VReg (indexed by VReg.0).
-    /// None means the allocator is free to choose.
-    pub constraints: Vec<Option<PReg>>,
-    /// Stack frame size from StackSlot operations only (not spills).
-    pub isel_frame_size: i32,
-    /// Whether the function contains any call instructions.
-    pub has_calls: bool,
-}
-
-/// Map from IR value to virtual register.
-struct VRegMap {
-    /// Instruction result values.
-    map: Vec<Option<VReg>>,
-    /// Block argument values (separate namespace).
-    block_arg_map: Vec<Option<VReg>>,
-}
-
-impl VRegMap {
-    fn new(inst_capacity: usize, block_arg_capacity: usize) -> Self {
-        Self {
-            map: vec![None; inst_capacity],
-            block_arg_map: vec![None; block_arg_capacity],
-        }
-    }
-
-    fn assign(&mut self, val: ValueRef, vreg: VReg) {
-        if val.is_block_arg() {
-            self.block_arg_map[val.index() as usize] = Some(vreg);
-        } else {
-            self.map[val.index() as usize] = Some(vreg);
-        }
-    }
-
-    fn get(&self, val: ValueRef) -> Option<VReg> {
-        if val.is_block_arg() {
-            *self.block_arg_map.get(val.index() as usize)?
-        } else {
-            *self.map.get(val.index() as usize)?
-        }
-    }
-}
-
-/// Tracks stack slot allocations (offset from RBP).
-struct StackMap {
-    /// Maps IR value index → offset from RBP (negative).
-    slots: Vec<Option<i32>>,
-    /// Block argument stack slots (separate namespace).
-    block_arg_slots: Vec<Option<i32>>,
-    /// Current stack frame size (grows downward).
-    frame_size: i32,
-}
-
-impl StackMap {
-    fn new(inst_capacity: usize, block_arg_capacity: usize) -> Self {
-        Self {
-            slots: vec![None; inst_capacity],
-            block_arg_slots: vec![None; block_arg_capacity],
-            frame_size: 0,
-        }
-    }
-
-    fn alloc(&mut self, val: ValueRef, bytes: u32) -> i32 {
-        self.frame_size += bytes as i32;
-        // Align to natural alignment (at least 8 bytes for pointers).
-        let align = std::cmp::max(bytes as i32, 8);
-        self.frame_size = (self.frame_size + align - 1) & !(align - 1);
-        let offset = -self.frame_size;
-        if val.is_block_arg() {
-            self.block_arg_slots[val.index() as usize] = Some(offset);
-        } else {
-            self.slots[val.index() as usize] = Some(offset);
-        }
-        offset
-    }
-
-    fn get(&self, val: ValueRef) -> Option<i32> {
-        if val.is_block_arg() {
-            *self.block_arg_slots.get(val.index() as usize)?
-        } else {
-            *self.slots.get(val.index() as usize)?
-        }
-    }
-}
-
-/// Tracks ICmp results so BrIf can emit Jcc directly.
-struct CmpMap {
-    map: Vec<Option<CondCode>>,
-}
-
-impl CmpMap {
-    fn new(capacity: usize) -> Self {
-        Self {
-            map: vec![None; capacity],
-        }
-    }
-
-    fn set(&mut self, val: ValueRef, cc: CondCode) {
-        self.map[val.index() as usize] = Some(cc);
-    }
-
-    fn get(&self, val: ValueRef) -> Option<CondCode> {
-        self.map[val.index() as usize]
-    }
-}
-
-/// Sequential virtual register allocator.
-struct VRegAlloc {
-    next: u32,
-    /// Fixed physical register constraint per VReg (indexed by VReg.0).
-    constraints: Vec<Option<PReg>>,
-}
-
-impl VRegAlloc {
-    fn new() -> Self {
-        Self {
-            next: 0,
-            constraints: Vec::new(),
-        }
-    }
-
-    /// Allocate a fresh virtual register with no constraint.
-    fn alloc(&mut self) -> VReg {
-        let vreg = VReg(self.next);
-        self.next += 1;
-        self.constraints.push(None);
-        vreg
-    }
-
-    /// Allocate a fresh virtual register constrained to a physical register.
-    fn alloc_fixed(&mut self, preg: PReg) -> VReg {
-        let vreg = VReg(self.next);
-        self.next += 1;
-        self.constraints.push(Some(preg));
-        vreg
-    }
-}
+use tuffy_regalloc::VReg;
+use tuffy_target::isel::{CmpMap, IselResult, StackMap, VRegAlloc, VRegMap};
 
 /// Mutable instruction selection state, bundled to reduce parameter counts.
 struct IselCtx {
     regs: VRegMap,
-    cmps: CmpMap,
+    cmps: CmpMap<CondCode>,
     stack: StackMap,
     alloc: VRegAlloc,
     next_label: u32,
@@ -232,7 +90,7 @@ pub fn isel(
     symbols: &SymbolTable,
     rdx_captures: &HashMap<u32, ()>,
     rdx_moves: &HashMap<u32, u32>,
-) -> Option<IselResult> {
+) -> Option<IselResult<VInst>> {
     let ba_cap = func.block_args.len();
     let mut ctx = IselCtx {
         regs: VRegMap::new(func.instructions.len(), ba_cap),

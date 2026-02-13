@@ -365,6 +365,7 @@ name = "tuffy_target"
 version = "0.1.0"
 dependencies = [
  "tuffy_ir",
+ "tuffy_regalloc",
 ]
 
 [[package]]
