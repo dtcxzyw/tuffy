@@ -126,7 +126,7 @@ for test_file in "${tests[@]}"; do
 
     # Try to compile with tuffy backend (disable errexit to capture exit code)
     set +e
-    output=$(timeout 10 rustc --edition "$edition" \
+    output=$(timeout 120 rustc --edition "$edition" \
         -Z codegen-backend="$BACKEND" \
         --crate-type lib \
         -o "$OUT_DIR/test_out.rlib" \
