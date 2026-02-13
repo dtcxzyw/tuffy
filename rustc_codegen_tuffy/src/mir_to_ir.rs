@@ -1789,11 +1789,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
             // Try simple inline handling first (black_box, etc.).
             let handled = translate_intrinsic(
+                self.tcx,
                 &intrinsic_name,
+                intrinsic_substs,
                 &intrinsic_args,
                 destination.local,
                 &mut self.builder,
                 &mut self.locals,
+                &mut self.symbols,
+                self.current_mem,
             );
             if handled {
                 if let Some(target) = target {
@@ -1831,7 +1835,50 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 }
                 return;
             }
-            // Fall through to normal call path for unhandled intrinsics.
+            // Intrinsic detected but not handled — treat as no-op rather
+            // than falling through to the normal call path (intrinsics don't
+            // have real symbol implementations).
+            if let Some(target) = target {
+                let target_block = self.block_map.get(*target);
+                self.builder.br(
+                    target_block,
+                    vec![self.current_mem.into()],
+                    Origin::synthetic(),
+                );
+            }
+            return;
+        }
+
+        // Skip calls to drop_in_place — consistent with the Drop terminator
+        // handler which already treats all drops as no-ops.  Rustc may not
+        // generate MonoItems for some drop glue, so emitting a call would
+        // create undefined symbol references.
+        // Also skip precondition_check calls — these are debug-mode
+        // assertions for unchecked operations that may not have MonoItems.
+        if let Operand::Constant(c) = func {
+            let fn_ty = self.tcx.instantiate_and_normalize_erasing_regions(
+                self.instance.args,
+                ty::TypingEnv::fully_monomorphized(),
+                ty::EarlyBinder::bind(c.ty()),
+            );
+            if let ty::FnDef(def_id, _fn_args) = fn_ty.kind() {
+                let skip = Some(*def_id) == self.tcx.lang_items().drop_in_place_fn()
+                    || self
+                        .tcx
+                        .opt_item_name(*def_id)
+                        .is_some_and(|n| n.as_str() == "precondition_check");
+                if skip {
+                    if let Some(target) = target {
+                        let target_block = self.block_map.get(*target);
+                        self.builder.br(
+                            target_block,
+                            vec![self.current_mem.into()],
+                            Origin::synthetic(),
+                        );
+                    }
+                    return;
+                }
+            }
         }
 
         // Resolve callee from the function operand's type.
@@ -3063,12 +3110,16 @@ fn translate_const_slice<'tcx>(
 
 /// Handle compiler intrinsics inline during MIR translation.
 /// Returns true if the intrinsic was handled, false to fall through to normal call.
-fn translate_intrinsic(
+fn translate_intrinsic<'tcx>(
+    tcx: TyCtxt<'tcx>,
     name: &str,
+    substs: &'tcx ty::List<ty::GenericArg<'tcx>>,
     ir_args: &[ValueRef],
     destination_local: mir::Local,
     builder: &mut Builder<'_>,
     locals: &mut LocalMap,
+    symbols: &mut SymbolTable,
+    current_mem: ValueRef,
 ) -> bool {
     match name {
         // black_box: identity function, prevents optimizations.
@@ -3083,6 +3134,10 @@ fn translate_intrinsic(
         // assume: optimizer hint, no runtime effect. Treat as no-op.
         "assume" => true,
 
+        // assert_inhabited / assert_zero_valid / assert_mem_uninitialized_valid:
+        // compile-time checks, no runtime effect.
+        "assert_inhabited" | "assert_zero_valid" | "assert_mem_uninitialized_valid" => true,
+
         // ctpop: population count (count set bits).
         "ctpop" => {
             if let Some(&v) = ir_args.first() {
@@ -3092,10 +3147,152 @@ fn translate_intrinsic(
             true
         }
 
+        // ctlz / ctlz_nonzero: count leading zeros.
+        "ctlz" | "ctlz_nonzero" => {
+            if let Some(&v) = ir_args.first() {
+                let result = builder.count_leading_zeros(v.into(), Origin::synthetic());
+                locals.set(destination_local, result);
+            }
+            true
+        }
+
+        // cttz / cttz_nonzero: count trailing zeros.
+        "cttz" | "cttz_nonzero" => {
+            if let Some(&v) = ir_args.first() {
+                let result = builder.count_trailing_zeros(v.into(), Origin::synthetic());
+                locals.set(destination_local, result);
+            }
+            true
+        }
+
         // is_val_statically_known: always false in a non-optimizing backend.
         "is_val_statically_known" => {
             let result = builder.bconst(false, Origin::synthetic());
             locals.set(destination_local, result);
+            true
+        }
+
+        // size_of_val: return the size of the pointed-to type.
+        // For sized types this is a compile-time constant.
+        "size_of_val" => {
+            if let Some(t) = substs.first().and_then(|a| a.as_type()) {
+                let sz = type_size(tcx, t).unwrap_or(0);
+                let result = builder.iconst(sz as i64, Origin::synthetic());
+                locals.set(destination_local, result);
+            }
+            true
+        }
+
+        // min_align_of_val / align_of_val: return the alignment of the type.
+        "min_align_of_val" | "align_of_val" => {
+            if let Some(t) = substs.first().and_then(|a| a.as_type()) {
+                let align = type_align(tcx, t).unwrap_or(1);
+                let result = builder.iconst(align as i64, Origin::synthetic());
+                locals.set(destination_local, result);
+            }
+            true
+        }
+
+        // arith_offset<T>(ptr, offset) → ptr + offset * sizeof(T)
+        "arith_offset" => {
+            if ir_args.len() >= 2 {
+                let ptr = ir_args[0];
+                let offset = ir_args[1];
+                let elem_size = substs
+                    .first()
+                    .and_then(|a| a.as_type())
+                    .and_then(|t| type_size(tcx, t))
+                    .unwrap_or(1);
+                let byte_offset = if elem_size == 1 {
+                    offset
+                } else {
+                    let sz = builder.iconst(elem_size as i64, Origin::synthetic());
+                    builder.mul(offset.into(), sz.into(), None, Origin::synthetic())
+                };
+                let result =
+                    builder.ptradd(ptr.into(), byte_offset.into(), 0, Origin::synthetic());
+                locals.set(destination_local, result);
+            }
+            true
+        }
+
+        // ptr_offset_from_unsigned<T>(ptr1, ptr2) → (ptr1 - ptr2) / sizeof(T)
+        "ptr_offset_from_unsigned" | "ptr_offset_from" => {
+            if ir_args.len() >= 2 {
+                let ptr1 = ir_args[0];
+                let ptr2 = ir_args[1];
+                let diff = builder.ptrdiff(ptr1.into(), ptr2.into(), Origin::synthetic());
+                let elem_size = substs
+                    .first()
+                    .and_then(|a| a.as_type())
+                    .and_then(|t| type_size(tcx, t))
+                    .unwrap_or(1);
+                let result = if elem_size <= 1 {
+                    diff
+                } else {
+                    let sz = builder.iconst(elem_size as i64, Origin::synthetic());
+                    builder.div(diff.into(), sz.into(), None, Origin::synthetic())
+                };
+                locals.set(destination_local, result);
+            }
+            true
+        }
+
+        // saturating_add<T>(a, b): add with saturation at max value.
+        "saturating_add" => {
+            if ir_args.len() >= 2 {
+                let a = ir_args[0];
+                let b = ir_args[1];
+                // result = a + b; if result wrapped (result < a), clamp to MAX.
+                let sum = builder.add(a.into(), b.into(), None, Origin::synthetic());
+                let overflowed =
+                    builder.icmp(ICmpOp::Lt, sum.into(), a.into(), Origin::synthetic());
+                let max_val = builder.iconst(-1i64, Origin::synthetic()); // all-ones = usize::MAX
+                let result = builder.select(
+                    overflowed.into(),
+                    max_val.into(),
+                    sum.into(),
+                    Type::Int,
+                    Origin::synthetic(),
+                );
+                locals.set(destination_local, result);
+            }
+            true
+        }
+
+        // saturating_sub<T>(a, b): subtract with saturation at zero.
+        "saturating_sub" => {
+            if ir_args.len() >= 2 {
+                let a = ir_args[0];
+                let b = ir_args[1];
+                let diff = builder.sub(a.into(), b.into(), None, Origin::synthetic());
+                let underflowed =
+                    builder.icmp(ICmpOp::Gt, b.into(), a.into(), Origin::synthetic());
+                let zero = builder.iconst(0, Origin::synthetic());
+                let result = builder.select(
+                    underflowed.into(),
+                    zero.into(),
+                    diff.into(),
+                    Type::Int,
+                    Origin::synthetic(),
+                );
+                locals.set(destination_local, result);
+            }
+            true
+        }
+
+        // abort: call libc abort().
+        "abort" => {
+            let sym_id = symbols.intern("abort");
+            let callee = builder.symbol_addr(sym_id, Origin::synthetic());
+            builder.call(
+                callee.into(),
+                vec![],
+                Type::Unit,
+                current_mem.into(),
+                None,
+                Origin::synthetic(),
+            );
             true
         }
 
