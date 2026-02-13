@@ -142,9 +142,9 @@ pub enum Op {
     Max(Operand, Operand),
     /// Population count: count the number of set bits.
     CountOnes(Operand),
-    /// Count leading zeros: number of zero bits before the most significant set bit.
-    /// Defined for non-negative integers; negative values produce poison.
-    CountLeadingZeros(Operand),
+    /// Count leading zeros: truncate to n bits, then count leading zero bits.
+    /// Negative values or n = 0 produce poison. Second field is the bit width.
+    CountLeadingZeros(Operand, u32),
     /// Count trailing zeros: number of zero bits after the least significant set bit.
     /// Defined for non-negative integers; negative values and zero produce poison.
     CountTrailingZeros(Operand),

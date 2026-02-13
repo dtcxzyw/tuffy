@@ -365,9 +365,13 @@ impl FuncVerifier<'_> {
                 }
             }
 
-            Op::CountLeadingZeros(a) => {
+            Op::CountLeadingZeros(a, bits) => {
                 self.check_operand(a, &loc);
                 self.expect_int(a, "count_leading_zeros", &loc);
+                if *bits == 0 {
+                    self.result
+                        .error(loc.clone(), "count_leading_zeros bit width must be > 0");
+                }
                 if inst.ty != Type::Int {
                     self.result.error(
                         loc,

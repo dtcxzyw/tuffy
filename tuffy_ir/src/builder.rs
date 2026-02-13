@@ -423,9 +423,15 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::CountOnes(val), Type::Int, None, origin, None)
     }
 
-    /// Count leading zeros.
-    pub fn count_leading_zeros(&mut self, val: Operand, origin: Origin) -> ValueRef {
-        self.push_inst(Op::CountLeadingZeros(val), Type::Int, None, origin, None)
+    /// Count leading zeros after truncating to `bits` width.
+    pub fn count_leading_zeros(&mut self, val: Operand, bits: u32, origin: Origin) -> ValueRef {
+        self.push_inst(
+            Op::CountLeadingZeros(val, bits),
+            Type::Int,
+            None,
+            origin,
+            None,
+        )
     }
 
     /// Count trailing zeros.
