@@ -91,10 +91,6 @@ impl CodegenBackend for TuffyCodegenBackend {
                         continue;
                     }
                     let result_opt = mir_to_ir::translate_function(tcx, *instance, &session);
-                    if result_opt.is_none() {
-                        let name = tcx.symbol_name(*instance);
-                        eprintln!("[tuffy] MIR translation failed for: {name}");
-                    }
                     if let Some(result) = result_opt {
                         if dump_ir {
                             for (sym_id, data, _relocs) in &result.static_data {
