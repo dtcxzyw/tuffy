@@ -47,21 +47,20 @@ def ctz : Nat → Nat
   | 0 => 0
   | n + 1 => if (n + 1) % 2 = 1 then 0 else 1 + ctz ((n + 1) / 2)
 
-/-- Count leading zeros: number of zero bits before the most significant set bit.
-    Defined as bitWidth - 1 - floor(log2(n)) for n > 0, where bitWidth is the
-    minimum number of bits to represent n. For the IR (infinite precision),
-    clz(n) is always 0 for n > 0 since there are no leading zeros in the
-    minimal representation. We define it as 0 for positive values. -/
-def clz (n : Nat) : Nat :=
-  if n = 0 then 0 else 0
+/-- Count leading zeros in an n-bit representation.
+    For val in [0, 2^n), returns n - floor(log2(val)) - 1 when val > 0,
+    and n when val = 0. -/
+def clzN (n : Nat) (val : Nat) : Nat :=
+  if val = 0 then n
+  else n - Nat.log2 val - 1
 
-/-- Count leading zeros. Defined for non-negative integers; negative values
-    and zero produce poison. In infinite precision, clz is always 0 for
-    positive values (no leading zeros in minimal representation).
-    The x86 lowering uses a fixed 64-bit width. -/
-def evalCountLeadingZeros (a : Int) : Value :=
-  if a ≤ 0 then .poison
-  else .int (clz a.toNat)
+/-- Count leading zeros after truncating to n bits.
+    Negative values or n = 0 produce poison. The value is truncated to
+    n bits (low n bits via modular reduction) before counting. -/
+def evalCountLeadingZeros (a : Int) (n : Nat) : Value :=
+  if a < 0 then .poison
+  else if n = 0 then .poison
+  else .int (clzN n (a.toNat % (2 ^ n)))
 
 /-- Count trailing zeros. Defined for non-negative integers; negative values
     and zero produce poison. -/
