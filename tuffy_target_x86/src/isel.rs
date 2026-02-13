@@ -104,7 +104,7 @@ pub fn isel(
                 id: block_ref.index(),
             });
             for (vref, inst) in func.block_insts_with_values(*block_ref) {
-                if select_inst(
+                select_inst(
                     &mut ctx,
                     vref,
                     &inst.op,
@@ -112,13 +112,7 @@ pub fn isel(
                     symbols,
                     rdx_captures,
                     rdx_moves,
-                )
-                .is_none()
-                {
-                    let fname = symbols.resolve(func.name);
-                    eprintln!("[tuffy] isel failed for op {:?} in {fname}", inst.op);
-                    return None;
-                }
+                )?;
             }
         }
     }

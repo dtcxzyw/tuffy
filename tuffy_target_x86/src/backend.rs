@@ -383,8 +383,6 @@ impl Backend for X86Backend {
             match isel::isel(func, symbols, &metadata.rdx_captures, &metadata.rdx_moves) {
                 Some(r) => r,
                 None => {
-                    let name = symbols.resolve(func.name);
-                    eprintln!("[tuffy] isel failed for: {name}");
                     return None;
                 }
             };
