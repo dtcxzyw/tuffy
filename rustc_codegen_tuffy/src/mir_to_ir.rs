@@ -714,7 +714,21 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     cur_ty = self.monomorphize(field_ty);
                 }
                 PlaceElem::Index(local) => {
-                    let idx_val = self.locals.get(local)?;
+                    let mut idx_val = self.locals.get(local)?;
+                    // If the index local is stored in a stack slot, load
+                    // the integer value — the raw slot is a Ptr, not Int.
+                    if self.stack_locals.is_stack(local)
+                        && matches!(self.builder.value_type(idx_val), Some(Type::Ptr(_)))
+                    {
+                        idx_val = self.builder.load(
+                            idx_val.into(),
+                            8,
+                            Type::Int,
+                            self.current_mem.into(),
+                            None,
+                            Origin::synthetic(),
+                        );
+                    }
                     let elem_size = type_size(
                         self.tcx,
                         match cur_ty.kind() {
