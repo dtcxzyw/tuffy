@@ -468,7 +468,7 @@ fn op_variant_pattern(op_name: &str) -> &'static str {
         "Min" => "Op::Min(lhs, rhs)",
         "Max" => "Op::Max(lhs, rhs)",
         "CountOnes" => "Op::CountOnes(val)",
-        "CountLeadingZeros" => "Op::CountLeadingZeros(val)",
+        "CountLeadingZeros" => "Op::CountLeadingZeros(val, _)",
         "CountTrailingZeros" => "Op::CountTrailingZeros(val)",
         "PtrAdd" => "Op::PtrAdd(ptr, offset)",
         "PtrDiff" => "Op::PtrDiff(lhs, rhs)",

@@ -398,7 +398,7 @@ pub(super) fn try_select_generated(
             let s = ctx.ensure_in_reg(val.value)?;
             gen_count_ones(ctx, vref, s)
         }
-        Op::CountLeadingZeros(val) => {
+        Op::CountLeadingZeros(val, _) => {
             let s = ctx.ensure_in_reg(val.value)?;
             gen_count_leading_zeros(ctx, vref, s)
         }
