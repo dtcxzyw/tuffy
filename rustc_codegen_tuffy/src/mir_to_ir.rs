@@ -108,9 +108,13 @@ pub fn translate_function<'tcx>(
         match translate_ty(ty) {
             Some(Type::Unit) | None => continue,
             Some(ir_ty) => {
-                // Large structs (> 16 bytes) are passed by hidden pointer.
+                // System V AMD64 ABI struct parameter passing:
+                // - > 16 bytes: passed by hidden pointer
+                // - 9-16 bytes: passed in TWO registers
+                // - <= 8 bytes: passed in one register
                 let param_size = type_size(tcx, ty).unwrap_or(0);
-                if param_size > 16 && matches!(ir_ty, Type::Int) {
+                let is_int_ty = matches!(ir_ty, Type::Int);
+                if param_size > 16 && is_int_ty {
                     params.push(Type::Ptr(0));
                     param_anns.push(None);
                 } else {
@@ -118,6 +122,16 @@ pub fn translate_function<'tcx>(
                     param_anns.push(translate_annotation(ty));
                 }
                 param_names.push(all_names.get(i).copied().flatten());
+                // Two-register structs (9-16 bytes) occupy two ABI slots.
+                if param_size > 8
+                    && param_size <= 16
+                    && is_int_ty
+                    && !is_fat_ptr(ty)
+                {
+                    params.push(Type::Int);
+                    param_anns.push(None);
+                    param_names.push(None);
+                }
                 // Fat pointers (&str, &[T]) occupy two ABI slots.
                 if is_fat_ptr(ty) {
                     params.push(Type::Int);
@@ -536,11 +550,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 _ => {}
             }
 
-            // Large structs (> 16 bytes) are passed by hidden pointer in
-            // the System V ABI. Declare the param as Ptr and mark the local
-            // as stack-allocated so field access works through the pointer.
+            // System V AMD64 ABI struct parameter passing:
+            // - > 16 bytes: passed by hidden pointer
+            // - 9-16 bytes: passed in TWO registers
+            // - <= 8 bytes: passed in one register
             let param_size = type_size(self.tcx, ty).unwrap_or(0);
             let large_struct = param_size > 16 && matches!(ir_ty, Some(Type::Int));
+            let two_reg_struct =
+                param_size > 8 && param_size <= 16 && matches!(ir_ty, Some(Type::Int));
             let (abi_ty, abi_ann) = if large_struct {
                 (Type::Ptr(0), None)
             } else {
@@ -554,6 +571,36 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // Mark as stack-allocated so translate_place_to_addr uses
                 // the pointer directly as the base address.
                 self.locals.set(local, val);
+                self.stack_locals.mark(local);
+            } else if two_reg_struct {
+                // Two-register struct (9-16 bytes): capture both ABI
+                // registers and reconstruct into a stack slot.
+                let slot = self
+                    .builder
+                    .stack_slot(param_size as u32, Origin::synthetic());
+                self.current_mem = self.builder.store(
+                    val.into(),
+                    slot.into(),
+                    8,
+                    self.current_mem.into(),
+                    Origin::synthetic(),
+                );
+                abi_idx += 1;
+                let val2 = self
+                    .builder
+                    .param(abi_idx, Type::Int, None, Origin::synthetic());
+                let off = self.builder.iconst(8, Origin::synthetic());
+                let addr1 = self
+                    .builder
+                    .ptradd(slot.into(), off.into(), 0, Origin::synthetic());
+                self.current_mem = self.builder.store(
+                    val2.into(),
+                    addr1.into(),
+                    8,
+                    self.current_mem.into(),
+                    Origin::synthetic(),
+                );
+                self.locals.set(local, slot);
                 self.stack_locals.mark(local);
             } else {
                 self.locals.set(local, val);
@@ -909,17 +956,35 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     // storing the pointer value.
                                     let val_ty = self.builder.value_type(val).cloned();
                                     if matches!(val_ty.as_ref(), Some(Type::Ptr(_))) && bytes > 8 {
+                                        // For word-by-word copy we need a SOURCE ADDRESS
+                                        // to load from. When the rvalue is Use(Copy/Move)
+                                        // of a place with projections (e.g. a fat pointer
+                                        // field like &str), `val` is the LOADED value (the
+                                        // data pointer), not a pointer to the multi-word
+                                        // data. Use translate_place_to_addr to get the
+                                        // actual source address in memory.
+                                        let src_base = match rvalue {
+                                            Rvalue::Use(
+                                                Operand::Copy(src_place)
+                                                | Operand::Move(src_place),
+                                            ) if !src_place.projection.is_empty() => {
+                                                self.translate_place_to_addr(src_place)
+                                                    .map(|(a, _)| self.coerce_to_ptr(a))
+                                            }
+                                            _ => None,
+                                        };
+                                        let src_base = src_base.unwrap_or(val);
                                         let num_words = (bytes as u64).div_ceil(8);
                                         for i in 0..num_words {
                                             let byte_off = i * 8;
                                             let src_addr = if byte_off == 0 {
-                                                val
+                                                src_base
                                             } else {
                                                 let off = self
                                                     .builder
                                                     .iconst(byte_off as i64, Origin::synthetic());
                                                 self.builder.ptradd(
-                                                    val.into(),
+                                                    src_base.into(),
                                                     off.into(),
                                                     0,
                                                     Origin::synthetic(),
@@ -1309,6 +1374,32 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 return Some(self.builder.symbol_addr(sym_id, Origin::synthetic()));
                             }
                         }
+                    // Handle array-to-slice unsizing: &[T; N] → &[T].
+                    // The fat component is the array length N.
+                    if let Some(inner) = target_inner
+                        && let ty::Slice(_) = inner.kind()
+                    {
+                        let src_ty = match op {
+                            Operand::Copy(p) | Operand::Move(p) => {
+                                self.monomorphize(self.mir.local_decls[p.local].ty)
+                            }
+                            Operand::Constant(c) => self.monomorphize(c.ty()),
+                            _ => return None,
+                        };
+                        let src_inner = match src_ty.kind() {
+                            ty::Ref(_, inner, _) => *inner,
+                            ty::RawPtr(inner, _) => *inner,
+                            _ => src_ty,
+                        };
+                        if let ty::Array(_, len) = src_inner.kind() {
+                            if let Some(n) = len.try_to_target_usize(self.tcx) {
+                                return Some(
+                                    self.builder.iconst(n as i64, Origin::synthetic()),
+                                );
+                            }
+                        }
+                    }
+
                     let _ = pc; // suppress unused warning
                 }
                 None
