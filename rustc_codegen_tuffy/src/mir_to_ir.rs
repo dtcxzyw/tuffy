@@ -554,11 +554,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
     fn translate_params(&mut self) {
         let mut abi_idx: u32 = 0;
-        let fn_name = self.tcx.symbol_name(self.instance).name.to_string();
-        eprintln!(
-            "[params] fn={fn_name} arg_count={} use_sret={}",
-            self.mir.arg_count, self.use_sret
-        );
 
         // If the function returns a large struct, the caller passes a hidden
         // pointer as the first argument (sret). We consume it here and use it
@@ -584,10 +579,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             let local = mir::Local::from_usize(i + 1);
             let ty = self.monomorphize(self.mir.local_decls[local].ty);
             let ir_ty = translate_ty(ty);
-            eprintln!(
-                "[params] i={i} local={local:?} ty={ty:?} ir_ty={ir_ty:?} abi_idx={abi_idx} fat={}",
-                is_fat_ptr(ty)
-            );
 
             // Skip zero-sized (Unit) and untranslatable params — they don't
             // occupy an ABI slot. Assign a dummy iconst 0 so downstream MIR
@@ -1086,10 +1077,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                             );
                                         }
                                     } else {
-                                        eprintln!(
-                                            "[tuffy-assign] FALLBACK store.{bytes} for local={:?}",
-                                            place.local
-                                        );
                                         self.current_mem = self.builder.store(
                                             val.into(),
                                             slot.into(),
@@ -1189,15 +1176,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // Check if the rvalue produces a fat pointer (e.g., &str from ConstValue::Slice).
                 if let Some(fat_val) = self.extract_fat_component(rvalue) {
                     self.fat_locals.set(place.local, fat_val);
-                } else {
-                    // Debug: log assignments to locals that might be fat pointers.
-                    let local_ty = self.monomorphize(self.mir.local_decls[place.local].ty);
-                    if is_fat_ptr(local_ty) {
-                        eprintln!(
-                            "[fat-miss] local={:?} ty={:?} rvalue={:?}",
-                            place.local, local_ty, rvalue
-                        );
-                    }
                 }
             }
             StatementKind::StorageLive(_) | StatementKind::StorageDead(_) | StatementKind::Nop => {}
@@ -1496,10 +1474,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 let sym_id = self.symbols.intern(&sym);
                                 let relocs =
                                     extract_alloc_relocs(self.tcx, inner_alloc, 0, size, &mut self.symbols, &mut self.static_data);
-                                eprintln!(
-                                    "[vtable-unsize] {} src={:?} size={} relocs={:?}",
-                                    sym, src_inner, size, relocs
-                                );
                                 self.static_data.push((sym_id, bytes, relocs));
                                 return Some(self.builder.symbol_addr(sym_id, Origin::synthetic()));
                             }
@@ -1872,28 +1846,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             let self_arg = &args[0].node;
             let vtable_ptr = match self_arg {
                 Operand::Copy(place) | Operand::Move(place) => {
-                    let has_fat = self.fat_locals.get(place.local).is_some();
-                    let is_stack = self.stack_locals.is_stack(place.local);
-                    let has_local = self.locals.get(place.local).is_some();
-                    let fn_name = self.tcx.symbol_name(self.instance).name.to_string();
-                    eprintln!(
-                        "[virtual] fn={fn_name} idx={idx} local={:?} has_fat={has_fat} is_stack={is_stack} has_local={has_local} proj={:?}",
-                        place.local, place.projection
-                    );
-                    // Dump all locals' fat status for this function.
-                    for (i, decl) in self.mir.local_decls.iter().enumerate() {
-                        let local = mir::Local::from_usize(i);
-                        let ty = self.monomorphize(decl.ty);
-                        let has_f = self.fat_locals.get(local).is_some();
-                        let has_l = self.locals.get(local).is_some();
-                        let is_s = self.stack_locals.is_stack(local);
-                        if has_f || has_l || i <= 10 {
-                            eprintln!(
-                                "[virtual]   local={local:?} ty={ty:?} fat_ptr={} has_fat={has_f} has_local={has_l} is_stack={is_s}",
-                                is_fat_ptr(ty)
-                            );
-                        }
-                    }
                     // First try fat_locals (set when the fat pointer was created
                     // from a parameter or an Unsize coercion).
                     if let Some(v) = self.fat_locals.get(place.local) {
@@ -2514,32 +2466,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     if let Some(existing) = self.locals.get(dest_place.local) {
                         let ety = self.builder.value_type(existing).cloned();
                         if matches!(ety, Some(Type::Ptr(_))) {
-                            eprintln!(
-                                "[tuffy-agg] REUSE dest={:?} existing_ty={:?} size={total_size}",
-                                dest_place.local, ety
-                            );
                             existing
                         } else {
-                            eprintln!(
-                                "[tuffy-agg] NEW (non-ptr) dest={:?} existing_ty={:?} size={total_size}",
-                                dest_place.local, ety
-                            );
                             self.builder
                                 .stack_slot(total_size as u32, Origin::synthetic())
                         }
                     } else {
-                        eprintln!(
-                            "[tuffy-agg] NEW (no-slot) dest={:?} size={total_size}",
-                            dest_place.local
-                        );
                         self.builder
                             .stack_slot(total_size as u32, Origin::synthetic())
                     }
                 } else {
-                    eprintln!(
-                        "[tuffy-agg] NEW (projected) dest={:?} size={total_size}",
-                        dest_place.local
-                    );
                     self.builder
                         .stack_slot(total_size as u32, Origin::synthetic())
                 };
@@ -2900,10 +2836,6 @@ fn translate_const<'tcx>(
 
                         let relocs =
                             extract_alloc_relocs(tcx, inner, 0, size, symbols, static_data);
-                        eprintln!(
-                            "[vtable-const] {} ty={:?} size={} relocs={:?}",
-                            sym, vtable_ty, size, relocs
-                        );
 
                         static_data.push((sym_id, bytes, relocs));
                         let base = builder.symbol_addr(sym_id, Origin::synthetic());
@@ -3395,11 +3327,6 @@ fn resolve_call_target<'tcx>(
                 }
             }
             if args.has_non_region_param() {
-                eprintln!(
-                    "[resolve-call] BAIL non_region_param: def={:?} args={:?}",
-                    tcx.def_path_str(*def_id),
-                    args
-                );
                 return None;
             }
             let instance =
@@ -3409,11 +3336,6 @@ fn resolve_call_target<'tcx>(
             let instance = match instance {
                 Some(i) => i,
                 None => {
-                    eprintln!(
-                        "[resolve-call] BAIL try_resolve failed: def={:?} args={:?}",
-                        tcx.def_path_str(*def_id),
-                        args
-                    );
                     return None;
                 }
             };
@@ -3422,10 +3344,6 @@ fn resolve_call_target<'tcx>(
                 return Some(CallTarget::Virtual(idx));
             }
             if instance.args.has_non_region_param() {
-                eprintln!(
-                    "[resolve-call] BAIL instance non_region_param: {:?}",
-                    tcx.symbol_name(instance).name
-                );
                 return None;
             }
             Some(CallTarget::Direct(

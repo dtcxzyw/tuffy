@@ -44,11 +44,6 @@ impl IselCtx {
             return Some(vreg);
         }
         if let Some(offset) = self.stack.get(val) {
-            eprintln!(
-                "[isel-ensure] val={} is stack_slot offset={} -> LEA",
-                val.index(),
-                offset
-            );
             let rbp = self.alloc.alloc_fixed(Gpr::Rbp.to_preg());
             let dst = self.alloc.alloc();
             self.out.push(MInst::Lea {
@@ -264,13 +259,6 @@ fn select_inst(
             let dst = ctx.alloc.alloc();
             let size = bytes_to_opsize(*bytes);
             if let Some(offset) = ctx.stack.get(ptr.value) {
-                eprintln!(
-                    "[isel-load] vref={} ptr={} bytes={} stack_offset={} -> MovRM",
-                    vref.index(),
-                    ptr.value.index(),
-                    bytes,
-                    offset
-                );
                 let rbp = ctx.alloc.alloc_fixed(Gpr::Rbp.to_preg());
                 ctx.out.push(MInst::MovRM {
                     size,
@@ -279,12 +267,6 @@ fn select_inst(
                     offset,
                 });
             } else {
-                eprintln!(
-                    "[isel-load] vref={} ptr={} bytes={} -> MovRM(reg)",
-                    vref.index(),
-                    ptr.value.index(),
-                    bytes
-                );
                 let ptr_vreg = ctx.ensure_in_reg(ptr.value)?;
                 ctx.out.push(MInst::MovRM {
                     size,

@@ -126,10 +126,6 @@ fn encode_inst(
             base,
             offset,
         } => {
-            eprintln!(
-                "[encode] MovRM size={size:?} dst={dst:?} base={base:?} offset={offset} at byte_offset={}",
-                buf.len()
-            );
             encode_mov_rm(*size, *dst, *base, *offset, buf);
         }
         MInst::MovMR {
@@ -141,10 +137,6 @@ fn encode_inst(
             encode_mov_mr(*size, *base, *offset, *src, buf);
         }
         MInst::Lea { dst, base, offset } => {
-            eprintln!(
-                "[encode] Lea dst={dst:?} base={base:?} offset={offset} at byte_offset={}",
-                buf.len()
-            );
             encode_lea(*dst, *base, *offset, buf);
         }
         MInst::MovRI64 { dst, imm } => {
