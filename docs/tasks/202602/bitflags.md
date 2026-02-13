@@ -33,11 +33,9 @@ Phase 2 (run `cargo test` for bitflags) is in progress. The test binary links su
 
 5. **Debug eprintln cleanup** — Removed all temporary debug `eprintln!` statements from the codegen pipeline.
 
+6. **Indirect constant pointer dereference bug** — `ConstValue::Indirect` for reference/pointer types (e.g. `&[Flag<TestFlags>]`) returned `symbol_addr` pointing to the fat pointer data instead of loading the actual data pointer. This caused `InternalBitFlags::all()` to index into the 16-byte slice header instead of the array data, producing wrong flag values. Fixed by loading the pointer value from the emitted static data for `Ref`/`RawPtr` types.
+
 ## Open Issues
-
-### P0 — Blocking
-
-1. **`Flag::value()` returns pointer instead of loaded value** — In the bitflags crate, `Flag<TestFlags>::value(&self) -> TestFlags` emits IR that returns `-> ptr` with just `ptradd` (no load), while standalone test cases with the identical pattern correctly emit `-> int` with `ptradd` + `load.1`. The IR dump confirms the load instruction is entirely missing. Root cause is likely in how `translate_place_to_value` or the assignment handler interacts with generic monomorphization of `Flag<B>` where `B = TestFlags`. This causes `TestFlags::all()` to fail its assertion because it compares an address against an expected bitmask value.
 
 ### P2 — Nice to Have
 

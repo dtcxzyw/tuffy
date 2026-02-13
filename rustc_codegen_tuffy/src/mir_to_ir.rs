@@ -2747,6 +2747,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 &mut self.builder,
                 &mut self.symbols,
                 &mut self.static_data,
+                &mut self.current_mem,
             ),
             Operand::RuntimeChecks(_) => {
                 // UbChecks / ContractChecks / OverflowChecks: emit false (0)
@@ -2807,6 +2808,7 @@ fn translate_const<'tcx>(
     builder: &mut Builder<'_>,
     symbols: &mut SymbolTable,
     static_data: &mut StaticDataVec,
+    current_mem: &mut ValueRef,
 ) -> Option<ValueRef> {
     // Monomorphize the constant using the instance's substitutions so that
     // associated type projections (e.g. <B as Flags>::Bits) are resolved
@@ -2931,7 +2933,25 @@ fn translate_const<'tcx>(
                 let relocs =
                     extract_alloc_relocs(tcx, inner, byte_offset, size, symbols, static_data);
                 static_data.push((sym_id, bytes, relocs));
-                Some(builder.symbol_addr(sym_id, Origin::synthetic()))
+                let base = builder.symbol_addr(sym_id, Origin::synthetic());
+
+                // For reference/pointer types, the Indirect constant contains
+                // the pointer value (or fat pointer data).  Load the actual
+                // pointer from the emitted static data so the local holds the
+                // pointer value, not a pointer-to-the-pointer.
+                if matches!(ty.kind(), ty::Ref(..) | ty::RawPtr(..)) {
+                    let loaded = builder.load(
+                        base.into(),
+                        8,
+                        Type::Ptr(0),
+                        (*current_mem).into(),
+                        None,
+                        Origin::synthetic(),
+                    );
+                    Some(loaded)
+                } else {
+                    Some(base)
+                }
             } else {
                 None
             }
