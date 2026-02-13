@@ -333,6 +333,9 @@ simd/simd-bitmask.rs
 nll/polonius/array-literal-index-oob-2024.rs
 simd/intrinsic/inlining-issue67557.rs
 
+# Requires newer -Znext-solver than current nightly (1.95.0-nightly 2026-02-12).
+traits/next-solver/coercion/unfulfilled-unsize-coercion-recursion-limit.rs
+
 # Compilation failures (layout, coroutine, import, stdlib features not yet supported).
 coroutine/uninhabited-field.rs
 imports/overwrite-different-vis-2.rs
