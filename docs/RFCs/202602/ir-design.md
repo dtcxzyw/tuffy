@@ -38,9 +38,9 @@ Instead of `i32` or `i64`, all integer values are simply `int`. Range constraint
 
 ```
 %raw = load b32, ptr %p         // load 32 bits of raw bytes from memory
-%x:s32 = bytecast %raw to int  // cast to int, result annotated as signed 32-bit
+%x:s32 = bitcast %raw to int   // cast to int, result annotated as signed 32-bit
 %y:s32 = add %x:s32, 1         // mathematical addition, no overflow; result in s32 range
-%out = bytecast %y:s32 to b32  // cast back to bytes for storing
+%out = bitcast %y:s32 to b32   // cast back to bytes for storing
 store b32 %out, ptr %q
 ```
 
@@ -225,7 +225,7 @@ Result-side violation → instruction produces poison. Use-side violation → co
 
 | Operation | Semantics |
 |-----------|-----------|
-| `bytecast %v to b<N>` | Type-punning conversion between byte type and other types |
+| `bitcast %v to b<N>` | Type-punning conversion between byte type and other types |
 | `load b<N>, ptr %p` | Load raw bytes from memory |
 | `store b<N> %v, ptr %p` | Store raw bytes to memory |
 

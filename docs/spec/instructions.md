@@ -506,32 +506,6 @@ vN = zext vA, <bits>
 Zero-extend `vA` to `bits` bits. Used during lowering to make bit widths explicit
 for instruction selection.
 
-### `bytecast`
-
-```
-vN = bytecast vA
-```
-
-Convert between byte types and typed values. The source and target types determine
-the conversion direction.
-
-**`byte(N) → int`**: Interprets the bytes as a little-endian integer. The low
-`N*8` bits of the result are determined by the byte contents; high bits are
-**unspecified**. The caller must apply `zext` (zero-extend) or `sext`
-(sign-extend) to obtain a fully determined value. `N` must be a multiple of 8
-bits (i.e., the byte count is the type parameter directly).
-
-**`byte(N) → float`**: Requires exact size match: `byte(4) → f32`,
-`byte(8) → f64`. Size mismatch is ill-formed.
-
-**`int → byte(N)`**: Truncates the integer to `N` bytes (little-endian).
-
-**AbstractByte handling**: Each byte in the input is resolved independently:
-- `bits(val)` → decoded as a concrete byte
-- `poison` → the entire result is `poison`
-- `uninit` → the entire result is `poison`
-- `ptrFragment(allocId, index)` → ptrtoint semantics (extracts address byte)
-
 ## Pointer Operations
 
 Pointer operations manipulate pointers with explicit provenance tracking. The formal

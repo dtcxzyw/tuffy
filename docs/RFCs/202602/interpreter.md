@@ -159,13 +159,6 @@ fn exec_assertsext(v: &Value, n: u32) -> Value {
 }
 ```
 
-### Bytecast semantics
-
-`bytecast` between `int` and `b<N>` follows the IR semantics:
-
-- `int → b<N>`: extract the low N bits of the integer as bytes. If the integer is poison, all bytes are `AbstractByte::Poison`.
-- `b<N> → int`: if any byte is `Uninit` or `Poison`, the result is `Value::Poison`. If any byte is `PtrFragment`, the result is `Value::Poison` (pointer-to-integer cast must use `ptrtoint`). Otherwise, assemble bytes into an integer.
-
 ### Hierarchical CFG execution
 
 The interpreter walks the hierarchical CFG:

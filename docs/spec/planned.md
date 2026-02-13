@@ -40,11 +40,6 @@ derived: `count = total_bits / element_bits`. Scalable vectors use
 (cf. SVE, RVV). Well-formedness: `total_bits % element_bits == 0` and lane count
 must be a power of two. See the [scalable vector RFC](../RFCs/202602/) (planned).
 
-## Byte Type Operations
-
-`bytecast` semantics are specified in [Type Conversion](instructions.md#type-conversion). The Lean
-formal definition and Rust implementation are not yet complete.
-
 ## Memory SSA
 
 Memory dependencies encoded directly into the IR as memory version tokens on load/store

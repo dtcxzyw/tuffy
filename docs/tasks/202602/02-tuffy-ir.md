@@ -11,7 +11,7 @@ Implement the core IR data structures based on the IR design RFC (`docs/RFCs/202
 
 Key deliverables:
 - Type system: `int`, `b<N>`, `ptr<AS>`, `float`, `double`, `vec<vscale x N x T>`
-- Instruction set: arithmetic, pointer ops (ptradd, ptrdiff, ptrtoint, ptrtoaddr, inttoptr), bytecast, load/store, assert nodes, atomic ops, vector ops
+- Instruction set: arithmetic, pointer ops (ptradd, ptrdiff, ptrtoint, ptrtoaddr, inttoptr), load/store, assert nodes, atomic ops, vector ops
 - Hierarchical CFG: Region (Loop, Branch, Sequence), BasicBlock, Terminator
 - Memory model: four-state AbstractByte, MemSSA tokens
 - At-use annotations: UseAnnotation with demanded_bits, known_bits, dirty flag

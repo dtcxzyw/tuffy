@@ -162,46 +162,6 @@ def applyAnnotation (v : Int) (ann : Annotation) : Value :=
   | .signed n => checkSignedRange v n
   | .unsigned n => checkUnsignedRange v n
 
--- Bytecast semantics: conversion between byte types and typed values.
--- Annotations are always droppable — they never determine bytecast semantics.
-
-/-- Resolve a single AbstractByte to a concrete byte value (0–255).
-    Returns none if the byte is poison, uninit, or a pointer fragment. -/
-def resolveAbstractByte (ab : AbstractByte) : Option UInt8 :=
-  match ab with
-  | .bits val => some val
-  | .poison => none
-  | .uninit => none
-  | .ptrFragment _ _ => none  -- TODO: ptrtoint semantics
-
-/-- Decode the low bits from a list of abstract bytes (little-endian).
-    Returns none if any byte is not concrete bits. -/
-def decodeBytesLE (bs : List AbstractByte) : Option Int :=
-  let rec go (remaining : List AbstractByte) (shift : Nat) (acc : Int) : Option Int :=
-    match remaining with
-    | [] => some acc
-    | b :: rest =>
-      match resolveAbstractByte b with
-      | none => none
-      | some v => go rest (shift + 8) (acc + (v.toNat : Int) <<< shift)
-  go bs 0 0
-
-/-- Specification for bytecast bytes→int. The low N*8 bits of the result
-    match the decoded bytes; high bits are unspecified. The caller must
-    apply zext or sext to obtain a fully determined value.
-    Returns poison if any byte is non-concrete. -/
-def bytecastToIntValid (bs : List AbstractByte) (result : Value) : Prop :=
-  match decodeBytesLE bs with
-  | none => result = .poison
-  | some decoded =>
-    ∃ v : Int, result = .int v ∧ v % (2 ^ (bs.length * 8)) = decoded
-
-/-- Encode an integer as a list of abstract bytes (little-endian, N bytes).
-    Truncates to the low N bytes. -/
-def evalBytecastFromInt (v : Int) (numBytes : Nat) : List AbstractByte :=
-  List.ofFn (fun (i : Fin numBytes) =>
-    .bits (UInt8.ofNat ((v >>> (i.val * 8)).toNat % 256)))
-
 -- Memory load/store semantics
 
 /-- Load `size` bytes from memory starting at address `addr`.
