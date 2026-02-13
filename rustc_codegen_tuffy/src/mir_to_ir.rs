@@ -1012,7 +1012,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     // do a word-by-word copy of the DATA instead of
                                     // storing the pointer value.
                                     let val_ty = self.builder.value_type(val).cloned();
-                                    if matches!(val_ty.as_ref(), Some(Type::Ptr(_))) && bytes > 8 {
+                                    if matches!(val_ty.as_ref(), Some(Type::Ptr(_))) && bytes > 0 {
                                         // For word-by-word copy we need a SOURCE ADDRESS
                                         // to load from. When the rvalue is Use(Copy/Move)
                                         // of a place with projections (e.g. a fat pointer
@@ -1100,7 +1100,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             let addr = self.coerce_to_ptr(addr);
                             let bytes = type_size(self.tcx, projected_ty).unwrap_or(8) as u32;
                             let val_ty = self.builder.value_type(val).cloned();
-                            if matches!(val_ty.as_ref(), Some(Type::Ptr(_))) && bytes > 8 {
+                            if matches!(val_ty.as_ref(), Some(Type::Ptr(_))) && bytes > 0 {
                                 // val is a pointer to multi-word data (e.g.
                                 // symbol_addr of an Indirect constant like a
                                 // slice reference).  Copy word-by-word from
