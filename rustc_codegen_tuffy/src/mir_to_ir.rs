@@ -1600,11 +1600,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let ret_ty = self.monomorphize(self.mir.local_decls[ret_local].ty);
                     let size = type_size(self.tcx, ret_ty).unwrap_or(8);
 
-                    // First 8 bytes → RAX.
+                    // Load the first word from the stack slot.
+                    // Use the actual type size (clamped to 8) so that sub-word
+                    // types (u8, u16, etc.) emit a correctly-sized load instead
+                    // of reading garbage bytes beyond the stored value.
+                    let load_size = size.min(8) as u32;
+                    let load_ty = translate_ty(ret_mir_ty).unwrap_or(Type::Int);
                     let word0 = self.builder.load(
                         slot.into(),
-                        8,
-                        Type::Int,
+                        load_size,
+                        load_ty,
                         self.current_mem.into(),
                         None,
                         Origin::synthetic(),
