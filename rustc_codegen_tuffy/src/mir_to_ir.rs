@@ -134,7 +134,7 @@ pub fn translate_function<'tcx>(
                 }
                 // Fat pointers (&str, &[T]) occupy two ABI slots.
                 if is_fat_ptr(ty) {
-                    params.push(Type::Int);
+                    params.push(fat_ptr_meta_type(ty));
                     param_anns.push(None);
                     param_names.push(None);
                 }
@@ -466,6 +466,18 @@ fn is_fat_ptr(ty: ty::Ty<'_>) -> bool {
     }
 }
 
+/// Return the IR type for the metadata word of a fat pointer.
+/// - &dyn Trait → Ptr (vtable pointer)
+/// - &str / &[T] → Int (length)
+fn fat_ptr_meta_type(ty: ty::Ty<'_>) -> Type {
+    match ty.kind() {
+        ty::Ref(_, inner, _) | ty::RawPtr(inner, _) if matches!(inner.kind(), ty::Dynamic(..)) => {
+            Type::Ptr(0)
+        }
+        _ => Type::Int,
+    }
+}
+
 /// Map from MIR BasicBlock to IR BlockRef.
 struct BlockMap {
     blocks: Vec<Option<BlockRef>>,
@@ -648,9 +660,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
             // Fat pointer types (&str, &[T]) occupy two ABI registers (ptr + metadata).
             if is_fat_ptr(ty) {
+                let meta_ty = fat_ptr_meta_type(ty);
                 let meta_val = self
                     .builder
-                    .param(abi_idx, Type::Int, None, Origin::synthetic());
+                    .param(abi_idx, meta_ty, None, Origin::synthetic());
                 self.fat_locals.set(local, meta_val);
                 abi_idx += 1;
             }
