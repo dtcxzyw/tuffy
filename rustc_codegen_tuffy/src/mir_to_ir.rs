@@ -3155,7 +3155,13 @@ fn translate_intrinsic<'tcx>(
         // ctlz / ctlz_nonzero: count leading zeros.
         "ctlz" | "ctlz_nonzero" => {
             if let Some(&v) = ir_args.first() {
-                let result = builder.count_leading_zeros(v.into(), Origin::synthetic());
+                let bits = substs
+                    .first()
+                    .and_then(|a| a.as_type())
+                    .and_then(|t| type_size(tcx, t))
+                    .map(|sz| (sz * 8) as u32)
+                    .unwrap_or(64);
+                let result = builder.count_leading_zeros(v.into(), bits, Origin::synthetic());
                 locals.set(destination_local, result);
             }
             true
