@@ -1966,35 +1966,47 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let arg_ty = self.monomorphize(self.mir.local_decls[place.local].ty);
                         let arg_size = type_size(self.tcx, arg_ty).unwrap_or(0);
                         if arg_size > 0 && arg_size <= 16 {
-                            // Load word(s) from the stack slot and pass in registers.
-                            let word0 = self.builder.load(
-                                v.into(),
-                                8,
-                                Type::Int,
-                                self.current_mem.into(),
-                                None,
-                                Origin::synthetic(),
+                            // Use the stack slot pointer directly — translate_operand
+                            // may have already loaded the value for small locals,
+                            // so `v` might be an Int rather than a Ptr.
+                            let slot = self.locals.get(place.local).unwrap_or(v);
+                            let slot_is_ptr = matches!(
+                                self.builder.value_type(slot),
+                                Some(Type::Ptr(_))
                             );
-                            ir_args.push(word0.into());
-                            if arg_size > 8 {
-                                let off = self.builder.iconst(8, Origin::synthetic());
-                                let addr1 = self.builder.ptradd(
-                                    v.into(),
-                                    off.into(),
-                                    0,
-                                    Origin::synthetic(),
-                                );
-                                let word1 = self.builder.load(
-                                    addr1.into(),
+                            if slot_is_ptr {
+                                // Load word(s) from the stack slot and pass in registers.
+                                let word0 = self.builder.load(
+                                    slot.into(),
                                     8,
                                     Type::Int,
                                     self.current_mem.into(),
                                     None,
                                     Origin::synthetic(),
                                 );
-                                ir_args.push(word1.into());
+                                ir_args.push(word0.into());
+                                if arg_size > 8 {
+                                    let off = self.builder.iconst(8, Origin::synthetic());
+                                    let addr1 = self.builder.ptradd(
+                                        slot.into(),
+                                        off.into(),
+                                        0,
+                                        Origin::synthetic(),
+                                    );
+                                    let word1 = self.builder.load(
+                                        addr1.into(),
+                                        8,
+                                        Type::Int,
+                                        self.current_mem.into(),
+                                        None,
+                                        Origin::synthetic(),
+                                    );
+                                    ir_args.push(word1.into());
+                                }
+                                true
+                            } else {
+                                false
                             }
-                            true
                         } else {
                             false
                         }
