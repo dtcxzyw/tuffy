@@ -230,6 +230,34 @@ pub fn translate_function<'tcx>(
                     }
                 }
             }
+            // Also check call terminators — they assign to a destination local.
+            if let Some(terminator) = &bb_data.terminator {
+                if let TerminatorKind::Call { destination, .. } = &terminator.kind {
+                    if destination.projection.is_empty() {
+                        let local = destination.local;
+                        if local.as_usize() > 0 && local.as_usize() <= mir.arg_count {
+                        } else if local.as_usize() == 0 && ctx.stack_locals.is_stack(local) {
+                        } else {
+                            let ty = monomorphize(mir.local_decls[local].ty);
+                            let size = type_size(tcx, ty).unwrap_or(0);
+                            if size <= 8 && size > 0 {
+                                if let Some(prev_bb) = assign_bb[local.as_usize()] {
+                                    if prev_bb != bb && !ctx.stack_locals.is_stack(local) {
+                                        let slot = ctx.builder.stack_slot(
+                                            std::cmp::max(size as u32, 1),
+                                            Origin::synthetic(),
+                                        );
+                                        ctx.locals.set(local, slot);
+                                        ctx.stack_locals.mark(local);
+                                    }
+                                } else {
+                                    assign_bb[local.as_usize()] = Some(bb);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -2172,6 +2200,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             }
 
             // Try simple inline handling first (black_box, etc.).
+            // Save the stack slot pointer before the intrinsic overwrites it
+            // via locals.set — we need it to emit a store afterward.
+            let saved_slot = if self.stack_locals.is_stack(destination.local) {
+                self.locals.get(destination.local)
+            } else {
+                None
+            };
             let handled = translate_intrinsic(
                 self.tcx,
                 &intrinsic_name,
@@ -2184,6 +2219,23 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 self.current_mem,
             );
             if handled {
+                // If the destination is a stack local, the intrinsic set the
+                // local to the raw result value.  Store it into the stack slot
+                // and restore the local to point at the slot.
+                if let Some(slot) = saved_slot {
+                    if let Some(result_val) = self.locals.get(destination.local) {
+                        let dest_ty = self.monomorphize(self.mir.local_decls[destination.local].ty);
+                        let size = type_size(self.tcx, dest_ty).unwrap_or(8) as u32;
+                        self.current_mem = self.builder.store(
+                            result_val.into(),
+                            slot.into(),
+                            size.max(1),
+                            self.current_mem.into(),
+                            Origin::synthetic(),
+                        );
+                        self.locals.set(destination.local, slot);
+                    }
+                }
                 if let Some(target) = target {
                     let target_block = self.block_map.get(*target);
                     self.builder.br(
@@ -3732,6 +3784,16 @@ fn translate_intrinsic<'tcx>(
     symbols: &mut SymbolTable,
     current_mem: ValueRef,
 ) -> bool {
+    // Helper: coerce an Int value to Ptr (needed when NonNull<T> or similar
+    // #[repr(transparent)] pointer wrappers are loaded as Int).
+    let ensure_ptr = |builder: &mut Builder<'_>, val: ValueRef| -> ValueRef {
+        if matches!(builder.value_type(val), Some(Type::Int)) {
+            builder.inttoptr(val.into(), 0, Origin::synthetic())
+        } else {
+            val
+        }
+    };
+
     match name {
         // black_box: identity function, prevents optimizations.
         // Just copy the argument to the destination.
@@ -3789,6 +3851,26 @@ fn translate_intrinsic<'tcx>(
             true
         }
 
+        // size_of<T>: return the size of type T as a compile-time constant.
+        "size_of" => {
+            if let Some(t) = substs.first().and_then(|a| a.as_type()) {
+                let sz = type_size(tcx, t).unwrap_or(0);
+                let result = builder.iconst(sz as i64, Origin::synthetic());
+                locals.set(destination_local, result);
+            }
+            true
+        }
+
+        // min_align_of / align_of: return the alignment of type T.
+        "min_align_of" | "pref_align_of" => {
+            if let Some(t) = substs.first().and_then(|a| a.as_type()) {
+                let align = type_align(tcx, t).unwrap_or(1);
+                let result = builder.iconst(align as i64, Origin::synthetic());
+                locals.set(destination_local, result);
+            }
+            true
+        }
+
         // size_of_val: return the size of the pointed-to type.
         // For sized types this is a compile-time constant.
         "size_of_val" => {
@@ -3813,7 +3895,7 @@ fn translate_intrinsic<'tcx>(
         // arith_offset<T>(ptr, offset) → ptr + offset * sizeof(T)
         "arith_offset" => {
             if ir_args.len() >= 2 {
-                let ptr = ir_args[0];
+                let ptr = ensure_ptr(builder, ir_args[0]);
                 let offset = ir_args[1];
                 let elem_size = substs
                     .first()
@@ -3835,8 +3917,8 @@ fn translate_intrinsic<'tcx>(
         // ptr_offset_from_unsigned<T>(ptr1, ptr2) → (ptr1 - ptr2) / sizeof(T)
         "ptr_offset_from_unsigned" | "ptr_offset_from" => {
             if ir_args.len() >= 2 {
-                let ptr1 = ir_args[0];
-                let ptr2 = ir_args[1];
+                let ptr1 = ensure_ptr(builder, ir_args[0]);
+                let ptr2 = ensure_ptr(builder, ir_args[1]);
                 let diff = builder.ptrdiff(ptr1.into(), ptr2.into(), Origin::synthetic());
                 let elem_size = substs
                     .first()

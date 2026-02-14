@@ -108,7 +108,9 @@ impl CodegenBackend for TuffyCodegenBackend {
                             // Verification failed — emit a stub instead of
                             // panicking so compilation can continue.
                             let func_name = result.symbols.resolve(result.func.name);
-                            eprintln!("warning: IR verification failed for {func_name}, emitting stub");
+                            eprintln!(
+                                "warning: IR verification failed for {func_name}, emitting stub\n  {vr}"
+                            );
                             let sym_name = tcx.symbol_name(*instance).name.to_string();
                             let is_noop = sym_name.contains("drop_in_place")
                                 || sym_name.contains("precondition_check");
