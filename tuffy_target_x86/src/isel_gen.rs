@@ -283,10 +283,78 @@ fn gen_icmp(
     cmp_op: ICmpOp,
     lhs_ann: Option<Annotation>,
 ) -> Option<()> {
+    // For sub-word annotations, normalize operands so that a zero-extended
+    // load (e.g. load.1 → 0x00000000000000FF) and a full-width iconst
+    // (e.g. iconst -1 → 0xFFFFFFFFFFFFFFFF) compare correctly.
+    let (cmp_lhs, cmp_rhs) = match lhs_ann {
+        Some(Annotation::Signed(n)) if n < 64 => {
+            let shift = (64 - n) as u8;
+            let l = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst: l,
+                src: lhs,
+            });
+            ctx.out.push(MInst::ShlImm {
+                size: OpSize::S64,
+                dst: l,
+                imm: shift,
+            });
+            ctx.out.push(MInst::SarImm {
+                size: OpSize::S64,
+                dst: l,
+                imm: shift,
+            });
+            let r = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst: r,
+                src: rhs,
+            });
+            ctx.out.push(MInst::ShlImm {
+                size: OpSize::S64,
+                dst: r,
+                imm: shift,
+            });
+            ctx.out.push(MInst::SarImm {
+                size: OpSize::S64,
+                dst: r,
+                imm: shift,
+            });
+            (l, r)
+        }
+        Some(Annotation::Unsigned(n)) if n < 64 => {
+            let mask = (1i64 << n) - 1;
+            let l = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst: l,
+                src: lhs,
+            });
+            ctx.out.push(MInst::AndRI {
+                size: OpSize::S64,
+                dst: l,
+                imm: mask,
+            });
+            let r = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst: r,
+                src: rhs,
+            });
+            ctx.out.push(MInst::AndRI {
+                size: OpSize::S64,
+                dst: r,
+                imm: mask,
+            });
+            (l, r)
+        }
+        _ => (lhs, rhs),
+    };
     ctx.out.push(MInst::CmpRR {
         size: OpSize::S64,
-        src1: lhs,
-        src2: rhs,
+        src1: cmp_lhs,
+        src2: cmp_rhs,
     });
     let cc = super::icmp_to_cc(cmp_op, lhs_ann);
     ctx.cmps.set(vref, cc);
