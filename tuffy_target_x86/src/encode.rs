@@ -534,9 +534,12 @@ fn encode_cmovcc(size: OpSize, cc: CondCode, dst: Gpr, src: Gpr, buf: &mut Vec<u
 }
 
 /// Encode SETcc r/m8 (0F 90+cc /0). Uses REX prefix if dst needs it.
+/// A REX prefix is required for registers with encoding >= 4 (RSP, RBP,
+/// RSI, RDI) to access their low byte (SPL, BPL, SIL, DIL) instead of
+/// the legacy high-byte registers (AH, CH, DH, BH).
 fn encode_setcc(cc: CondCode, dst: Gpr, buf: &mut Vec<u8>) {
     let b_bit = if dst.needs_rex() { 0x01 } else { 0 };
-    if b_bit != 0 {
+    if b_bit != 0 || dst.encoding() >= 4 {
         buf.push(0x40 | b_bit);
     }
     buf.push(0x0f);
