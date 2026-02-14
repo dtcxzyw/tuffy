@@ -13,7 +13,7 @@ Make tuffy capable of compiling and correctly running a Rust binary that uses th
 
 Phase 1 (basic `println!("{:?}", flags)`) is complete — `Flags(A | B | C)` prints correctly and the binary exits cleanly.
 
-Phase 2 (run `cargo test` for bitflags) is in progress. The test binary links successfully but crashes with SIGABRT during `TestFlags::all()` assertion. Multiple sub-word codegen bugs have been fixed, but one critical issue remains.
+Phase 2 (run `cargo test` for bitflags) is in progress. 35/37 compile-pass tests now pass. The remaining 2 failures (`impl_fmt`, `shadow_macros`) crash with SIGABRT due to missing `.eh_frame` unwinding support.
 
 ### Success Criteria
 
@@ -34,6 +34,16 @@ Phase 2 (run `cargo test` for bitflags) is in progress. The test binary links su
 5. **Debug eprintln cleanup** — Removed all temporary debug `eprintln!` statements from the codegen pipeline.
 
 6. **Indirect constant pointer dereference bug** — `ConstValue::Indirect` for reference/pointer types (e.g. `&[Flag<TestFlags>]`) returned `symbol_addr` pointing to the fat pointer data instead of loading the actual data pointer. This caused `InternalBitFlags::all()` to index into the 16-byte slice header instead of the array data, producing wrong flag values. Fixed by loading the pointer value from the emitted static data for `Ref`/`RawPtr` types.
+
+7. **SETcc REX prefix bug** — `encode_setcc` only emitted a REX prefix for r8-r15 registers, but not for RSP/RBP/RSI/RDI (encodings 4-7). Without REX, byte operations on these encodings access legacy high-byte registers (AH/CH/DH/BH) instead of the low-byte registers (SPL/BPL/SIL/DIL), causing BoolToInt to produce garbage values.
+
+8. **Cross-block value flow for call terminators** — The multi-BB assignment detection only scanned `StatementKind::Assign` in MIR statements, missing `TerminatorKind::Call` destinations. Locals assigned by intrinsic/function calls in one block but used in another were not promoted to stack slots, causing stale SSA values.
+
+9. **Intrinsic result stack-slot store** — When `translate_intrinsic` sets a result via `locals.set()`, it overwrites the stack slot pointer with the raw value. Added logic to save the slot pointer before the intrinsic call and emit a store afterward.
+
+10. **Pointer coercion for ptrdiff/arith_offset** — `NonNull<T>` and similar `#[repr(transparent)]` pointer wrappers are loaded as `Int` type. Added `ensure_ptr` coercion (inttoptr) in `ptr_offset_from` and `arith_offset` intrinsic handlers to satisfy the `ptrdiff` verifier check.
+
+11. **size_of / min_align_of intrinsics** — Added inline handlers for `size_of`, `min_align_of`, and `pref_align_of` intrinsics.
 
 ## Open Issues
 
