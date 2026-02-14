@@ -113,6 +113,11 @@ pub fn translate_function<'tcx>(
                 // - 9-16 bytes: passed in TWO registers
                 // - <= 8 bytes: passed in one register
                 let param_size = type_size(tcx, ty).unwrap_or(0);
+                // Skip zero-sized ADTs (e.g. Global allocator) — they
+                // don't occupy an ABI slot.
+                if param_size == 0 {
+                    continue;
+                }
                 let is_int_ty = matches!(ir_ty, Type::Int);
                 if param_size > 16 && is_int_ty {
                     params.push(Type::Ptr(0));
@@ -426,6 +431,35 @@ fn field_offset<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>, field_idx: usize) -> 
     Some(layout.fields.offset(field_idx).bytes())
 }
 
+/// Query the byte offset of field `field_idx` within a specific enum variant.
+fn variant_field_offset<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    ty: ty::Ty<'tcx>,
+    variant_idx: rustc_abi::VariantIdx,
+    field_idx: usize,
+) -> Option<u64> {
+    let typing_env = ty::TypingEnv::fully_monomorphized();
+    let layout = tcx.layout_of(typing_env.as_query_input(ty)).ok()?;
+    match &layout.variants {
+        rustc_abi::Variants::Multiple { variants, .. } => {
+            let variant_layout = &variants[variant_idx];
+            if field_idx >= variant_layout.fields.count() {
+                return None;
+            }
+            Some(variant_layout.fields.offset(field_idx).bytes())
+        }
+        rustc_abi::Variants::Single { .. } => {
+            // Single-variant enum — field offsets are the same as the
+            // top-level layout.
+            if field_idx >= layout.fields.count() {
+                return None;
+            }
+            Some(layout.fields.offset(field_idx).bytes())
+        }
+        rustc_abi::Variants::Empty => None,
+    }
+}
+
 /// Query the total byte size of type `ty`.
 fn type_size<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> Option<u64> {
     let typing_env = ty::TypingEnv::fully_monomorphized();
@@ -656,6 +690,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // - 9-16 bytes: passed in TWO registers
             // - <= 8 bytes: passed in one register
             let param_size = type_size(self.tcx, ty).unwrap_or(0);
+            // Skip zero-sized ADTs (e.g. Global allocator) — they
+            // don't occupy an ABI slot.
+            if param_size == 0 {
+                let dummy = self.builder.iconst(0, Origin::synthetic());
+                self.locals.set(local, dummy);
+                continue;
+            }
             let large_struct = param_size > 16 && matches!(ir_ty, Some(Type::Int));
             let two_reg_struct =
                 param_size > 8 && param_size <= 16 && matches!(ir_ty, Some(Type::Int));
@@ -780,6 +821,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             addr = slot;
         }
 
+        let mut downcast_variant: Option<rustc_abi::VariantIdx> = None;
         for (proj_idx, elem) in place.projection.iter().enumerate() {
             match elem {
                 PlaceElem::Deref => {
@@ -808,7 +850,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     };
                 }
                 PlaceElem::Field(field_idx, field_ty) => {
-                    let offset = field_offset(self.tcx, cur_ty, field_idx.as_usize())?;
+                    let offset = if let Some(variant_idx) = downcast_variant.take() {
+                        variant_field_offset(
+                            self.tcx,
+                            cur_ty,
+                            variant_idx,
+                            field_idx.as_usize(),
+                        )?
+                    } else {
+                        field_offset(self.tcx, cur_ty, field_idx.as_usize())?
+                    };
                     if offset != 0 {
                         let off_val = self.builder.iconst(offset as i64, Origin::synthetic());
                         addr = self.builder.ptradd(
@@ -862,9 +913,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         _ => return None,
                     };
                 }
-                PlaceElem::Downcast(_, _) => {
+                PlaceElem::Downcast(_, variant_idx) => {
                     // Downcast doesn't change the address, only the type interpretation.
-                    // We keep the same address and update cur_ty via the variant.
+                    // Record the variant so the next Field projection uses
+                    // variant-specific field offsets.
+                    downcast_variant = Some(variant_idx);
                 }
                 PlaceElem::ConstantIndex {
                     offset, from_end, ..
@@ -927,6 +980,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let (addr, projected_ty) = self.translate_place_to_addr(place)?;
         let addr = self.coerce_to_ptr(addr);
         let bytes = type_size(self.tcx, projected_ty).unwrap_or(8) as u32;
+        // For types > 8 bytes, return the address directly so the
+        // caller (assignment handler) can do word-by-word copy.
+        if bytes > 8 {
+            return Some(addr);
+        }
         let ty = translate_ty(projected_ty).unwrap_or(Type::Int);
         Some(self.builder.load(
             addr.into(),
@@ -1383,6 +1441,35 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 variant_index,
             } => {
                 self.translate_set_discriminant(place, *variant_index);
+            }
+            StatementKind::Intrinsic(intrinsic) => {
+                use rustc_middle::mir::NonDivergingIntrinsic;
+                match &**intrinsic {
+                    NonDivergingIntrinsic::CopyNonOverlapping(copy_info) => {
+                        // copy_nonoverlapping(src, dst, count) → memcpy(dst, src, count)
+                        // count is already in bytes (MIR lowering multiplies by elem size).
+                        let src = self.translate_operand(&copy_info.src);
+                        let dst = self.translate_operand(&copy_info.dst);
+                        let count = self.translate_operand(&copy_info.count);
+                        if let (Some(src_v), Some(dst_v), Some(count_v)) = (src, dst, count) {
+                            let sym_id = self.symbols.intern("memcpy");
+                            let callee =
+                                self.builder.symbol_addr(sym_id, Origin::synthetic());
+                            let (mem_out, _) = self.builder.call(
+                                callee.into(),
+                                vec![dst_v.into(), src_v.into(), count_v.into()],
+                                Type::Int,
+                                self.current_mem.into(),
+                                None,
+                                Origin::synthetic(),
+                            );
+                            self.current_mem = mem_out;
+                        }
+                    }
+                    NonDivergingIntrinsic::Assume(_) => {
+                        // Runtime assumption — no codegen needed.
+                    }
+                }
             }
             _ => {}
         }
@@ -2241,6 +2328,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             if matches!(translate_ty(arg_ty), Some(Type::Unit) | None) {
                 continue;
             }
+            // Skip zero-sized ADTs (e.g. Global allocator) — they
+            // don't occupy an ABI slot, matching the callee's param skipping.
+            if type_size(self.tcx, arg_ty).unwrap_or(0) == 0 {
+                continue;
+            }
 
             if let Some(v) = self.translate_operand(&arg.node) {
                 // Check if this argument is a stack-allocated local that
@@ -2302,6 +2394,57 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 };
 
                 if !decomposed {
+                    // Check if this is a constant struct (9-16 bytes) that
+                    // needs to be decomposed into two register-sized words
+                    // for the SysV ABI.  translate_const returns a
+                    // symbol_addr for Indirect constants, but the callee
+                    // expects the struct fields in separate registers.
+                    let const_decomposed = if let Operand::Constant(_) = &arg.node {
+                        let arg_size = type_size(self.tcx, arg_ty).unwrap_or(0);
+                        if arg_size > 8
+                            && arg_size <= 16
+                            && matches!(
+                                self.builder.value_type(v),
+                                Some(Type::Ptr(_))
+                            )
+                            && !is_fat_ptr(arg_ty)
+                        {
+                            let word0 = self.builder.load(
+                                v.into(),
+                                8,
+                                Type::Int,
+                                self.current_mem.into(),
+                                None,
+                                Origin::synthetic(),
+                            );
+                            ir_args.push(word0.into());
+                            let off = self.builder.iconst(8, Origin::synthetic());
+                            let addr1 = self.builder.ptradd(
+                                v.into(),
+                                off.into(),
+                                0,
+                                Origin::synthetic(),
+                            );
+                            let word1 = self.builder.load(
+                                addr1.into(),
+                                8,
+                                Type::Int,
+                                self.current_mem.into(),
+                                None,
+                                Origin::synthetic(),
+                            );
+                            ir_args.push(word1.into());
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    };
+
+                    if const_decomposed {
+                        // Already pushed both words — skip normal arg handling.
+                    } else {
                     ir_args.push(v.into());
                     // If this arg is a Copy/Move of a fat local, also pass the high part.
                     // Exception: for virtual dispatch, skip the vtable pointer on the
@@ -2358,6 +2501,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 }
                             }
                         }
+                    }
                     }
                 }
             }
