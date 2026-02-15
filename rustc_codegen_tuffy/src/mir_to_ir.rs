@@ -1356,6 +1356,34 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                     None
                                                 }
                                             }
+                                            // Cast (e.g. PtrToPtr) of a non-stack
+                                            // fat pointer local: propagate the fat
+                                            // component so we store (data_ptr, len)
+                                            // instead of doing a word-by-word copy
+                                            // from the data pointer address.
+                                            Rvalue::Cast(
+                                                _,
+                                                Operand::Copy(src_place)
+                                                | Operand::Move(src_place),
+                                                _,
+                                            ) if src_place.projection.is_empty()
+                                                && !self
+                                                    .stack_locals
+                                                    .is_stack(src_place.local) =>
+                                            {
+                                                self.fat_locals.get(src_place.local)
+                                            }
+                                            // &raw const (*local) / &(*local) on a
+                                            // non-stack fat pointer local: the fat
+                                            // component lives in fat_locals.
+                                            Rvalue::Ref(_, _, src_place)
+                                            | Rvalue::RawPtr(_, src_place)
+                                                if !self
+                                                    .stack_locals
+                                                    .is_stack(src_place.local) =>
+                                            {
+                                                self.fat_locals.get(src_place.local)
+                                            }
                                             _ => None,
                                         };
                                         if let Some(fat_val) = fat_src {
@@ -1985,13 +2013,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 None
             }
             // Use of a fat local: propagate the fat component.
-            // If the source local already has a fat component, propagate it.
-            // Otherwise, if the place has projections (e.g. field access on a
-            // struct containing a fat pointer like &mut dyn Write), load the
-            // vtable/metadata from offset 8 of the field address.
+            // If the source local already has a fat component AND the place
+            // has no projections, propagate it directly.  When projections
+            // are present (e.g. _struct.field), the local's fat component
+            // belongs to the struct itself (set by Aggregate), not to the
+            // projected field — fall through to the projected-place path.
             Rvalue::Use(Operand::Copy(place) | Operand::Move(place)) => {
-                if let Some(fat) = self.fat_locals.get(place.local) {
-                    return Some(fat);
+                if place.projection.is_empty() {
+                    if let Some(fat) = self.fat_locals.get(place.local) {
+                        return Some(fat);
+                    }
                 }
                 // Check if the place resolves to a fat pointer type via projections.
                 if !place.projection.is_empty() {
@@ -2009,7 +2040,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             let meta = self.builder.load(
                                 meta_addr.into(),
                                 8,
-                                Type::Ptr(0),
+                                Type::Int,
                                 self.current_mem.into(),
                                 None,
                                 Origin::synthetic(),
@@ -3194,13 +3225,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let res_ann = l_ann;
 
                 let val = match op {
-                    BinOp::Add | BinOp::AddWithOverflow => {
+                    BinOp::Add | BinOp::AddWithOverflow | BinOp::AddUnchecked => {
                         self.builder.add(l_op, r_op, res_ann, Origin::synthetic())
                     }
-                    BinOp::Sub | BinOp::SubWithOverflow => {
+                    BinOp::Sub | BinOp::SubWithOverflow | BinOp::SubUnchecked => {
                         self.builder.sub(l_op, r_op, res_ann, Origin::synthetic())
                     }
-                    BinOp::Mul | BinOp::MulWithOverflow => {
+                    BinOp::Mul | BinOp::MulWithOverflow | BinOp::MulUnchecked => {
                         self.builder.mul(l_op, r_op, res_ann, Origin::synthetic())
                     }
                     BinOp::Eq => {
@@ -3484,7 +3515,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let val = self
                         .translate_operand(op)
                         .unwrap_or_else(|| self.builder.iconst(0, Origin::synthetic()));
-                    let offset = field_offset(self.tcx, agg_ty, i).unwrap_or(i as u64 * 8);
+                    let offset = if let Some(variant_idx) = enum_variant_idx {
+                        variant_field_offset(self.tcx, agg_ty, variant_idx, i)
+                            .unwrap_or(i as u64 * 8)
+                    } else {
+                        field_offset(self.tcx, agg_ty, i).unwrap_or(i as u64 * 8)
+                    };
 
                     // Check if the operand is a stack-allocated local whose
                     // value is a pointer to data rather than the data itself.
@@ -3682,7 +3718,55 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 Operand::Copy(place) | Operand::Move(place),
             ) => {
                 // Extract metadata (e.g., slice length) from a fat pointer.
-                self.fat_locals.get(place.local)
+                // 1. Non-stack local with fat component tracked in fat_locals.
+                if place.projection.is_empty() {
+                    if let Some(len) = self.fat_locals.get(place.local) {
+                        return Some(len);
+                    }
+                }
+                // 2. Stack local: load length from slot + 8.
+                if place.projection.is_empty() && self.stack_locals.is_stack(place.local) {
+                    if let Some(slot) = self.locals.get(place.local) {
+                        let off8 = self.builder.iconst(8, Origin::synthetic());
+                        let len_addr = self.builder.ptradd(
+                            slot.into(),
+                            off8.into(),
+                            0,
+                            Origin::synthetic(),
+                        );
+                        return Some(self.builder.load(
+                            len_addr.into(),
+                            8,
+                            Type::Int,
+                            self.current_mem.into(),
+                            None,
+                            Origin::synthetic(),
+                        ));
+                    }
+                }
+                // 3. Projected place (e.g. _s.field): compute the fat
+                //    pointer's address and load length from offset +8.
+                if !place.projection.is_empty() {
+                    if let Some((addr, _)) = self.translate_place_to_addr(place) {
+                        let addr = self.coerce_to_ptr(addr);
+                        let off8 = self.builder.iconst(8, Origin::synthetic());
+                        let len_addr = self.builder.ptradd(
+                            addr.into(),
+                            off8.into(),
+                            0,
+                            Origin::synthetic(),
+                        );
+                        return Some(self.builder.load(
+                            len_addr.into(),
+                            8,
+                            Type::Int,
+                            self.current_mem.into(),
+                            None,
+                            Origin::synthetic(),
+                        ));
+                    }
+                }
+                None
             }
             Rvalue::UnaryOp(mir::UnOp::PtrMetadata, _) => None,
             Rvalue::UnaryOp(mir::UnOp::Neg, operand) => {
@@ -4386,6 +4470,48 @@ fn translate_intrinsic<'tcx>(
                 None,
                 Origin::synthetic(),
             );
+            true
+        }
+
+        // unchecked arithmetic: same as wrapping ops (no overflow check).
+        "unchecked_add" => {
+            if ir_args.len() >= 2 {
+                let result =
+                    builder.add(ir_args[0].into(), ir_args[1].into(), None, Origin::synthetic());
+                locals.set(destination_local, result);
+            }
+            true
+        }
+        "unchecked_sub" => {
+            if ir_args.len() >= 2 {
+                let result =
+                    builder.sub(ir_args[0].into(), ir_args[1].into(), None, Origin::synthetic());
+                locals.set(destination_local, result);
+            }
+            true
+        }
+        "unchecked_mul" => {
+            if ir_args.len() >= 2 {
+                let result =
+                    builder.mul(ir_args[0].into(), ir_args[1].into(), None, Origin::synthetic());
+                locals.set(destination_local, result);
+            }
+            true
+        }
+        "unchecked_shl" => {
+            if ir_args.len() >= 2 {
+                let result =
+                    builder.shl(ir_args[0].into(), ir_args[1].into(), None, Origin::synthetic());
+                locals.set(destination_local, result);
+            }
+            true
+        }
+        "unchecked_shr" => {
+            if ir_args.len() >= 2 {
+                let result =
+                    builder.shr(ir_args[0].into(), ir_args[1].into(), None, Origin::synthetic());
+                locals.set(destination_local, result);
+            }
             true
         }
 
