@@ -204,11 +204,14 @@ fn encode_inst(
         MInst::Cqo => {
             encode_cqo(buf);
         }
-        MInst::Idiv { size, src } => {
-            encode_idiv(*size, *src, buf);
-        }
-        MInst::Div { size, src } => {
-            encode_div(*size, *src, buf);
+        MInst::DivRem {
+            dst,
+            lhs,
+            rhs,
+            signed,
+            rem,
+        } => {
+            encode_divrem(*dst, *lhs, *rhs, *signed, *rem, buf);
         }
         MInst::Popcnt { dst, src } => {
             encode_popcnt(*dst, *src, buf);
@@ -610,6 +613,60 @@ fn encode_movsxd(dst: Gpr, src: Gpr, buf: &mut Vec<u8>) {
 fn encode_cqo(buf: &mut Vec<u8>) {
     buf.push(0x48);
     buf.push(0x99);
+}
+
+/// Encode the DivRem pseudo-instruction expansion.
+///
+/// Emits: mov rcx,rhs; mov rax,lhs; {xor edx,edx | cqo}; {div|idiv} rcx;
+///        mov dst,{rax|rdx}
+///
+/// Care is taken to handle the case where lhs or rhs is already in one of
+/// the scratch registers (RAX, RCX).
+fn encode_divrem(dst: Gpr, lhs: Gpr, rhs: Gpr, signed: bool, rem: bool, buf: &mut Vec<u8>) {
+    // Step 1: Get rhs into RCX and lhs into RAX without clobbering either.
+    if rhs == Gpr::Rax && lhs == Gpr::Rcx {
+        // Both are swapped — use xchg rax, rcx.
+        // REX.W + 87 /r  (xchg rcx, rax)
+        buf.push(0x48);
+        buf.push(0x87);
+        buf.push(modrm(Gpr::Rcx.encoding(), Gpr::Rax.encoding()));
+    } else if rhs == Gpr::Rax {
+        // rhs is in RAX — move it to RCX first, then move lhs to RAX.
+        encode_mov_rr(OpSize::S64, Gpr::Rcx, Gpr::Rax, buf);
+        if lhs != Gpr::Rax {
+            encode_mov_rr(OpSize::S64, Gpr::Rax, lhs, buf);
+        }
+    } else {
+        // Move lhs to RAX first (safe: rhs is not in RAX).
+        if lhs != Gpr::Rax {
+            encode_mov_rr(OpSize::S64, Gpr::Rax, lhs, buf);
+        }
+        if rhs != Gpr::Rcx {
+            encode_mov_rr(OpSize::S64, Gpr::Rcx, rhs, buf);
+        }
+    }
+
+    // Step 2: Set up RDX (zero for unsigned, sign-extend for signed).
+    if signed {
+        encode_cqo(buf);
+    } else {
+        // xor edx, edx (33 D2)
+        buf.push(0x33);
+        buf.push(modrm(Gpr::Rdx.encoding(), Gpr::Rdx.encoding()));
+    }
+
+    // Step 3: div/idiv rcx
+    if signed {
+        encode_idiv(OpSize::S64, Gpr::Rcx, buf);
+    } else {
+        encode_div(OpSize::S64, Gpr::Rcx, buf);
+    }
+
+    // Step 4: Move result to dst.
+    let result_reg = if rem { Gpr::Rdx } else { Gpr::Rax };
+    if dst != result_reg {
+        encode_mov_rr(OpSize::S64, dst, result_reg, buf);
+    }
 }
 
 /// Encode IDIV r/m (REX.W + F7 /7): signed divide RDX:RAX by src.

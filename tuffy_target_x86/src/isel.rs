@@ -734,49 +734,17 @@ fn select_divrem(
     let lhs_vreg = ctx.ensure_in_reg(lhs.value)?;
     let rhs_vreg = ctx.ensure_in_reg(rhs.value)?;
     let signed = matches!(lhs.annotation, Some(Annotation::Signed(_)));
+    let rem = matches!(kind, DivRemKind::Rem);
 
-    // Move divisor to an unconstrained vreg to avoid RAX/RDX conflicts.
-    let divisor = ctx.alloc.alloc();
-    ctx.out.push(MInst::MovRR {
-        size: OpSize::S64,
-        dst: divisor,
-        src: rhs_vreg,
+    let dst = ctx.alloc.alloc();
+    ctx.out.push(MInst::DivRem {
+        dst,
+        lhs: lhs_vreg,
+        rhs: rhs_vreg,
+        signed,
+        rem,
     });
-
-    // Move dividend into RAX-constrained vreg.
-    let rax = ctx.alloc.alloc_fixed(Gpr::Rax.to_preg());
-    ctx.out.push(MInst::MovRR {
-        size: OpSize::S64,
-        dst: rax,
-        src: lhs_vreg,
-    });
-
-    if signed {
-        ctx.out.push(MInst::Cqo);
-        ctx.out.push(MInst::Idiv {
-            size: OpSize::S64,
-            src: divisor,
-        });
-    } else {
-        // Zero RDX for unsigned division.
-        let rdx_zero = ctx.alloc.alloc_fixed(Gpr::Rdx.to_preg());
-        ctx.out.push(MInst::XorRR {
-            size: OpSize::S32,
-            dst: rdx_zero,
-            src: rdx_zero,
-        });
-        ctx.out.push(MInst::Div {
-            size: OpSize::S64,
-            src: divisor,
-        });
-    }
-
-    // Quotient in RAX, remainder in RDX.
-    let result = match kind {
-        DivRemKind::Div => ctx.alloc.alloc_fixed(Gpr::Rax.to_preg()),
-        DivRemKind::Rem => ctx.alloc.alloc_fixed(Gpr::Rdx.to_preg()),
-    };
-    ctx.regs.assign(vref, result);
+    ctx.regs.assign(vref, dst);
     Some(())
 }
 

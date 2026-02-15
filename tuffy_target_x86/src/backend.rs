@@ -251,13 +251,18 @@ fn rewrite_inst(inst: &VInst, assignments: &[PReg]) -> PInst {
             src: r(src),
         },
         MInst::Cqo => MInst::Cqo,
-        MInst::Idiv { size, src } => MInst::Idiv {
-            size: *size,
-            src: r(src),
-        },
-        MInst::Div { size, src } => MInst::Div {
-            size: *size,
-            src: r(src),
+        MInst::DivRem {
+            dst,
+            lhs,
+            rhs,
+            signed,
+            rem,
+        } => MInst::DivRem {
+            dst: r(dst),
+            lhs: r(lhs),
+            rhs: r(rhs),
+            signed: *signed,
+            rem: *rem,
         },
         MInst::Popcnt { dst, src } => MInst::Popcnt {
             dst: r(dst),

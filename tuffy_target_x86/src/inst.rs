@@ -178,10 +178,21 @@ pub enum MInst<R: RegType> {
     MovsxD { dst: R, src: R },
     /// cqo (sign-extend RAX into RDX:RAX)
     Cqo,
-    /// idiv r/m64 (signed divide RDX:RAX by src)
-    Idiv { size: OpSize, src: R },
-    /// div r/m64 (unsigned divide RDX:RAX by src)
-    Div { size: OpSize, src: R },
+    /// Pseudo-instruction: 64-bit division/remainder.
+    ///
+    /// Expanded by the encoder into: mov rcx,rhs; mov rax,lhs; xor edx,edx
+    /// (or cqo for signed); div/idiv rcx; mov dst,rax (or rdx for rem).
+    ///
+    /// This avoids exposing the implicit RAX/RCX/RDX usage to the register
+    /// allocator, which cannot reliably handle multiple fixed-register
+    /// constraints in the same function.
+    DivRem {
+        dst: R,
+        lhs: R,
+        rhs: R,
+        signed: bool,
+        rem: bool,
+    },
     /// popcnt r64, r64 (population count)
     Popcnt { dst: R, src: R },
     /// lzcnt r64, r64 (count leading zeros)

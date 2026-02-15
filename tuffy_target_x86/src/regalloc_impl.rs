@@ -131,9 +131,12 @@ impl RegAllocInst for VInst {
             MInst::Pop { reg } => {
                 ops.push(def_op(*reg));
             }
-            // div/idiv: implicit RAX/RDX, explicit divisor
-            MInst::Idiv { src, .. } | MInst::Div { src, .. } => {
-                ops.push(use_op(*src));
+            // DivRem pseudo-instruction: lhs and rhs are inputs, dst is output.
+            // RAX, RCX, RDX are clobbered internally by the expansion.
+            MInst::DivRem { dst, lhs, rhs, .. } => {
+                ops.push(def_op(*dst));
+                ops.push(use_op(*lhs));
+                ops.push(use_op(*rhs));
             }
             // Indirect call: callee register is a use operand
             MInst::CallReg { callee, ret } => {
@@ -176,8 +179,17 @@ impl RegAllocInst for VInst {
     }
 
     fn clobbers(&self, clobbers: &mut Vec<PReg>) {
-        if matches!(self, MInst::CallSym { .. } | MInst::CallReg { .. }) {
-            clobbers.extend_from_slice(&CALL_CLOBBERS);
+        match self {
+            MInst::CallSym { .. } | MInst::CallReg { .. } => {
+                clobbers.extend_from_slice(&CALL_CLOBBERS);
+            }
+            // DivRem internally uses RAX, RCX, RDX.
+            MInst::DivRem { .. } => {
+                clobbers.push(PReg(0)); // Rax
+                clobbers.push(PReg(1)); // Rcx
+                clobbers.push(PReg(2)); // Rdx
+            }
+            _ => {}
         }
     }
 
