@@ -257,6 +257,88 @@ pub fn translate_function<'tcx>(
                 }
             }
         }
+
+        // Promote locals used in a block that precedes their assignment
+        // block in declaration order.  Since blocks are translated
+        // sequentially, a backward reference (use-block index < def-block
+        // index) means the local has no value when the use-block is
+        // translated.  Promoting to a stack slot ensures the value is
+        // accessible from any block at runtime.
+        let collect_used_locals = |op: &Operand<'tcx>| -> Option<mir::Local> {
+            match op {
+                Operand::Copy(place) | Operand::Move(place) => Some(place.local),
+                _ => None,
+            }
+        };
+        for (bb, bb_data) in mir.basic_blocks.iter_enumerated() {
+            let mut used_locals = Vec::new();
+            for stmt in &bb_data.statements {
+                if let StatementKind::Assign(box (_, rvalue)) = &stmt.kind {
+                    match rvalue {
+                        Rvalue::Use(op)
+                        | Rvalue::UnaryOp(_, op)
+                        | Rvalue::Cast(_, op, _)
+                        | Rvalue::ShallowInitBox(op, _) => {
+                            used_locals.extend(collect_used_locals(op));
+                        }
+                        Rvalue::BinaryOp(_, box (a, b)) => {
+                            used_locals.extend(collect_used_locals(a));
+                            used_locals.extend(collect_used_locals(b));
+                        }
+                        Rvalue::Aggregate(_, ops) => {
+                            for op in ops.iter() {
+                                used_locals.extend(collect_used_locals(op));
+                            }
+                        }
+                        Rvalue::Discriminant(place)
+                        | Rvalue::Ref(_, _, place)
+                        | Rvalue::RawPtr(_, place)
+                        | Rvalue::CopyForDeref(place) => {
+                            used_locals.push(place.local);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            if let Some(terminator) = &bb_data.terminator {
+                match &terminator.kind {
+                    TerminatorKind::SwitchInt { discr, .. } => {
+                        used_locals.extend(collect_used_locals(discr));
+                    }
+                    TerminatorKind::Call { func, args, .. } => {
+                        used_locals.extend(collect_used_locals(func));
+                        for arg in args {
+                            used_locals.extend(collect_used_locals(&arg.node));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            for local in used_locals {
+                if local.as_usize() == 0
+                    || (local.as_usize() > 0 && local.as_usize() <= mir.arg_count)
+                {
+                    continue;
+                }
+                if ctx.stack_locals.is_stack(local) {
+                    continue;
+                }
+                if let Some(def_bb) = assign_bb[local.as_usize()] {
+                    if bb < def_bb {
+                        let ty = monomorphize(mir.local_decls[local].ty);
+                        let size = type_size(tcx, ty).unwrap_or(0);
+                        if size > 0 {
+                            let slot = ctx.builder.stack_slot(
+                                std::cmp::max(size as u32, 1),
+                                Origin::synthetic(),
+                            );
+                            ctx.locals.set(local, slot);
+                            ctx.stack_locals.mark(local);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // Pre-scan: promote locals whose address is taken (Ref / RawPtr) to
@@ -306,6 +388,24 @@ pub fn translate_function<'tcx>(
                                 ctx.current_mem.into(),
                                 Origin::synthetic(),
                             );
+                            // For fat pointer locals (&str, &[T], &dyn Trait),
+                            // also store the metadata (length/vtable) at offset 8.
+                            if let Some(meta) = ctx.fat_locals.get(local) {
+                                let off8 = ctx.builder.iconst(8, Origin::synthetic());
+                                let meta_addr = ctx.builder.ptradd(
+                                    slot.into(),
+                                    off8.into(),
+                                    0,
+                                    Origin::synthetic(),
+                                );
+                                ctx.current_mem = ctx.builder.store(
+                                    meta.into(),
+                                    meta_addr.into(),
+                                    8,
+                                    ctx.current_mem.into(),
+                                    Origin::synthetic(),
+                                );
+                            }
                         }
                         ctx.locals.set(local, slot);
                         ctx.stack_locals.mark(local);
@@ -1485,6 +1585,49 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         // as Int via repr(transparent)).  Try to find
                                         // the source stack-slot pointer so we can do a
                                         // word-by-word copy of the full width.
+                                        //
+                                        // First, check if this is a Ref/RawPtr on a
+                                        // non-stack fat pointer local.  In that case the
+                                        // data pointer and metadata live in separate IR
+                                        // values (locals + fat_locals), so we store them
+                                        // directly instead of doing a word-by-word copy.
+                                        let ref_fat_src = match rvalue {
+                                            Rvalue::Ref(_, _, src_place)
+                                            | Rvalue::RawPtr(_, src_place)
+                                                if !self
+                                                    .stack_locals
+                                                    .is_stack(src_place.local) =>
+                                            {
+                                                self.fat_locals.get(src_place.local)
+                                            }
+                                            _ => None,
+                                        };
+                                        if let Some(fat_val) = ref_fat_src {
+                                            // Store data pointer into slot[0..8].
+                                            self.current_mem = self.builder.store(
+                                                val.into(),
+                                                slot.into(),
+                                                8,
+                                                self.current_mem.into(),
+                                                Origin::synthetic(),
+                                            );
+                                            // Store metadata (length/vtable) into slot[8..16].
+                                            let off8 =
+                                                self.builder.iconst(8, Origin::synthetic());
+                                            let hi_addr = self.builder.ptradd(
+                                                slot.into(),
+                                                off8.into(),
+                                                0,
+                                                Origin::synthetic(),
+                                            );
+                                            self.current_mem = self.builder.store(
+                                                fat_val.into(),
+                                                hi_addr.into(),
+                                                8,
+                                                self.current_mem.into(),
+                                                Origin::synthetic(),
+                                            );
+                                        } else {
                                         let src_slot = match rvalue {
                                             Rvalue::Use(
                                                 Operand::Copy(src_place) | Operand::Move(src_place),
@@ -1568,6 +1711,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                 Origin::synthetic(),
                                             );
                                         }
+                                        } // close ref_fat_src else
                                     } else {
                                         self.current_mem = self.builder.store(
                                             val.into(),
@@ -3418,13 +3562,32 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let local_ty = self.monomorphize(self.mir.local_decls[place.local].ty);
                         let size = type_size(self.tcx, local_ty).unwrap_or(8) as u32;
                         let slot = self.builder.stack_slot(size.max(8), Origin::synthetic());
+                        // Store the primary value (data pointer for fat ptrs).
                         self.current_mem = self.builder.store(
                             val.into(),
                             slot.into(),
-                            size,
+                            8,
                             self.current_mem.into(),
                             Origin::synthetic(),
                         );
+                        // For fat pointer locals (&str, &[T], &dyn Trait),
+                        // also store the metadata (length/vtable) at offset 8.
+                        if let Some(meta) = self.fat_locals.get(place.local) {
+                            let off8 = self.builder.iconst(8, Origin::synthetic());
+                            let meta_addr = self.builder.ptradd(
+                                slot.into(),
+                                off8.into(),
+                                0,
+                                Origin::synthetic(),
+                            );
+                            self.current_mem = self.builder.store(
+                                meta.into(),
+                                meta_addr.into(),
+                                8,
+                                self.current_mem.into(),
+                                Origin::synthetic(),
+                            );
+                        }
                         // Promote the local to a stack local so that future
                         // reads/writes go through this slot.  Without this,
                         // mutations via `&mut` references (e.g. add_assign
@@ -3811,27 +3974,46 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             }
             Rvalue::UnaryOp(mir::UnOp::Not, operand) => {
                 let v = self.translate_operand(operand)?;
-                match self.builder.value_type(v) {
-                    Some(Type::Bool) => {
-                        // Boolean NOT: bool_to_int then XOR 1.
-                        let int_v = self.builder.bool_to_int(v.into(), Origin::synthetic());
-                        let one = self.builder.iconst(1, Origin::synthetic());
-                        Some(
-                            self.builder
-                                .xor(int_v.into(), one.into(), None, Origin::synthetic()),
-                        )
+                // Use the MIR type to decide boolean vs bitwise NOT.
+                // The IR type may be Int even for MIR bools (e.g. after
+                // bool_to_int or bitwise AND), so checking the IR type
+                // alone would incorrectly use XOR -1 for boolean values.
+                let mir_ty = match operand {
+                    Operand::Copy(p) | Operand::Move(p) => {
+                        let ty = p.ty(&self.mir.local_decls, self.tcx).ty;
+                        Some(self.monomorphize(ty))
                     }
-                    Some(Type::Int) => {
-                        // Bitwise NOT: XOR with -1.
-                        let ones = self.builder.iconst(-1, Origin::synthetic());
-                        Some(
-                            self.builder
-                                .xor(v.into(), ones.into(), None, Origin::synthetic()),
-                        )
-                    }
-                    _ => {
-                        // Unsupported type (e.g. float) — emit dummy zero.
-                        Some(self.builder.iconst(0, Origin::synthetic()))
+                    Operand::Constant(c) => Some(self.monomorphize(c.ty())),
+                    _ => None,
+                };
+                let is_bool = mir_ty.is_some_and(|t| t.is_bool());
+                if is_bool {
+                    // Boolean NOT: XOR 1.
+                    let int_v = self.coerce_to_int(v);
+                    let one = self.builder.iconst(1, Origin::synthetic());
+                    Some(
+                        self.builder
+                            .xor(int_v.into(), one.into(), None, Origin::synthetic()),
+                    )
+                } else {
+                    match self.builder.value_type(v) {
+                        Some(Type::Bool) => {
+                            let int_v =
+                                self.builder.bool_to_int(v.into(), Origin::synthetic());
+                            let one = self.builder.iconst(1, Origin::synthetic());
+                            Some(
+                                self.builder
+                                    .xor(int_v.into(), one.into(), None, Origin::synthetic()),
+                            )
+                        }
+                        _ => {
+                            // Bitwise NOT: XOR with -1.
+                            let ones = self.builder.iconst(-1, Origin::synthetic());
+                            Some(
+                                self.builder
+                                    .xor(v.into(), ones.into(), None, Origin::synthetic()),
+                            )
+                        }
                     }
                 }
             }
