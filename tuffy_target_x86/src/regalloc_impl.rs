@@ -139,15 +139,21 @@ impl RegAllocInst for VInst {
                 ops.push(use_op(*rhs));
             }
             // Indirect call: callee register is a use operand
-            MInst::CallReg { callee, ret } => {
+            MInst::CallReg { callee, ret, ret2 } => {
                 ops.push(use_op(*callee));
                 if let Some(r) = ret {
                     ops.push(def_op(*r));
                 }
+                if let Some(r) = ret2 {
+                    ops.push(def_op(*r));
+                }
             }
             // Direct call: return vreg is a def operand
-            MInst::CallSym { ret, .. } => {
+            MInst::CallSym { ret, ret2, .. } => {
                 if let Some(r) = ret {
+                    ops.push(def_op(*r));
+                }
+                if let Some(r) = ret2 {
                     ops.push(def_op(*r));
                 }
             }
@@ -180,8 +186,19 @@ impl RegAllocInst for VInst {
 
     fn clobbers(&self, clobbers: &mut Vec<PReg>) {
         match self {
-            MInst::CallSym { .. } | MInst::CallReg { .. } => {
-                clobbers.extend_from_slice(&CALL_CLOBBERS);
+            MInst::CallSym { ret2, .. } | MInst::CallReg { ret2, .. } => {
+                if ret2.is_some() {
+                    // When the call captures RDX as a secondary return,
+                    // exclude RDX from the clobber set.
+                    for &c in &CALL_CLOBBERS {
+                        if c.0 != 2 {
+                            // 2 = Rdx
+                            clobbers.push(c);
+                        }
+                    }
+                } else {
+                    clobbers.extend_from_slice(&CALL_CLOBBERS);
+                }
             }
             // DivRem internally uses RAX, RCX, RDX.
             MInst::DivRem { .. } => {

@@ -101,9 +101,17 @@ pub enum MInst<R: RegType> {
     /// test r/m, r (AND without storing, sets flags)
     TestRR { size: OpSize, src1: R, src2: R },
     /// call to named symbol (uses relocation)
-    CallSym { name: String, ret: Option<R> },
+    CallSym {
+        name: String,
+        ret: Option<R>,
+        ret2: Option<R>,
+    },
     /// indirect call through register (call *%reg)
-    CallReg { callee: R, ret: Option<R> },
+    CallReg {
+        callee: R,
+        ret: Option<R>,
+        ret2: Option<R>,
+    },
     /// push reg onto stack
     Push { reg: R },
     /// pop reg from stack

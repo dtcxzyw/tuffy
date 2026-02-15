@@ -6,7 +6,7 @@
 #[path = "isel_gen.rs"]
 mod isel_gen;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::inst::{CondCode, MInst, OpSize, VInst};
 use crate::reg::Gpr;
@@ -31,6 +31,9 @@ struct IselCtx {
     /// `LeaSymbol` is only emitted when `ensure_in_reg` is called,
     /// avoiding dead code when the symbol is only used as a direct call callee.
     sym_addrs: HashMap<u32, String>,
+    /// Captured RDX vregs from calls with secondary returns.
+    /// Maps call instruction index → unconstrained vreg holding the RDX value.
+    rdx_captured: HashMap<u32, VReg>,
 }
 
 impl IselCtx {
@@ -85,8 +88,9 @@ const ARG_REGS: [Gpr; 6] = [Gpr::Rdi, Gpr::Rsi, Gpr::Rdx, Gpr::Rcx, Gpr::R8, Gpr
 pub fn isel(
     func: &Function,
     symbols: &SymbolTable,
-    rdx_captures: &HashMap<u32, ()>,
+    rdx_captures: &HashMap<u32, u32>,
     rdx_moves: &HashMap<u32, u32>,
+    call_has_ret2: &HashSet<u32>,
 ) -> Option<IselResult<VInst>> {
     let ba_cap = func.block_args.len();
     let mut ctx = IselCtx {
@@ -97,6 +101,7 @@ pub fn isel(
         next_label: func.blocks.len() as u32,
         out: Vec::new(),
         sym_addrs: HashMap::new(),
+        rdx_captured: HashMap::new(),
     };
 
     let root = &func.regions[func.root_region.index() as usize];
@@ -114,6 +119,7 @@ pub fn isel(
                     symbols,
                     rdx_captures,
                     rdx_moves,
+                    call_has_ret2,
                 )?;
             }
         }
@@ -137,8 +143,9 @@ fn select_inst(
     op: &Op,
     func: &Function,
     symbols: &SymbolTable,
-    rdx_captures: &HashMap<u32, ()>,
+    rdx_captures: &HashMap<u32, u32>,
     rdx_moves: &HashMap<u32, u32>,
+    call_has_ret2: &HashSet<u32>,
 ) -> Option<()> {
     // Try generated rules first (covers Add, Sub, Mul, Or, And, Xor,
     // Shl, Shr, Min, Max, CountOnes, CountLeadingZeros, CountTrailingZeros,
@@ -181,9 +188,14 @@ fn select_inst(
         }
 
         Op::Const(imm) => {
-            if rdx_captures.contains_key(&vref.index()) {
-                let vreg = ctx.alloc.alloc_fixed(Gpr::Rdx.to_preg());
-                ctx.regs.assign(vref, vreg);
+            if let Some(call_idx) = rdx_captures.get(&vref.index()) {
+                // Look up the RDX vreg captured at the call site.
+                let captured = ctx
+                    .rdx_captured
+                    .get(call_idx)
+                    .copied()
+                    .expect("rdx_captured must be set for call with secondary return");
+                ctx.regs.assign(vref, captured);
             } else if let Some(src_idx) = rdx_moves.get(&vref.index()) {
                 let src_vref = ValueRef::inst_result(*src_idx);
                 let src_vreg = ctx.regs.get(src_vref)?;
@@ -261,7 +273,7 @@ fn select_inst(
         }
 
         Op::Call(callee, args, _mem) => {
-            select_call(ctx, vref, callee, args, func, symbols)?;
+            select_call(ctx, vref, callee, args, func, symbols, call_has_ret2)?;
         }
 
         Op::StackSlot(bytes) => {
@@ -500,6 +512,7 @@ fn select_call(
     args: &[Operand],
     func: &Function,
     symbols: &SymbolTable,
+    call_has_ret2: &HashSet<u32>,
 ) -> Option<()> {
     // Phase 1: materialize all args into unconstrained vregs.
     // This must happen before any fixed-register moves, otherwise
@@ -564,12 +577,22 @@ fn select_call(
         None
     };
 
+    // If this call has a secondary return (RDX), allocate a fixed RDX vreg.
+    let has_ret2 = call_has_ret2.contains(&vref.index());
+    let ret2_vreg = if has_ret2 {
+        let rdx = ctx.alloc.alloc_fixed(Gpr::Rdx.to_preg());
+        Some(rdx)
+    } else {
+        None
+    };
+
     let callee_idx = callee.value.index();
     if let Op::SymbolAddr(sym_id) = &func.inst(callee_idx).op {
         let name = symbols.resolve(*sym_id).to_string();
         ctx.out.push(MInst::CallSym {
             name,
             ret: ret_vreg,
+            ret2: ret2_vreg,
         });
     } else {
         // Indirect call through a register (e.g. virtual dispatch).
@@ -577,6 +600,7 @@ fn select_call(
         ctx.out.push(MInst::CallReg {
             callee: callee_vreg,
             ret: ret_vreg,
+            ret2: ret2_vreg,
         });
     }
 
@@ -590,6 +614,18 @@ fn select_call(
         });
         let secondary = ValueRef::inst_secondary_result(vref.index());
         ctx.regs.assign(secondary, dst);
+    }
+
+    // Copy the rdx-fixed vreg into an unconstrained vreg for downstream use.
+    // The rdx_captures iconst handler will look this up later.
+    if let Some(rdx) = ret2_vreg {
+        let dst = ctx.alloc.alloc();
+        ctx.out.push(MInst::MovRR {
+            size: OpSize::S64,
+            dst,
+            src: rdx,
+        });
+        ctx.rdx_captured.insert(vref.index(), dst);
     }
 
     // Clean up stack arguments after the call.

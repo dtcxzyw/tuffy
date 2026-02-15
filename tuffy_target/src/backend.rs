@@ -13,7 +13,12 @@ use crate::types::{CompiledFunction, StaticData};
 pub trait AbiMetadata: Default {
     /// Mark an IR instruction as capturing the secondary return register
     /// from the preceding call (e.g., RDX on x86-64).
-    fn mark_secondary_return_capture(&mut self, inst_idx: u32);
+    /// `inst_idx` is the placeholder instruction, `call_idx` is the call.
+    fn mark_secondary_return_capture(&mut self, inst_idx: u32, call_idx: u32);
+
+    /// Mark a call instruction as producing a secondary return value
+    /// (e.g., RDX on x86-64 for 9-16 byte returns).
+    fn mark_call_secondary_return(&mut self, call_idx: u32);
 
     /// Mark an IR instruction as moving a value into the secondary return
     /// register before a return (e.g., moving into RDX on x86-64).

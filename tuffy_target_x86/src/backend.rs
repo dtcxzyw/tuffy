@@ -1,6 +1,6 @@
 //! X86-64 backend implementation.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use tuffy_ir::function::Function;
 use tuffy_ir::module::SymbolTable;
@@ -55,13 +55,18 @@ const CALLEE_SAVED_REGS: [PReg; 5] = [
 /// X86-64 ABI metadata tracking secondary return register (RDX) usage.
 #[derive(Default)]
 pub struct X86AbiMetadata {
-    pub rdx_captures: HashMap<u32, ()>,
+    pub rdx_captures: HashMap<u32, u32>,
     pub rdx_moves: HashMap<u32, u32>,
+    pub call_has_ret2: HashSet<u32>,
 }
 
 impl AbiMetadata for X86AbiMetadata {
-    fn mark_secondary_return_capture(&mut self, inst_idx: u32) {
-        self.rdx_captures.insert(inst_idx, ());
+    fn mark_secondary_return_capture(&mut self, inst_idx: u32, call_idx: u32) {
+        self.rdx_captures.insert(inst_idx, call_idx);
+    }
+
+    fn mark_call_secondary_return(&mut self, call_idx: u32) {
+        self.call_has_ret2.insert(call_idx);
     }
 
     fn mark_secondary_return_move(&mut self, inst_idx: u32, source_idx: u32) {
@@ -120,13 +125,15 @@ fn rewrite_inst(inst: &VInst, assignments: &[PReg]) -> PInst {
             src1: r(src1),
             src2: r(src2),
         },
-        MInst::CallSym { name, ret } => MInst::CallSym {
+        MInst::CallSym { name, ret, ret2 } => MInst::CallSym {
             name: name.clone(),
             ret: ret.map(|v| r(&v)),
+            ret2: ret2.map(|v| r(&v)),
         },
-        MInst::CallReg { callee, ret } => MInst::CallReg {
+        MInst::CallReg { callee, ret, ret2 } => MInst::CallReg {
             callee: r(callee),
             ret: ret.map(|v| r(&v)),
+            ret2: ret2.map(|v| r(&v)),
         },
         MInst::Push { reg } => MInst::Push { reg: r(reg) },
         MInst::Pop { reg } => MInst::Pop { reg: r(reg) },
@@ -384,13 +391,18 @@ impl Backend for X86Backend {
         metadata: &X86AbiMetadata,
     ) -> Option<CompiledFunction> {
         // 1. Instruction selection → MInst<VReg>
-        let isel_result =
-            match isel::isel(func, symbols, &metadata.rdx_captures, &metadata.rdx_moves) {
-                Some(r) => r,
-                None => {
-                    return None;
-                }
-            };
+        let isel_result = match isel::isel(
+            func,
+            symbols,
+            &metadata.rdx_captures,
+            &metadata.rdx_moves,
+            &metadata.call_has_ret2,
+        ) {
+            Some(r) => r,
+            None => {
+                return None;
+            }
+        };
 
         // 2. Register allocation → VReg assignments
         let alloc_result = tuffy_regalloc::allocator::allocate(

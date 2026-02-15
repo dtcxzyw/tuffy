@@ -615,7 +615,7 @@ fn needs_indirect_return<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> bool {
     if ty.is_unit() || ty.is_never() {
         return false;
     }
-    type_size(tcx, ty).is_some_and(|size| size > 8)
+    type_size(tcx, ty).is_some_and(|size| size > 16)
 }
 
 /// Check if a type is a signed integer type.
@@ -3159,9 +3159,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 Origin::synthetic(),
             );
 
+            // Mark the call as producing a secondary return value (RDX).
+            self.abi_metadata
+                .mark_call_secondary_return(call_mem.index());
             let rdx_val = self.builder.iconst(0, Origin::synthetic());
             self.abi_metadata
-                .mark_secondary_return_capture(rdx_val.index());
+                .mark_secondary_return_capture(rdx_val.index(), call_mem.index());
             let off = self.builder.iconst(8, Origin::synthetic());
             let addr1 = self
                 .builder
@@ -3248,9 +3251,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // spurious high-part value will be injected as an extra argument
             // when this local is later passed to another function call.
             if is_fat_ptr(dest_ty) {
+                self.abi_metadata
+                    .mark_call_secondary_return(call_mem.index());
                 let rdx_val = self.builder.iconst(0, Origin::synthetic());
                 self.abi_metadata
-                    .mark_secondary_return_capture(rdx_val.index());
+                    .mark_secondary_return_capture(rdx_val.index(), call_mem.index());
                 self.fat_locals.set(destination.local, rdx_val);
             }
         }

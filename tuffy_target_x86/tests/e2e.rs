@@ -1,6 +1,6 @@
 //! End-to-end integration test: IR → isel → encode → ELF → link → run.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::process::Command;
 
@@ -55,7 +55,8 @@ fn compile_add_func() -> Vec<u8> {
     let (func, symbols) = build_add_func();
     let no_rdx_captures = HashMap::new();
     let no_rdx_moves = HashMap::new();
-    let result = isel::isel(&func, &symbols, &no_rdx_captures, &no_rdx_moves)
+    let no_ret2 = HashSet::new();
+    let result = isel::isel(&func, &symbols, &no_rdx_captures, &no_rdx_moves, &no_ret2)
         .expect("isel should succeed for add");
     let pinsts = backend::lower_isel_result(&result);
     let enc = encode::encode_function(&pinsts);

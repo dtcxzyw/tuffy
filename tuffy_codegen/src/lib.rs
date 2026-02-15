@@ -94,9 +94,16 @@ impl CodegenSession {
 
 impl AbiMetadataBox {
     /// Mark an IR instruction as capturing the secondary return register.
-    pub fn mark_secondary_return_capture(&mut self, inst_idx: u32) {
+    pub fn mark_secondary_return_capture(&mut self, inst_idx: u32, call_idx: u32) {
         match self {
-            AbiMetadataBox::X86(meta) => meta.mark_secondary_return_capture(inst_idx),
+            AbiMetadataBox::X86(meta) => meta.mark_secondary_return_capture(inst_idx, call_idx),
+        }
+    }
+
+    /// Mark a call instruction as producing a secondary return value.
+    pub fn mark_call_secondary_return(&mut self, call_idx: u32) {
+        match self {
+            AbiMetadataBox::X86(meta) => meta.mark_call_secondary_return(call_idx),
         }
     }
 

@@ -23,7 +23,7 @@ use tuffy_ir::instruction::{ICmpOp, Operand, Origin};
 use tuffy_ir::module::SymbolTable;
 use tuffy_ir::types::{Annotation, Type};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::backend::lower_isel_result;
 use crate::encode;
@@ -34,7 +34,8 @@ fn isel_add_function() {
     let (func, symbols) = build_add_func();
     let no_rdx_captures = HashMap::new();
     let no_rdx_moves = HashMap::new();
-    let result = isel::isel(&func, &symbols, &no_rdx_captures, &no_rdx_moves)
+    let no_ret2 = HashSet::new();
+    let result = isel::isel(&func, &symbols, &no_rdx_captures, &no_rdx_moves, &no_ret2)
         .expect("isel should succeed for add");
 
     assert_eq!(result.name, "add");
@@ -48,7 +49,8 @@ fn encode_add_function() {
     let (func, symbols) = build_add_func();
     let no_rdx_captures = HashMap::new();
     let no_rdx_moves = HashMap::new();
-    let result = isel::isel(&func, &symbols, &no_rdx_captures, &no_rdx_moves)
+    let no_ret2 = HashSet::new();
+    let result = isel::isel(&func, &symbols, &no_rdx_captures, &no_rdx_moves, &no_ret2)
         .expect("isel should succeed for add");
     let pinsts = lower_isel_result(&result);
     let enc = encode::encode_function(&pinsts);
@@ -64,7 +66,8 @@ fn emit_elf_valid() {
     let (func, symbols) = build_add_func();
     let no_rdx_captures = HashMap::new();
     let no_rdx_moves = HashMap::new();
-    let result = isel::isel(&func, &symbols, &no_rdx_captures, &no_rdx_moves)
+    let no_ret2 = HashSet::new();
+    let result = isel::isel(&func, &symbols, &no_rdx_captures, &no_rdx_moves, &no_ret2)
         .expect("isel should succeed for add");
     let pinsts = lower_isel_result(&result);
     let enc = encode::encode_function(&pinsts);
@@ -119,7 +122,8 @@ fn isel_branch_function() {
     let (func, symbols) = build_branch_func();
     let no_rdx_captures = HashMap::new();
     let no_rdx_moves = HashMap::new();
-    let result = isel::isel(&func, &symbols, &no_rdx_captures, &no_rdx_moves)
+    let no_ret2 = HashSet::new();
+    let result = isel::isel(&func, &symbols, &no_rdx_captures, &no_rdx_moves, &no_ret2)
         .expect("isel should succeed for branch");
     assert_eq!(result.name, "max");
 
@@ -134,7 +138,8 @@ fn encode_branch_labels_resolved() {
     let (func, symbols) = build_branch_func();
     let no_rdx_captures = HashMap::new();
     let no_rdx_moves = HashMap::new();
-    let result = isel::isel(&func, &symbols, &no_rdx_captures, &no_rdx_moves)
+    let no_ret2 = HashSet::new();
+    let result = isel::isel(&func, &symbols, &no_rdx_captures, &no_rdx_moves, &no_ret2)
         .expect("isel should succeed for branch");
     let pinsts = lower_isel_result(&result);
     let enc = encode::encode_function(&pinsts);
@@ -206,9 +211,10 @@ fn build_branch_func() -> (Function, SymbolTable) {
 #[test]
 fn isel_sext_nonstandard_unsigned_width() {
     let (func, symbols) = build_extend_func("sext_u17", Annotation::Unsigned(17), true);
-    let captures: HashMap<u32, ()> = HashMap::new();
+    let captures: HashMap<u32, u32> = HashMap::new();
     let moves: HashMap<u32, u32> = HashMap::new();
-    let result = isel::isel(&func, &symbols, &captures, &moves).expect("isel should succeed");
+    let result = isel::isel(&func, &symbols, &captures, &moves, &HashSet::new())
+        .expect("isel should succeed");
 
     let has_shl = result
         .insts
@@ -225,9 +231,10 @@ fn isel_sext_nonstandard_unsigned_width() {
 #[test]
 fn isel_sext_nonstandard_signed_is_noop() {
     let (func, symbols) = build_extend_func("sext_s17", Annotation::Signed(17), true);
-    let captures: HashMap<u32, ()> = HashMap::new();
+    let captures: HashMap<u32, u32> = HashMap::new();
     let moves: HashMap<u32, u32> = HashMap::new();
-    let result = isel::isel(&func, &symbols, &captures, &moves).expect("isel should succeed");
+    let result = isel::isel(&func, &symbols, &captures, &moves, &HashSet::new())
+        .expect("isel should succeed");
 
     let has_shift = result.insts.iter().any(|i| {
         matches!(
@@ -241,9 +248,10 @@ fn isel_sext_nonstandard_signed_is_noop() {
 #[test]
 fn isel_zext_nonstandard_signed_width() {
     let (func, symbols) = build_extend_func("zext_s13", Annotation::Signed(13), false);
-    let captures: HashMap<u32, ()> = HashMap::new();
+    let captures: HashMap<u32, u32> = HashMap::new();
     let moves: HashMap<u32, u32> = HashMap::new();
-    let result = isel::isel(&func, &symbols, &captures, &moves).expect("isel should succeed");
+    let result = isel::isel(&func, &symbols, &captures, &moves, &HashSet::new())
+        .expect("isel should succeed");
 
     let has_and = result
         .insts
@@ -255,9 +263,10 @@ fn isel_zext_nonstandard_signed_width() {
 #[test]
 fn isel_zext_nonstandard_unsigned_is_noop() {
     let (func, symbols) = build_extend_func("zext_u13", Annotation::Unsigned(13), false);
-    let captures: HashMap<u32, ()> = HashMap::new();
+    let captures: HashMap<u32, u32> = HashMap::new();
     let moves: HashMap<u32, u32> = HashMap::new();
-    let result = isel::isel(&func, &symbols, &captures, &moves).expect("isel should succeed");
+    let result = isel::isel(&func, &symbols, &captures, &moves, &HashSet::new())
+        .expect("isel should succeed");
 
     let has_and = result
         .insts
