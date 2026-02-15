@@ -2597,7 +2597,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // from a parameter or an Unsize coercion).
                     if let Some(v) = self.fat_locals.get(place.local) {
                         Some(v)
-                    } else if self.stack_locals.is_stack(place.local) {
+                    } else if self.stack_locals.is_stack(place.local)
+                        && place.projection.is_empty()
+                    {
                         // The fat pointer lives in a stack slot.  The vtable
                         // pointer is the second word (offset 8).
                         if let Some(base) = self.locals.get(place.local) {
@@ -2621,12 +2623,37 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             None
                         }
                     } else {
-                        None
+                        // Projected place (e.g. (*_1).buf) — compute the
+                        // address of the fat pointer field and load the
+                        // vtable from offset 8.
+                        if let Some((addr, _)) = self.translate_place_to_addr(place) {
+                            let addr = self.coerce_to_ptr(addr);
+                            let off8 = self.builder.iconst(8, Origin::synthetic());
+                            let vtable_addr = self.builder.ptradd(
+                                addr.into(),
+                                off8.into(),
+                                0,
+                                Origin::synthetic(),
+                            );
+                            let vtable = self.builder.load(
+                                vtable_addr.into(),
+                                8,
+                                Type::Ptr(0),
+                                self.current_mem.into(),
+                                None,
+                                Origin::synthetic(),
+                            );
+                            Some(vtable)
+                        } else {
+                            None
+                        }
                     }
                 }
                 _ => None,
             };
             if let Some(vtable) = vtable_ptr {
+                // Coerce to Ptr in case fat_locals stored it as Int.
+                let vtable = self.coerce_to_ptr(vtable);
                 // vtable layout: [drop_in_place, size, align, method0, method1, ...]
                 // Method at index `idx` is at offset (3 + idx) * 8.
                 let offset = (3 + idx) * 8;
