@@ -130,6 +130,20 @@ impl<'a> Builder<'a> {
         }
     }
 
+    /// If `v` is a StackSlot instruction, return its size in bytes.
+    pub fn stack_slot_size(&self, v: ValueRef) -> Option<u32> {
+        if v.is_block_arg() || v.is_secondary_result() {
+            return None;
+        }
+        match self.func.instructions.get(v.index() as usize) {
+            Some(inst) => match &inst.op {
+                Op::StackSlot(bytes) => Some(*bytes),
+                _ => None,
+            },
+            None => None,
+        }
+    }
+
     /// Add a block argument and return its ValueRef.
     pub fn add_block_arg(&mut self, block: BlockRef, ty: Type) -> ValueRef {
         let arg_idx = self.func.block_args.len() as u32;
