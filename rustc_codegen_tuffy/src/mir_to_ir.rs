@@ -211,9 +211,7 @@ pub fn translate_function<'tcx>(
                         }
                         let ty = monomorphize(mir.local_decls[local].ty);
                         let size = type_size(tcx, ty).unwrap_or(0);
-                        // Only promote small scalars (<=8 bytes); large types
-                        // already use stack slots via the aggregate path.
-                        if size > 8 || size == 0 {
+                        if size == 0 {
                             continue;
                         }
                         if let Some(prev_bb) = assign_bb[local.as_usize()] {
@@ -240,7 +238,7 @@ pub fn translate_function<'tcx>(
                         } else {
                             let ty = monomorphize(mir.local_decls[local].ty);
                             let size = type_size(tcx, ty).unwrap_or(0);
-                            if size <= 8 && size > 0 {
+                            if size > 0 {
                                 if let Some(prev_bb) = assign_bb[local.as_usize()] {
                                     if prev_bb != bb && !ctx.stack_locals.is_stack(local) {
                                         let slot = ctx.builder.stack_slot(
@@ -279,7 +277,12 @@ pub fn translate_function<'tcx>(
                         _ => None,
                     };
                     if let Some(local) = referenced_local {
-                        if local.as_usize() == 0 || local.as_usize() <= mir.arg_count {
+                        // Skip the return place (_0); it is handled
+                        // separately.  Parameters (1..=arg_count) are NOT
+                        // skipped — if their address is taken they must be
+                        // spilled to a stack slot so the slot pointer is
+                        // available across all basic blocks.
+                        if local.as_usize() == 0 {
                             continue;
                         }
                         if ctx.stack_locals.is_stack(local) {
@@ -317,7 +320,12 @@ pub fn translate_function<'tcx>(
         let ir_block = ctx.block_map.get(bb);
         ctx.builder.switch_to_block(ir_block);
         // Pick up the memory token from this block's MemSSA block argument.
-        ctx.current_mem = ctx.block_mem_args[bb.as_usize()];
+        // For bb0 (entry), translate_params may have already advanced
+        // current_mem past the block arg (e.g. storing two-register struct
+        // params into stack slots).  Resetting would discard those stores.
+        if bb.as_usize() != 0 {
+            ctx.current_mem = ctx.block_mem_args[bb.as_usize()];
+        }
 
         for stmt in &bb_data.statements {
             ctx.translate_statement(stmt);
@@ -411,6 +419,10 @@ fn translate_ty(ty: ty::Ty<'_>) -> Option<Type> {
         ty::FnDef(..) => Some(Type::Int),
         ty::Never => Some(Type::Int),
         ty::Adt(..) | ty::Tuple(..) | ty::Array(..) | ty::Slice(..) | ty::Str => Some(Type::Int),
+        // Closure / coroutine-closure structs that capture variables are
+        // laid out like regular structs — treat them as Int so they are
+        // not skipped as "untranslatable" in call argument handling.
+        ty::Closure(..) | ty::CoroutineClosure(..) => Some(Type::Int),
         _ => None,
     }
 }
@@ -1047,7 +1059,21 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let (addr, projected_ty) = self.translate_place_to_addr(place)?;
         let addr = self.coerce_to_ptr(addr);
         let bytes = type_size(self.tcx, projected_ty).unwrap_or(8) as u32;
-        // For types > 8 bytes, return the address directly so the
+        // For fat pointer types (e.g. &mut dyn Write, &[T]), load the
+        // first word (data pointer) so that locals[dest] holds the data
+        // pointer value.  The second word (vtable/length) is handled
+        // separately by the fat component extraction in translate_rvalue.
+        if bytes > 8 && is_fat_ptr(projected_ty) {
+            return Some(self.builder.load(
+                addr.into(),
+                8,
+                Type::Ptr(0),
+                self.current_mem.into(),
+                None,
+                Origin::synthetic(),
+            ));
+        }
+        // For other types > 8 bytes, return the address directly so the
         // caller (assignment handler) can do word-by-word copy.
         if bytes > 8 {
             return Some(addr);
@@ -1242,9 +1268,19 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     let val_ty = self.builder.value_type(val).cloned();
                                     let is_ref_rvalue =
                                         matches!(rvalue, Rvalue::Ref(..) | Rvalue::RawPtr(..));
+                                    // When the destination MIR type is a thin
+                                    // reference/pointer, val IS the pointer value
+                                    // (not an address pointing to data).  Store it
+                                    // directly instead of doing a word-by-word copy.
+                                    let dest_is_ptr_ty = matches!(ty.kind(),
+                                        ty::Ref(_, inner, _) if !matches!(inner.kind(), ty::Str | ty::Slice(..) | ty::Dynamic(..))
+                                    ) || matches!(ty.kind(),
+                                        ty::RawPtr(inner, _) if !matches!(inner.kind(), ty::Str | ty::Slice(..) | ty::Dynamic(..))
+                                    ) || matches!(ty.kind(), ty::FnPtr(..));
                                     if matches!(val_ty.as_ref(), Some(Type::Ptr(_)))
                                         && bytes > 0
                                         && !is_ref_rvalue
+                                        && !dest_is_ptr_ty
                                     {
                                         // Check if the source is a non-stack fat pointer
                                         // local (e.g. a &[T] function parameter). In that
@@ -1258,6 +1294,67 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                 && !self.stack_locals.is_stack(src_place.local) =>
                                             {
                                                 self.fat_locals.get(src_place.local)
+                                            }
+                                            // Constant fat pointer (e.g. &str literal,
+                                            // &[T] associated constant).  translate_const
+                                            // already loaded the data pointer; extract the
+                                            // length from the constant so we can store both
+                                            // components into the stack slot.
+                                            Rvalue::Use(Operand::Constant(c)) => {
+                                                let mono_const = self
+                                                    .tcx
+                                                    .instantiate_and_normalize_erasing_regions(
+                                                        self.instance.args,
+                                                        ty::TypingEnv::fully_monomorphized(),
+                                                        ty::EarlyBinder::bind(c.const_),
+                                                    );
+                                                let resolved = match mono_const {
+                                                    mir::Const::Val(v, _) => Some(v),
+                                                    _ => {
+                                                        let typing_env =
+                                                            ty::TypingEnv::fully_monomorphized();
+                                                        mono_const
+                                                            .eval(self.tcx, typing_env, c.span)
+                                                            .ok()
+                                                    }
+                                                };
+                                                if let Some(mir::ConstValue::Slice {
+                                                    meta, ..
+                                                }) = resolved
+                                                {
+                                                    Some(
+                                                        self.builder.iconst(
+                                                            meta as i64,
+                                                            Origin::synthetic(),
+                                                        ),
+                                                    )
+                                                } else if let Some(mir::ConstValue::Indirect {
+                                                    alloc_id,
+                                                    offset,
+                                                }) = resolved
+                                                {
+                                                    let const_ty = mono_const.ty();
+                                                    if is_fat_ptr(const_ty) {
+                                                        let alloc = self.tcx.global_alloc(alloc_id);
+                                                        if let rustc_middle::mir::interpret::GlobalAlloc::Memory(mem_alloc) = alloc {
+                                                            let inner = mem_alloc.inner();
+                                                            let byte_offset = offset.bytes() as usize + 8;
+                                                            let len_bytes = inner.inspect_with_uninit_and_ptr_outside_interpreter(
+                                                                byte_offset..byte_offset + 8,
+                                                            );
+                                                            let len = u64::from_le_bytes(
+                                                                len_bytes.try_into().unwrap_or([0u8; 8]),
+                                                            );
+                                                            Some(self.builder.iconst(len as i64, Origin::synthetic()))
+                                                        } else {
+                                                            None
+                                                        }
+                                                    } else {
+                                                        None
+                                                    }
+                                                } else {
+                                                    None
+                                                }
                                             }
                                             _ => None,
                                         };
@@ -1354,6 +1451,95 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                 );
                                             }
                                         }
+                                    } else if bytes > 8 {
+                                        // Value is not a Ptr but the destination is
+                                        // wider than 8 bytes (e.g. a fat pointer stored
+                                        // as Int via repr(transparent)).  Try to find
+                                        // the source stack-slot pointer so we can do a
+                                        // word-by-word copy of the full width.
+                                        let src_slot = match rvalue {
+                                            Rvalue::Use(
+                                                Operand::Copy(src_place) | Operand::Move(src_place),
+                                            ) if src_place.projection.is_empty()
+                                                && self.stack_locals.is_stack(src_place.local) =>
+                                            {
+                                                self.locals.get(src_place.local)
+                                            }
+                                            // &(*local) / &raw (*local) on a fat-pointer
+                                            // stack local: the slot holds the full fat
+                                            // pointer (data ptr + metadata) which must be
+                                            // copied word-by-word to the destination.
+                                            Rvalue::Ref(_, _, src_place)
+                                            | Rvalue::RawPtr(_, src_place)
+                                                if self.stack_locals.is_stack(src_place.local) =>
+                                            {
+                                                self.locals.get(src_place.local)
+                                            }
+                                            _ => None,
+                                        };
+                                        if let Some(src_base) = src_slot {
+                                            let src_base = self.coerce_to_ptr(src_base);
+                                            let num_words = (bytes as u64).div_ceil(8);
+                                            for i in 0..num_words {
+                                                let byte_off = i * 8;
+                                                let chunk =
+                                                    std::cmp::min(8, bytes as u64 - byte_off)
+                                                        as u32;
+                                                let src_addr = if byte_off == 0 {
+                                                    src_base
+                                                } else {
+                                                    let off = self.builder.iconst(
+                                                        byte_off as i64,
+                                                        Origin::synthetic(),
+                                                    );
+                                                    self.builder.ptradd(
+                                                        src_base.into(),
+                                                        off.into(),
+                                                        0,
+                                                        Origin::synthetic(),
+                                                    )
+                                                };
+                                                let word = self.builder.load(
+                                                    src_addr.into(),
+                                                    chunk,
+                                                    Type::Int,
+                                                    self.current_mem.into(),
+                                                    None,
+                                                    Origin::synthetic(),
+                                                );
+                                                let dst_addr = if byte_off == 0 {
+                                                    slot
+                                                } else {
+                                                    let off = self.builder.iconst(
+                                                        byte_off as i64,
+                                                        Origin::synthetic(),
+                                                    );
+                                                    self.builder.ptradd(
+                                                        slot.into(),
+                                                        off.into(),
+                                                        0,
+                                                        Origin::synthetic(),
+                                                    )
+                                                };
+                                                self.current_mem = self.builder.store(
+                                                    word.into(),
+                                                    dst_addr.into(),
+                                                    chunk,
+                                                    self.current_mem.into(),
+                                                    Origin::synthetic(),
+                                                );
+                                            }
+                                        } else {
+                                            // No source slot — store only the bytes
+                                            // we actually have (8 for an Int value).
+                                            self.current_mem = self.builder.store(
+                                                val.into(),
+                                                slot.into(),
+                                                std::cmp::min(bytes, 8),
+                                                self.current_mem.into(),
+                                                Origin::synthetic(),
+                                            );
+                                        }
                                     } else {
                                         self.current_mem = self.builder.store(
                                             val.into(),
@@ -1372,15 +1558,45 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         } else {
                             self.locals.set(place.local, val);
                             // Propagate stack-local status when the source is a
-                            // stack local (e.g. `_6 = move _4` where _4 is sret).
-                            // Without this, `&mut _6` would create a copy of the
-                            // struct instead of returning the existing slot address.
-                            if let Rvalue::Use(Operand::Copy(src) | Operand::Move(src)) = rvalue {
-                                if src.projection.is_empty()
-                                    && self.stack_locals.is_stack(src.local)
+                            // stack local (e.g. `_6 = move _4` where _4 is sret,
+                            // or `_5 = _1 as T (Transmute)` where _1 is a two-reg
+                            // struct parameter, or `_5 = move ((_1 as Some).0: T)`
+                            // where the projected field is > 8 bytes).
+                            // Without this, later uses treat the slot pointer as
+                            // a data value instead of an address.
+                            let mark_as_stack = match rvalue {
+                                // Direct copy/move from a stack local (no projections).
+                                Rvalue::Use(Operand::Copy(src) | Operand::Move(src))
+                                    if src.projection.is_empty()
+                                        && self.stack_locals.is_stack(src.local) =>
                                 {
-                                    self.stack_locals.mark(place.local);
+                                    true
                                 }
+                                // Cast/Transmute from a stack local.
+                                Rvalue::Cast(_, Operand::Copy(src) | Operand::Move(src), _)
+                                    if src.projection.is_empty()
+                                        && self.stack_locals.is_stack(src.local) =>
+                                {
+                                    true
+                                }
+                                // Projected place where the projected type is
+                                // > 8 bytes.  translate_operand returns an
+                                // address for large projected types (either a
+                                // pointer into a stack slot, or a dereferenced
+                                // pointer), so the destination must also be
+                                // treated as a stack local.
+                                Rvalue::Use(Operand::Copy(src) | Operand::Move(src))
+                                    if !src.projection.is_empty() =>
+                                {
+                                    let projected_ty = src.ty(&self.mir.local_decls, self.tcx).ty;
+                                    let projected_ty = self.monomorphize(projected_ty);
+                                    type_size(self.tcx, projected_ty).unwrap_or(8) > 8
+                                        && !is_fat_ptr(projected_ty)
+                                }
+                                _ => false,
+                            };
+                            if mark_as_stack {
+                                self.stack_locals.mark(place.local);
                             }
                         }
                     } else {
@@ -1425,7 +1641,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         self.current_mem.into(),
                                         Origin::synthetic(),
                                     );
-                                } else {
+                                } else if bytes > 8 {
                                     // val is a pointer to multi-word data (e.g.
                                     // symbol_addr of an Indirect constant like a
                                     // slice reference).  Copy word-by-word from
@@ -1486,6 +1702,17 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                             Origin::synthetic(),
                                         );
                                     }
+                                } else {
+                                    // Scalar pointer value (≤8 bytes, e.g. &u32,
+                                    // *const T): store the value directly instead
+                                    // of treating it as an address to load from.
+                                    self.current_mem = self.builder.store(
+                                        val.into(),
+                                        addr.into(),
+                                        bytes,
+                                        self.current_mem.into(),
+                                        Origin::synthetic(),
+                                    );
                                 }
                             } else {
                                 self.current_mem = self.builder.store(
@@ -2271,18 +2498,21 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 }
                 return;
             }
-            // Intrinsic detected but not handled — treat as no-op rather
-            // than falling through to the normal call path (intrinsics don't
-            // have real symbol implementations).
-            if let Some(target) = target {
-                let target_block = self.block_map.get(*target);
-                self.builder.br(
-                    target_block,
-                    vec![self.current_mem.into()],
-                    Origin::synthetic(),
-                );
+            // Intrinsic detected but not handled inline.  If it maps to a
+            // libc symbol (e.g. compare_bytes → memcmp), fall through to
+            // the normal call path so resolve_call_target can emit the call.
+            // Only treat truly unhandled intrinsics as no-ops.
+            if intrinsic_to_libc(&intrinsic_name).is_none() {
+                if let Some(target) = target {
+                    let target_block = self.block_map.get(*target);
+                    self.builder.br(
+                        target_block,
+                        vec![self.current_mem.into()],
+                        Origin::synthetic(),
+                    );
+                }
+                return;
             }
-            return;
         }
 
         // Skip calls to drop_in_place — consistent with the Drop terminator
@@ -2321,6 +2551,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let resolved = resolve_call_target(self.tcx, func, self.instance, self.mir);
         let callee_target = resolved.target;
         let needs_caller_location = resolved.requires_caller_location;
+        let needs_self_deref = resolved.needs_self_deref;
 
         // For virtual dispatch, extract the vtable pointer from the first
         // argument (a fat pointer: data_ptr + vtable_ptr) and load the
@@ -2398,9 +2629,24 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let mut ir_args: Vec<tuffy_ir::instruction::Operand> = Vec::new();
 
         // If callee uses sret, allocate a stack slot and prepend as first arg.
+        // Reuse the destination's existing stack slot when it is already a
+        // stack local AND large enough — this avoids creating a separate sret
+        // slot that other basic blocks cannot see (cross-block value flow).
         let sret_slot = if callee_sret {
-            let size = type_size(self.tcx, dest_ty).unwrap_or(8);
-            let slot = self.builder.stack_slot(size as u32, Origin::synthetic());
+            let needed_size = type_size(self.tcx, dest_ty).unwrap_or(8) as u32;
+            let existing_slot = if self.stack_locals.is_stack(destination.local) {
+                self.locals
+                    .get(destination.local)
+                    .filter(|s| matches!(self.builder.value_type(*s), Some(Type::Ptr(_))))
+                    .filter(|s| {
+                        // Only reuse if the existing slot is large enough.
+                        self.builder.stack_slot_size(*s).unwrap_or(0) >= needed_size
+                    })
+            } else {
+                None
+            };
+            let slot = existing_slot
+                .unwrap_or_else(|| self.builder.stack_slot(needed_size, Origin::synthetic()));
             ir_args.push(slot.into());
             Some(slot)
         } else {
@@ -2430,49 +2676,72 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // Check if this argument is a stack-allocated local that
                 // should be decomposed into register-sized words (≤16 bytes).
                 let decomposed = if let Operand::Copy(place) | Operand::Move(place) = &arg.node {
-                    if place.projection.is_empty() && self.stack_locals.is_stack(place.local) {
-                        let arg_ty = self.monomorphize(self.mir.local_decls[place.local].ty);
-                        let arg_size = type_size(self.tcx, arg_ty).unwrap_or(0);
-                        if arg_size > 0 && arg_size <= 16 {
-                            // Use the stack slot pointer directly — translate_operand
-                            // may have already loaded the value for small locals,
-                            // so `v` might be an Int rather than a Ptr.
-                            let slot = self.locals.get(place.local).unwrap_or(v);
-                            let slot_is_ptr =
-                                matches!(self.builder.value_type(slot), Some(Type::Ptr(_)));
-                            if slot_is_ptr {
-                                // Load word(s) from the stack slot and pass in registers.
-                                let word0 = self.builder.load(
+                    // Detect stack-local arguments that need decomposition:
+                    // 1. Non-projected stack locals (e.g. `move _3` where _3 is stack)
+                    // 2. Projected places on stack locals where the projected
+                    //    type is > 8 bytes (e.g. `move _2.0` where _2 is a
+                    //    stack local and field 0 is &str/16 bytes).  In this
+                    //    case translate_operand returns an address into the
+                    //    source slot, which must be decomposed into registers.
+                    let (is_stack_arg, arg_size) =
+                        if place.projection.is_empty() && self.stack_locals.is_stack(place.local) {
+                            let arg_ty = self.monomorphize(self.mir.local_decls[place.local].ty);
+                            (true, type_size(self.tcx, arg_ty).unwrap_or(0))
+                        } else if !place.projection.is_empty()
+                            && self.stack_locals.is_stack(place.local)
+                        {
+                            let projected_ty = place.ty(&self.mir.local_decls, self.tcx).ty;
+                            let projected_ty = self.monomorphize(projected_ty);
+                            let psize = type_size(self.tcx, projected_ty).unwrap_or(0);
+                            // Only treat as stack arg if the projected type is
+                            // large enough that translate_operand returned an
+                            // address rather than a loaded value.
+                            if psize > 8 {
+                                (true, psize)
+                            } else {
+                                (false, psize)
+                            }
+                        } else {
+                            (false, 0)
+                        };
+                    if is_stack_arg && arg_size > 8 && arg_size <= 16 {
+                        // Only decompose stack locals larger than 8 bytes.
+                        // For ≤8-byte stack locals, translate_operand already
+                        // loaded the value from the slot — decomposing again
+                        // would double-dereference pointer-typed values.
+                        let slot = self.locals.get(place.local).unwrap_or(v);
+                        let slot_is_ptr =
+                            matches!(self.builder.value_type(slot), Some(Type::Ptr(_)));
+                        if slot_is_ptr {
+                            // Load word(s) from the stack slot and pass in registers.
+                            let word0 = self.builder.load(
+                                slot.into(),
+                                8,
+                                Type::Int,
+                                self.current_mem.into(),
+                                None,
+                                Origin::synthetic(),
+                            );
+                            ir_args.push(word0.into());
+                            if arg_size > 8 {
+                                let off = self.builder.iconst(8, Origin::synthetic());
+                                let addr1 = self.builder.ptradd(
                                     slot.into(),
+                                    off.into(),
+                                    0,
+                                    Origin::synthetic(),
+                                );
+                                let word1 = self.builder.load(
+                                    addr1.into(),
                                     8,
                                     Type::Int,
                                     self.current_mem.into(),
                                     None,
                                     Origin::synthetic(),
                                 );
-                                ir_args.push(word0.into());
-                                if arg_size > 8 {
-                                    let off = self.builder.iconst(8, Origin::synthetic());
-                                    let addr1 = self.builder.ptradd(
-                                        slot.into(),
-                                        off.into(),
-                                        0,
-                                        Origin::synthetic(),
-                                    );
-                                    let word1 = self.builder.load(
-                                        addr1.into(),
-                                        8,
-                                        Type::Int,
-                                        self.current_mem.into(),
-                                        None,
-                                        Origin::synthetic(),
-                                    );
-                                    ir_args.push(word1.into());
-                                }
-                                true
-                            } else {
-                                false
+                                ir_args.push(word1.into());
                             }
+                            true
                         } else {
                             false
                         }
@@ -2590,6 +2859,31 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             }
         }
 
+        // When Instance::try_resolve resolved through a blanket impl that
+        // strips a reference from Self, the first argument has an extra level
+        // of indirection.  Dereference it so the callee receives the correct
+        // pointer type (e.g. &mut Formatter instead of &&mut Formatter).
+        // Only apply when the argument is a Ptr (stack slot address) — if
+        // it's already an Int/scalar, the extra indirection doesn't exist.
+        if needs_self_deref {
+            let self_idx = if callee_sret { 1 } else { 0 };
+            if self_idx < ir_args.len() {
+                let arg_ty = self.builder.value_type(ir_args[self_idx].value);
+                if matches!(arg_ty, Some(Type::Ptr(_))) {
+                    let old_self = ir_args[self_idx].clone();
+                    let derefed = self.builder.load(
+                        old_self,
+                        8,
+                        Type::Ptr(0),
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
+                    );
+                    ir_args[self_idx] = derefed.into();
+                }
+            }
+        }
+
         // If the callee has #[track_caller], append an implicit &Location
         // as the last ABI argument.
         if needs_caller_location {
@@ -2630,7 +2924,25 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             let slot = sret_slot.unwrap();
             self.locals.set(destination.local, slot);
             self.stack_locals.mark(destination.local);
-            // No RDX capture needed for sret calls.
+            // For fat pointer sret returns (&[T], &str, etc.), the second
+            // word (length/vtable) is at offset 8 in the sret buffer.
+            // Load it into fat_locals so it gets passed when this local
+            // is later used as a call argument.
+            if is_fat_ptr(dest_ty) {
+                let off = self.builder.iconst(8, Origin::synthetic());
+                let addr = self
+                    .builder
+                    .ptradd(slot.into(), off.into(), 0, Origin::synthetic());
+                let fat_val = self.builder.load(
+                    addr.into(),
+                    8,
+                    Type::Int,
+                    self.current_mem.into(),
+                    None,
+                    Origin::synthetic(),
+                );
+                self.fat_locals.set(destination.local, fat_val);
+            }
         } else if dest_size.unwrap_or(0) > 8 {
             // Two-register return (9-16 bytes): RAX has first word,
             // RDX has second word. Reconstruct into a stack slot so
@@ -3201,6 +3513,56 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         {
                             self.fat_locals.get(p.local)
                         }
+                        // Constant fat pointer (e.g. `const <Self as Trait>::ITEMS`
+                        // where ITEMS: &'static [T]).  translate_const already loaded
+                        // the data pointer from the Indirect allocation; extract the
+                        // length from the allocation bytes so we can store both
+                        // components into the destination.
+                        Operand::Constant(c) if is_ptr_val && bytes > 8 => {
+                            let mono_const = self.tcx.instantiate_and_normalize_erasing_regions(
+                                self.instance.args,
+                                ty::TypingEnv::fully_monomorphized(),
+                                ty::EarlyBinder::bind(c.const_),
+                            );
+                            let resolved = match mono_const {
+                                mir::Const::Val(v, _) => Some(v),
+                                _ => {
+                                    let typing_env = ty::TypingEnv::fully_monomorphized();
+                                    mono_const.eval(self.tcx, typing_env, c.span).ok()
+                                }
+                            };
+                            if let Some(mir::ConstValue::Slice { meta, .. }) = resolved {
+                                Some(self.builder.iconst(meta as i64, Origin::synthetic()))
+                            } else if let Some(mir::ConstValue::Indirect { alloc_id, offset }) =
+                                resolved
+                            {
+                                let const_ty = mono_const.ty();
+                                if is_fat_ptr(const_ty) {
+                                    let alloc = self.tcx.global_alloc(alloc_id);
+                                    if let rustc_middle::mir::interpret::GlobalAlloc::Memory(
+                                        mem_alloc,
+                                    ) = alloc
+                                    {
+                                        let inner = mem_alloc.inner();
+                                        let byte_offset = offset.bytes() as usize + 8;
+                                        let len_bytes = inner
+                                            .inspect_with_uninit_and_ptr_outside_interpreter(
+                                                byte_offset..byte_offset + 8,
+                                            );
+                                        let len = u64::from_le_bytes(
+                                            len_bytes.try_into().unwrap_or([0u8; 8]),
+                                        );
+                                        Some(self.builder.iconst(len as i64, Origin::synthetic()))
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        }
                         _ => None,
                     };
                     if let Some(fat_val) = fat_op {
@@ -3269,6 +3631,30 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 Origin::synthetic(),
                             );
                         }
+                    } else if is_stack_op
+                        && is_ptr_val
+                        && bytes <= 8
+                        && self.builder.stack_slot_size(val).is_some()
+                    {
+                        // The operand is a stack local whose slot is wider
+                        // than the field (e.g. Option<&str> used as a ptr
+                        // field).  Load the first word from the slot instead
+                        // of storing the slot address itself.
+                        let loaded = self.builder.load(
+                            val.into(),
+                            bytes,
+                            Type::Int,
+                            self.current_mem.into(),
+                            None,
+                            Origin::synthetic(),
+                        );
+                        self.current_mem = self.builder.store(
+                            loaded.into(),
+                            dst_addr.into(),
+                            bytes,
+                            self.current_mem.into(),
+                            Origin::synthetic(),
+                        );
                     } else {
                         self.current_mem = self.builder.store(
                             val.into(),
@@ -3350,12 +3736,22 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let val = self.locals.get(place.local);
                     // For scalar locals promoted to stack slots (multi-BB
                     // mutation), load the current value from the slot.
+                    // Only load if the value is an actual stack_slot — other
+                    // Ptr-typed values (e.g. loaded pointers from reborrows)
+                    // are already the correct value and must not be dereferenced.
+                    // Additionally, the slot must be pointer-sized (≤8 bytes).
+                    // A reference local (e.g. `&mut Iter`) may hold the address
+                    // of a larger struct's stack slot; loading from that slot
+                    // would read the struct's data instead of the pointer value.
                     if self.stack_locals.is_stack(place.local) {
                         if let Some(slot) = val {
                             let ty = self.monomorphize(self.mir.local_decls[place.local].ty);
                             let size = type_size(self.tcx, ty).unwrap_or(8);
+                            let slot_size = self.builder.stack_slot_size(slot);
                             if size <= 8
                                 && matches!(self.builder.value_type(slot), Some(Type::Ptr(_)))
+                                && slot_size.is_some()
+                                && slot_size.unwrap() <= 8
                             {
                                 let ir_ty = translate_ty(ty).unwrap_or(Type::Int);
                                 let loaded = self.builder.load(
@@ -4194,6 +4590,12 @@ struct ResolvedCall {
     /// True if the callee has `#[track_caller]` and expects an implicit
     /// `&Location` as the last ABI argument.
     requires_caller_location: bool,
+    /// True when `Instance::try_resolve` resolved through a blanket impl
+    /// that strips a reference level from Self (e.g. `<&mut Formatter as
+    /// Write>::write_fmt` → `<Formatter as Write>::write_fmt`).  The MIR
+    /// passes `&mut &mut Formatter` but the resolved callee expects
+    /// `&mut Formatter`, so the first argument needs a dereference.
+    needs_self_deref: bool,
 }
 
 /// Resolve the callee symbol name from a Call terminator's function operand.
@@ -4215,6 +4617,7 @@ fn resolve_call_target<'tcx>(
             return ResolvedCall {
                 target: None,
                 requires_caller_location: false,
+                needs_self_deref: false,
             };
         }
     };
@@ -4235,6 +4638,7 @@ fn resolve_call_target<'tcx>(
                     return ResolvedCall {
                         target: Some(CallTarget::Direct(libc_sym.to_string())),
                         requires_caller_location: false,
+                        needs_self_deref: false,
                     };
                 }
             }
@@ -4242,6 +4646,7 @@ fn resolve_call_target<'tcx>(
                 return ResolvedCall {
                     target: None,
                     requires_caller_location: false,
+                    needs_self_deref: false,
                 };
             }
             let instance =
@@ -4254,8 +4659,73 @@ fn resolve_call_target<'tcx>(
                     return ResolvedCall {
                         target: None,
                         requires_caller_location: false,
+                        needs_self_deref: false,
                     };
                 }
+            };
+            // Detect blanket-impl resolution that strips a reference from
+            // Self.  For example, `<&mut Formatter as Write>::write_fmt`
+            // with args=[&mut Formatter] resolves to
+            // `<Formatter as Write>::write_fmt`.  The MIR passes
+            // `&mut &mut Formatter` but the compiled callee expects
+            // `&mut Formatter`, so we must dereference the first argument.
+            //
+            // There are two cases:
+            //
+            // Case A: Resolution went THROUGH the blanket impl to the
+            // direct impl (e.g. `write_fmt` which the blanket impl
+            // doesn't override).  The resolved impl's raw Self is
+            // non-reference.  We just need needs_self_deref.
+            //
+            // Case B: Resolution went TO the blanket impl itself (e.g.
+            // `write_str` which the blanket impl DOES override).  The
+            // resolved impl's raw Self IS a reference.  The blanket
+            // impl's method just delegates to the inner type's method,
+            // but the monomorphization collector doesn't instantiate
+            // the blanket impl's wrapper — it expects the call to go
+            // directly to the inner type's method.  So we must
+            // re-resolve with the inner type and set needs_self_deref.
+            //
+            // IMPORTANT: This check only applies to trait methods where
+            // args[0] is the Self type.  For inherent methods (e.g.
+            // `<[T]>::iter`), args[0] is a type parameter like T, NOT
+            // Self.  Checking it would incorrectly trigger needs_self_deref
+            // when T happens to be a reference type (e.g. T = &str).
+            let mut needs_self_deref = false;
+            let is_trait_method = matches!(
+                tcx.def_kind(tcx.parent(*def_id)),
+                rustc_hir::def::DefKind::Trait
+            );
+            let instance = if is_trait_method && let Some(orig_self) = args.first() {
+                if let Some(orig_ty) = orig_self.as_type() {
+                    if let ty::Ref(_, inner_ty, _) = orig_ty.kind() {
+                        let impl_def_id = tcx.parent(instance.def_id());
+                        let is_impl = matches!(
+                            tcx.def_kind(impl_def_id),
+                            rustc_hir::def::DefKind::Impl { .. }
+                        );
+                        let raw_impl_self = if is_impl {
+                            Some(tcx.type_of(impl_def_id).skip_binder())
+                        } else {
+                            None
+                        };
+                        if matches!(raw_impl_self, Some(t) if !matches!(t.kind(), ty::Ref(_, _, _) | ty::Param(_)))
+                        {
+                            // Case A: resolved through blanket impl to direct impl.
+                            needs_self_deref = true;
+                            instance
+                        } else {
+                            // Case B (blanket impl) or non-impl parent — skip for now.
+                            instance
+                        }
+                    } else {
+                        instance
+                    }
+                } else {
+                    instance
+                }
+            } else {
+                instance
             };
             let needs_location = instance.def.requires_caller_location(tcx);
             // Detect virtual dispatch (trait object method calls).
@@ -4263,12 +4733,14 @@ fn resolve_call_target<'tcx>(
                 return ResolvedCall {
                     target: Some(CallTarget::Virtual(idx)),
                     requires_caller_location: needs_location,
+                    needs_self_deref: false,
                 };
             }
             if instance.args.has_non_region_param() {
                 return ResolvedCall {
                     target: None,
                     requires_caller_location: needs_location,
+                    needs_self_deref: false,
                 };
             }
             ResolvedCall {
@@ -4276,11 +4748,13 @@ fn resolve_call_target<'tcx>(
                     tcx.symbol_name(instance).name.to_string(),
                 )),
                 requires_caller_location: needs_location,
+                needs_self_deref,
             }
         }
         _ => ResolvedCall {
             target: None,
             requires_caller_location: false,
+            needs_self_deref: false,
         },
     }
 }
