@@ -23,15 +23,14 @@ use crate::reg::Gpr;
 /// Caller-saved registers are listed first (preferred for short-lived values),
 /// followed by callee-saved registers (used for values live across calls).
 /// R11 is reserved as the spill temp register.
-const ALLOC_REGS: [PReg; 13] = [
-    PReg(0),  // Rax
-    PReg(1),  // Rcx
-    PReg(2),  // Rdx
-    PReg(8),  // R8
-    PReg(9),  // R9
-    PReg(10), // R10
-    PReg(6),  // Rsi
-    PReg(7),  // Rdi
+const ALLOC_REGS: [PReg; 12] = [
+    PReg(0), // Rax
+    PReg(1), // Rcx
+    PReg(2), // Rdx
+    PReg(8), // R8
+    PReg(9), // R9
+    PReg(6), // Rsi
+    PReg(7), // Rdi
     // Callee-saved registers (for values live across calls).
     PReg(3),  // Rbx
     PReg(12), // R12
@@ -40,8 +39,13 @@ const ALLOC_REGS: [PReg; 13] = [
     PReg(15), // R15
 ];
 
-/// Register reserved for spill loads/stores. Must NOT be in ALLOC_REGS.
+/// Primary register reserved for spill loads/stores. Must NOT be in ALLOC_REGS.
 const SPILL_REG: PReg = PReg(11); // R11
+
+/// Secondary spill register, used when an instruction has multiple spilled
+/// operands (e.g. `and dst, src` where both dst and src are spilled).
+/// Must NOT be in ALLOC_REGS.
+const SPILL_REG2: PReg = PReg(10); // R10
 
 /// Callee-saved registers that must be preserved across function calls.
 const CALLEE_SAVED_REGS: [PReg; 5] = [
@@ -295,6 +299,10 @@ fn rewrite_inst(inst: &VInst, assignments: &[PReg]) -> PInst {
 /// - `MovRM` (load from stack → R11) before instructions that USE a spilled VReg
 /// - `MovMR` (store R11 → stack) after instructions that DEF a spilled VReg
 ///
+/// When an instruction has multiple spilled operands (e.g. `and dst, src` where
+/// both are spilled), the secondary spill register R10 is used for the Use
+/// operand to avoid clobbering the UseDef operand's value in R11.
+///
 /// Spill slot N lives at `[RBP - isel_frame_size - (N+1)*8]`.
 fn rewrite_with_spills(
     insts: &[VInst],
@@ -303,50 +311,101 @@ fn rewrite_with_spills(
 ) -> Vec<PInst> {
     let mut out = Vec::with_capacity(insts.len() * 2);
     let mut ops_buf = Vec::new();
+    let spill_gpr2 = Gpr::from_preg(SPILL_REG2);
 
     for inst in insts {
         ops_buf.clear();
         inst.reg_operands(&mut ops_buf);
 
-        // Collect spill loads (Use/UseDef) and stores (Def/UseDef).
-        let mut loads: Vec<i32> = Vec::new();
-        let mut stores: Vec<i32> = Vec::new();
+        // Collect spilled operands with their details.
+        struct SpilledOp {
+            vreg_idx: u32,
+            kind: OpKind,
+            offset: i32,
+        }
+        let mut spilled: Vec<SpilledOp> = Vec::new();
 
         for op in &ops_buf {
             if let Some(&slot) = alloc_result.spill_map.get(&op.vreg.0) {
                 let offset = -(isel_frame_size + (slot as i32 + 1) * 8);
-                match op.kind {
-                    OpKind::Use => loads.push(offset),
-                    OpKind::Def => stores.push(offset),
-                    OpKind::UseDef => {
-                        loads.push(offset);
-                        stores.push(offset);
-                    }
-                }
+                spilled.push(SpilledOp {
+                    vreg_idx: op.vreg.0,
+                    kind: op.kind,
+                    offset,
+                });
             }
         }
 
-        // Emit spill loads before the instruction.
-        for &offset in &loads {
-            out.push(MInst::MovRM {
-                size: OpSize::S64,
-                dst: Gpr::R11,
-                base: Gpr::Rbp,
-                offset,
-            });
-        }
+        if spilled.len() <= 1 {
+            // Simple case: at most one spilled operand — use R11 only.
+            for sp in &spilled {
+                if matches!(sp.kind, OpKind::Use | OpKind::UseDef) {
+                    out.push(MInst::MovRM {
+                        size: OpSize::S64,
+                        dst: Gpr::R11,
+                        base: Gpr::Rbp,
+                        offset: sp.offset,
+                    });
+                }
+            }
 
-        // Rewrite the instruction (spilled vregs map to R11 via assignments).
-        out.push(rewrite_inst(inst, &alloc_result.assignments));
+            out.push(rewrite_inst(inst, &alloc_result.assignments));
 
-        // Emit spill stores after the instruction.
-        for &offset in &stores {
-            out.push(MInst::MovMR {
-                size: OpSize::S64,
-                base: Gpr::Rbp,
-                offset,
-                src: Gpr::R11,
-            });
+            for sp in &spilled {
+                if matches!(sp.kind, OpKind::Def | OpKind::UseDef) {
+                    out.push(MInst::MovMR {
+                        size: OpSize::S64,
+                        base: Gpr::Rbp,
+                        offset: sp.offset,
+                        src: Gpr::R11,
+                    });
+                }
+            }
+        } else {
+            // Multiple spilled operands: use R10 for Use operands and R11
+            // for the UseDef/Def operand to avoid clobbering.
+            //
+            // Identify which vreg gets R10 (the secondary spill register).
+            // The Use-only operand gets R10; the UseDef operand keeps R11.
+            let r10_vreg = spilled
+                .iter()
+                .find(|sp| matches!(sp.kind, OpKind::Use))
+                .map(|sp| sp.vreg_idx);
+
+            // Emit loads: UseDef → R11, Use → R10.
+            for sp in &spilled {
+                if matches!(sp.kind, OpKind::Use | OpKind::UseDef) {
+                    let is_r10 = r10_vreg == Some(sp.vreg_idx) && matches!(sp.kind, OpKind::Use);
+                    let dst_gpr = if is_r10 { spill_gpr2 } else { Gpr::R11 };
+                    out.push(MInst::MovRM {
+                        size: OpSize::S64,
+                        dst: dst_gpr,
+                        base: Gpr::Rbp,
+                        offset: sp.offset,
+                    });
+                }
+            }
+
+            // Rewrite the instruction with R10 override for the Use operand.
+            if let Some(r10_vi) = r10_vreg {
+                let mut overrides = alloc_result.assignments.to_vec();
+                overrides[r10_vi as usize] = SPILL_REG2;
+                out.push(rewrite_inst(inst, &overrides));
+            } else {
+                out.push(rewrite_inst(inst, &alloc_result.assignments));
+            }
+
+            // Emit stores for Def/UseDef operands.
+            for sp in &spilled {
+                if matches!(sp.kind, OpKind::Def | OpKind::UseDef) {
+                    out.push(MInst::MovMR {
+                        size: OpSize::S64,
+                        base: Gpr::Rbp,
+                        offset: sp.offset,
+                        src: Gpr::R11,
+                    });
+                }
+            }
         }
     }
 
