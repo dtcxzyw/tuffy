@@ -62,6 +62,14 @@ impl IselCtx {
             self.regs.assign(val, dst);
             return Some(dst);
         }
+        // Materialize a deferred icmp result into a register via SetCC + MovzxB.
+        if let Some(cc) = self.cmps.get(val) {
+            let tmp = self.alloc.alloc();
+            self.out.push(MInst::SetCC { cc, dst: tmp });
+            self.out.push(MInst::MovzxB { dst: tmp, src: tmp });
+            self.regs.assign(val, tmp);
+            return Some(tmp);
+        }
         None
     }
 }
