@@ -2452,6 +2452,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // Unit-returning or untranslatable return type: bare ret, no value.
                     self.builder
                         .ret(None, self.current_mem.into(), Origin::synthetic());
+                } else if type_size(self.tcx, ret_mir_ty).map_or(false, |s| s == 0) {
+                    // Zero-sized return type: return a dummy value to satisfy the
+                    // function signature (translate_ty maps ADTs to Int).
+                    let dummy = self.builder.iconst(0, Origin::synthetic());
+                    self.builder.ret(
+                        Some(dummy.into()),
+                        self.current_mem.into(),
+                        Origin::synthetic(),
+                    );
                 } else if self.stack_locals.is_stack(ret_local)
                     && matches!(
                         self.locals
@@ -2608,58 +2617,88 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
                 // Only emit drop glue when the type actually needs dropping.
                 if drop_ty.needs_drop(self.tcx, ty::TypingEnv::fully_monomorphized()) {
-                    let drop_instance = ty::Instance::resolve_drop_in_place(self.tcx, drop_ty);
-                    if !drop_instance.args.has_non_region_param() {
-                        let sym_name = self.tcx.symbol_name(drop_instance).name.to_string();
-                        let sym_id = self.symbols.intern(&sym_name);
-                        let callee = self.builder.symbol_addr(sym_id, Origin::synthetic());
-
-                        // Get a pointer to the place being dropped.
-                        let drop_ptr = if place.projection.is_empty() {
-                            if self.stack_locals.is_stack(place.local) {
-                                self.locals.get(place.local)
-                            } else if let Some(v) = self.locals.get(place.local) {
-                                // Non-stack local: the value IS the pointer
-                                // (e.g. a Box or reference).  For types that
-                                // need dropping and are stored as a register
-                                // value, we need to spill to a stack slot so
-                                // drop_in_place gets a valid &mut T.
-                                let ty_size = type_size(self.tcx, drop_ty).unwrap_or(8);
-                                if ty_size > 8
-                                    || matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
-                                {
-                                    Some(v)
-                                } else {
-                                    let slot = self
-                                        .builder
-                                        .stack_slot(ty_size as u32, Origin::synthetic());
-                                    self.current_mem = self.builder.store(
-                                        v.into(),
-                                        slot.into(),
-                                        ty_size as u32,
-                                        self.current_mem.into(),
-                                        Origin::synthetic(),
-                                    );
-                                    Some(slot)
-                                }
-                            } else {
-                                None
-                            }
-                        } else {
-                            self.translate_place_to_addr(place)
-                                .map(|(a, _)| self.coerce_to_ptr(a))
-                        };
-
-                        if let Some(ptr) = drop_ptr {
+                    // Trait object drops: dispatch through vtable[0] instead of
+                    // calling drop_in_place directly (which would recurse).
+                    if matches!(drop_ty.kind(), ty::Dynamic(..)) {
+                        // The place is `*local` where local is a fat pointer
+                        // (data ptr + vtable ptr). Get both components.
+                        let base_local = place.local;
+                        let data_ptr = self.locals.get(base_local);
+                        let vtable_ptr = self.fat_locals.get(base_local);
+                        if let (Some(data), Some(vtable)) = (data_ptr, vtable_ptr) {
+                            // Load drop function pointer from vtable[0].
+                            let drop_fn = self.builder.load(
+                                vtable.into(),
+                                8,
+                                Type::Ptr(0),
+                                self.current_mem.into(),
+                                None,
+                                Origin::synthetic(),
+                            );
                             let (call_mem, _) = self.builder.call(
-                                callee.into(),
-                                vec![ptr.into()],
+                                drop_fn.into(),
+                                vec![data.into()],
                                 Type::Unit,
                                 self.current_mem.into(),
                                 None,
                                 Origin::synthetic(),
                             );
                             self.current_mem = call_mem;
+                        }
+                    } else {
+                        let drop_instance = ty::Instance::resolve_drop_in_place(self.tcx, drop_ty);
+                        if !drop_instance.args.has_non_region_param() {
+                            let sym_name = self.tcx.symbol_name(drop_instance).name.to_string();
+                            let sym_id = self.symbols.intern(&sym_name);
+                            let callee = self.builder.symbol_addr(sym_id, Origin::synthetic());
+
+                            // Get a pointer to the place being dropped.
+                            let drop_ptr = if place.projection.is_empty() {
+                                if self.stack_locals.is_stack(place.local) {
+                                    self.locals.get(place.local)
+                                } else if let Some(v) = self.locals.get(place.local) {
+                                    // Non-stack local: the value IS the pointer
+                                    // (e.g. a Box or reference).  For types that
+                                    // need dropping and are stored as a register
+                                    // value, we need to spill to a stack slot so
+                                    // drop_in_place gets a valid &mut T.
+                                    let ty_size = type_size(self.tcx, drop_ty).unwrap_or(8);
+                                    if ty_size > 8
+                                        || matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
+                                    {
+                                        Some(v)
+                                    } else {
+                                        let slot = self
+                                            .builder
+                                            .stack_slot(ty_size as u32, Origin::synthetic());
+                                        self.current_mem = self.builder.store(
+                                            v.into(),
+                                            slot.into(),
+                                            ty_size as u32,
+                                            self.current_mem.into(),
+                                            Origin::synthetic(),
+                                        );
+                                        Some(slot)
+                                    }
+                                } else {
+                                    None
+                                }
+                            } else {
+                                self.translate_place_to_addr(place)
+                                    .map(|(a, _)| self.coerce_to_ptr(a))
+                            };
+
+                            if let Some(ptr) = drop_ptr {
+                                let (call_mem, _) = self.builder.call(
+                                    callee.into(),
+                                    vec![ptr.into()],
+                                    Type::Unit,
+                                    self.current_mem.into(),
+                                    None,
+                                    Origin::synthetic(),
+                                );
+                                self.current_mem = call_mem;
+                            }
                         }
                     }
                 }
