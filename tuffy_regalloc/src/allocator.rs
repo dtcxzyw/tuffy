@@ -189,6 +189,8 @@ pub fn allocate<I: RegAllocInst>(
                     spill_reg,
                     &mut spill_map,
                     &mut spill_slot_count,
+                    &call_positions,
+                    &caller_saved_set,
                 );
             }
         }
@@ -556,12 +558,19 @@ fn spill_at(
     spill_reg: PReg,
     spill_map: &mut HashMap<u32, u32>,
     spill_slot_count: &mut u32,
+    call_positions: &[u32],
+    caller_saved_set: &HashSet<u8>,
 ) {
     let vi = range.vreg.0 as usize;
+    let spans_call = spans_any_call(range, call_positions);
 
     // Try to find ANY allocatable register that doesn't conflict with
-    // the current interval's range.
+    // the current interval's range. Skip caller-saved registers for
+    // ranges that span calls (they would be clobbered).
     for &p in allocatable {
+        if spans_call && caller_saved_set.contains(&p.0) {
+            continue;
+        }
         if !conflicts_with(
             p.0,
             range.start,
@@ -578,7 +587,6 @@ fn spill_at(
     }
 
     // All registers conflict — spill this vreg to a stack slot.
-    // The spill_reg will be used as a temporary for loads/stores.
     let slot = *spill_slot_count;
     *spill_slot_count += 1;
     spill_map.insert(range.vreg.0, slot);
