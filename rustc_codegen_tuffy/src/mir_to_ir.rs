@@ -1507,6 +1507,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                             }
                                             _ => None,
                                         };
+                                        // Fallback: for Unsize coercions the source is a
+                                        // thin pointer but extract_fat_component can
+                                        // generate the vtable/length for the destination.
+                                        let fat_src = fat_src.or_else(|| self.extract_fat_component(rvalue));
                                         if let Some(fat_val) = fat_src {
                                             // Store data pointer into slot[0..8].
                                             self.current_mem = self.builder.store(
