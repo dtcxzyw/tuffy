@@ -61,6 +61,18 @@ Phase 2 (run `cargo test` for bitflags) is complete. All 37/37 compile-pass test
 
 19. **Intrinsic fallthrough to libc** — Check `intrinsic_to_libc` before treating unhandled intrinsics as no-ops, so `compare_bytes` correctly maps to `memcmp` instead of being silently dropped. This fixed string equality comparisons.
 
+20. **Aggregate self-copy corruption** — When `Rvalue::Aggregate` reuses the destination stack slot directly (`val == slot`), the assignment handler's word-by-word copy stored the slot address into itself instead of the actual field values. This corrupted `Layout` structs, causing `Box::new` to pass garbage alignment to `__rust_alloc`. Fixed by skipping the copy when `val == slot`.
+
+21. **Unsize coercion to stack-allocated fat pointer** — Fixed coercion path for unsizing into a stack-allocated fat pointer destination.
+
+22. **ZST load/store skip** — Skip loads and stores for zero-sized types to avoid generating invalid memory operations.
+
+23. **Caller-saved register spill at calls** — Fixed linear scan allocator to skip caller-saved registers when spilling at call boundaries, preventing clobbered values across function calls.
+
+24. **ZST returns and trait object drop dispatch** — Fixed return handling for zero-sized types and virtual dispatch for trait object drop glue.
+
+25. **Deferred icmp materialization** — Fixed `ensure_in_reg` to materialize deferred `icmp` results before use in registers.
+
 ## Open Issues
 
 ### P2 — Nice to Have
