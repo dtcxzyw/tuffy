@@ -1181,6 +1181,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let (addr, projected_ty) = self.translate_place_to_addr(place)?;
         let addr = self.coerce_to_ptr(addr);
         let bytes = type_size(self.tcx, projected_ty).unwrap_or(8) as u32;
+        // ZST: no data to load — return a dummy value.
+        if bytes == 0 {
+            return Some(self.builder.iconst(0, Origin::synthetic()));
+        }
         // For fat pointer types (e.g. &mut dyn Write, &[T]), load the
         // first word (data pointer) so that locals[dest] holds the data
         // pointer value.  The second word (vtable/length) is handled
@@ -1906,7 +1910,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         Origin::synthetic(),
                                     );
                                 }
-                            } else {
+                            } else if bytes > 0 {
                                 self.current_mem = self.builder.store(
                                     val.into(),
                                     addr.into(),
