@@ -2976,8 +2976,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // Coerce to Ptr in case fat_locals stored it as Int.
                 let vtable = self.coerce_to_ptr(vtable);
                 // vtable layout: [drop_in_place, size, align, method0, method1, ...]
-                // Method at index `idx` is at offset (3 + idx) * 8.
-                let offset = (3 + idx) * 8;
+                // rustc's InstanceKind::Virtual idx already includes the 3
+                // metadata entries, so the byte offset is simply idx * 8.
+                let offset = idx * 8;
                 let off_val = self.builder.iconst(offset as i64, Origin::synthetic());
                 let fn_addr =
                     self.builder
