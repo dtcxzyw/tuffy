@@ -1408,6 +1408,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         && !is_ref_rvalue
                                         && !dest_is_ptr_ty
                                     {
+                                        // When the Aggregate rvalue reused the
+                                        // destination slot, val == slot and the
+                                        // data is already in place — skip the copy.
+                                        if val == slot {
+                                            // already stored by translate_rvalue
+                                        } else {
                                         // Check if the source is a non-stack fat pointer
                                         // local (e.g. a &[T] function parameter). In that
                                         // case `val` is the data pointer VALUE, not an
@@ -1603,6 +1609,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                     Origin::synthetic(),
                                                 );
                                             }
+                                        }
                                         }
                                     } else if bytes > 8 {
                                         // Value is not a Ptr but the destination is
