@@ -335,6 +335,14 @@ simd/intrinsic/inlining-issue67557.rs
 
 # Requires newer -Znext-solver than current nightly (1.95.0-nightly 2026-02-12).
 traits/next-solver/coercion/unfulfilled-unsize-coercion-recursion-limit.rs
+traits/next-solver/opaques/eventually-constrained-region.rs
+
+# Upstream ICE in borrowck (not tuffy bug).
+generic-const-items/type-const-nested-assoc-const.rs
+
+# Requires unstable feature final_associated_functions (not in current nightly).
+traits/final/dyn-compat.rs
+traits/final/works.rs
 
 # Compilation failures (layout, coroutine, import, stdlib features not yet supported).
 coroutine/uninhabited-field.rs
