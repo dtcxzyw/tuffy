@@ -21,7 +21,10 @@ extern crate rustc_symbol_mangling;
 mod mir_to_ir;
 
 use std::any::Any;
+use std::collections::HashSet;
 use std::fs;
+
+use rustc_middle::ty::Instance;
 
 use rustc_codegen_ssa::traits::CodegenBackend;
 use rustc_codegen_ssa::{CodegenResults, CompiledModule, CrateInfo, ModuleKind, TargetConfig};
@@ -74,6 +77,8 @@ impl CodegenBackend for TuffyCodegenBackend {
         let dump_ir = tcx.sess.opts.cg.llvm_args.iter().any(|a| a == "dump-ir");
         let cgus = tcx.collect_and_partition_mono_items(()).codegen_units;
         let mut modules = Vec::new();
+        let mut compiled_symbols: HashSet<String> = HashSet::new();
+        let mut pending_instances: Vec<Instance<'tcx>> = Vec::new();
 
         for cgu in cgus {
             let cgu_name = cgu.name().to_string();
@@ -90,8 +95,10 @@ impl CodegenBackend for TuffyCodegenBackend {
                     if Some(instance.def_id()) == tcx.lang_items().start_fn() {
                         continue;
                     }
+                    compiled_symbols.insert(tcx.symbol_name(*instance).name.to_string());
                     let result_opt = mir_to_ir::translate_function(tcx, *instance, &session);
                     if let Some(result) = result_opt {
+                        pending_instances.extend(result.referenced_instances.iter().copied());
                         if dump_ir {
                             for (sym_id, data, _relocs) in &result.static_data {
                                 let name = result.symbols.resolve(*sym_id);
@@ -248,6 +255,97 @@ impl CodegenBackend for TuffyCodegenBackend {
                     links_from_incr_cache: vec![],
                 });
             }
+        }
+
+        // Fixpoint loop: compile #[inline] functions not collected as mono
+        // items but referenced by direct calls during translation.
+        let mut inline_funcs: Vec<CompiledFunction> = Vec::new();
+        let mut inline_static_data: Vec<StaticData> = Vec::new();
+        loop {
+            let batch: Vec<Instance<'tcx>> = pending_instances
+                .drain(..)
+                .filter(|inst| {
+                    let sym = tcx.symbol_name(*inst).name.to_string();
+                    compiled_symbols.insert(sym)
+                })
+                .collect();
+            if batch.is_empty() {
+                break;
+            }
+            for inst in batch {
+                let result = match mir_to_ir::translate_function(tcx, inst, &session) {
+                    Some(r) => r,
+                    None => continue,
+                };
+                pending_instances.extend(result.referenced_instances.iter().copied());
+                let vr =
+                    tuffy_ir::verifier::verify_function(&result.func, &result.symbols);
+                if !vr.is_ok() {
+                    let sym_name = tcx.symbol_name(inst).name.to_string();
+                    let is_noop = sym_name.contains("drop_in_place")
+                        || sym_name.contains("precondition_check");
+                    inline_funcs.push(CompiledFunction {
+                        name: sym_name,
+                        code: if is_noop { vec![0xC3] } else { vec![0x0F, 0x0B] },
+                        relocations: vec![],
+                        weak: true,
+                        local: false,
+                    });
+                    continue;
+                }
+                for (sym_id, data, relocs) in &result.static_data {
+                    inline_static_data.push(StaticData {
+                        name: result.symbols.resolve(*sym_id).to_string(),
+                        data: data.clone(),
+                        relocations: relocs
+                            .iter()
+                            .map(|(offset, sym)| tuffy_target::reloc::Relocation {
+                                offset: *offset,
+                                symbol: sym.clone(),
+                                kind: tuffy_target::reloc::RelocKind::Abs64,
+                            })
+                            .collect(),
+                    });
+                }
+                if let Some(mut cf) = session.compile_function(
+                    &result.func,
+                    &result.symbols,
+                    &result.abi_metadata,
+                ) {
+                    cf.weak = true;
+                    inline_funcs.push(cf);
+                } else {
+                    let sym_name = tcx.symbol_name(inst).name.to_string();
+                    let is_noop = sym_name.contains("drop_in_place")
+                        || sym_name.contains("precondition_check");
+                    inline_funcs.push(CompiledFunction {
+                        name: sym_name,
+                        code: if is_noop { vec![0xC3] } else { vec![0x0F, 0x0B] },
+                        relocations: vec![],
+                        weak: true,
+                        local: false,
+                    });
+                }
+            }
+        }
+        if !inline_funcs.is_empty() {
+            let object_data = session.emit_object(&inline_funcs, &inline_static_data);
+            let tmp = tcx.output_filenames(()).temp_path_for_cgu(
+                rustc_session::config::OutputType::Object,
+                "inline_shims",
+                tcx.sess.invocation_temp.as_deref(),
+            );
+            fs::write(&tmp, &object_data).expect("failed to write inline shims");
+            modules.push(CompiledModule {
+                name: "inline_shims".to_string(),
+                kind: ModuleKind::Regular,
+                object: Some(tmp),
+                dwarf_object: None,
+                bytecode: None,
+                assembly: None,
+                llvm_ir: None,
+                links_from_incr_cache: vec![],
+            });
         }
 
         // Generate allocator shim if needed.

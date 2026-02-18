@@ -31,7 +31,7 @@ use tuffy_ir::value::{BlockRef, ValueRef};
 type StaticDataVec = Vec<(SymbolId, Vec<u8>, Vec<(usize, String)>)>;
 
 /// Result of MIR → IR translation.
-pub struct TranslationResult {
+pub struct TranslationResult<'tcx> {
     pub func: Function,
     /// Interned symbol table shared across the codegen unit.
     pub symbols: SymbolTable,
@@ -39,6 +39,9 @@ pub struct TranslationResult {
     pub static_data: StaticDataVec,
     /// Target-specific ABI metadata (e.g., secondary return register info).
     pub abi_metadata: AbiMetadataBox,
+    /// Instances referenced by direct calls during translation.
+    /// Used to compile `#[inline]` functions not collected as mono items.
+    pub referenced_instances: Vec<Instance<'tcx>>,
 }
 
 /// Translate a single MIR function instance to tuffy IR.
@@ -46,10 +49,19 @@ pub fn translate_function<'tcx>(
     tcx: TyCtxt<'tcx>,
     instance: Instance<'tcx>,
     session: &CodegenSession,
-) -> Option<TranslationResult> {
+) -> Option<TranslationResult<'tcx>> {
     // Skip partially substituted polymorphic instances — the symbol mangler
     // will panic if generic parameters are still present.
     if instance.args.has_non_region_param() {
+        return None;
+    }
+
+    // Cross-crate items only have MIR available if they are #[inline].
+    // Non-inline external functions are already compiled in the rlib.
+    if let ty::InstanceKind::Item(def_id) = instance.def
+        && !def_id.is_local()
+        && !tcx.is_mir_available(def_id)
+    {
         return None;
     }
 
@@ -184,6 +196,7 @@ pub fn translate_function<'tcx>(
         use_sret,
         current_mem: initial_mem,
         cast_fat_meta: FatLocalMap::new(),
+        referenced_instances: Vec::new(),
     };
 
     // Emit params into the entry block.
@@ -463,6 +476,7 @@ pub fn translate_function<'tcx>(
         symbols,
         static_data,
         abi_metadata,
+        referenced_instances,
         ..
     } = ctx;
 
@@ -471,6 +485,7 @@ pub fn translate_function<'tcx>(
         symbols,
         static_data,
         abi_metadata,
+        referenced_instances,
     })
 }
 
@@ -768,6 +783,8 @@ struct TranslationCtx<'a, 'tcx> {
     /// Only consulted by PtrMetadata — does NOT propagate through
     /// Use/Copy chains like fat_locals does.
     cast_fat_meta: FatLocalMap,
+    /// Instances referenced by direct calls, for on-demand compilation.
+    referenced_instances: Vec<Instance<'tcx>>,
 }
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
@@ -2893,6 +2910,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let callee_target = resolved.target;
         let needs_caller_location = resolved.requires_caller_location;
         let needs_self_deref = resolved.needs_self_deref;
+        if let Some(inst) = resolved.resolved_instance {
+            self.referenced_instances.push(inst);
+        }
 
         // Skip LLVM intrinsics (e.g. llvm.x86.sse2.pause from spin_loop).
         // These are target-specific hints with no semantic effect.
@@ -5178,7 +5198,7 @@ enum CallTarget {
 }
 
 /// Result of resolving a call target, including caller-location metadata.
-struct ResolvedCall {
+struct ResolvedCall<'tcx> {
     target: Option<CallTarget>,
     /// True if the callee has `#[track_caller]` and expects an implicit
     /// `&Location` as the last ABI argument.
@@ -5189,6 +5209,9 @@ struct ResolvedCall {
     /// passes `&mut &mut Formatter` but the resolved callee expects
     /// `&mut Formatter`, so the first argument needs a dereference.
     needs_self_deref: bool,
+    /// The resolved Instance, if available. Used to compile `#[inline]`
+    /// functions not collected as mono items.
+    resolved_instance: Option<Instance<'tcx>>,
 }
 
 /// Resolve the callee symbol name from a Call terminator's function operand.
@@ -5197,7 +5220,7 @@ fn resolve_call_target<'tcx>(
     func_op: &Operand<'tcx>,
     caller: Instance<'tcx>,
     mir: &mir::Body<'tcx>,
-) -> ResolvedCall {
+) -> ResolvedCall<'tcx> {
     let ty = match func_op {
         Operand::Constant(c) => c.ty(),
         Operand::Copy(place) | Operand::Move(place) => {
@@ -5211,6 +5234,7 @@ fn resolve_call_target<'tcx>(
                 target: None,
                 requires_caller_location: false,
                 needs_self_deref: false,
+                resolved_instance: None,
             };
         }
     };
@@ -5232,6 +5256,7 @@ fn resolve_call_target<'tcx>(
                         target: Some(CallTarget::Direct(libc_sym.to_string())),
                         requires_caller_location: false,
                         needs_self_deref: false,
+                        resolved_instance: None,
                     };
                 }
             }
@@ -5240,6 +5265,7 @@ fn resolve_call_target<'tcx>(
                     target: None,
                     requires_caller_location: false,
                     needs_self_deref: false,
+                    resolved_instance: None,
                 };
             }
             let instance =
@@ -5253,6 +5279,7 @@ fn resolve_call_target<'tcx>(
                         target: None,
                         requires_caller_location: false,
                         needs_self_deref: false,
+                        resolved_instance: None,
                     };
                 }
             };
@@ -5327,6 +5354,7 @@ fn resolve_call_target<'tcx>(
                     target: Some(CallTarget::Virtual(idx)),
                     requires_caller_location: needs_location,
                     needs_self_deref: false,
+                    resolved_instance: None,
                 };
             }
             if instance.args.has_non_region_param() {
@@ -5334,6 +5362,7 @@ fn resolve_call_target<'tcx>(
                     target: None,
                     requires_caller_location: needs_location,
                     needs_self_deref: false,
+                    resolved_instance: None,
                 };
             }
             ResolvedCall {
@@ -5342,12 +5371,14 @@ fn resolve_call_target<'tcx>(
                 )),
                 requires_caller_location: needs_location,
                 needs_self_deref,
+                resolved_instance: Some(instance),
             }
         }
         _ => ResolvedCall {
             target: None,
             requires_caller_location: false,
             needs_self_deref: false,
+            resolved_instance: None,
         },
     }
 }
