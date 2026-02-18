@@ -80,6 +80,11 @@ jobs:
           chmod +x rustc_codegen_tuffy/tests/run-ui-tests.sh
           rustc_codegen_tuffy/tests/run-ui-tests.sh
 
+      - name: Run run-pass tests
+        run: |
+          chmod +x rustc_codegen_tuffy/tests/run-pass-tests.sh
+          rustc_codegen_tuffy/tests/run-pass-tests.sh
+
       - name: Run doctests
         run: |
           chmod +x rustc_codegen_tuffy/tests/run-doctest.sh
