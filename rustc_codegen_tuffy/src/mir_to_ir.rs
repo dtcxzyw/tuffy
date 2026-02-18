@@ -2353,6 +2353,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 size,
                                 &mut self.symbols,
                                 &mut self.static_data,
+                                &mut self.referenced_instances,
                             );
                             self.static_data.push((sym_id, bytes, relocs));
                             return Some(self.builder.symbol_addr(sym_id, Origin::synthetic()));
@@ -4329,6 +4330,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 &mut self.symbols,
                 &mut self.static_data,
                 &mut self.current_mem,
+                &mut self.referenced_instances,
             ),
             Operand::RuntimeChecks(_) => {
                 // UbChecks / ContractChecks / OverflowChecks: emit false (0)
@@ -4390,6 +4392,7 @@ fn translate_const<'tcx>(
     symbols: &mut SymbolTable,
     static_data: &mut StaticDataVec,
     current_mem: &mut ValueRef,
+    referenced_instances: &mut Vec<Instance<'tcx>>,
 ) -> Option<ValueRef> {
     // Monomorphize the constant using the instance's substitutions so that
     // associated type projections (e.g. <B as Flags>::Bits) are resolved
@@ -4429,7 +4432,7 @@ fn translate_const<'tcx>(
                     );
                     let sym_id = symbols.intern(&sym);
                     let relocs =
-                        extract_alloc_relocs(tcx, alloc, offset, size, symbols, static_data);
+                        extract_alloc_relocs(tcx, alloc, offset, size, symbols, static_data, referenced_instances);
                     static_data.push((sym_id, bytes, relocs));
                     let base = builder.symbol_addr(sym_id, Origin::synthetic());
                     Some(base)
@@ -4470,7 +4473,7 @@ fn translate_const<'tcx>(
                         let sym_id = symbols.intern(&sym);
 
                         let relocs =
-                            extract_alloc_relocs(tcx, inner, 0, size, symbols, static_data);
+                            extract_alloc_relocs(tcx, inner, 0, size, symbols, static_data, referenced_instances);
 
                         static_data.push((sym_id, bytes, relocs));
                         let base = builder.symbol_addr(sym_id, Origin::synthetic());
@@ -4512,7 +4515,7 @@ fn translate_const<'tcx>(
                 );
                 let sym_id = symbols.intern(&sym);
                 let relocs =
-                    extract_alloc_relocs(tcx, inner, byte_offset, size, symbols, static_data);
+                    extract_alloc_relocs(tcx, inner, byte_offset, size, symbols, static_data, referenced_instances);
                 static_data.push((sym_id, bytes, relocs));
                 let base = builder.symbol_addr(sym_id, Origin::synthetic());
 
@@ -4555,6 +4558,7 @@ fn extract_alloc_relocs<'tcx>(
     byte_len: usize,
     symbols: &mut SymbolTable,
     static_data: &mut StaticDataVec,
+    referenced_instances: &mut Vec<Instance<'tcx>>,
 ) -> Vec<(usize, String)> {
     let mut relocs = Vec::new();
     for (offset, prov) in alloc.provenance().ptrs().iter() {
@@ -4569,6 +4573,7 @@ fn extract_alloc_relocs<'tcx>(
             rustc_middle::mir::interpret::GlobalAlloc::Function { instance } => {
                 let fn_sym = tcx.symbol_name(instance).name.to_string();
                 relocs.push((rel_offset, fn_sym));
+                referenced_instances.push(instance);
             }
             rustc_middle::mir::interpret::GlobalAlloc::Static(def_id) => {
                 let instance = Instance::mono(tcx, def_id);
@@ -4586,7 +4591,7 @@ fn extract_alloc_relocs<'tcx>(
                 );
                 let sym_id = symbols.intern(&sym);
                 let nested_relocs =
-                    extract_alloc_relocs(tcx, inner, 0, inner.len(), symbols, static_data);
+                    extract_alloc_relocs(tcx, inner, 0, inner.len(), symbols, static_data, referenced_instances);
                 static_data.push((sym_id, bytes, nested_relocs));
                 relocs.push((rel_offset, symbols.resolve(sym_id).to_string()));
             }
@@ -4609,7 +4614,7 @@ fn extract_alloc_relocs<'tcx>(
                         );
                         let sym_id = symbols.intern(&sym);
                         let nested_relocs =
-                            extract_alloc_relocs(tcx, inner, 0, inner.len(), symbols, static_data);
+                            extract_alloc_relocs(tcx, inner, 0, inner.len(), symbols, static_data, referenced_instances);
                         static_data.push((sym_id, bytes, nested_relocs));
                         relocs.push((rel_offset, symbols.resolve(sym_id).to_string()));
                     }

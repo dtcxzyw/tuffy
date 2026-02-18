@@ -241,7 +241,7 @@ impl CodegenBackend for TuffyCodegenBackend {
                     let bytes = inner
                         .inspect_with_uninit_and_ptr_outside_interpreter(0..inner.len())
                         .to_vec();
-                    let relocs = collect_alloc_relocs(tcx, inner, &mut all_static_data);
+                    let relocs = collect_alloc_relocs(tcx, inner, &mut all_static_data, &mut pending_instances);
                     all_static_data.push(StaticData {
                         name: sym_name,
                         data: bytes,
@@ -527,6 +527,7 @@ fn collect_alloc_relocs<'tcx>(
     tcx: TyCtxt<'tcx>,
     alloc: &rustc_middle::mir::interpret::Allocation,
     static_data: &mut Vec<StaticData>,
+    referenced_instances: &mut Vec<Instance<'tcx>>,
 ) -> Vec<tuffy_target::reloc::Relocation> {
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -537,6 +538,7 @@ fn collect_alloc_relocs<'tcx>(
         let alloc_id = prov.alloc_id();
         let sym = match tcx.global_alloc(alloc_id) {
             GlobalAlloc::Function { instance } => {
+                referenced_instances.push(instance);
                 tcx.symbol_name(instance).name.to_string()
             }
             GlobalAlloc::Static(def_id) => {
@@ -552,7 +554,7 @@ fn collect_alloc_relocs<'tcx>(
                     ".Lstatic.{}",
                     COUNTER.fetch_add(1, Ordering::Relaxed)
                 );
-                let nested_relocs = collect_alloc_relocs(tcx, inner, static_data);
+                let nested_relocs = collect_alloc_relocs(tcx, inner, static_data, referenced_instances);
                 static_data.push(StaticData {
                     name: name.clone(),
                     data: bytes,
@@ -581,7 +583,7 @@ fn collect_alloc_relocs<'tcx>(
                             COUNTER.fetch_add(1, Ordering::Relaxed)
                         );
                         let nested_relocs =
-                            collect_alloc_relocs(tcx, inner, static_data);
+                            collect_alloc_relocs(tcx, inner, static_data, referenced_instances);
                         static_data.push(StaticData {
                             name: name.clone(),
                             data: bytes,
