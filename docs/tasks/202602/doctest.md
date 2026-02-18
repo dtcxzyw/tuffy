@@ -18,22 +18,22 @@ Extracted 4025 doctests from `scratch/rust/library/`.
 
 | Category | Count | % |
 |----------|------:|----:|
-| Pass (compiled) | 3010 | 74.8 |
+| Pass (compiled) | 3027 | 75.2 |
 | Skip (rustc errors) | 990 | 24.6 |
-| Link fail (tuffy) | 25 | 0.6 |
+| Link fail (tuffy) | 4 | 0.1 |
+| Other (extraction bugs, ARM) | 4 | 0.1 |
 
-### Top linker failure causes
+### Remaining linker failures
 
-- ~21 — `<&T as Debug>::fmt` trait impl methods from vtables in inline functions
-- ~2 — `drop_in_place` for complex types (vtable-related)
-- ~2 — miscellaneous (stdarch ARM tests, keyword_docs)
+- 2 — complex `drop_in_place`/sort monomorphizations not compiled
+- 2 — stdarch ARM-specific tests (not applicable on x86)
 
 ## Subtasks
 
 - [x] Write doctest extraction and compilation script (`tests/run-doctest.sh`)
 - [x] Fix `llvm.x86.sse2.pause` — skip LLVM intrinsic calls
 - [x] Fix hashbrown `RawIterRange` — compile #[inline] functions via fixpoint loop
-- [ ] Fix `<&T as Debug>::fmt` vtable references from inline functions
+- [x] Fix `<&T as Debug>::fmt` vtable references from inline functions
 - [x] Fix static variable codegen (emit MonoItem::Static + weak allocator shims)
 - [ ] Add `--run` mode validation (execute compiled doctests)
 
