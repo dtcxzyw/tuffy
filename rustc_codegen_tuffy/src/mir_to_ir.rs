@@ -2669,6 +2669,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         }
                     } else {
                         let drop_instance = ty::Instance::resolve_drop_in_place(self.tcx, drop_ty);
+                        self.referenced_instances.push(drop_instance);
                         if !drop_instance.args.has_non_region_param() {
                             let sym_name = self.tcx.symbol_name(drop_instance).name.to_string();
                             let sym_id = self.symbols.intern(&sym_name);

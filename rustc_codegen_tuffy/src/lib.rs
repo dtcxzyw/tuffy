@@ -290,7 +290,19 @@ impl CodegenBackend for TuffyCodegenBackend {
             for inst in batch {
                 let result = match mir_to_ir::translate_function(tcx, inst, &session) {
                     Some(r) => r,
-                    None => continue,
+                    None => {
+                        let sym_name = tcx.symbol_name(inst).name.to_string();
+                        let is_noop = sym_name.contains("drop_in_place")
+                            || sym_name.contains("precondition_check");
+                        inline_funcs.push(CompiledFunction {
+                            name: sym_name,
+                            code: if is_noop { vec![0xC3] } else { vec![0x0F, 0x0B] },
+                            relocations: vec![],
+                            weak: true,
+                            local: false,
+                        });
+                        continue;
+                    }
                 };
                 pending_instances.extend(result.referenced_instances.iter().copied());
                 let vr =
