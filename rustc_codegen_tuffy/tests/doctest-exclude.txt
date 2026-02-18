@@ -1,0 +1,14 @@
+# Doctests excluded from tuffy codegen backend testing.
+# These fail due to extraction bugs, ARM-specific code, or rustc issues.
+#
+# Format: one doctest name per line. Lines starting with # are comments.
+
+# Extraction bugs (prose/grammar extracted as Rust code)
+core_src_num_dec2flt_mod_0
+core_src_num_uint_macros_26
+core_src_num_uint_macros_28
+std_src_keyword_docs_69
+
+# ARM-specific stdarch tests (not applicable on x86)
+stdarch_crates_stdarch-gen-arm_src_big_endian_1
+stdarch_crates_stdarch-gen-arm_src_load_store_tests_0

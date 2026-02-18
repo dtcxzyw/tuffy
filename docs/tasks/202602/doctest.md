@@ -20,14 +20,15 @@ Extracted 4025 doctests from `scratch/rust/library/`.
 |----------|------:|----:|
 | Pass (compiled) | 3029 | 75.3 |
 | Skip (rustc errors) | 990 | 24.6 |
-| Link fail (tuffy) | 0 | 0.0 |
-| Other (extraction bugs, ARM, rustc parse) | 6 | 0.1 |
+| Excluded (non-tuffy) | 6 | 0.1 |
+| Fail | 0 | 0.0 |
 
-### Non-tuffy failures
+100% pass rate on non-excluded, non-skipped doctests (3029/3029).
 
-- 3 — extraction bugs (prose/grammar extracted as Rust code)
-- 2 — stdarch ARM-specific tests (not applicable on x86)
-- 1 — rustc edition parse error (anonymous parameters)
+6 known non-tuffy failures excluded via `tests/doctest-exclude.txt`:
+- 3 extraction bugs (prose/grammar extracted as Rust code)
+- 2 stdarch ARM-specific tests (not applicable on x86)
+- 1 rustc edition parse error (anonymous parameters)
 
 ## Subtasks
 

@@ -162,12 +162,30 @@ echo "Total doctests: $TOTAL"
 PASS=0
 FAIL=0
 SKIP=0
+EXCLUDED=0
 ERRORS=""
+
+# Load exclusion list
+EXCLUDE_FILE="$SCRIPT_DIR/doctest-exclude.txt"
+declare -A doctest_excluded
+if [[ -f "$EXCLUDE_FILE" ]]; then
+    while IFS= read -r line; do
+        line="${line%%#*}"
+        line="${line// /}"
+        [[ -z "$line" ]] && continue
+        doctest_excluded["$line"]=1
+    done < "$EXCLUDE_FILE"
+fi
 
 echo "=== Compiling doctests with tuffy ==="
 for src in "$OUTDIR/src/"*.rs; do
     [[ "$(basename "$src")" == "manifest.json" ]] && continue
     name="$(basename "$src" .rs)"
+
+    if [[ "${doctest_excluded[$name]+_}" ]]; then
+        EXCLUDED=$((EXCLUDED + 1))
+        continue
+    fi
     bin="$OUTDIR/bin/$name"
     log="$OUTDIR/logs/$name.log"
 
@@ -204,6 +222,7 @@ echo "=== Results ==="
 echo "Pass:  $PASS"
 echo "Fail:  $FAIL"
 echo "Skip:  $SKIP (rustc compile errors, not tuffy)"
+echo "Excluded: $EXCLUDED (known non-tuffy failures)"
 echo "Total: $TOTAL"
 if [[ -n "$ERRORS" ]]; then
     echo ""
