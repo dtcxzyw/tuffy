@@ -2894,6 +2894,22 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let needs_caller_location = resolved.requires_caller_location;
         let needs_self_deref = resolved.needs_self_deref;
 
+        // Skip LLVM intrinsics (e.g. llvm.x86.sse2.pause from spin_loop).
+        // These are target-specific hints with no semantic effect.
+        if let Some(CallTarget::Direct(ref sym)) = callee_target
+            && sym.starts_with("llvm.")
+        {
+            if let Some(target) = target {
+                let target_block = self.block_map.get(*target);
+                self.builder.br(
+                    target_block,
+                    vec![self.current_mem.into()],
+                    Origin::synthetic(),
+                );
+            }
+            return;
+        }
+
         // For virtual dispatch, extract the vtable pointer from the first
         // argument (a fat pointer: data_ptr + vtable_ptr) and load the
         // function pointer from the vtable before processing arguments.
