@@ -214,6 +214,7 @@ parser/issues/issue-63115-range-pat-interpolated.rs
 pattern/inc-range-pat.rs
 pattern/issue-110508.rs
 pattern/mut_preserve_binding_mode_2024.rs
+privacy/pub-extern-privacy.rs
 privacy/use-in-impl-scope-12729.rs
 proc-macro/allowed-signatures.rs
 proc-macro/attr-stmt-expr-rpass.rs

@@ -11,8 +11,20 @@ Improve the tuffy codegen backend to pass a larger portion of the rustc UI test 
 
 Failures cluster into a small number of root causes in `mir_to_ir.rs` and `isel.rs`. Each subtask addresses one category.
 
-Test runner script: `scratch/run_ui_tests.sh`
+Test runner script: `rustc_codegen_tuffy/tests/run-ui-tests.sh`
 Test source: `scratch/rust/tests/ui/` (shallow clone of rust-lang/rust at efc9e1b50)
+
+## Current Results (2026-02-18)
+
+| Category | Count | % |
+|----------|------:|----:|
+| Pass | 5391 | 28.4 |
+| Skip | 13610 | 71.6 |
+| Fail | 0 | 0.0 |
+
+100% pass rate on non-skipped tests (5391/5391).
+
+One rustc nightly ICE (`privacy/pub-extern-privacy.rs`) added to exclusion list — this is a rustc bug, not a tuffy issue.
 
 ## Subtasks
 
