@@ -272,6 +272,19 @@ impl CodegenBackend for TuffyCodegenBackend {
             }
         }
 
+        // Pre-register allocator shim symbols so the fixpoint loop does
+        // not emit ud2 stubs that override the real forwarding stubs.
+        for name in [
+            "__rust_alloc",
+            "__rust_dealloc",
+            "__rust_realloc",
+            "__rust_alloc_zeroed",
+            "__rust_no_alloc_shim_is_unstable_v2",
+        ] {
+            compiled_symbols
+                .insert(rustc_symbol_mangling::mangle_internal_symbol(tcx, name));
+        }
+
         // Fixpoint loop: compile #[inline] functions not collected as mono
         // items but referenced by direct calls during translation.
         let mut inline_funcs: Vec<CompiledFunction> = Vec::new();

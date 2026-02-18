@@ -3764,6 +3764,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             .ok()
                             .flatten()?;
                             let sym_name = self.tcx.symbol_name(resolved).name.to_string();
+                            self.referenced_instances.push(resolved);
                             let sym_id = self.symbols.intern(&sym_name);
                             Some(self.builder.symbol_addr(sym_id, Origin::synthetic()))
                         } else {
@@ -4453,6 +4454,7 @@ fn translate_const<'tcx>(
                 rustc_middle::mir::interpret::GlobalAlloc::Function { instance } => {
                     let sym_name = tcx.symbol_name(instance).name.to_string();
                     let sym_id = symbols.intern(&sym_name);
+                    referenced_instances.push(instance);
                     Some(builder.symbol_addr(sym_id, Origin::synthetic()))
                 }
                 rustc_middle::mir::interpret::GlobalAlloc::VTable(vtable_ty, vtable_trait_ref) => {
