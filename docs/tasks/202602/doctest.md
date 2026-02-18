@@ -14,19 +14,19 @@ and compiled with `rustc -Z codegen-backend=tuffy`.
 
 ## Current Results (2026-02-18)
 
-Extracted 4026 doctests from `scratch/rust/library/`.
+Extracted 4025 doctests from `scratch/rust/library/`.
 
 | Category | Count | % |
 |----------|------:|----:|
-| Pass (compiled) | 2986 | 74.2 |
-| Skip (rustc errors) | 996 | 24.7 |
-| Link fail (tuffy) | 43 | 1.1 |
-| Other | 1 | 0.0 |
+| Pass (compiled) | 3010 | 74.8 |
+| Skip (rustc errors) | 990 | 24.6 |
+| Link fail (tuffy) | 25 | 0.6 |
 
 ### Top linker failure causes
 
-- ~17 — `<&T as Debug>::fmt` trait impl methods from vtables in inline functions
-- ~26 — static/thread-local symbols not emitted
+- ~21 — `<&T as Debug>::fmt` trait impl methods from vtables in inline functions
+- ~2 — `drop_in_place` for complex types (vtable-related)
+- ~2 — miscellaneous (stdarch ARM tests, keyword_docs)
 
 ## Subtasks
 
@@ -34,7 +34,7 @@ Extracted 4026 doctests from `scratch/rust/library/`.
 - [x] Fix `llvm.x86.sse2.pause` — skip LLVM intrinsic calls
 - [x] Fix hashbrown `RawIterRange` — compile #[inline] functions via fixpoint loop
 - [ ] Fix `<&T as Debug>::fmt` vtable references from inline functions
-- [ ] Fix static/thread-local variable codegen
+- [x] Fix static variable codegen (emit MonoItem::Static + weak allocator shims)
 - [ ] Add `--run` mode validation (execute compiled doctests)
 
 ## Affected Modules
