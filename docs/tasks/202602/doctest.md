@@ -14,29 +14,26 @@ and compiled with `rustc -Z codegen-backend=tuffy`.
 
 ## Current Results (2026-02-18)
 
-Extracted 4025 doctests from `scratch/rust/library/`.
+Extracted 4026 doctests from `scratch/rust/library/`.
 
 | Category | Count | % |
 |----------|------:|----:|
-| Pass (compiled) | 2863 | 71.1 |
-| Skip (rustc errors) | 990 | 24.6 |
-| Link fail (tuffy) | 166 | 4.1 |
-| Other | 6 | 0.1 |
+| Pass (compiled) | 2986 | 74.2 |
+| Skip (rustc errors) | 996 | 24.7 |
+| Link fail (tuffy) | 43 | 1.1 |
+| Other | 1 | 0.0 |
 
 ### Top linker failure causes
 
-- 38 — `llvm.x86.sse2.pause` (spin_loop intrinsic not implemented)
-- ~74 — hashbrown `RawIterRange` (HashMap generic monomorphization)
-- 4 — `llvm.x86.sse42.pcmpistri128` (SSE4.2 intrinsic)
-- ~8 — static/thread-local symbols not emitted
-- ~3 — `conjure_zst` missing
+- ~17 — `<&T as Debug>::fmt` trait impl methods from vtables in inline functions
+- ~26 — static/thread-local symbols not emitted
 
 ## Subtasks
 
 - [x] Write doctest extraction and compilation script (`tests/run-doctest.sh`)
-- [ ] Fix `llvm.x86.sse2.pause` — emit `pause` instruction for spin_loop hint
-- [ ] Fix hashbrown `RawIterRange` monomorphization failures
-- [ ] Fix duplicate `__rust_alloc` symbol emission
+- [x] Fix `llvm.x86.sse2.pause` — skip LLVM intrinsic calls
+- [x] Fix hashbrown `RawIterRange` — compile #[inline] functions via fixpoint loop
+- [ ] Fix `<&T as Debug>::fmt` vtable references from inline functions
 - [ ] Fix static/thread-local variable codegen
 - [ ] Add `--run` mode validation (execute compiled doctests)
 
