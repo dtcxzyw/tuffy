@@ -73,7 +73,7 @@ pub fn translate_function<'tcx>(
     // Must be computed before building params so the hidden sret pointer
     // is included in the parameter list.
     let use_sret = needs_indirect_return(tcx, ret_mir_ty);
-    let ret_size = type_size(tcx, ret_mir_ty);
+    let _ret_size = type_size(tcx, ret_mir_ty);
 
     // When using sret, the ABI return value is the sret pointer (Ptr),
     // not the logical Rust return type.
@@ -196,8 +196,8 @@ pub fn translate_function<'tcx>(
         let mut assign_bb: Vec<Option<BasicBlock>> = vec![None; mir.local_decls.len()];
         for (bb, bb_data) in mir.basic_blocks.iter_enumerated() {
             for stmt in &bb_data.statements {
-                if let StatementKind::Assign(box (place, _)) = &stmt.kind {
-                    if place.projection.is_empty() {
+                if let StatementKind::Assign(box (place, _)) = &stmt.kind
+                    && place.projection.is_empty() {
                         let local = place.local;
                         // Skip function params (handled by translate_params).
                         // _0 (return place) is only skipped when it already has
@@ -227,15 +227,15 @@ pub fn translate_function<'tcx>(
                             assign_bb[local.as_usize()] = Some(bb);
                         }
                     }
-                }
             }
             // Also check call terminators — they assign to a destination local.
-            if let Some(terminator) = &bb_data.terminator {
-                if let TerminatorKind::Call { destination, .. } = &terminator.kind {
-                    if destination.projection.is_empty() {
+            if let Some(terminator) = &bb_data.terminator
+                && let TerminatorKind::Call { destination, .. } = &terminator.kind
+                    && destination.projection.is_empty() {
                         let local = destination.local;
-                        if local.as_usize() > 0 && local.as_usize() <= mir.arg_count {
-                        } else if local.as_usize() == 0 && ctx.stack_locals.is_stack(local) {
+                        if (local.as_usize() > 0 && local.as_usize() <= mir.arg_count)
+                            || (local.as_usize() == 0 && ctx.stack_locals.is_stack(local))
+                        {
                         } else {
                             let ty = monomorphize(mir.local_decls[local].ty);
                             let size = type_size(tcx, ty).unwrap_or(0);
@@ -255,8 +255,6 @@ pub fn translate_function<'tcx>(
                             }
                         }
                     }
-                }
-            }
         }
 
         // Promote locals used in a block that precedes their assignment
@@ -324,8 +322,8 @@ pub fn translate_function<'tcx>(
                 if ctx.stack_locals.is_stack(local) {
                     continue;
                 }
-                if let Some(def_bb) = assign_bb[local.as_usize()] {
-                    if bb < def_bb {
+                if let Some(def_bb) = assign_bb[local.as_usize()]
+                    && bb < def_bb {
                         let ty = monomorphize(mir.local_decls[local].ty);
                         let size = type_size(tcx, ty).unwrap_or(0);
                         if size > 0 {
@@ -336,7 +334,6 @@ pub fn translate_function<'tcx>(
                             ctx.stack_locals.mark(local);
                         }
                     }
-                }
             }
         }
     }
@@ -806,6 +803,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     /// Builds two data blobs in `.rodata`:
     ///   1. The file-name string bytes.
     ///   2. A 24-byte `Location` struct: `{ file_ptr, file_len, line, col }`.
+    ///
     /// Returns a `symbol_addr` pointing to the Location blob.
     fn make_caller_location(&mut self, source_info: mir::SourceInfo) -> ValueRef {
         let tcx = self.tcx;
@@ -1167,8 +1165,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             let local_ty = self.monomorphize(self.mir.local_decls[place.local].ty);
             let is_checked_op = matches!(local_ty.kind(), ty::Tuple(fields)
                 if fields.len() == 2 && fields[1].is_bool());
-            if is_checked_op {
-                if let PlaceElem::Field(idx, _) = place.projection[0] {
+            if is_checked_op
+                && let PlaceElem::Field(idx, _) = place.projection[0] {
                     if idx.as_usize() == 0 {
                         return self.locals.get(place.local);
                     } else {
@@ -1176,7 +1174,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         return Some(self.builder.iconst(0, Origin::synthetic()));
                     }
                 }
-            }
         }
         let (addr, projected_ty) = self.translate_place_to_addr(place)?;
         let addr = self.coerce_to_ptr(addr);
@@ -1945,14 +1942,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // propagation through Use/Copy chains.
                 if let Rvalue::Cast(_, op, target_ty) = rvalue {
                     let target_ty_mono = self.monomorphize(*target_ty);
-                    if is_fat_ptr(target_ty_mono) {
-                        if let Operand::Copy(src) | Operand::Move(src) = op {
-                            if !src.projection.is_empty() {
+                    if is_fat_ptr(target_ty_mono)
+                        && let Operand::Copy(src) | Operand::Move(src) = op
+                            && !src.projection.is_empty() {
                                 let src_ty = src.ty(&self.mir.local_decls, self.tcx).ty;
                                 let src_ty = self.monomorphize(src_ty);
                                 let src_size = type_size(self.tcx, src_ty).unwrap_or(0);
-                                if src_size >= 16 && !is_fat_ptr(src_ty) {
-                                    if let Some((addr, _)) = self.translate_place_to_addr(src) {
+                                if src_size >= 16 && !is_fat_ptr(src_ty)
+                                    && let Some((addr, _)) = self.translate_place_to_addr(src) {
                                         let addr = self.coerce_to_ptr(addr);
                                         let off8 = self.builder.iconst(8, Origin::synthetic());
                                         let meta_addr = self.builder.ptradd(
@@ -1971,10 +1968,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         );
                                         self.cast_fat_meta.set(place.local, meta);
                                     }
-                                }
                             }
-                        }
-                    }
                 }
             }
             StatementKind::StorageLive(_) | StatementKind::StorageDead(_) | StatementKind::Nop => {}
@@ -2213,8 +2207,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // Indirect constant for fat pointer types (e.g. &[T]):
                 // the allocation contains [data_ptr (8 bytes) | len (8 bytes)].
                 // Extract the length from bytes 8..16.
-                if let Some(mir::ConstValue::Indirect { alloc_id, offset }) = resolved {
-                    if is_fat_ptr(const_ty) {
+                if let Some(mir::ConstValue::Indirect { alloc_id, offset }) = resolved
+                    && is_fat_ptr(const_ty) {
                         let alloc = self.tcx.global_alloc(alloc_id);
                         if let rustc_middle::mir::interpret::GlobalAlloc::Memory(mem_alloc) = alloc
                         {
@@ -2227,7 +2221,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             return Some(self.builder.iconst(len as i64, Origin::synthetic()));
                         }
                     }
-                }
                 None
             }
             // Use of a fat local: propagate the fat component.
@@ -2237,17 +2230,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // belongs to the struct itself (set by Aggregate), not to the
             // projected field — fall through to the projected-place path.
             Rvalue::Use(Operand::Copy(place) | Operand::Move(place)) => {
-                if place.projection.is_empty() {
-                    if let Some(fat) = self.fat_locals.get(place.local) {
+                if place.projection.is_empty()
+                    && let Some(fat) = self.fat_locals.get(place.local) {
                         return Some(fat);
                     }
-                }
                 // Check if the place resolves to a fat pointer type via projections.
                 if !place.projection.is_empty() {
                     let projected_ty = place.ty(&self.mir.local_decls, self.tcx).ty;
                     let projected_ty = self.monomorphize(projected_ty);
-                    if is_fat_ptr(projected_ty) {
-                        if let Some((addr, _)) = self.translate_place_to_addr(place) {
+                    if is_fat_ptr(projected_ty)
+                        && let Some((addr, _)) = self.translate_place_to_addr(place) {
                             let off8 = self.builder.iconst(8, Origin::synthetic());
                             let meta_addr = self.builder.ptradd(
                                 addr.into(),
@@ -2265,7 +2257,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             );
                             return Some(meta);
                         }
-                    }
                 }
                 None
             }
@@ -2275,13 +2266,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // type is itself a fat pointer.  Casts like *const [T] →
                 // *const T strip metadata and must NOT propagate.
                 let target_ty_mono = self.monomorphize(*target_ty);
-                if is_fat_ptr(target_ty_mono) {
-                    if let Operand::Copy(place) | Operand::Move(place) = op
+                if is_fat_ptr(target_ty_mono)
+                    && let Operand::Copy(place) | Operand::Move(place) = op
                         && let Some(fat) = self.fat_locals.get(place.local)
                     {
                         return Some(fat);
                     }
-                }
                 // For Unsize coercions to trait objects, generate the vtable pointer.
                 if let CastKind::PointerCoercion(pc, _) = cast_kind {
                     // Check if this is an Unsize coercion by examining the target type.
@@ -2369,11 +2359,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             _ if src_ty.is_box() => src_ty.boxed_ty().unwrap(),
                             _ => src_ty,
                         };
-                        if let ty::Array(_, len) = src_inner.kind() {
-                            if let Some(n) = len.try_to_target_usize(self.tcx) {
+                        if let ty::Array(_, len) = src_inner.kind()
+                            && let Some(n) = len.try_to_target_usize(self.tcx) {
                                 return Some(self.builder.iconst(n as i64, Origin::synthetic()));
                             }
-                        }
                     }
 
                     let _ = pc; // suppress unused warning
@@ -2467,7 +2456,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // Unit-returning or untranslatable return type: bare ret, no value.
                     self.builder
                         .ret(None, self.current_mem.into(), Origin::synthetic());
-                } else if type_size(self.tcx, ret_mir_ty).map_or(false, |s| s == 0) {
+                } else if type_size(self.tcx, ret_mir_ty) == Some(0) {
                     // Zero-sized return type: return a dummy value to satisfy the
                     // function signature (translate_ty maps ADTs to Int).
                     let dummy = self.builder.iconst(0, Origin::synthetic());
@@ -2800,8 +2789,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // If the destination is a stack local, the intrinsic set the
                 // local to the raw result value.  Store it into the stack slot
                 // and restore the local to point at the slot.
-                if let Some(slot) = saved_slot {
-                    if let Some(result_val) = self.locals.get(destination.local) {
+                if let Some(slot) = saved_slot
+                    && let Some(result_val) = self.locals.get(destination.local) {
                         let dest_ty = self.monomorphize(self.mir.local_decls[destination.local].ty);
                         let size = type_size(self.tcx, dest_ty).unwrap_or(8) as u32;
                         self.current_mem = self.builder.store(
@@ -2813,7 +2802,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         );
                         self.locals.set(destination.local, slot);
                     }
-                }
                 if let Some(target) = target {
                     let target_block = self.block_map.get(*target);
                     self.builder.br(
@@ -3211,8 +3199,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 ir_args.push(len_val.into());
                             } else if let Some(mir::ConstValue::Indirect { alloc_id, offset }) =
                                 resolved
-                            {
-                                if is_fat_ptr(const_ty) {
+                                && is_fat_ptr(const_ty) {
                                     let alloc = self.tcx.global_alloc(alloc_id);
                                     if let rustc_middle::mir::interpret::GlobalAlloc::Memory(
                                         mem_alloc,
@@ -3232,7 +3219,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         ir_args.push(len_val.into());
                                     }
                                 }
-                            }
                         }
                     }
                 }
@@ -3701,7 +3687,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 .add(l_op, byte_off_op, res_ann, Origin::synthetic())
                         }
                     }
-                    _ => return None,
                 };
                 Some(val)
             }
@@ -3757,9 +3742,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // pointer value, not the address of the source slot.
                     _ => {
                         let target_ty_mono = self.monomorphize(*target_ty);
-                        if is_fat_ptr(target_ty_mono) {
-                            if let Operand::Copy(src) | Operand::Move(src) = operand {
-                                if !src.projection.is_empty() {
+                        if is_fat_ptr(target_ty_mono)
+                            && let Operand::Copy(src) | Operand::Move(src) = operand
+                                && !src.projection.is_empty() {
                                     let src_ty = src.ty(&self.mir.local_decls, self.tcx).ty;
                                     let src_ty = self.monomorphize(src_ty);
                                     let src_size = type_size(self.tcx, src_ty).unwrap_or(0);
@@ -3776,8 +3761,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         ));
                                     }
                                 }
-                            }
-                        }
                         Some(val)
                     }
                 }
@@ -4151,20 +4134,18 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             ) => {
                 // Extract metadata (e.g., slice length) from a fat pointer.
                 // 1. Non-stack local with fat component tracked in fat_locals.
-                if place.projection.is_empty() {
-                    if let Some(len) = self.fat_locals.get(place.local) {
+                if place.projection.is_empty()
+                    && let Some(len) = self.fat_locals.get(place.local) {
                         return Some(len);
                     }
-                }
                 // 1b. Cast-to-fat metadata (e.g. NonNull<[T]> as *const [T]).
-                if place.projection.is_empty() {
-                    if let Some(len) = self.cast_fat_meta.get(place.local) {
+                if place.projection.is_empty()
+                    && let Some(len) = self.cast_fat_meta.get(place.local) {
                         return Some(len);
                     }
-                }
                 // 2. Stack local: load length from slot + 8.
-                if place.projection.is_empty() && self.stack_locals.is_stack(place.local) {
-                    if let Some(slot) = self.locals.get(place.local) {
+                if place.projection.is_empty() && self.stack_locals.is_stack(place.local)
+                    && let Some(slot) = self.locals.get(place.local) {
                         let off8 = self.builder.iconst(8, Origin::synthetic());
                         let len_addr =
                             self.builder
@@ -4178,11 +4159,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             Origin::synthetic(),
                         ));
                     }
-                }
                 // 3. Projected place (e.g. _s.field): compute the fat
                 //    pointer's address and load length from offset +8.
-                if !place.projection.is_empty() {
-                    if let Some((addr, _)) = self.translate_place_to_addr(place) {
+                if !place.projection.is_empty()
+                    && let Some((addr, _)) = self.translate_place_to_addr(place) {
                         let addr = self.coerce_to_ptr(addr);
                         let off8 = self.builder.iconst(8, Origin::synthetic());
                         let len_addr =
@@ -4197,7 +4177,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             Origin::synthetic(),
                         ));
                     }
-                }
                 None
             }
             Rvalue::UnaryOp(mir::UnOp::PtrMetadata, _) => None,
@@ -4279,8 +4258,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // A reference local (e.g. `&mut Iter`) may hold the address
                     // of a larger struct's stack slot; loading from that slot
                     // would read the struct's data instead of the pointer value.
-                    if self.stack_locals.is_stack(place.local) {
-                        if let Some(slot) = val {
+                    if self.stack_locals.is_stack(place.local)
+                        && let Some(slot) = val {
                             let ty = self.monomorphize(self.mir.local_decls[place.local].ty);
                             let size = type_size(self.tcx, ty).unwrap_or(8);
                             let slot_size = self.builder.stack_slot_size(slot);
@@ -4301,7 +4280,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 return Some(loaded);
                             }
                         }
-                    }
                     val
                 } else {
                     self.translate_place_to_value(place)
@@ -4705,6 +4683,7 @@ fn translate_const_slice<'tcx>(
 
 /// Handle compiler intrinsics inline during MIR translation.
 /// Returns true if the intrinsic was handled, false to fall through to normal call.
+#[allow(clippy::too_many_arguments)]
 fn translate_intrinsic<'tcx>(
     tcx: TyCtxt<'tcx>,
     name: &str,
@@ -5296,7 +5275,7 @@ fn resolve_call_target<'tcx>(
             );
             let instance = if is_trait_method && let Some(orig_self) = args.first() {
                 if let Some(orig_ty) = orig_self.as_type() {
-                    if let ty::Ref(_, inner_ty, _) = orig_ty.kind() {
+                    if let ty::Ref(_, _inner_ty, _) = orig_ty.kind() {
                         let impl_def_id = tcx.parent(instance.def_id());
                         let is_impl = matches!(
                             tcx.def_kind(impl_def_id),
