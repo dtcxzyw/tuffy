@@ -18,14 +18,10 @@ Extracted 4025 doctests from `scratch/rust/library/`.
 
 | Category | Count | % |
 |----------|------:|----:|
-| Pass (compiled) | 3028 | 75.2 |
+| Pass (compiled) | 3029 | 75.3 |
 | Skip (rustc errors) | 990 | 24.6 |
-| Link fail (tuffy) | 1 | 0.0 |
+| Link fail (tuffy) | 0 | 0.0 |
 | Other (extraction bugs, ARM, rustc parse) | 6 | 0.1 |
-
-### Remaining linker failures
-
-- 1 — `alloc_src_slice_3`: complex sort monomorphization (`partition_lomuto_branchless_cyclic` with `(String, u32)`) not compiled
 
 ### Non-tuffy failures
 
@@ -41,6 +37,8 @@ Extracted 4025 doctests from `scratch/rust/library/`.
 - [x] Fix `<&T as Debug>::fmt` vtable references from inline functions
 - [x] Fix static variable codegen (emit MonoItem::Static + weak allocator shims)
 - [x] Fix `drop_in_place` discovery (add drop instances to referenced_instances)
+- [x] Fix function pointer instance tracking (ReifyFnPointer + GlobalAlloc::Function constants)
+- [x] Fix allocator shim symbol collision with fixpoint loop stubs
 - [ ] Add `--run` mode validation (execute compiled doctests)
 
 ## Affected Modules
