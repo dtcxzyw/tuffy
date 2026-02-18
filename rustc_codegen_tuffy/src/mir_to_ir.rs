@@ -1999,17 +1999,30 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 use rustc_middle::mir::NonDivergingIntrinsic;
                 match &**intrinsic {
                     NonDivergingIntrinsic::CopyNonOverlapping(copy_info) => {
-                        // copy_nonoverlapping(src, dst, count) → memcpy(dst, src, count)
-                        // count is already in bytes (MIR lowering multiplies by elem size).
+                        // copy_nonoverlapping(src, dst, count) → memcpy(dst, src, count * sizeof(T))
+                        // count is in elements; we must multiply by the pointee size.
                         let src = self.translate_operand(&copy_info.src);
                         let dst = self.translate_operand(&copy_info.dst);
                         let count = self.translate_operand(&copy_info.count);
                         if let (Some(src_v), Some(dst_v), Some(count_v)) = (src, dst, count) {
+                            let src_ty = self.monomorphize(
+                                copy_info.src.ty(&self.mir.local_decls, self.tcx),
+                            );
+                            let pointee_size = src_ty
+                                .builtin_deref(true)
+                                .and_then(|t| type_size(self.tcx, t))
+                                .unwrap_or(1);
+                            let byte_count = if pointee_size <= 1 {
+                                count_v
+                            } else {
+                                let sz = self.builder.iconst(pointee_size as i64, Origin::synthetic());
+                                self.builder.mul(count_v.into(), sz.into(), None, Origin::synthetic())
+                            };
                             let sym_id = self.symbols.intern("memcpy");
                             let callee = self.builder.symbol_addr(sym_id, Origin::synthetic());
                             let (mem_out, _) = self.builder.call(
                                 callee.into(),
-                                vec![dst_v.into(), src_v.into(), count_v.into()],
+                                vec![dst_v.into(), src_v.into(), byte_count.into()],
                                 Type::Int,
                                 self.current_mem.into(),
                                 None,
