@@ -18,15 +18,20 @@ Extracted 4025 doctests from `scratch/rust/library/`.
 
 | Category | Count | % |
 |----------|------:|----:|
-| Pass (compiled) | 3027 | 75.2 |
+| Pass (compiled) | 3028 | 75.2 |
 | Skip (rustc errors) | 990 | 24.6 |
-| Link fail (tuffy) | 4 | 0.1 |
-| Other (extraction bugs, ARM) | 4 | 0.1 |
+| Link fail (tuffy) | 1 | 0.0 |
+| Other (extraction bugs, ARM, rustc parse) | 6 | 0.1 |
 
 ### Remaining linker failures
 
-- 2 — complex `drop_in_place`/sort monomorphizations not compiled
+- 1 — `alloc_src_slice_3`: complex sort monomorphization (`partition_lomuto_branchless_cyclic` with `(String, u32)`) not compiled
+
+### Non-tuffy failures
+
+- 3 — extraction bugs (prose/grammar extracted as Rust code)
 - 2 — stdarch ARM-specific tests (not applicable on x86)
+- 1 — rustc edition parse error (anonymous parameters)
 
 ## Subtasks
 
@@ -35,6 +40,7 @@ Extracted 4025 doctests from `scratch/rust/library/`.
 - [x] Fix hashbrown `RawIterRange` — compile #[inline] functions via fixpoint loop
 - [x] Fix `<&T as Debug>::fmt` vtable references from inline functions
 - [x] Fix static variable codegen (emit MonoItem::Static + weak allocator shims)
+- [x] Fix `drop_in_place` discovery (add drop instances to referenced_instances)
 - [ ] Add `--run` mode validation (execute compiled doctests)
 
 ## Affected Modules
