@@ -73,12 +73,17 @@ jobs:
       - name: Clone rustc UI tests
         run: |
           git clone --depth 1 --filter=blob:none --sparse https://github.com/rust-lang/rust.git scratch/rust
-          cd scratch/rust && git sparse-checkout set tests/ui
+          cd scratch/rust && git sparse-checkout set tests/ui library
 
       - name: Run UI tests
         run: |
           chmod +x rustc_codegen_tuffy/tests/run-ui-tests.sh
           rustc_codegen_tuffy/tests/run-ui-tests.sh
+
+      - name: Run doctests
+        run: |
+          chmod +x rustc_codegen_tuffy/tests/run-doctest.sh
+          rustc_codegen_tuffy/tests/run-doctest.sh scratch/rust/library
 
   lean:
     name: Lean 4 CI

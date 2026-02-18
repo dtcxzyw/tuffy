@@ -228,4 +228,5 @@ if [[ -n "$ERRORS" ]]; then
     echo ""
     echo "Failures:"
     echo -e "$ERRORS"
+    exit 1
 fi
