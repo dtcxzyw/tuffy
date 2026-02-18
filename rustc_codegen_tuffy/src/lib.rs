@@ -24,14 +24,13 @@ use std::any::Any;
 use std::collections::HashSet;
 use std::fs;
 
-use rustc_middle::ty::Instance;
-
 use rustc_codegen_ssa::traits::CodegenBackend;
 use rustc_codegen_ssa::{CodegenResults, CompiledModule, CrateInfo, ModuleKind, TargetConfig};
 use rustc_data_structures::fx::FxIndexMap;
 use rustc_middle::dep_graph::{WorkProduct, WorkProductId};
+use rustc_middle::mir::interpret::GlobalAlloc;
 use rustc_middle::mir::mono::MonoItem;
-use rustc_middle::ty::TyCtxt;
+use rustc_middle::ty::{Instance, TyCtxt};
 use rustc_session::Session;
 use rustc_session::config::OutputFilenames;
 use rustc_span::Symbol;
@@ -233,9 +232,25 @@ impl CodegenBackend for TuffyCodegenBackend {
                         });
                     }
                 }
+                if let MonoItem::Static(def_id) = mono_item
+                    && let Ok(alloc) = tcx.eval_static_initializer(*def_id)
+                {
+                    let instance = Instance::mono(tcx, *def_id);
+                    let sym_name = tcx.symbol_name(instance).name.to_string();
+                    let inner = alloc.inner();
+                    let bytes = inner
+                        .inspect_with_uninit_and_ptr_outside_interpreter(0..inner.len())
+                        .to_vec();
+                    let relocs = collect_alloc_relocs(tcx, inner, &mut all_static_data);
+                    all_static_data.push(StaticData {
+                        name: sym_name,
+                        data: bytes,
+                        relocations: relocs,
+                    });
+                }
             }
 
-            if !compiled_funcs.is_empty() {
+            if !compiled_funcs.is_empty() || !all_static_data.is_empty() {
                 let object_data = session.emit_object(&compiled_funcs, &all_static_data);
                 let tmp = tcx.output_filenames(()).temp_path_for_cgu(
                     rustc_session::config::OutputType::Object,
@@ -405,6 +420,7 @@ fn generate_allocator_module(tcx: TyCtxt<'_>, session: &CodegenSession) -> Optio
         |name: &str| -> String { rustc_symbol_mangling::mangle_internal_symbol(tcx, name) };
 
     // Generate forwarding stubs: each __rust_alloc* calls __rdl_alloc*.
+    // Stubs are weak so #[global_allocator] definitions take precedence.
     let alloc_pairs_raw = [
         ("__rust_alloc", "__rdl_alloc"),
         ("__rust_dealloc", "__rdl_dealloc"),
@@ -422,7 +438,10 @@ fn generate_allocator_module(tcx: TyCtxt<'_>, session: &CodegenSession) -> Optio
         .collect();
 
     let shim_marker = mangle("__rust_no_alloc_shim_is_unstable_v2");
-    let funcs = session.generate_allocator_stubs(&pairs_ref, &shim_marker);
+    let mut funcs = session.generate_allocator_stubs(&pairs_ref, &shim_marker);
+    for f in &mut funcs {
+        f.weak = true;
+    }
 
     let object_data = session.emit_object(&funcs, &[]);
 
@@ -500,4 +519,89 @@ fn generate_entry_point(tcx: TyCtxt<'_>, session: &CodegenSession) -> Option<Com
         llvm_ir: None,
         links_from_incr_cache: vec![],
     })
+}
+
+/// Extract relocations from an allocation, emitting nested memory
+/// allocations as additional `StaticData` entries.
+fn collect_alloc_relocs<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    alloc: &rustc_middle::mir::interpret::Allocation,
+    static_data: &mut Vec<StaticData>,
+) -> Vec<tuffy_target::reloc::Relocation> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    let mut relocs = Vec::new();
+    for (offset, prov) in alloc.provenance().ptrs().iter() {
+        let rel_offset = offset.bytes() as usize;
+        let alloc_id = prov.alloc_id();
+        let sym = match tcx.global_alloc(alloc_id) {
+            GlobalAlloc::Function { instance } => {
+                tcx.symbol_name(instance).name.to_string()
+            }
+            GlobalAlloc::Static(def_id) => {
+                let inst = Instance::mono(tcx, def_id);
+                tcx.symbol_name(inst).name.to_string()
+            }
+            GlobalAlloc::Memory(nested) => {
+                let inner = nested.inner();
+                let bytes = inner
+                    .inspect_with_uninit_and_ptr_outside_interpreter(0..inner.len())
+                    .to_vec();
+                let name = format!(
+                    ".Lstatic.{}",
+                    COUNTER.fetch_add(1, Ordering::Relaxed)
+                );
+                let nested_relocs = collect_alloc_relocs(tcx, inner, static_data);
+                static_data.push(StaticData {
+                    name: name.clone(),
+                    data: bytes,
+                    relocations: nested_relocs,
+                });
+                name
+            }
+            GlobalAlloc::VTable(ty, trait_ref) => {
+                let principal = trait_ref.principal().map(|p| p.skip_binder());
+                if let Ok(vtable_id) =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        tcx.vtable_allocation((ty, principal))
+                    }))
+                {
+                    if let GlobalAlloc::Memory(vtable_alloc) =
+                        tcx.global_alloc(vtable_id)
+                    {
+                        let inner = vtable_alloc.inner();
+                        let bytes = inner
+                            .inspect_with_uninit_and_ptr_outside_interpreter(
+                                0..inner.len(),
+                            )
+                            .to_vec();
+                        let name = format!(
+                            ".Lvtable.{}",
+                            COUNTER.fetch_add(1, Ordering::Relaxed)
+                        );
+                        let nested_relocs =
+                            collect_alloc_relocs(tcx, inner, static_data);
+                        static_data.push(StaticData {
+                            name: name.clone(),
+                            data: bytes,
+                            relocations: nested_relocs,
+                        });
+                        name
+                    } else {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
+            }
+            GlobalAlloc::TypeId { .. } => continue,
+        };
+        relocs.push(tuffy_target::reloc::Relocation {
+            offset: rel_offset,
+            symbol: sym,
+            kind: tuffy_target::reloc::RelocKind::Abs64,
+        });
+    }
+    relocs
 }
