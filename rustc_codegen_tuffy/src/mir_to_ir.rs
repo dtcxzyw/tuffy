@@ -1989,8 +1989,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     }
                 }
                 // Check if the rvalue produces a fat pointer (e.g., &str from ConstValue::Slice).
-                if let Some(fat_val) = self.extract_fat_component(rvalue) {
-                    self.fat_locals.set(place.local, fat_val);
+                // Only store the fat component when the destination type is
+                // actually a fat pointer — otherwise regular multi-field
+                // structs would be misidentified as fat pointers.
+                let dest_ty = self.monomorphize(self.mir.local_decls[place.local].ty);
+                if is_fat_ptr(dest_ty) {
+                    if let Some(fat_val) = self.extract_fat_component(rvalue) {
+                        self.fat_locals.set(place.local, fat_val);
+                    }
                 }
                 // Cast from a projected non-fat type to a fat pointer
                 // (e.g. `NonNull<[T]> as *const [T]` in into_vec):
