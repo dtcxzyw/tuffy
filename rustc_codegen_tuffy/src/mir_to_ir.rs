@@ -2453,12 +2453,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     None
                 }
             }
-            // Tuple aggregate with exactly 2 fields: the second field is
-            // the fat component (e.g. (data_ptr, len) for slices).
-            // Only match tuples — named structs (Adt), arrays, and
-            // closures are never fat pointer constructions.
-            Rvalue::Aggregate(box mir::AggregateKind::Tuple, operands)
-                if operands.len() == 2 =>
+            // Multi-field Aggregate: second field becomes the fat component.
+            // Exclude arrays — their elements are not fat pointer metadata.
+            Rvalue::Aggregate(box kind, operands)
+                if operands.len() >= 2
+                    && !matches!(kind, mir::AggregateKind::Array(_)) =>
             {
                 let second_op = operands.iter().nth(1).unwrap();
                 self.translate_operand(second_op)
@@ -3273,7 +3272,19 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             && let Operand::Copy(place) | Operand::Move(place) = &arg.node
                             && let Some(fat_v) = self.fat_locals.get(place.local)
                         {
-                            ir_args.push(fat_v.into());
+                            // Only push the fat component when the local's
+                            // type is actually a fat pointer.  Aggregates
+                            // (structs) with 2+ fields also set fat_locals
+                            // but their second field is not ABI metadata.
+                            let local_ty = self.monomorphize(self.mir.local_decls[place.local].ty);
+                            let needs_fat = is_fat_ptr(local_ty)
+                                || (local_ty.is_box()
+                                    && local_ty.boxed_ty().is_some_and(|bt| {
+                                        matches!(bt.kind(), ty::Str | ty::Slice(..) | ty::Dynamic(..))
+                                    }));
+                            if needs_fat {
+                                ir_args.push(fat_v.into());
+                            }
                         }
                         // If this arg is a constant fat pointer, pass the length.
                         // Resolve Unevaluated constants first.
