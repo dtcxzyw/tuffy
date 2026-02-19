@@ -1989,14 +1989,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     }
                 }
                 // Check if the rvalue produces a fat pointer (e.g., &str from ConstValue::Slice).
-                // Only store the fat component when the destination type is
-                // actually a fat pointer — otherwise regular multi-field
-                // structs would be misidentified as fat pointers.
-                let dest_ty = self.monomorphize(self.mir.local_decls[place.local].ty);
-                if is_fat_ptr(dest_ty) {
-                    if let Some(fat_val) = self.extract_fat_component(rvalue) {
-                        self.fat_locals.set(place.local, fat_val);
-                    }
+                if let Some(fat_val) = self.extract_fat_component(rvalue) {
+                    self.fat_locals.set(place.local, fat_val);
                 }
                 // Cast from a projected non-fat type to a fat pointer
                 // (e.g. `NonNull<[T]> as *const [T]` in into_vec):
@@ -2459,11 +2453,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     None
                 }
             }
-            // Multi-field Aggregate: second field becomes the fat component.
-            // Exclude arrays — their elements are not fat pointer metadata.
-            Rvalue::Aggregate(box kind, operands)
-                if operands.len() >= 2
-                    && !matches!(kind, mir::AggregateKind::Array(_)) =>
+            // Tuple aggregate with exactly 2 fields: the second field is
+            // the fat component (e.g. (data_ptr, len) for slices).
+            // Only match tuples — named structs (Adt), arrays, and
+            // closures are never fat pointer constructions.
+            Rvalue::Aggregate(box mir::AggregateKind::Tuple, operands)
+                if operands.len() == 2 =>
             {
                 let second_op = operands.iter().nth(1).unwrap();
                 self.translate_operand(second_op)
