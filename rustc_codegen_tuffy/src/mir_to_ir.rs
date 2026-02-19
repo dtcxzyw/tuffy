@@ -1558,7 +1558,20 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         // Fallback: for Unsize coercions the source is a
                                         // thin pointer but extract_fat_component can
                                         // generate the vtable/length for the destination.
-                                        let fat_src = fat_src.or_else(|| self.extract_fat_component(rvalue));
+                                        // Skip the fallback when the source is a stack
+                                        // local — val is a slot address, not a data
+                                        // pointer, so the word-by-word copy path must
+                                        // handle it instead.
+                                        let src_is_stack = matches!(rvalue,
+                                            Rvalue::Use(Operand::Copy(p) | Operand::Move(p))
+                                                if p.projection.is_empty()
+                                                    && self.stack_locals.is_stack(p.local)
+                                        );
+                                        let fat_src = if src_is_stack {
+                                            None
+                                        } else {
+                                            fat_src.or_else(|| self.extract_fat_component(rvalue))
+                                        };
                                         if let Some(fat_val) = fat_src {
                                             // Store data pointer into slot[0..8].
                                             self.current_mem = self.builder.store(
@@ -2441,7 +2454,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 }
             }
             // Multi-field Aggregate: second field becomes the fat component.
-            Rvalue::Aggregate(_, operands) if operands.len() >= 2 => {
+            // Exclude arrays — their elements are not fat pointer metadata.
+            Rvalue::Aggregate(box kind, operands)
+                if operands.len() >= 2
+                    && !matches!(kind, mir::AggregateKind::Array(_)) =>
+            {
                 let second_op = operands.iter().nth(1).unwrap();
                 self.translate_operand(second_op)
             }
