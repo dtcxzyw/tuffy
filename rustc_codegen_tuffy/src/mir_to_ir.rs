@@ -2762,7 +2762,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         Some(slot)
                                     }
                                 } else {
-                                    None
+                                    // ZST with no stored value — use a
+                                    // dangling aligned pointer so
+                                    // drop_in_place is still called.
+                                    let align = self
+                                        .tcx
+                                        .layout_of(ty::TypingEnv::fully_monomorphized().as_query_input(drop_ty))
+                                        .map(|l| l.align.abi.bytes())
+                                        .unwrap_or(1);
+                                    Some(self.builder.iconst(align as i64, Origin::synthetic()))
                                 }
                             } else {
                                 self.translate_place_to_addr(place)

@@ -16,10 +16,12 @@ pub struct CompiledFunction {
     pub local: bool,
 }
 
-/// A static data blob to be placed in a read-only section.
+/// A static data blob to be placed in a data section.
 pub struct StaticData {
     pub name: String,
     pub data: Vec<u8>,
     /// Relocations within the data (e.g. function pointers in vtables).
     pub relocations: Vec<Relocation>,
+    /// If true, place in a writable section (.data) instead of .rodata.
+    pub writable: bool,
 }

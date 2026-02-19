@@ -36,12 +36,15 @@ pub fn emit_elf_with_data(functions: &[CompiledFunction], statics: &[StaticData]
     // symbols defined in this same object file.
     let mut sym_map: HashMap<String, SymbolId> = HashMap::new();
 
-    // Emit static data: plain data in .rodata, data with relocations in .data.rel.ro.
+    // Emit static data into appropriate sections based on mutability and relocations.
     if !statics.is_empty() {
         let rodata = obj.section_id(object::write::StandardSection::ReadOnlyData);
         let data_rel_ro = obj.section_id(object::write::StandardSection::ReadOnlyDataWithRel);
+        let data_rw = obj.section_id(object::write::StandardSection::Data);
         for sd in statics {
-            let section = if sd.relocations.is_empty() {
+            let section = if sd.writable {
+                data_rw
+            } else if sd.relocations.is_empty() {
                 rodata
             } else {
                 data_rel_ro

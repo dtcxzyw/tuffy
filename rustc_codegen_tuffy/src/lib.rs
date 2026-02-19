@@ -153,6 +153,7 @@ impl CodegenBackend for TuffyCodegenBackend {
                                             kind: tuffy_target::reloc::RelocKind::Abs64,
                                         })
                                         .collect(),
+                                    writable: false,
                                 });
                             }
 
@@ -246,6 +247,7 @@ impl CodegenBackend for TuffyCodegenBackend {
                         name: sym_name,
                         data: bytes,
                         relocations: relocs,
+                        writable: tcx.is_mutable_static(*def_id),
                     });
                 }
             }
@@ -350,6 +352,7 @@ impl CodegenBackend for TuffyCodegenBackend {
                                 kind: tuffy_target::reloc::RelocKind::Abs64,
                             })
                             .collect(),
+                        writable: false,
                     });
                 }
                 if let Some(mut cf) = session.compile_function(
@@ -589,6 +592,7 @@ fn collect_alloc_relocs<'tcx>(
                     name: name.clone(),
                     data: bytes,
                     relocations: nested_relocs,
+                    writable: false,
                 });
                 name
             }
@@ -618,6 +622,7 @@ fn collect_alloc_relocs<'tcx>(
                             name: name.clone(),
                             data: bytes,
                             relocations: nested_relocs,
+                            writable: false,
                         });
                         name
                     } else {
