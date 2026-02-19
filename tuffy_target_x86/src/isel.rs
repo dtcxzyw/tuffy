@@ -145,6 +145,7 @@ pub fn isel(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn select_inst(
     ctx: &mut IselCtx,
     vref: ValueRef,
