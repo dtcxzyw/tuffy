@@ -1021,6 +1021,34 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     self.current_mem.into(),
                     Origin::synthetic(),
                 );
+            } else if matches!(self.builder.value_type(addr), Some(Type::Ptr(_))) {
+                // addr is a pointer to the data (e.g. symbol_addr for a
+                // const array).  Copy word-by-word from the source address.
+                let num_words = (size as u64).div_ceil(8);
+                for i in 0..num_words {
+                    let byte_off = i * 8;
+                    let chunk = std::cmp::min(8, size as u64 - byte_off) as u32;
+                    let src = if byte_off == 0 {
+                        addr
+                    } else {
+                        let off = self.builder.iconst(byte_off as i64, Origin::synthetic());
+                        self.builder.ptradd(addr.into(), off.into(), 0, Origin::synthetic())
+                    };
+                    let word = self.builder.load(
+                        src.into(), chunk, Type::Int,
+                        self.current_mem.into(), None, Origin::synthetic(),
+                    );
+                    let dst = if byte_off == 0 {
+                        slot
+                    } else {
+                        let off = self.builder.iconst(byte_off as i64, Origin::synthetic());
+                        self.builder.ptradd(slot.into(), off.into(), 0, Origin::synthetic())
+                    };
+                    self.current_mem = self.builder.store(
+                        word.into(), dst.into(), chunk,
+                        self.current_mem.into(), Origin::synthetic(),
+                    );
+                }
             } else {
                 self.current_mem = self.builder.store(
                     addr.into(),
@@ -3531,7 +3559,17 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let all_targets: Vec<_> = targets.iter().collect();
         let otherwise = targets.otherwise();
 
-        if all_targets.len() == 1 {
+        if all_targets.is_empty() {
+            // No explicit value-target pairs — unconditionally jump to otherwise.
+            // This happens for single-variant enums where the discriminant check
+            // is optimised away.
+            let otherwise_block = self.block_map.get(otherwise);
+            self.builder.br(
+                otherwise_block,
+                vec![self.current_mem.into()],
+                Origin::synthetic(),
+            );
+        } else if all_targets.len() == 1 {
             // Two-way branch: compare discriminant with the single value.
             let (test_val, target_bb) = all_targets[0];
             let const_val = self.builder.iconst(test_val as i64, Origin::synthetic());
@@ -3862,7 +3900,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         self.stack_locals.mark(place.local);
                         Some(slot)
                     } else {
-                        None
+                        // ZST local (e.g. non-capturing closure env) — allocate
+                        // a 1-byte slot so the reference has a valid address.
+                        let slot = self.builder.stack_slot(1, Origin::synthetic());
+                        self.locals.set(place.local, slot);
+                        self.stack_locals.mark(place.local);
+                        Some(slot)
                     }
                 }
             }
@@ -4292,6 +4335,58 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 }
             }
             Rvalue::Discriminant(place) => self.translate_discriminant(place),
+            Rvalue::Repeat(operand, count) => {
+                let elem_val = self.translate_operand(operand)?;
+                let dest_ty = if dest_place.projection.is_empty() {
+                    self.monomorphize(self.mir.local_decls[dest_place.local].ty)
+                } else {
+                    self.monomorphize(dest_place.ty(&self.mir.local_decls, self.tcx).ty)
+                };
+                let (elem_size, n) = match dest_ty.kind() {
+                    ty::Array(elem_ty, _) => {
+                        let es = type_size(self.tcx, *elem_ty).unwrap_or(8);
+                        let cnt = count.try_to_target_usize(self.tcx).unwrap_or(0);
+                        (es, cnt)
+                    }
+                    _ => return None,
+                };
+                if n == 0 || elem_size == 0 {
+                    return Some(self.builder.iconst(0, Origin::synthetic()));
+                }
+                let total = (elem_size * n) as u32;
+                let slot = if dest_place.projection.is_empty() {
+                    if let Some(existing) = self.locals.get(dest_place.local) {
+                        if matches!(self.builder.value_type(existing), Some(Type::Ptr(_))) {
+                            existing
+                        } else {
+                            self.builder.stack_slot(total, Origin::synthetic())
+                        }
+                    } else {
+                        self.builder.stack_slot(total, Origin::synthetic())
+                    }
+                } else {
+                    self.builder.stack_slot(total, Origin::synthetic())
+                };
+                let store_size = elem_size as u32;
+                for i in 0..n {
+                    let offset = (i * elem_size) as i64;
+                    let dst = if offset == 0 {
+                        slot
+                    } else {
+                        let off = self.builder.iconst(offset, Origin::synthetic());
+                        self.builder.ptradd(slot.into(), off.into(), 0, Origin::synthetic())
+                    };
+                    self.current_mem = self.builder.store(
+                        elem_val.into(),
+                        dst.into(),
+                        store_size,
+                        self.current_mem.into(),
+                        Origin::synthetic(),
+                    );
+                }
+                self.stack_locals.mark(dest_place.local);
+                Some(slot)
+            }
             _ => None,
         }
     }

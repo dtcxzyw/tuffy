@@ -285,6 +285,11 @@ impl CodegenBackend for TuffyCodegenBackend {
                 .insert(rustc_symbol_mangling::mangle_internal_symbol(tcx, name));
         }
 
+        // Skip C library functions that must be resolved by the linker.
+        for name in ["free", "malloc", "realloc", "calloc", "posix_memalign", "aligned_alloc"] {
+            compiled_symbols.insert(name.to_string());
+        }
+
         // Fixpoint loop: compile #[inline] functions not collected as mono
         // items but referenced by direct calls during translation.
         let mut inline_funcs: Vec<CompiledFunction> = Vec::new();
