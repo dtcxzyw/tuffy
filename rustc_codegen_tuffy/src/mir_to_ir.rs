@@ -644,7 +644,21 @@ fn needs_indirect_return<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> bool {
     if ty.is_unit() || ty.is_never() {
         return false;
     }
-    type_size(tcx, ty).is_some_and(|size| size > 16)
+    let size = match type_size(tcx, ty) {
+        Some(s) => s,
+        None => return false,
+    };
+    if size <= 8 {
+        return false;
+    }
+    // ScalarPair types (fat pointers, two-scalar structs) are returned in
+    // two registers (rax + rdx).  All other aggregates > 8 bytes use sret.
+    let typing_env = ty::TypingEnv::fully_monomorphized();
+    if let Ok(layout) = tcx.layout_of(typing_env.as_query_input(ty)) {
+        !matches!(layout.backend_repr, rustc_abi::BackendRepr::ScalarPair(..))
+    } else {
+        size > 16
+    }
 }
 
 /// Check if a type is a signed integer type.
