@@ -8,7 +8,7 @@ mod isel_gen;
 
 use std::collections::{HashMap, HashSet};
 
-use crate::inst::{CondCode, MInst, OpSize, VInst};
+use crate::inst::{CondCode, FpBinOpKind, MInst, OpSize, VInst};
 use crate::reg::Gpr;
 use num_traits::ToPrimitive;
 use tuffy_ir::function::{CfgNode, Function};
@@ -395,7 +395,54 @@ fn select_inst(
             select_divrem(ctx, vref, lhs, rhs, DivRemKind::Rem)?;
         }
 
-        Op::FAdd(..) | Op::FSub(..) | Op::FMul(..) | Op::FDiv(..) => return None,
+        Op::FAdd(lhs, rhs, _) => {
+            let l = ctx.ensure_in_reg(lhs.value)?;
+            let r = ctx.ensure_in_reg(rhs.value)?;
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::FpBinOp {
+                op: FpBinOpKind::Add,
+                dst,
+                lhs: l,
+                rhs: r,
+            });
+            ctx.regs.assign(vref, dst);
+        }
+        Op::FSub(lhs, rhs, _) => {
+            let l = ctx.ensure_in_reg(lhs.value)?;
+            let r = ctx.ensure_in_reg(rhs.value)?;
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::FpBinOp {
+                op: FpBinOpKind::Sub,
+                dst,
+                lhs: l,
+                rhs: r,
+            });
+            ctx.regs.assign(vref, dst);
+        }
+        Op::FMul(lhs, rhs, _) => {
+            let l = ctx.ensure_in_reg(lhs.value)?;
+            let r = ctx.ensure_in_reg(rhs.value)?;
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::FpBinOp {
+                op: FpBinOpKind::Mul,
+                dst,
+                lhs: l,
+                rhs: r,
+            });
+            ctx.regs.assign(vref, dst);
+        }
+        Op::FDiv(lhs, rhs, _) => {
+            let l = ctx.ensure_in_reg(lhs.value)?;
+            let r = ctx.ensure_in_reg(rhs.value)?;
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::FpBinOp {
+                op: FpBinOpKind::Div,
+                dst,
+                lhs: l,
+                rhs: r,
+            });
+            ctx.regs.assign(vref, dst);
+        }
         Op::FNeg(_) | Op::FAbs(_) | Op::CopySign(..) => return None,
         Op::LoadAtomic(..) | Op::StoreAtomic(..) => return None,
         Op::AtomicRmw(..) | Op::AtomicCmpXchg(..) => return None,

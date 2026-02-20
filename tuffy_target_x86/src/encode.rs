@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::inst::{CondCode, MInst, OpSize, PInst};
+use crate::inst::{CondCode, FpBinOpKind, MInst, OpSize, PInst};
 use crate::reg::Gpr;
 use tuffy_target::reloc::{EncodeResult, RelocKind, Relocation};
 
@@ -221,6 +221,9 @@ fn encode_inst(
         }
         MInst::Tzcnt { dst, src } => {
             encode_tzcnt(*dst, *src, buf);
+        }
+        MInst::FpBinOp { op, dst, lhs, rhs } => {
+            encode_fp_binop(*op, *dst, *lhs, *rhs, buf);
         }
     }
 }
@@ -732,4 +735,30 @@ fn encode_tzcnt(dst: Gpr, src: Gpr, buf: &mut Vec<u8>) {
     buf.push(0x0f);
     buf.push(0xbc);
     buf.push(modrm(dst.encoding(), src.encoding()));
+}
+
+/// Encode FpBinOp pseudo-instruction: SSE2 f64 binary op via red-zone.
+///
+/// Sequence: mov [rsp-8],lhs; mov [rsp-16],rhs;
+///           movsd xmm0,[rsp-8]; opsd xmm0,[rsp-16];
+///           movsd [rsp-8],xmm0; mov dst,[rsp-8]
+fn encode_fp_binop(op: FpBinOpKind, dst: Gpr, lhs: Gpr, rhs: Gpr, buf: &mut Vec<u8>) {
+    // 1. mov [rsp-8], lhs
+    encode_mov_mr(OpSize::S64, Gpr::Rsp, -8, lhs, buf);
+    // 2. mov [rsp-16], rhs
+    encode_mov_mr(OpSize::S64, Gpr::Rsp, -16, rhs, buf);
+    // 3. movsd xmm0, [rsp-8]  →  F2 0F 10 44 24 F8
+    buf.extend_from_slice(&[0xf2, 0x0f, 0x10, 0x44, 0x24, 0xf8]);
+    // 4. opsd xmm0, [rsp-16]
+    let op_byte = match op {
+        FpBinOpKind::Add => 0x58,
+        FpBinOpKind::Sub => 0x5c,
+        FpBinOpKind::Mul => 0x59,
+        FpBinOpKind::Div => 0x5e,
+    };
+    buf.extend_from_slice(&[0xf2, 0x0f, op_byte, 0x44, 0x24, 0xf0]);
+    // 5. movsd [rsp-8], xmm0  →  F2 0F 11 44 24 F8
+    buf.extend_from_slice(&[0xf2, 0x0f, 0x11, 0x44, 0x24, 0xf8]);
+    // 6. mov dst, [rsp-8]
+    encode_mov_rm(OpSize::S64, dst, Gpr::Rsp, -8, buf);
 }

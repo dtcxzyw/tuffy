@@ -288,6 +288,12 @@ fn rewrite_inst(inst: &VInst, assignments: &[PReg]) -> PInst {
             src: r(src),
         },
         MInst::Ud2 => MInst::Ud2,
+        MInst::FpBinOp { op, dst, lhs, rhs } => MInst::FpBinOp {
+            op: *op,
+            dst: r(dst),
+            lhs: r(lhs),
+            rhs: r(rhs),
+        },
     }
 }
 

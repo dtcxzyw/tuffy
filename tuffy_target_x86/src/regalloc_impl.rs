@@ -138,6 +138,11 @@ impl RegAllocInst for VInst {
                 ops.push(use_op(*lhs));
                 ops.push(use_op(*rhs));
             }
+            MInst::FpBinOp { dst, lhs, rhs, .. } => {
+                ops.push(def_op(*dst));
+                ops.push(use_op(*lhs));
+                ops.push(use_op(*rhs));
+            }
             // Indirect call: callee register is a use operand
             MInst::CallReg { callee, ret, ret2 } => {
                 ops.push(use_op(*callee));

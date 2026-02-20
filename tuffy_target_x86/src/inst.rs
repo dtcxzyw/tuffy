@@ -209,4 +209,23 @@ pub enum MInst<R: RegType> {
     Tzcnt { dst: R, src: R },
     /// ud2 (undefined instruction trap)
     Ud2,
+    /// Pseudo-instruction: SSE2 f64 binary operation via memory.
+    ///
+    /// Moves lhs/rhs GPRs through stack memory into xmm0/xmm1,
+    /// performs the SSE2 op, and moves the result back to dst GPR.
+    FpBinOp {
+        op: FpBinOpKind,
+        dst: R,
+        lhs: R,
+        rhs: R,
+    },
+}
+
+/// SSE2 floating-point binary operation kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FpBinOpKind {
+    Add,
+    Sub,
+    Mul,
+    Div,
 }
