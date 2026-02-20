@@ -854,6 +854,25 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         }
     }
 
+    /// Transform an IEEE 754 float bit-pattern so unsigned integer comparison
+    /// gives correct float ordering (works for both positive and negative).
+    fn float_to_orderable(&mut self, val: ValueRef) -> IrOperand {
+        let sixty3 = self.builder.iconst(63i64, Origin::synthetic());
+        let mask = self.builder.shr(
+            IrOperand::annotated(val, Annotation::Signed(64)),
+            sixty3.into(),
+            None,
+            Origin::synthetic(),
+        );
+        let sign_bit = self.builder.iconst(
+            BigInt::from(0x8000_0000_0000_0000u64),
+            Origin::synthetic(),
+        );
+        let flip = self.builder.or(mask.into(), sign_bit.into(), None, Origin::synthetic());
+        let result = self.builder.xor(val.into(), flip.into(), None, Origin::synthetic());
+        result.into()
+    }
+
     /// Create a static `&Location` for a `#[track_caller]` call site.
     ///
     /// Builds two data blobs in `.rodata`:
@@ -3828,6 +3847,21 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 };
                 let res_ann = l_ann;
 
+                // Detect float operands for comparison fixup.
+                let is_float_cmp = matches!(
+                    op,
+                    BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge | BinOp::Eq | BinOp::Ne | BinOp::Cmp
+                ) && {
+                    let mir_ty = match lhs {
+                        Operand::Copy(p) | Operand::Move(p) => {
+                            self.monomorphize(self.mir.local_decls[p.local].ty)
+                        }
+                        Operand::Constant(c) => self.monomorphize(c.ty()),
+                        _ => self.tcx.types.i32,
+                    };
+                    mir_ty.is_floating_point()
+                };
+
                 let val = match op {
                     BinOp::Add | BinOp::AddWithOverflow | BinOp::AddUnchecked => {
                         self.builder.add(l_op, r_op, res_ann, Origin::synthetic())
@@ -3850,28 +3884,19 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             .icmp(ICmpOp::Ne, l_op, r_op, Origin::synthetic());
                         self.builder.bool_to_int(cmp.into(), Origin::synthetic())
                     }
-                    BinOp::Lt => {
-                        let cmp = self
-                            .builder
-                            .icmp(ICmpOp::Lt, l_op, r_op, Origin::synthetic());
-                        self.builder.bool_to_int(cmp.into(), Origin::synthetic())
-                    }
-                    BinOp::Le => {
-                        let cmp = self
-                            .builder
-                            .icmp(ICmpOp::Le, l_op, r_op, Origin::synthetic());
-                        self.builder.bool_to_int(cmp.into(), Origin::synthetic())
-                    }
-                    BinOp::Gt => {
-                        let cmp = self
-                            .builder
-                            .icmp(ICmpOp::Gt, l_op, r_op, Origin::synthetic());
-                        self.builder.bool_to_int(cmp.into(), Origin::synthetic())
-                    }
-                    BinOp::Ge => {
-                        let cmp = self
-                            .builder
-                            .icmp(ICmpOp::Ge, l_op, r_op, Origin::synthetic());
+                    BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+                        let icmp_op = match op {
+                            BinOp::Lt => ICmpOp::Lt,
+                            BinOp::Le => ICmpOp::Le,
+                            BinOp::Gt => ICmpOp::Gt,
+                            _ => ICmpOp::Ge,
+                        };
+                        let (cl, cr) = if is_float_cmp {
+                            (self.float_to_orderable(l), self.float_to_orderable(r))
+                        } else {
+                            (l_op, r_op)
+                        };
+                        let cmp = self.builder.icmp(icmp_op, cl, cr, Origin::synthetic());
                         self.builder.bool_to_int(cmp.into(), Origin::synthetic())
                     }
                     BinOp::Cmp => {
