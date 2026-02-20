@@ -270,6 +270,32 @@ pub fn translate_function<'tcx>(
                     }
         }
 
+        // Locals assigned via projections (e.g. `_0.0 = ...`) need stack
+        // slots unconditionally — partial field writes require addressable memory.
+        for bb_data in mir.basic_blocks.iter() {
+            for stmt in &bb_data.statements {
+                if let StatementKind::Assign(box (place, _)) = &stmt.kind
+                    && !place.projection.is_empty()
+                    && !ctx.stack_locals.is_stack(place.local)
+                {
+                    let local = place.local;
+                    if local.as_usize() > 0 && local.as_usize() <= mir.arg_count {
+                        continue;
+                    }
+                    let ty = monomorphize(mir.local_decls[local].ty);
+                    let size = type_size(tcx, ty).unwrap_or(0);
+                    if size > 0 {
+                        let slot = ctx.builder.stack_slot(
+                            std::cmp::max(size as u32, 1),
+                            Origin::synthetic(),
+                        );
+                        ctx.locals.set(local, slot);
+                        ctx.stack_locals.mark(local);
+                    }
+                }
+            }
+        }
+
         // Promote locals used in a block that precedes their assignment
         // block in declaration order.  Since blocks are translated
         // sequentially, a backward reference (use-block index < def-block
@@ -2996,7 +3022,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         if let Some(inst) = resolved.resolved_instance {
             self.referenced_instances.push(inst);
         }
-
         // Skip LLVM intrinsics (e.g. llvm.x86.sse2.pause from spin_loop).
         // These are target-specific hints with no semantic effect.
         if let Some(CallTarget::Direct(ref sym)) = callee_target
