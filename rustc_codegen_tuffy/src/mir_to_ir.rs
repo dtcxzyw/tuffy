@@ -1879,6 +1879,42 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                     self.current_mem.into(),
                                                     Origin::synthetic(),
                                                 );
+                                                // CheckedBinaryOp stores (result, bool)
+                                                // but translate_rvalue only returns the
+                                                // arithmetic result.  Zero the overflow
+                                                // flag so later reads don't see garbage.
+                                                let is_checked = matches!(
+                                                    rvalue,
+                                                    Rvalue::BinaryOp(
+                                                        BinOp::AddWithOverflow
+                                                            | BinOp::SubWithOverflow
+                                                            | BinOp::MulWithOverflow,
+                                                        _
+                                                    )
+                                                );
+                                                if is_checked && bytes > 8 {
+                                                    let off = self.builder.iconst(
+                                                        8,
+                                                        Origin::synthetic(),
+                                                    );
+                                                    let flag_addr = self.builder.ptradd(
+                                                        slot.into(),
+                                                        off.into(),
+                                                        0,
+                                                        Origin::synthetic(),
+                                                    );
+                                                    let zero = self.builder.iconst(
+                                                        0,
+                                                        Origin::synthetic(),
+                                                    );
+                                                    self.current_mem = self.builder.store(
+                                                        zero.into(),
+                                                        flag_addr.into(),
+                                                        1,
+                                                        self.current_mem.into(),
+                                                        Origin::synthetic(),
+                                                    );
+                                                }
                                             }
                                         } // close ref_fat_src else
                                     } else {
