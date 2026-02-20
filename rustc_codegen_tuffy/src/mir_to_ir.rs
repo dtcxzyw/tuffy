@@ -5505,6 +5505,39 @@ fn translate_memory_intrinsic<'tcx>(
             Some(mem_out)
         }
 
+        // typed_swap_nonoverlapping<T>(x, y) — swap values at two pointers.
+        "typed_swap_nonoverlapping" => {
+            if ir_args.len() < 2 {
+                return None;
+            }
+            let x = if matches!(builder.value_type(ir_args[0]), Some(Type::Int)) {
+                builder.inttoptr(ir_args[0].into(), 0, Origin::synthetic())
+            } else { ir_args[0] };
+            let y = if matches!(builder.value_type(ir_args[1]), Some(Type::Int)) {
+                builder.inttoptr(ir_args[1].into(), 0, Origin::synthetic())
+            } else { ir_args[1] };
+            let mut mem = current_mem;
+            let num_words = (elem_size as u64).div_ceil(8);
+            for i in 0..num_words {
+                let off = i * 8;
+                let chunk = std::cmp::min(8, elem_size as u64 - off) as u32;
+                let (xa, ya) = if off == 0 {
+                    (x, y)
+                } else {
+                    let o = builder.iconst(off as i64, Origin::synthetic());
+                    (
+                        builder.ptradd(x.into(), o.into(), 0, Origin::synthetic()),
+                        builder.ptradd(y.into(), o.into(), 0, Origin::synthetic()),
+                    )
+                };
+                let vx = builder.load(xa.into(), chunk, Type::Int, mem.into(), None, Origin::synthetic());
+                let vy = builder.load(ya.into(), chunk, Type::Int, mem.into(), None, Origin::synthetic());
+                mem = builder.store(vy.into(), xa.into(), chunk, mem.into(), Origin::synthetic());
+                mem = builder.store(vx.into(), ya.into(), chunk, mem.into(), Origin::synthetic());
+            }
+            Some(mem)
+        }
+
         _ => None,
     }
 }
