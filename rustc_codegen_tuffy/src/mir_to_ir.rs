@@ -4948,6 +4948,11 @@ fn translate_scalar(
             let val = bits as i64;
             Some(builder.iconst(val, Origin::synthetic()))
         }
+        ty::Float(_) => {
+            // Store IEEE 754 bit pattern as an integer (no XMM support).
+            let val = BigInt::from(bits);
+            Some(builder.iconst(val, Origin::synthetic()))
+        }
         ty::Adt(..) => {
             // Newtype structs (e.g., ExitCode(u8)) are represented as
             // scalars. Treat the raw bits as an unsigned integer.
