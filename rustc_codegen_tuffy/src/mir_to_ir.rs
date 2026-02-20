@@ -55,7 +55,6 @@ pub fn translate_function<'tcx>(
     if instance.args.has_non_region_param() {
         return None;
     }
-
     // Cross-crate items only have MIR available if they are #[inline].
     // Non-inline external functions are already compiled in the rlib.
     if let ty::InstanceKind::Item(def_id) = instance.def

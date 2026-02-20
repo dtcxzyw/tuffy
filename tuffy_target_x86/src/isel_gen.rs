@@ -124,13 +124,33 @@ fn gen_shl(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Op
     Some(())
 }
 
-fn gen_shr_signed(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Option<()> {
+fn gen_shr_signed(
+    ctx: &mut super::IselCtx,
+    vref: ValueRef,
+    lhs: VReg,
+    rhs: VReg,
+    bits: u32,
+) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::MovRR {
         size: OpSize::S64,
         dst: v0,
         src: lhs,
     });
+    // Sign-extend from `bits` to 64 before arithmetic shift.
+    if bits < 64 {
+        let pad = (64 - bits) as u8;
+        ctx.out.push(MInst::ShlImm {
+            size: OpSize::S64,
+            dst: v0,
+            imm: pad,
+        });
+        ctx.out.push(MInst::SarImm {
+            size: OpSize::S64,
+            dst: v0,
+            imm: pad,
+        });
+    }
     let v1 = ctx.alloc.alloc_fixed(Gpr::Rcx.to_preg());
     ctx.out.push(MInst::MovRR {
         size: OpSize::S64,
@@ -439,7 +459,7 @@ pub(super) fn try_select_generated(
             let l = ctx.ensure_in_reg(lhs.value)?;
             let r = ctx.ensure_in_reg(rhs.value)?;
             match lhs.annotation {
-                Some(Annotation::Signed(_)) => gen_shr_signed(ctx, vref, l, r),
+                Some(Annotation::Signed(n)) => gen_shr_signed(ctx, vref, l, r, n),
                 Some(Annotation::Unsigned(_)) => gen_shr_unsigned(ctx, vref, l, r),
                 _ => gen_shr_unsigned(ctx, vref, l, r),
             }
