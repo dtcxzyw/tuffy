@@ -3965,15 +3965,28 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             ty::TypingEnv::fully_monomorphized(),
                             ty::EarlyBinder::bind(src_ty),
                         );
-                        if let ty::FnDef(def_id, args) = src_ty.kind() {
-                            let resolved = ty::Instance::try_resolve(
-                                self.tcx,
-                                ty::TypingEnv::fully_monomorphized(),
-                                *def_id,
-                                args,
-                            )
-                            .ok()
-                            .flatten()?;
+                        let resolved = match src_ty.kind() {
+                            ty::FnDef(def_id, args) => {
+                                ty::Instance::try_resolve(
+                                    self.tcx,
+                                    ty::TypingEnv::fully_monomorphized(),
+                                    *def_id,
+                                    args,
+                                )
+                                .ok()
+                                .flatten()
+                            }
+                            ty::Closure(def_id, args) => {
+                                Some(Instance::resolve_closure(
+                                    self.tcx,
+                                    *def_id,
+                                    args,
+                                    ty::ClosureKind::FnOnce,
+                                ))
+                            }
+                            _ => None,
+                        };
+                        if let Some(resolved) = resolved {
                             let sym_name = self.tcx.symbol_name(resolved).name.to_string();
                             self.referenced_instances.push(resolved);
                             let sym_id = self.symbols.intern(&sym_name);
