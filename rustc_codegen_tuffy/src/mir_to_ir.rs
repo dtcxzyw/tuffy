@@ -2992,6 +2992,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let callee_target = resolved.target;
         let needs_caller_location = resolved.requires_caller_location;
         let needs_self_deref = resolved.needs_self_deref;
+        let needs_tuple_spread = resolved.needs_tuple_spread;
         if let Some(inst) = resolved.resolved_instance {
             self.referenced_instances.push(inst);
         }
@@ -3156,6 +3157,67 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // don't occupy an ABI slot, matching the callee's param skipping.
             if type_size(self.tcx, arg_ty).unwrap_or(0) == 0 {
                 continue;
+            }
+
+            // Tuple spreading for closure calls through Fn/FnMut/FnOnce:
+            // the caller passes args as a single tuple but the closure
+            // body expects individual parameters.  Only spread tuples
+            // with 2+ non-ZST fields — 1-tuples have identical layout
+            // to the inner type and don't need spreading.
+            if needs_tuple_spread
+                && let ty::Tuple(fields) = arg_ty.kind()
+                && fields.iter().filter(|f| type_size(self.tcx, *f).unwrap_or(0) > 0).count() >= 2
+                && let Operand::Copy(place) | Operand::Move(place) = &arg.node
+                && let Some(base) = self.locals.get(place.local)
+                && matches!(self.builder.value_type(base), Some(Type::Ptr(_)))
+            {
+                let typing_env = ty::TypingEnv::fully_monomorphized();
+                if let Ok(layout) = self.tcx.layout_of(typing_env.as_query_input(arg_ty)) {
+                    for i in 0..fields.len() {
+                        let ft = fields[i];
+                        let fsz = type_size(self.tcx, ft).unwrap_or(0);
+                        if fsz == 0 { continue; }
+                        let offset = layout.fields.offset(i).bytes();
+                        let addr = if offset == 0 {
+                            base
+                        } else {
+                            let off = self.builder.iconst(offset as i64, Origin::synthetic());
+                            self.builder.ptradd(base.into(), off.into(), 0, Origin::synthetic())
+                        };
+                        if fsz <= 8 {
+                            let fty = translate_ty(ft).unwrap_or(Type::Int);
+                            let val = self.builder.load(
+                                addr.into(),
+                                fsz as u32,
+                                fty,
+                                self.current_mem.into(),
+                                None,
+                                Origin::synthetic(),
+                            );
+                            ir_args.push(val.into());
+                        } else if fsz <= 16 {
+                            // Decompose 9-16 byte fields into two words.
+                            let w0 = self.builder.load(
+                                addr.into(), 8, Type::Int,
+                                self.current_mem.into(), None, Origin::synthetic(),
+                            );
+                            ir_args.push(w0.into());
+                            let off8 = self.builder.iconst(8, Origin::synthetic());
+                            let a1 = self.builder.ptradd(
+                                addr.into(), off8.into(), 0, Origin::synthetic(),
+                            );
+                            let w1 = self.builder.load(
+                                a1.into(), 8, Type::Int,
+                                self.current_mem.into(), None, Origin::synthetic(),
+                            );
+                            ir_args.push(w1.into());
+                        } else {
+                            // >16 byte fields: pass pointer.
+                            ir_args.push(addr.into());
+                        }
+                    }
+                    continue;
+                }
             }
 
             if let Some(v) = self.translate_operand(&arg.node) {
@@ -5379,6 +5441,11 @@ struct ResolvedCall<'tcx> {
     /// The resolved Instance, if available. Used to compile `#[inline]`
     /// functions not collected as mono items.
     resolved_instance: Option<Instance<'tcx>>,
+    /// True when the call goes through Fn::call / FnMut::call_mut /
+    /// FnOnce::call_once and resolves to a closure body.  The caller
+    /// passes args as a single tuple but the closure body expects
+    /// individual parameters — the tuple must be spread at the call site.
+    needs_tuple_spread: bool,
 }
 
 /// Resolve the callee symbol name from a Call terminator's function operand.
@@ -5402,6 +5469,7 @@ fn resolve_call_target<'tcx>(
                 requires_caller_location: false,
                 needs_self_deref: false,
                 resolved_instance: None,
+                needs_tuple_spread: false,
             };
         }
     };
@@ -5424,6 +5492,7 @@ fn resolve_call_target<'tcx>(
                         requires_caller_location: false,
                         needs_self_deref: false,
                         resolved_instance: None,
+                        needs_tuple_spread: false,
                     };
                 }
             }
@@ -5433,6 +5502,7 @@ fn resolve_call_target<'tcx>(
                     requires_caller_location: false,
                     needs_self_deref: false,
                     resolved_instance: None,
+                    needs_tuple_spread: false,
                 };
             }
             let instance =
@@ -5447,6 +5517,7 @@ fn resolve_call_target<'tcx>(
                         requires_caller_location: false,
                         needs_self_deref: false,
                         resolved_instance: None,
+                        needs_tuple_spread: false,
                     };
                 }
             };
@@ -5522,6 +5593,7 @@ fn resolve_call_target<'tcx>(
                     requires_caller_location: needs_location,
                     needs_self_deref: false,
                     resolved_instance: None,
+                    needs_tuple_spread: false,
                 };
             }
             if instance.args.has_non_region_param() {
@@ -5530,8 +5602,20 @@ fn resolve_call_target<'tcx>(
                     requires_caller_location: needs_location,
                     needs_self_deref: false,
                     resolved_instance: None,
+                    needs_tuple_spread: false,
                 };
             }
+            // Detect calls through Fn/FnMut/FnOnce that resolve to a
+            // closure body — the caller passes args as a tuple but the
+            // closure body expects individual parameters.
+            let is_fn_trait_call = is_trait_method && {
+                let trait_id = tcx.parent(*def_id);
+                Some(trait_id) == tcx.lang_items().fn_trait()
+                    || Some(trait_id) == tcx.lang_items().fn_mut_trait()
+                    || Some(trait_id) == tcx.lang_items().fn_once_trait()
+            };
+            let needs_spread = is_fn_trait_call
+                && tcx.is_closure_like(instance.def_id());
             ResolvedCall {
                 target: Some(CallTarget::Direct(
                     tcx.symbol_name(instance).name.to_string(),
@@ -5539,6 +5623,7 @@ fn resolve_call_target<'tcx>(
                 requires_caller_location: needs_location,
                 needs_self_deref,
                 resolved_instance: Some(instance),
+                needs_tuple_spread: needs_spread,
             }
         }
         _ => ResolvedCall {
@@ -5546,6 +5631,7 @@ fn resolve_call_target<'tcx>(
             requires_caller_location: false,
             needs_self_deref: false,
             resolved_instance: None,
+            needs_tuple_spread: false,
         },
     }
 }
