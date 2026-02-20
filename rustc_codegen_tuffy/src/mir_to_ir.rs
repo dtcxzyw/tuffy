@@ -1217,8 +1217,30 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // from_end case would need array length; skip for now.
                     cur_ty = elem_ty;
                 }
+                PlaceElem::Subslice { from, to, from_end } => {
+                    let elem_ty = match cur_ty.kind() {
+                        ty::Array(elem_ty, _) | ty::Slice(elem_ty) => *elem_ty,
+                        _ => return None,
+                    };
+                    let elem_size = type_size(self.tcx, elem_ty)?;
+                    if from > 0 {
+                        let off = self.builder.iconst((from * elem_size) as i64, Origin::synthetic());
+                        addr = self.builder.ptradd(addr.into(), off.into(), 0, Origin::synthetic());
+                    }
+                    cur_ty = if from_end {
+                        // Array: [T; N] -> [T; N - from - to]
+                        let n = match cur_ty.kind() {
+                            ty::Array(_, n) => n.try_to_target_usize(self.tcx).unwrap_or(0),
+                            _ => return None,
+                        };
+                        ty::Ty::new_array(self.tcx, elem_ty, n - from - to)
+                    } else {
+                        // Slice: result is still a slice
+                        cur_ty
+                    };
+                }
                 _ => {
-                    // OpaqueCast, Subslice, UnwrapUnsafeBinder — not yet handled.
+                    // OpaqueCast, UnwrapUnsafeBinder — not yet handled.
                     return None;
                 }
             }
