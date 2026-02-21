@@ -116,12 +116,7 @@ pub fn translate_function<'tcx>(
     for i in 0..mir.arg_count {
         let local = mir::Local::from_usize(i + 1);
         let ty = monomorphize(mir.local_decls[local].ty);
-        let ir_ty_opt = translate_ty(ty).or_else(|| {
-            // Float types are not in translate_ty (to avoid global
-            // side-effects) but they DO occupy an ABI slot as Int.
-            if matches!(ty.kind(), ty::Float(..)) { Some(Type::Int) } else { None }
-        });
-        match ir_ty_opt {
+        match translate_ty(ty) {
             Some(Type::Unit) | None => continue,
             Some(ir_ty) => {
                 // System V AMD64 ABI struct parameter passing:
@@ -953,9 +948,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         for i in 0..self.mir.arg_count {
             let local = mir::Local::from_usize(i + 1);
             let ty = self.monomorphize(self.mir.local_decls[local].ty);
-            let ir_ty = translate_ty(ty).or_else(|| {
-                if matches!(ty.kind(), ty::Float(..)) { Some(Type::Int) } else { None }
-            });
+            let ir_ty = translate_ty(ty);
 
             // Skip zero-sized (Unit) and untranslatable params — they don't
             // occupy an ABI slot. Assign a dummy iconst 0 so downstream MIR
@@ -3297,9 +3290,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 Operand::Constant(c) => self.monomorphize(c.ty()),
                 _ => self.monomorphize(self.mir.local_decls[mir::Local::from_usize(0)].ty),
             };
-            if matches!(translate_ty(arg_ty), Some(Type::Unit) | None)
-                && !matches!(arg_ty.kind(), ty::Float(..))
-            {
+            if matches!(translate_ty(arg_ty), Some(Type::Unit) | None) {
                 continue;
             }
             // Skip zero-sized ADTs (e.g. Global allocator) — they
