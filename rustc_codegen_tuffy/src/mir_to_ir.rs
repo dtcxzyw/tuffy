@@ -348,13 +348,14 @@ pub fn translate_function<'tcx>(
                             used_locals.extend(collect_used_locals(&arg.node));
                         }
                     }
+                    TerminatorKind::Return => {
+                        used_locals.push(mir::Local::from_usize(0));
+                    }
                     _ => {}
                 }
             }
             for local in used_locals {
-                if local.as_usize() == 0
-                    || (local.as_usize() > 0 && local.as_usize() <= mir.arg_count)
-                {
+                if local.as_usize() > 0 && local.as_usize() <= mir.arg_count {
                     continue;
                 }
                 if ctx.stack_locals.is_stack(local) {
