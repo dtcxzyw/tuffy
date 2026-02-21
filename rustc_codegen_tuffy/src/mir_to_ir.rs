@@ -1968,18 +1968,24 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             // a data value instead of an address.
                             let mark_as_stack = match rvalue {
                                 // Direct copy/move from a stack local (no projections).
+                                // Only propagate when the source type is > 8 bytes,
+                                // because translate_operand loads small (≤8 byte)
+                                // values from the slot — the returned value is data,
+                                // not a slot pointer.
                                 Rvalue::Use(Operand::Copy(src) | Operand::Move(src))
                                     if src.projection.is_empty()
                                         && self.stack_locals.is_stack(src.local) =>
                                 {
-                                    true
+                                    let src_ty = self.monomorphize(self.mir.local_decls[src.local].ty);
+                                    type_size(self.tcx, src_ty).unwrap_or(8) > 8
                                 }
                                 // Cast/Transmute from a stack local.
                                 Rvalue::Cast(_, Operand::Copy(src) | Operand::Move(src), _)
                                     if src.projection.is_empty()
                                         && self.stack_locals.is_stack(src.local) =>
                                 {
-                                    true
+                                    let src_ty = self.monomorphize(self.mir.local_decls[src.local].ty);
+                                    type_size(self.tcx, src_ty).unwrap_or(8) > 8
                                 }
                                 // Projected place where the projected type is
                                 // > 8 bytes.  translate_operand returns an
