@@ -2598,7 +2598,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let pointee_ty = place.ty(&self.mir.local_decls, self.tcx).ty;
                 let pointee_ty = self.monomorphize(pointee_ty);
                 if matches!(pointee_ty.kind(), ty::Slice(..) | ty::Str | ty::Dynamic(..)) {
-                    self.fat_locals.get(place.local)
+                    self.fat_locals
+                        .get(place.local)
+                        .or_else(|| self.cast_fat_meta.get(place.local))
                 } else {
                     None
                 }
