@@ -320,8 +320,7 @@ pub fn translate_function<'tcx>(
                     match rvalue {
                         Rvalue::Use(op)
                         | Rvalue::UnaryOp(_, op)
-                        | Rvalue::Cast(_, op, _)
-                        | Rvalue::ShallowInitBox(op, _) => {
+                        | Rvalue::Cast(_, op, _) => {
                             used_locals.extend(collect_used_locals(op));
                         }
                         Rvalue::BinaryOp(_, box (a, b)) => {
