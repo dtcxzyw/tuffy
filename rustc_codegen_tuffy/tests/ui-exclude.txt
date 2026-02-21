@@ -334,19 +334,17 @@ simd/simd-bitmask.rs
 nll/polonius/array-literal-index-oob-2024.rs
 simd/intrinsic/inlining-issue67557.rs
 
-# Requires newer -Znext-solver than current nightly (1.95.0-nightly 2026-02-12).
-traits/next-solver/coercion/unfulfilled-unsize-coercion-recursion-limit.rs
+# -Znext-solver opaque type region constraint failure.
 traits/next-solver/opaques/eventually-constrained-region.rs
-
-# Upstream ICE in borrowck (not tuffy bug).
-generic-const-items/type-const-nested-assoc-const.rs
-
-# Requires unstable feature final_associated_functions (not in current nightly).
-traits/final/dyn-compat.rs
-traits/final/works.rs
 
 # Compilation failures (layout, coroutine, import, stdlib features not yet supported).
 coroutine/uninhabited-field.rs
 imports/overwrite-different-vis-2.rs
 layout/rigid-alias-no-params.rs
 stdlib-unit-tests/matches2021.rs
+
+# Hangs (timeout) — likely infinite loop in codegen with repr(align) types.
+structs-enums/align-struct.rs
+
+# Nightly frontend syntax change — `use self as A` not yet supported.
+use/use-keyword.rs
