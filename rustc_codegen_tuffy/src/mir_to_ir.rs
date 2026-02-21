@@ -5344,6 +5344,46 @@ fn translate_intrinsic<'tcx>(
             true
         }
 
+        // bswap: byte-swap an integer value.
+        "bswap" => {
+            if let Some(&v) = ir_args.first() {
+                let byte_size = substs
+                    .first()
+                    .and_then(|a| a.as_type())
+                    .and_then(|t| type_size(tcx, t))
+                    .unwrap_or(8);
+                if byte_size <= 1 {
+                    locals.set(destination_local, v);
+                } else if byte_size > 8 {
+                    // u128 bswap not yet supported — fall through to false
+                    return false;
+                } else {
+                    // Coerce Ptr to Int for arithmetic.
+                    let v = if matches!(builder.value_type(v), Some(Type::Ptr(_))) {
+                        builder.ptrtoint(v.into(), Origin::synthetic())
+                    } else {
+                        v
+                    };
+                    let mask = builder.iconst(0xFF, Origin::synthetic());
+                    let mut result = {
+                        let shift = builder.iconst(((byte_size - 1) * 8) as i64, Origin::synthetic());
+                        let byte0 = builder.and(v.into(), mask.into(), None, Origin::synthetic());
+                        builder.shl(byte0.into(), shift.into(), None, Origin::synthetic())
+                    };
+                    for i in 1..byte_size {
+                        let extract_shift = builder.iconst((i * 8) as i64, Origin::synthetic());
+                        let shifted = builder.shr(v.into(), extract_shift.into(), None, Origin::synthetic());
+                        let byte_i = builder.and(shifted.into(), mask.into(), None, Origin::synthetic());
+                        let place_shift = builder.iconst(((byte_size - 1 - i) * 8) as i64, Origin::synthetic());
+                        let placed = builder.shl(byte_i.into(), place_shift.into(), None, Origin::synthetic());
+                        result = builder.or(result.into(), placed.into(), None, Origin::synthetic());
+                    }
+                    locals.set(destination_local, result);
+                }
+            }
+            true
+        }
+
         // is_val_statically_known: always false in a non-optimizing backend.
         "is_val_statically_known" => {
             let result = builder.bconst(false, Origin::synthetic());
