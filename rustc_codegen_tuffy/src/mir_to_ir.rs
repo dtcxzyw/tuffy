@@ -57,9 +57,15 @@ pub fn translate_function<'tcx>(
     }
     // Cross-crate items only have MIR available if they are #[inline].
     // Non-inline external functions are already compiled in the rlib.
+    // Exception: constructors (enum variant / struct) have synthesized MIR
+    // via instance_mir even when is_mir_available returns false.
     if let ty::InstanceKind::Item(def_id) = instance.def
         && !def_id.is_local()
         && !tcx.is_mir_available(def_id)
+        && !matches!(
+            tcx.def_kind(def_id),
+            rustc_hir::def::DefKind::Ctor(..)
+        )
     {
         return None;
     }
