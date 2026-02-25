@@ -144,6 +144,20 @@ impl<'a> Builder<'a> {
         }
     }
 
+    /// Returns true if `v` is a StackSlot, SymbolAddr, or PtrAdd —
+    /// i.e. a pointer that addresses memory rather than being a
+    /// pointer-sized *value* (like `NonNull<T>`).
+    pub fn is_memory_address(&self, v: ValueRef) -> bool {
+        if v.is_block_arg() || v.is_secondary_result() {
+            return false;
+        }
+        matches!(
+            self.func.instructions.get(v.index() as usize),
+            Some(inst) if matches!(inst.op, Op::StackSlot(_) | Op::SymbolAddr(_) | Op::PtrAdd(..))
+
+        )
+    }
+
     /// Add a block argument and return its ValueRef.
     pub fn add_block_arg(&mut self, block: BlockRef, ty: Type) -> ValueRef {
         let arg_idx = self.func.block_args.len() as u32;
