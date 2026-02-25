@@ -145,14 +145,14 @@ pub fn translate_function<'tcx>(
                 }
                 param_names.push(all_names.get(i).copied().flatten());
                 // Two-register structs (9-16 bytes) occupy two ABI slots.
-                if param_size > 8 && param_size <= 16 && is_int_ty && !is_fat_ptr(ty) {
+                if param_size > 8 && param_size <= 16 && is_int_ty && !is_fat_ptr(tcx, ty) {
                     params.push(Type::Int);
                     param_anns.push(None);
                     param_names.push(None);
                 }
-                // Fat pointers (&str, &[T]) occupy two ABI slots.
-                if is_fat_ptr(ty) {
-                    params.push(fat_ptr_meta_type(ty));
+                // Fat pointers (&str, &[T], &Path, etc.) occupy two ABI slots.
+                if is_fat_ptr(tcx, ty) {
+                    params.push(fat_ptr_meta_type(tcx, ty));
                     param_anns.push(None);
                     param_names.push(None);
                 }
@@ -770,10 +770,12 @@ fn extract_param_names(mir: &mir::Body<'_>, symbols: &mut SymbolTable) -> Vec<Op
 }
 
 /// Check if a type is a fat pointer (e.g., &str, &[T], &dyn Trait) that uses two registers at ABI level.
-fn is_fat_ptr(ty: ty::Ty<'_>) -> bool {
+fn is_fat_ptr<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> bool {
     match ty.kind() {
         ty::Ref(_, inner, _) | ty::RawPtr(inner, _) => {
-            matches!(inner.kind(), ty::Str | ty::Slice(..) | ty::Dynamic(..))
+            let typing_env = ty::TypingEnv::fully_monomorphized();
+            let tail = tcx.struct_tail_for_codegen(*inner, typing_env);
+            matches!(tail.kind(), ty::Str | ty::Slice(..) | ty::Dynamic(..))
         }
         _ => false,
     }
@@ -782,10 +784,16 @@ fn is_fat_ptr(ty: ty::Ty<'_>) -> bool {
 /// Return the IR type for the metadata word of a fat pointer.
 /// - &dyn Trait → Ptr (vtable pointer)
 /// - &str / &[T] → Int (length)
-fn fat_ptr_meta_type(ty: ty::Ty<'_>) -> Type {
+fn fat_ptr_meta_type<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> Type {
     match ty.kind() {
-        ty::Ref(_, inner, _) | ty::RawPtr(inner, _) if matches!(inner.kind(), ty::Dynamic(..)) => {
-            Type::Ptr(0)
+        ty::Ref(_, inner, _) | ty::RawPtr(inner, _) => {
+            let typing_env = ty::TypingEnv::fully_monomorphized();
+            let tail = tcx.struct_tail_for_codegen(*inner, typing_env);
+            if matches!(tail.kind(), ty::Dynamic(..)) {
+                Type::Ptr(0)
+            } else {
+                Type::Int
+            }
         }
         _ => Type::Int,
     }
@@ -1044,8 +1052,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             abi_idx += 1;
 
             // Fat pointer types (&str, &[T]) occupy two ABI registers (ptr + metadata).
-            if is_fat_ptr(ty) {
-                let meta_ty = fat_ptr_meta_type(ty);
+            if is_fat_ptr(self.tcx, ty) {
+                let meta_ty = fat_ptr_meta_type(self.tcx, ty);
                 let meta_val = self
                     .builder
                     .param(abi_idx, meta_ty, None, Origin::synthetic());
@@ -1350,7 +1358,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         // first word (data pointer) so that locals[dest] holds the data
         // pointer value.  The second word (vtable/length) is handled
         // separately by the fat component extraction in translate_rvalue.
-        if bytes > 8 && is_fat_ptr(projected_ty) {
+        if bytes > 8 && is_fat_ptr(self.tcx, projected_ty) {
             return Some(self.builder.load(
                 addr.into(),
                 8,
@@ -1632,7 +1640,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                     ) = resolved
                                                     {
                                                         let const_ty = mono_const.ty();
-                                                        if is_fat_ptr(const_ty) {
+                                                        if is_fat_ptr(self.tcx, const_ty) {
                                                             let alloc =
                                                                 self.tcx.global_alloc(alloc_id);
                                                             if let rustc_middle::mir::interpret::GlobalAlloc::Memory(mem_alloc) = alloc {
@@ -2095,7 +2103,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     let projected_ty = src.ty(&self.mir.local_decls, self.tcx).ty;
                                     let projected_ty = self.monomorphize(projected_ty);
                                     type_size(self.tcx, projected_ty).unwrap_or(8) > 8
-                                        && !is_fat_ptr(projected_ty)
+                                        && !is_fat_ptr(self.tcx, projected_ty)
                                 }
                                 _ => false,
                             };
@@ -2234,6 +2242,28 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // Check if the rvalue produces a fat pointer (e.g., &str from ConstValue::Slice).
                 if let Some(fat_val) = self.extract_fat_component(rvalue) {
                     self.fat_locals.set(place.local, fat_val);
+                    // For stack-allocated locals, also store the metadata to
+                    // the stack slot at offset 8 so that code loading the full
+                    // fat pointer from the slot (e.g. the Return terminator's
+                    // stack-allocated path) sees both words.
+                    if self.stack_locals.is_stack(place.local) {
+                        if let Some(slot) = self.locals.get(place.local) {
+                            let off = self.builder.iconst(8, Origin::synthetic());
+                            let addr = self.builder.ptradd(
+                                slot.into(),
+                                off.into(),
+                                0,
+                                Origin::synthetic(),
+                            );
+                            self.current_mem = self.builder.store(
+                                fat_val.into(),
+                                addr.into(),
+                                8,
+                                self.current_mem.into(),
+                                Origin::synthetic(),
+                            );
+                        }
+                    }
                 }
                 // Cast from a projected non-fat type to a fat pointer
                 // (e.g. `NonNull<[T]> as *const [T]` in into_vec):
@@ -2243,7 +2273,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // propagation through Use/Copy chains.
                 if let Rvalue::Cast(_, op, target_ty) = rvalue {
                     let target_ty_mono = self.monomorphize(*target_ty);
-                    if is_fat_ptr(target_ty_mono)
+                    if is_fat_ptr(self.tcx, target_ty_mono)
                         && let Operand::Copy(src) | Operand::Move(src) = op
                         && !src.projection.is_empty()
                     {
@@ -2251,7 +2281,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let src_ty = self.monomorphize(src_ty);
                         let src_size = type_size(self.tcx, src_ty).unwrap_or(0);
                         if src_size >= 16
-                            && !is_fat_ptr(src_ty)
+                            && !is_fat_ptr(self.tcx, src_ty)
                             && let Some((addr, _)) = self.translate_place_to_addr(src)
                         {
                             let addr = self.coerce_to_ptr(addr);
@@ -2531,7 +2561,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // the allocation contains [data_ptr (8 bytes) | len (8 bytes)].
                 // Extract the length from bytes 8..16.
                 if let Some(mir::ConstValue::Indirect { alloc_id, offset }) = resolved
-                    && is_fat_ptr(const_ty)
+                    && is_fat_ptr(self.tcx, const_ty)
                 {
                     let alloc = self.tcx.global_alloc(alloc_id);
                     if let rustc_middle::mir::interpret::GlobalAlloc::Memory(mem_alloc) = alloc {
@@ -2562,7 +2592,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 if !place.projection.is_empty() {
                     let projected_ty = place.ty(&self.mir.local_decls, self.tcx).ty;
                     let projected_ty = self.monomorphize(projected_ty);
-                    if is_fat_ptr(projected_ty)
+                    if is_fat_ptr(self.tcx, projected_ty)
                         && let Some((addr, _)) = self.translate_place_to_addr(place)
                     {
                         let off8 = self.builder.iconst(8, Origin::synthetic());
@@ -2588,7 +2618,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // type is itself a fat pointer.  Casts like *const [T] →
                 // *const T strip metadata and must NOT propagate.
                 let target_ty_mono = self.monomorphize(*target_ty);
-                if is_fat_ptr(target_ty_mono)
+                if is_fat_ptr(self.tcx, target_ty_mono)
                     && let Operand::Copy(place) | Operand::Move(place) = op
                     && let Some(fat) = self.fat_locals.get(place.local)
                 {
@@ -2699,7 +2729,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             Rvalue::RawPtr(_, place) | Rvalue::Ref(_, _, place) => {
                 let pointee_ty = place.ty(&self.mir.local_decls, self.tcx).ty;
                 let pointee_ty = self.monomorphize(pointee_ty);
-                if matches!(pointee_ty.kind(), ty::Slice(..) | ty::Str | ty::Dynamic(..)) {
+                let typing_env = ty::TypingEnv::fully_monomorphized();
+                let tail = self.tcx.struct_tail_for_codegen(pointee_ty, typing_env);
+                if matches!(tail.kind(), ty::Slice(..) | ty::Str | ty::Dynamic(..)) {
                     self.fat_locals
                         .get(place.local)
                         .or_else(|| self.cast_fat_meta.get(place.local))
@@ -3571,7 +3603,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         if arg_size > 8
                             && arg_size <= 16
                             && matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
-                            && !is_fat_ptr(arg_ty)
+                            && !is_fat_ptr(self.tcx, arg_ty)
                         {
                             let word0 = self.builder.load(
                                 v.into(),
@@ -3621,7 +3653,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             // (structs) with 2+ fields also set fat_locals
                             // but their second field is not ABI metadata.
                             let local_ty = self.monomorphize(self.mir.local_decls[place.local].ty);
-                            let needs_fat = is_fat_ptr(local_ty)
+                            let needs_fat = is_fat_ptr(self.tcx, local_ty)
                                 || (local_ty.is_box()
                                     && local_ty.boxed_ty().is_some_and(|bt| {
                                         matches!(
@@ -3654,7 +3686,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 ir_args.push(len_val.into());
                             } else if let Some(mir::ConstValue::Indirect { alloc_id, offset }) =
                                 resolved
-                                && is_fat_ptr(const_ty)
+                                && is_fat_ptr(self.tcx, const_ty)
                             {
                                 let alloc = self.tcx.global_alloc(alloc_id);
                                 if let rustc_middle::mir::interpret::GlobalAlloc::Memory(
@@ -3750,7 +3782,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // word (length/vtable) is at offset 8 in the sret buffer.
             // Load it into fat_locals so it gets passed when this local
             // is later used as a call argument.
-            if is_fat_ptr(dest_ty) {
+            if is_fat_ptr(self.tcx, dest_ty) {
                 let off = self.builder.iconst(8, Origin::synthetic());
                 let addr = self
                     .builder
@@ -3812,7 +3844,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // also record the RDX placeholder in fat_locals so that
             // PtrMetadata and fat-pointer propagation can find the
             // metadata (length/vtable) without loading from the stack slot.
-            if is_fat_ptr(dest_ty) {
+            if is_fat_ptr(self.tcx, dest_ty) {
                 self.fat_locals.set(destination.local, rdx_val);
             }
         } else {
@@ -3886,7 +3918,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // Non-fat types must NOT get a fat_locals entry, otherwise the
             // spurious high-part value will be injected as an extra argument
             // when this local is later passed to another function call.
-            if is_fat_ptr(dest_ty) {
+            if is_fat_ptr(self.tcx, dest_ty) {
                 self.abi_metadata
                     .mark_call_secondary_return(call_mem.index());
                 let rdx_val = self.builder.iconst(0, Origin::synthetic());
@@ -4387,14 +4419,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // pointer value, not the address of the source slot.
                     _ => {
                         let target_ty_mono = self.monomorphize(*target_ty);
-                        if is_fat_ptr(target_ty_mono)
+                        if is_fat_ptr(self.tcx, target_ty_mono)
                             && let Operand::Copy(src) | Operand::Move(src) = operand
                             && !src.projection.is_empty()
                         {
                             let src_ty = src.ty(&self.mir.local_decls, self.tcx).ty;
                             let src_ty = self.monomorphize(src_ty);
                             let src_size = type_size(self.tcx, src_ty).unwrap_or(0);
-                            if src_size > 8 && !is_fat_ptr(src_ty) {
+                            if src_size > 8 && !is_fat_ptr(self.tcx, src_ty) {
                                 // val is an address; load the data pointer.
                                 let ptr_val = self.coerce_to_ptr(val);
                                 return Some(self.builder.load(
@@ -4672,7 +4704,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 resolved
                             {
                                 let const_ty = mono_const.ty();
-                                if is_fat_ptr(const_ty) {
+                                if is_fat_ptr(self.tcx, const_ty) {
                                     let alloc = self.tcx.global_alloc(alloc_id);
                                     if let rustc_middle::mir::interpret::GlobalAlloc::Memory(
                                         mem_alloc,

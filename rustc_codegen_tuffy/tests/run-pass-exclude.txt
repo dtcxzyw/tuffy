@@ -1,9 +1,4 @@
-# Run-pass tests excluded from tuffy codegen backend testing.
-# These tests fail due to compile errors, link errors, or runtime failures
-# with the tuffy backend as of nightly 2026-02-20.
 #
-# Format: one relative path per line (relative to tests/ui/).
-# Lines starting with # are comments.
 abi/anon-extern-mod.rs
 abi/cabi-int-widening.rs
 abi/c-stack-as-value.rs
@@ -113,6 +108,7 @@ closures/issue-22864-2.rs
 closures/issue-46742.rs
 codegen/issue-101585-128bit-repeat.rs
 codegen/issue-27859.rs
+codegen/issue-64401.rs
 codegen/issue-99551.rs
 coercion/any-trait-object-debug-12744.rs
 coercion/coerce-expect-unsized.rs
@@ -172,6 +168,7 @@ coroutine/drop-control-flow.rs
 coroutine/drop-track-addassign-yield.rs
 coroutine/drop-tracking-yielding-in-match-guards.rs
 coroutine/issue-44197.rs
+coroutine/issue-53548-1.rs
 coroutine/issue-57017.rs
 coroutine/issue-93161.rs
 coroutine/iterator-count.rs
@@ -185,6 +182,7 @@ c-variadic/variadic-unreachable-arg-error.rs
 darwin-objc/darwin-objc-class.rs
 darwin-objc/darwin-objc-class-selector.rs
 darwin-objc/darwin-objc-selector.rs
+delegation/impl-reuse-pass.rs
 derives/derive-marker-tricky.rs
 derives/derive-partial-ord-discriminant.rs
 deriving/derive-partialord-correctness.rs
@@ -238,7 +236,9 @@ for-loop-while/foreach-external-iterators-hashmap-break-restart.rs
 for-loop-while/foreach-external-iterators-hashmap.rs
 for-loop-while/while-let.rs
 for-loop-while/while-with-break.rs
+# Format: one relative path per line (relative to tests/ui/).
 functions-closures/closure-bounds-can-capture-chan.rs
+functions-closures/closure-expected-type/issue-38714.rs
 generic-associated-types/bugs/hrtb-implied-1.rs
 generic-associated-types/bugs/hrtb-implied-2.rs
 generic-associated-types/bugs/issue-87735.rs
@@ -268,12 +268,15 @@ impl-trait/hidden-lifetimes.rs
 impl-trait/impl-fn-hrtb-bounds-2.rs
 impl-trait/issues/issue-49579.rs
 impl-trait/issues/issue-55608-captures-empty-region.rs
+impl-trait/issues/issue-57464-unexpected-regions.rs
 impl-trait/normalize-tait-in-const.rs
 impl-trait/precise-capturing/dyn-use.rs
 imports/issue-26873-multifile/issue-26873-multifile.rs
+imports/no-ambiguous-trait-lint-on-redundant-import.rs
 imports/underscore-imports/duplicate.rs
 indexing/indexing-spans-caller-location.rs
 inference/collection-type-copy-behavior-12909.rs
+# in run-pass-tests.sh (these were previously hidden by a script bug).
 intrinsics/const-eval-select-x86_64.rs
 intrinsics/intrinsic-atomics.rs
 intrinsics/intrinsic-fmuladd.rs
@@ -320,6 +323,7 @@ layout/valid_range_oob.rs
 let-else/let-else-drop-order.rs
 lexer/lexer-crlf-line-endings-string-literal-doc-comment.rs
 lifetimes/rvalue-lifetime-drop-timing.rs
+# Lines starting with # are comments.
 lint/non-snake-case/non-snake-ffi-issue-31924.rs
 lint/rfc-2383-lint-reason/catch_multiple_lint_triggers.rs
 lint/unsafe_code/forge_unsafe_block.rs
@@ -327,6 +331,7 @@ loop-match/drop-in-match-arm.rs
 loop-match/unwind.rs
 loop-match/valid-patterns.rs
 loops/infinite-loop-simplify-cfg-75704.rs
+loops/loop-break-unsize.rs
 macros/expand-full-asm.rs
 macros/format-args-temporaries.rs
 macros/issue-78333.rs
@@ -395,6 +400,7 @@ pattern/issue-15080.rs
 pattern/move-ref-patterns/move-ref-patterns-dynamic-semantics.rs
 pattern/slice-pattern-recursion-15104.rs
 pattern/usefulness/const-pat-ice.rs
+# Pre-existing failures discovered after fixing edition handling
 privacy/restricted/lookup-ignores-private.rs
 process/env-args-reverse-iterator.rs
 process/env-null-vars.rs
@@ -493,10 +499,12 @@ rfcs/rfc-2565-param-attrs/issue-64682-dropping-first-attrs-in-impl-fns.rs
 rfcs/rfc-2565-param-attrs/param-attrs-pretty.rs
 rfcs/rfc-3348-c-string-literals/basic.rs
 rfcs/rfc-3348-c-string-literals/non-ascii.rs
+# Run-pass tests excluded from tuffy codegen backend testing.
 runtime/atomic-print.rs
 runtime/stdout-before-main.rs
 rust-2018/uniform-paths/prelude.rs
 self/arbitrary_self_types_dispatch_to_vtable.rs
+self/arbitrary_self_types_nested.rs
 self/arbitrary_self_types_pointers_and_wrappers.rs
 self/arbitrary_self_types_stdlib_pointers.rs
 self/arbitrary_self_types_unsized_struct.rs
@@ -523,6 +531,7 @@ structs-enums/struct-order-of-eval-3.rs
 structs-enums/struct-order-of-eval-4.rs
 structs-enums/tag-variant-disr-val.rs
 target-feature/wasm-safe.rs
+# These tests fail due to compile errors, link errors, or runtime failures
 thread-local/spawn-hook-atexit.rs
 thread-local/thread-local-static-ref-use-after-free.rs
 threads-sendsync/child-outlives-parent.rs
@@ -588,6 +597,9 @@ traits/issue-23825.rs
 traits/kindck-owned-contains-1.rs
 traits/monad.rs
 traits/non_lifetime_binders/type-match-with-late-bound.rs
+traits/object/auto-dedup.rs
+traits/object/exclusion.rs
+traits/object/generics.rs
 traits/object/lifetime-first.rs
 traits/object/with-lifetime-bound.rs
 traits/overlap-permitted-for-marker-traits.rs
@@ -640,19 +652,5 @@ unsized/unchanged-param.rs
 unsized/unsized3-rpass.rs
 use/use-keyword.rs
 wasm/wasm-stable-target-features.rs
+# with the tuffy backend as of nightly 2026-02-20.
 zero-sized/zero-sized-binary-heap-push.rs
-# Pre-existing failures discovered after fixing edition handling
-# in run-pass-tests.sh (these were previously hidden by a script bug).
-codegen/issue-64401.rs
-coroutine/issue-53548-1.rs
-functions-closures/closure-expected-type/issue-38714.rs
-impl-trait/issues/issue-57464-unexpected-regions.rs
-imports/overwrite-different-vis-2.rs
-imports/overwritten-glob-ambig.rs
-loops/loop-break-unsize.rs
-self/arbitrary_self_types_nested.rs
-traits/object/auto-dedup.rs
-traits/object/exclusion.rs
-traits/object/generics.rs
-delegation/impl-reuse-pass.rs
-imports/no-ambiguous-trait-lint-on-redundant-import.rs
