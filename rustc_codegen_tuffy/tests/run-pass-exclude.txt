@@ -142,18 +142,15 @@ const-generics/occurs-check/bind-param.rs
 const-generics/slice-const-param.rs
 const-generics/type-dependent/issue-70586.rs
 const_prop/dont-propagate-generic-instance.rs
-consts/cast-discriminant-zst-enum.rs
 consts/const-blocks/const-repeat.rs
 consts/const-endianess.rs
 consts/const-eval/issue-84957-const-str-as-bytes.rs
 consts/const-eval/ptr_fragments.rs
 consts/constifconst-call-in-const-position.rs
 consts/const-int-arithmetic.rs
-consts/const-int-saturating-arith.rs
 consts/const_let_eq_float.rs
 consts/const-promoted-opaque.rs
 consts/const-region-ptrs-noncopy.rs
-consts/const-typeid-of-rpass.rs
 consts/ice-zst-static-access.rs
 consts/issue-33537.rs
 consts/issue-62045.rs
@@ -216,7 +213,6 @@ dst/dst-trait.rs
 duplicate/inherent-impls-overlap-check/no-overlap.rs
 dyn-compatibility/elaborated-predicates-ordering.rs
 dyn-compatibility/metasized.rs
-dyn-compatibility/pointeesized.rs
 entry-point/imported_main_conflict_lib.rs
 enum-discriminant/arbitrary_enum_discriminant.rs
 enum-discriminant/discriminant_size.rs
@@ -263,8 +259,6 @@ higher-ranked/trait-bounds/normalize-under-binder/issue-62529-6.rs
 higher-ranked/trait-bounds/normalize-under-binder/issue-70120.rs
 higher-ranked/trait-bounds/normalize-under-binder/norm-before-method-resolution.rs
 hygiene/no_implicit_prelude-2021.rs
-implied-bounds/dyn-erasure-no-tait.rs
-implied-bounds/dyn-erasure-tait.rs
 impl-trait/alias-liveness/rpit-hidden-erased-unsoundness.rs
 impl-trait/alias-liveness/rpit-hide-lifetime-for-swap.rs
 impl-trait/associated-impl-trait-type-issue-114325.rs
@@ -626,7 +620,6 @@ typeck/issue-88609.rs
 typeck/osstring-str-equality.rs
 type-inference/partial-type-hint-12909.rs
 unboxed-closures/callback-trait-prediction-70746.rs
-unboxed-closures/type-id-higher-rank.rs
 unboxed-closures/unboxed-closures-boxed.rs
 unboxed-closures/unboxed-closures-call-sugar-object-autoderef.rs
 unboxed-closures/unboxed-closures-call-sugar-object.rs
