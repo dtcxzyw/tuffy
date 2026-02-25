@@ -1920,6 +1920,61 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                     self.current_mem.into(),
                                                     Origin::synthetic(),
                                                 );
+                                                // 128-bit integer destination: the low
+                                                // word was stored above; now store the
+                                                // high word (sign- or zero-extended).
+                                                let dest_ty = self.monomorphize(
+                                                    self.mir.local_decls[place.local].ty,
+                                                );
+                                                let is_i128_dest = matches!(
+                                                    dest_ty.kind(),
+                                                    ty::Int(ty::IntTy::I128)
+                                                        | ty::Uint(ty::UintTy::U128)
+                                                );
+                                                if is_i128_dest && bytes > 8 {
+                                                    let hi_word =
+                                                        if matches!(dest_ty.kind(), ty::Int(ty::IntTy::I128))
+                                                    {
+                                                        // Signed: high word = sar(val, 63)
+                                                        let c63 = self.builder.iconst(
+                                                            63,
+                                                            Origin::synthetic(),
+                                                        );
+                                                        let signed_op = IrOperand::annotated(
+                                                            val,
+                                                            Annotation::Signed(64),
+                                                        );
+                                                        self.builder.shr(
+                                                            signed_op,
+                                                            c63.into(),
+                                                            None,
+                                                            Origin::synthetic(),
+                                                        )
+                                                    } else {
+                                                        // Unsigned: high word = 0
+                                                        self.builder.iconst(
+                                                            0,
+                                                            Origin::synthetic(),
+                                                        )
+                                                    };
+                                                    let off8 = self.builder.iconst(
+                                                        8,
+                                                        Origin::synthetic(),
+                                                    );
+                                                    let hi_addr = self.builder.ptradd(
+                                                        slot.into(),
+                                                        off8.into(),
+                                                        0,
+                                                        Origin::synthetic(),
+                                                    );
+                                                    self.current_mem = self.builder.store(
+                                                        hi_word.into(),
+                                                        hi_addr.into(),
+                                                        8,
+                                                        self.current_mem.into(),
+                                                        Origin::synthetic(),
+                                                    );
+                                                }
                                                 // CheckedBinaryOp stores (result, bool)
                                                 // but translate_rvalue only returns the
                                                 // arithmetic result.  Zero the overflow
@@ -4081,6 +4136,83 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     mir_ty.is_floating_point()
                 };
 
+                // Detect 128-bit integer operands for multi-word comparison.
+                let is_128bit = matches!(
+                    op,
+                    BinOp::Eq | BinOp::Ne
+                ) && {
+                    let mir_ty = match lhs {
+                        Operand::Copy(p) | Operand::Move(p) => {
+                            self.monomorphize(self.mir.local_decls[p.local].ty)
+                        }
+                        Operand::Constant(c) => self.monomorphize(c.ty()),
+                        _ => self.tcx.types.i32,
+                    };
+                    matches!(
+                        mir_ty.kind(),
+                        ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
+                    )
+                };
+
+                // For i128/u128 Eq/Ne: compare both 64-bit words.
+                if is_128bit && matches!(op, BinOp::Eq | BinOp::Ne) {
+                    let l_ptr = self.coerce_to_ptr(l_raw);
+                    let r_ptr = self.coerce_to_ptr(r_raw);
+                    // Load low words
+                    let l_lo = self.builder.load(
+                        l_ptr.into(), 8, Type::Int,
+                        self.current_mem.into(), None, Origin::synthetic(),
+                    );
+                    let r_lo = self.builder.load(
+                        r_ptr.into(), 8, Type::Int,
+                        self.current_mem.into(), None, Origin::synthetic(),
+                    );
+                    // Load high words
+                    let off8 = self.builder.iconst(8, Origin::synthetic());
+                    let l_hi_addr = self.builder.ptradd(
+                        l_ptr.into(), off8.into(), 0, Origin::synthetic(),
+                    );
+                    let off8b = self.builder.iconst(8, Origin::synthetic());
+                    let r_hi_addr = self.builder.ptradd(
+                        r_ptr.into(), off8b.into(), 0, Origin::synthetic(),
+                    );
+                    let l_hi = self.builder.load(
+                        l_hi_addr.into(), 8, Type::Int,
+                        self.current_mem.into(), None, Origin::synthetic(),
+                    );
+                    let r_hi = self.builder.load(
+                        r_hi_addr.into(), 8, Type::Int,
+                        self.current_mem.into(), None, Origin::synthetic(),
+                    );
+                    let lo_cmp = self.builder.icmp(
+                        ICmpOp::Eq, l_lo.into(), r_lo.into(), Origin::synthetic(),
+                    );
+                    let hi_cmp = self.builder.icmp(
+                        ICmpOp::Eq, l_hi.into(), r_hi.into(), Origin::synthetic(),
+                    );
+                    // Convert Bool results to Int (0/1) so we can AND them.
+                    let lo_int = self.builder.bool_to_int(
+                        lo_cmp.into(), Origin::synthetic(),
+                    );
+                    let hi_int = self.builder.bool_to_int(
+                        hi_cmp.into(), Origin::synthetic(),
+                    );
+                    // Eq: both words must match; Ne: any word differs
+                    let combined = self.builder.and(
+                        lo_int.into(), hi_int.into(), None, Origin::synthetic(),
+                    );
+                    if matches!(op, BinOp::Eq) {
+                        return Some(combined);
+                    } else {
+                        // Ne: invert the Eq result
+                        let one = self.builder.iconst(1, Origin::synthetic());
+                        return Some(self.builder.icmp(
+                            ICmpOp::Ne, combined.into(), one.into(),
+                            Origin::synthetic(),
+                        ).into());
+                    }
+                }
+
                 let val = match op {
                     BinOp::Add | BinOp::AddWithOverflow | BinOp::AddUnchecked => {
                         self.builder.add(l_op, r_op, res_ann, Origin::synthetic())
@@ -4908,6 +5040,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 /// - Widening signed: sign-extend via shl+shr
 /// - Widening unsigned / narrowing: mask via and
 /// - Same width: pass through (reinterpretation)
+///
+/// For widening to >64 bits (i128/u128), this function only produces the
+/// low 64-bit word.  The caller (assignment handler) is responsible for
+/// storing the high word into the stack slot.
 fn translate_int_to_int_cast(
     src_ty: ty::Ty<'_>,
     target_ty: ty::Ty<'_>,
@@ -4923,20 +5059,27 @@ fn translate_int_to_int_cast(
     }
 
     if dst_bits > src_bits {
-        // Widening cast.
-        if is_signed_int(src_ty) {
-            // Sign-extend: shl by (dst - src), then arithmetic shr by (dst - src).
-            let shift_amt = dst_bits - src_bits;
+        // Widening cast.  Cap effective destination at 64 bits — the IR
+        // operates on 64-bit registers, so shl/shr by ≥64 is undefined.
+        // The high word for 128-bit targets is handled by the caller.
+        let effective_dst = std::cmp::min(dst_bits, 64);
+        if is_signed_int(src_ty) && src_bits < effective_dst {
+            // Sign-extend: shl by (eff_dst - src), then arithmetic shr.
+            let shift_amt = effective_dst - src_bits;
             let shift_val = builder.iconst(shift_amt as i64, Origin::synthetic());
             let shifted = builder.shl(val.into(), shift_val.into(), None, Origin::synthetic());
             let shift_val2 = builder.iconst(shift_amt as i64, Origin::synthetic());
-            let shifted_op = IrOperand::annotated(shifted, Annotation::Signed(dst_bits));
+            let shifted_op = IrOperand::annotated(shifted, Annotation::Signed(effective_dst));
             Some(builder.shr(shifted_op, shift_val2.into(), None, Origin::synthetic()))
-        } else {
+        } else if !is_signed_int(src_ty) && src_bits < 64 {
             // Zero-extend: mask off high bits.
             let mask = (BigInt::from(1) << src_bits) - 1;
             let mask_val = builder.iconst(mask, Origin::synthetic());
             Some(builder.and(val.into(), mask_val.into(), None, Origin::synthetic()))
+        } else {
+            // src_bits == 64 widening to 128, or signed 64→128:
+            // low word is val as-is; caller stores the high word.
+            Some(val)
         }
     } else {
         // Narrowing cast: mask to target width.
