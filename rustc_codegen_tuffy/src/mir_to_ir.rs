@@ -4272,6 +4272,108 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     }
                 }
 
+                // For i128/u128 Lt/Le/Gt/Ge: compare hi words first,
+                // then lo words if hi are equal.  For signed i128 the
+                // hi comparison is signed; lo is always unsigned.
+                if is_128bit
+                    && matches!(op, BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge)
+                {
+                    let l_ptr = self.coerce_to_ptr(l_raw);
+                    let r_ptr = self.coerce_to_ptr(r_raw);
+                    let l_lo = self.builder.load(
+                        l_ptr.into(), 8, Type::Int,
+                        self.current_mem.into(), None, Origin::synthetic(),
+                    );
+                    let r_lo = self.builder.load(
+                        r_ptr.into(), 8, Type::Int,
+                        self.current_mem.into(), None, Origin::synthetic(),
+                    );
+                    let off8 = self.builder.iconst(8, Origin::synthetic());
+                    let l_hi_addr = self.builder.ptradd(
+                        l_ptr.into(), off8.into(), 0, Origin::synthetic(),
+                    );
+                    let off8b = self.builder.iconst(8, Origin::synthetic());
+                    let r_hi_addr = self.builder.ptradd(
+                        r_ptr.into(), off8b.into(), 0, Origin::synthetic(),
+                    );
+                    let l_hi = self.builder.load(
+                        l_hi_addr.into(), 8, Type::Int,
+                        self.current_mem.into(), None, Origin::synthetic(),
+                    );
+                    let r_hi = self.builder.load(
+                        r_hi_addr.into(), 8, Type::Int,
+                        self.current_mem.into(), None, Origin::synthetic(),
+                    );
+
+                    let is_signed = matches!(lhs_mir_ty.kind(), ty::Int(ty::IntTy::I128));
+
+                    // Map the op to icmp operations for hi (signed/unsigned)
+                    // and lo (always unsigned).
+                    let (strict_op, eq_or_op) = match op {
+                        BinOp::Lt | BinOp::Le => (ICmpOp::Lt, ICmpOp::Lt),
+                        BinOp::Gt | BinOp::Ge => (ICmpOp::Gt, ICmpOp::Gt),
+                        _ => unreachable!(),
+                    };
+                    let is_le_or_ge = matches!(op, BinOp::Le | BinOp::Ge);
+
+                    // hi comparison (signed for i128, unsigned for u128)
+                    let hi_strict = if is_signed {
+                        self.builder.icmp(
+                            strict_op,
+                            IrOperand::annotated(l_hi, Annotation::Signed(64)),
+                            IrOperand::annotated(r_hi, Annotation::Signed(64)),
+                            Origin::synthetic(),
+                        )
+                    } else {
+                        self.builder.icmp(
+                            strict_op,
+                            IrOperand::annotated(l_hi, Annotation::Unsigned(64)),
+                            IrOperand::annotated(r_hi, Annotation::Unsigned(64)),
+                            Origin::synthetic(),
+                        )
+                    };
+                    let hi_eq = self.builder.icmp(
+                        ICmpOp::Eq, l_hi.into(), r_hi.into(),
+                        Origin::synthetic(),
+                    );
+                    // lo comparison (always unsigned)
+                    let lo_cmp_op = if is_le_or_ge {
+                        match op {
+                            BinOp::Le => ICmpOp::Le,
+                            BinOp::Ge => ICmpOp::Ge,
+                            _ => unreachable!(),
+                        }
+                    } else {
+                        eq_or_op
+                    };
+                    let lo_cmp = self.builder.icmp(
+                        lo_cmp_op,
+                        IrOperand::annotated(l_lo, Annotation::Unsigned(64)),
+                        IrOperand::annotated(r_lo, Annotation::Unsigned(64)),
+                        Origin::synthetic(),
+                    );
+
+                    // result = hi_strict || (hi_eq && lo_cmp)
+                    let hi_strict_int = self.builder.bool_to_int(
+                        hi_strict.into(), Origin::synthetic(),
+                    );
+                    let hi_eq_int = self.builder.bool_to_int(
+                        hi_eq.into(), Origin::synthetic(),
+                    );
+                    let lo_cmp_int = self.builder.bool_to_int(
+                        lo_cmp.into(), Origin::synthetic(),
+                    );
+                    let eq_and_lo = self.builder.and(
+                        hi_eq_int.into(), lo_cmp_int.into(), None,
+                        Origin::synthetic(),
+                    );
+                    let result = self.builder.or(
+                        hi_strict_int.into(), eq_and_lo.into(), None,
+                        Origin::synthetic(),
+                    );
+                    return Some(result);
+                }
+
                 // For i128/u128 Add/Sub: decompose into two 64-bit operations.
                 if is_128bit
                     && matches!(
@@ -4382,6 +4484,252 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     );
                     self.current_mem = self.builder.store(
                         res_hi.into(), hi_addr.into(), 8,
+                        self.current_mem.into(), Origin::synthetic(),
+                    );
+                    return Some(result_slot);
+                }
+
+                // For i128/u128 BitAnd/BitOr/BitXor: apply to each 64-bit word.
+                if is_128bit
+                    && matches!(op, BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor)
+                {
+                    let l_ptr = self.coerce_to_ptr(l_raw);
+                    let r_ptr = self.coerce_to_ptr(r_raw);
+                    let l_lo = self.builder.load(
+                        l_ptr.into(), 8, Type::Int,
+                        self.current_mem.into(), None, Origin::synthetic(),
+                    );
+                    let r_lo = self.builder.load(
+                        r_ptr.into(), 8, Type::Int,
+                        self.current_mem.into(), None, Origin::synthetic(),
+                    );
+                    let off8 = self.builder.iconst(8, Origin::synthetic());
+                    let l_hi_addr = self.builder.ptradd(
+                        l_ptr.into(), off8.into(), 0, Origin::synthetic(),
+                    );
+                    let off8b = self.builder.iconst(8, Origin::synthetic());
+                    let r_hi_addr = self.builder.ptradd(
+                        r_ptr.into(), off8b.into(), 0, Origin::synthetic(),
+                    );
+                    let l_hi = self.builder.load(
+                        l_hi_addr.into(), 8, Type::Int,
+                        self.current_mem.into(), None, Origin::synthetic(),
+                    );
+                    let r_hi = self.builder.load(
+                        r_hi_addr.into(), 8, Type::Int,
+                        self.current_mem.into(), None, Origin::synthetic(),
+                    );
+                    let (res_lo, res_hi) = match op {
+                        BinOp::BitAnd => (
+                            self.builder.and(
+                                l_lo.into(), r_lo.into(), None, Origin::synthetic(),
+                            ),
+                            self.builder.and(
+                                l_hi.into(), r_hi.into(), None, Origin::synthetic(),
+                            ),
+                        ),
+                        BinOp::BitOr => (
+                            self.builder.or(
+                                l_lo.into(), r_lo.into(), None, Origin::synthetic(),
+                            ),
+                            self.builder.or(
+                                l_hi.into(), r_hi.into(), None, Origin::synthetic(),
+                            ),
+                        ),
+                        BinOp::BitXor => (
+                            self.builder.xor(
+                                l_lo.into(), r_lo.into(), None, Origin::synthetic(),
+                            ),
+                            self.builder.xor(
+                                l_hi.into(), r_hi.into(), None, Origin::synthetic(),
+                            ),
+                        ),
+                        _ => unreachable!(),
+                    };
+                    let result_slot = self.builder.stack_slot(16, Origin::synthetic());
+                    self.current_mem = self.builder.store(
+                        res_lo.into(), result_slot.into(), 8,
+                        self.current_mem.into(), Origin::synthetic(),
+                    );
+                    let off8c = self.builder.iconst(8, Origin::synthetic());
+                    let hi_addr = self.builder.ptradd(
+                        result_slot.into(), off8c.into(), 0, Origin::synthetic(),
+                    );
+                    self.current_mem = self.builder.store(
+                        res_hi.into(), hi_addr.into(), 8,
+                        self.current_mem.into(), Origin::synthetic(),
+                    );
+                    return Some(result_slot);
+                }
+
+                // For i128/u128 Shl/Shr: decompose into two 64-bit shifts
+                // with select for the shift >= 64 case.
+                if is_128bit
+                    && matches!(op, BinOp::Shl | BinOp::ShlUnchecked
+                                  | BinOp::Shr | BinOp::ShrUnchecked)
+                {
+                    let l_ptr = self.coerce_to_ptr(l_raw);
+                    // Shift amount is a regular int, not i128
+                    let shift = self.coerce_to_int(r_raw);
+                    let lo = self.builder.load(
+                        l_ptr.into(), 8, Type::Int,
+                        self.current_mem.into(), None, Origin::synthetic(),
+                    );
+                    let off8 = self.builder.iconst(8, Origin::synthetic());
+                    let hi_addr = self.builder.ptradd(
+                        l_ptr.into(), off8.into(), 0, Origin::synthetic(),
+                    );
+                    let hi = self.builder.load(
+                        hi_addr.into(), 8, Type::Int,
+                        self.current_mem.into(), None, Origin::synthetic(),
+                    );
+
+                    let c63 = self.builder.iconst(63, Origin::synthetic());
+                    let c64 = self.builder.iconst(64, Origin::synthetic());
+                    let c1 = self.builder.iconst(1, Origin::synthetic());
+                    let mask = self.builder.and(
+                        shift.into(), c63.into(), None, Origin::synthetic(),
+                    );
+                    let is_large_bool = self.builder.icmp(
+                        ICmpOp::Ge,
+                        IrOperand::annotated(shift, Annotation::Unsigned(64)),
+                        IrOperand::annotated(c64, Annotation::Unsigned(64)),
+                        Origin::synthetic(),
+                    );
+                    // Materialize the condition into a register immediately so
+                    // that the downstream `select` uses TEST+CMOVcc instead of
+                    // relying on flags surviving through the shr/shl sequence.
+                    let is_large = self.builder.bool_to_int(
+                        is_large_bool.into(), Origin::synthetic(),
+                    );
+
+                    let is_shl = matches!(op, BinOp::Shl | BinOp::ShlUnchecked);
+                    let is_signed = matches!(
+                        lhs_mir_ty.kind(), ty::Int(ty::IntTy::I128)
+                    );
+
+                    let (res_lo, res_hi) = if is_shl {
+                        // Small shift: lo_s = lo << mask,
+                        //   hi_s = (hi << mask) | ((lo >> 1) >> (63 - mask))
+                        let lo_s = self.builder.shl(
+                            lo.into(), mask.into(), None, Origin::synthetic(),
+                        );
+                        let hi_s = self.builder.shl(
+                            hi.into(), mask.into(), None, Origin::synthetic(),
+                        );
+                        let lo_r1 = self.builder.shr(
+                            lo.into(), c1.into(), None, Origin::synthetic(),
+                        );
+                        let c63b = self.builder.iconst(63, Origin::synthetic());
+                        let compl = self.builder.sub(
+                            c63b.into(), mask.into(), None, Origin::synthetic(),
+                        );
+                        let carry = self.builder.shr(
+                            lo_r1.into(), compl.into(), None, Origin::synthetic(),
+                        );
+                        let hi_small = self.builder.or(
+                            hi_s.into(), carry.into(), None, Origin::synthetic(),
+                        );
+                        // Large shift: lo = 0, hi = lo << mask
+                        let zero = self.builder.iconst(0, Origin::synthetic());
+                        let hi_large = self.builder.shl(
+                            lo.into(), mask.into(), None, Origin::synthetic(),
+                        );
+                        // Refresh flags right before selects so TEST is
+                        // adjacent to CMOVcc (shl/shr above clobber flags).
+                        let cond = self.builder.int_to_bool(
+                            is_large.into(), Origin::synthetic(),
+                        );
+                        let final_lo = self.builder.select(
+                            cond.into(), zero.into(), lo_s.into(),
+                            Type::Int, Origin::synthetic(),
+                        );
+                        let final_hi = self.builder.select(
+                            cond.into(), hi_large.into(), hi_small.into(),
+                            Type::Int, Origin::synthetic(),
+                        );
+                        (final_lo, final_hi)
+                    } else {
+                        // Shr: unsigned or arithmetic
+                        // Small shift: hi_s = hi >> mask,
+                        //   lo_s = (lo >> mask) | ((hi << 1) << (63 - mask))
+                        let lo_s = self.builder.shr(
+                            lo.into(), mask.into(), None, Origin::synthetic(),
+                        );
+                        let hi_s = if is_signed {
+                            self.builder.shr(
+                                hi.into(), mask.into(),
+                                Some(Annotation::Signed(64)),
+                                Origin::synthetic(),
+                            )
+                        } else {
+                            self.builder.shr(
+                                hi.into(), mask.into(), None,
+                                Origin::synthetic(),
+                            )
+                        };
+                        let hi_l1 = self.builder.shl(
+                            hi.into(), c1.into(), None, Origin::synthetic(),
+                        );
+                        let c63b = self.builder.iconst(63, Origin::synthetic());
+                        let compl = self.builder.sub(
+                            c63b.into(), mask.into(), None, Origin::synthetic(),
+                        );
+                        let carry = self.builder.shl(
+                            hi_l1.into(), compl.into(), None, Origin::synthetic(),
+                        );
+                        let lo_small = self.builder.or(
+                            lo_s.into(), carry.into(), None, Origin::synthetic(),
+                        );
+                        // Large shift: hi = 0 (or sign-ext), lo = hi >> mask
+                        let lo_large = if is_signed {
+                            self.builder.shr(
+                                hi.into(), mask.into(),
+                                Some(Annotation::Signed(64)),
+                                Origin::synthetic(),
+                            )
+                        } else {
+                            self.builder.shr(
+                                hi.into(), mask.into(), None,
+                                Origin::synthetic(),
+                            )
+                        };
+                        let hi_large = if is_signed {
+                            let c63c = self.builder.iconst(63, Origin::synthetic());
+                            self.builder.shr(
+                                hi.into(), c63c.into(),
+                                Some(Annotation::Signed(64)),
+                                Origin::synthetic(),
+                            )
+                        } else {
+                            self.builder.iconst(0, Origin::synthetic())
+                        };
+                        // Refresh flags right before selects (same reason as Shl).
+                        let cond = self.builder.int_to_bool(
+                            is_large.into(), Origin::synthetic(),
+                        );
+                        let final_lo = self.builder.select(
+                            cond.into(), lo_large.into(), lo_small.into(),
+                            Type::Int, Origin::synthetic(),
+                        );
+                        let final_hi = self.builder.select(
+                            cond.into(), hi_large.into(), hi_s.into(),
+                            Type::Int, Origin::synthetic(),
+                        );
+                        (final_lo, final_hi)
+                    };
+
+                    let result_slot = self.builder.stack_slot(16, Origin::synthetic());
+                    self.current_mem = self.builder.store(
+                        res_lo.into(), result_slot.into(), 8,
+                        self.current_mem.into(), Origin::synthetic(),
+                    );
+                    let off8b = self.builder.iconst(8, Origin::synthetic());
+                    let hi_store = self.builder.ptradd(
+                        result_slot.into(), off8b.into(), 0, Origin::synthetic(),
+                    );
+                    self.current_mem = self.builder.store(
+                        res_hi.into(), hi_store.into(), 8,
                         self.current_mem.into(), Origin::synthetic(),
                     );
                     return Some(result_slot);
@@ -4498,8 +4846,33 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             Operand::Constant(c) => c.ty(),
                             _ => return Some(val),
                         };
-                        // Bool is Type::Bool in IR but IntToInt casts need Int operands.
-                        let val = self.coerce_to_int(val);
+                        let src_ty = self.monomorphize(src_ty);
+                        // For i128/u128 source: val is a stack slot pointer.
+                        // Load the lo word for narrowing casts to ≤64-bit types.
+                        let val = if matches!(
+                            src_ty.kind(),
+                            ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
+                        ) && matches!(
+                            self.builder.value_type(val),
+                            Some(Type::Ptr(_))
+                        ) {
+                            let target_ty_m = self.monomorphize(*target_ty);
+                            let dst_bits = int_bitwidth(target_ty_m).unwrap_or(64);
+                            if dst_bits <= 64 {
+                                // Narrowing: just load the lo word.
+                                self.builder.load(
+                                    val.into(), 8, Type::Int,
+                                    self.current_mem.into(), None,
+                                    Origin::synthetic(),
+                                )
+                            } else {
+                                // i128 → i128 or u128 → i128: return slot as-is.
+                                return Some(val);
+                            }
+                        } else {
+                            // Bool is Type::Bool in IR but IntToInt casts need Int operands.
+                            self.coerce_to_int(val)
+                        };
                         translate_int_to_int_cast(src_ty, *target_ty, val, &mut self.builder)
                     }
                     CastKind::PointerCoercion(..) => {
