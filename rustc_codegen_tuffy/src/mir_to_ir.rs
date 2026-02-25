@@ -685,9 +685,20 @@ fn needs_indirect_return<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> bool {
     }
     // ScalarPair types (fat pointers, two-scalar structs) are returned in
     // two registers (rax + rdx).  All other aggregates > 8 bytes use sret.
+    //
+    // Exception: when either scalar is a float, the SysV ABI returns them
+    // in XMM registers which tuffy cannot handle.  Force sret for those.
     let typing_env = ty::TypingEnv::fully_monomorphized();
     if let Ok(layout) = tcx.layout_of(typing_env.as_query_input(ty)) {
-        !matches!(layout.backend_repr, rustc_abi::BackendRepr::ScalarPair(..))
+        match layout.backend_repr {
+            rustc_abi::BackendRepr::ScalarPair(a, b) => {
+                use rustc_abi::Primitive;
+                let has_float = matches!(a.primitive(), Primitive::Float(..))
+                    || matches!(b.primitive(), Primitive::Float(..));
+                has_float
+            }
+            _ => true,
+        }
     } else {
         size > 16
     }
