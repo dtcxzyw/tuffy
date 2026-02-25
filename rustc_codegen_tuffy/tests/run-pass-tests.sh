@@ -94,9 +94,20 @@ for test_file in "${tests[@]}"; do
     bin_path="$OUT_DIR/test_bin"
     rm -f "$bin_path"
 
-    # Parse edition directive from test file (default: 2021)
-    test_edition=$(grep -oP '//@ edition:\s*\K\S+' "$test_file" 2>/dev/null | head -1 || true)
-    test_edition="${test_edition:-2021}"
+    # Parse edition directive from test file (default: 2021).
+    # Handles range syntax like "2015..2021" or "2015.." by picking the
+    # last concrete edition in the range (or 2021 for open-ended ranges).
+    raw_edition=$(grep -oP '//@ edition:\s*\K\S+' "$test_file" 2>/dev/null | head -1 || true)
+    if [[ "$raw_edition" == *..* ]]; then
+        start_edition="${raw_edition%%..*}"
+        if [[ -n "$start_edition" ]]; then
+            test_edition="$start_edition"
+        else
+            test_edition="2021"
+        fi
+    else
+        test_edition="${raw_edition:-2021}"
+    fi
 
     # Step 1: Compile and link as binary
     set +e
