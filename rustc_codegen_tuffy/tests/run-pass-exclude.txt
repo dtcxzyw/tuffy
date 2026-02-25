@@ -185,7 +185,6 @@ c-variadic/variadic-unreachable-arg-error.rs
 darwin-objc/darwin-objc-class.rs
 darwin-objc/darwin-objc-class-selector.rs
 darwin-objc/darwin-objc-selector.rs
-delegation/impl-reuse-pass.rs
 derives/derive-marker-tricky.rs
 derives/derive-partial-ord-discriminant.rs
 deriving/derive-partialord-correctness.rs
@@ -272,7 +271,6 @@ impl-trait/issues/issue-55608-captures-empty-region.rs
 impl-trait/normalize-tait-in-const.rs
 impl-trait/precise-capturing/dyn-use.rs
 imports/issue-26873-multifile/issue-26873-multifile.rs
-imports/no-ambiguous-trait-lint-on-redundant-import.rs
 imports/underscore-imports/duplicate.rs
 indexing/indexing-spans-caller-location.rs
 inference/collection-type-copy-behavior-12909.rs
@@ -645,22 +643,16 @@ wasm/wasm-stable-target-features.rs
 zero-sized/zero-sized-binary-heap-push.rs
 # Pre-existing failures discovered after fixing edition handling
 # in run-pass-tests.sh (these were previously hidden by a script bug).
-associated-consts/associated-const-range-match-patterns.rs
 codegen/issue-64401.rs
 coroutine/issue-53548-1.rs
 functions-closures/closure-expected-type/issue-38714.rs
 impl-trait/issues/issue-57464-unexpected-regions.rs
 imports/overwrite-different-vis-2.rs
 imports/overwritten-glob-ambig.rs
-lifetimes/temporary-lifetime-extension.rs
-lint/rfc-2383-lint-reason/fulfilled_expectation_early_lints.rs
 loops/loop-break-unsize.rs
-macros/macro-follow-rpass.rs
-macros/macro-pat-pattern-followed-by-or.rs
-nll/issue-27583.rs
-parser/issues/issue-63115-range-pat-interpolated.rs
-pattern/inc-range-pat.rs
 self/arbitrary_self_types_nested.rs
 traits/object/auto-dedup.rs
 traits/object/exclusion.rs
 traits/object/generics.rs
+delegation/impl-reuse-pass.rs
+imports/no-ambiguous-trait-lint-on-redundant-import.rs
