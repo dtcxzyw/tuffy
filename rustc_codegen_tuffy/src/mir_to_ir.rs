@@ -4240,6 +4240,39 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 ));
                             }
                         }
+                        // PtrToPtr from a large stack local: translate_operand
+                        // returns the stack-slot ADDRESS (size > 8 skips the
+                        // load).  Load the first target_size bytes so the
+                        // cast produces the actual pointer value.
+                        // Example: Result<NonNull<T>, AllocError> (16 B)
+                        // cast to *mut T (8 B) via PtrToPtr.
+                        // Only for PtrToPtr — Transmute must preserve the
+                        // slot address for the assignment handler's
+                        // word-by-word copy.
+                        if matches!(kind, CastKind::PtrToPtr) {
+                            let target_size = type_size(self.tcx, target_ty_mono).unwrap_or(0);
+                            if target_size > 0
+                                && target_size <= 8
+                                && matches!(self.builder.value_type(val), Some(Type::Ptr(_)))
+                                && let Operand::Copy(src) | Operand::Move(src) = operand
+                                && src.projection.is_empty()
+                                && self.stack_locals.is_stack(src.local)
+                            {
+                                let src_ty = self.monomorphize(self.mir.local_decls[src.local].ty);
+                                let src_size = type_size(self.tcx, src_ty).unwrap_or(0);
+                                if src_size > 8 {
+                                    let ir_ty = translate_ty(target_ty_mono).unwrap_or(Type::Int);
+                                    return Some(self.builder.load(
+                                        val.into(),
+                                        target_size as u32,
+                                        ir_ty,
+                                        self.current_mem.into(),
+                                        None,
+                                        Origin::synthetic(),
+                                    ));
+                                }
+                            }
+                        }
                         Some(val)
                     }
                 }
@@ -4796,10 +4829,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // Only load if the value is an actual stack_slot — other
                     // Ptr-typed values (e.g. loaded pointers from reborrows)
                     // are already the correct value and must not be dereferenced.
-                    // Additionally, the slot must be pointer-sized (≤8 bytes).
-                    // A reference local (e.g. `&mut Iter`) may hold the address
-                    // of a larger struct's stack slot; loading from that slot
-                    // would read the struct's data instead of the pointer value.
+                    // Only load from small (≤ 8 byte) slots; larger slots
+                    // hold multi-word data that the assignment handler
+                    // copies word-by-word.
                     if self.stack_locals.is_stack(place.local)
                         && let Some(slot) = val
                     {
