@@ -1089,9 +1089,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     self.current_mem.into(),
                     Origin::synthetic(),
                 );
-            } else if matches!(self.builder.value_type(addr), Some(Type::Ptr(_))) {
+            } else if matches!(self.builder.value_type(addr), Some(Type::Ptr(_)))
+                && self.builder.is_memory_address(addr)
+            {
                 // addr is a pointer to the data (e.g. symbol_addr for a
-                // const array).  Copy word-by-word from the source address.
+                // const array, or ptradd derived from one).  Copy
+                // word-by-word from the source address.
+                // Non-address Ptr values (e.g. a NonNull<T> loaded from
+                // a call result) fall through to the direct-store path
+                // below so we don't accidentally dereference them.
                 let num_words = (size as u64).div_ceil(8);
                 for i in 0..num_words {
                     let byte_off = i * 8;
@@ -1986,12 +1992,30 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     type_size(self.tcx, src_ty).unwrap_or(8) > 8
                                 }
                                 // Cast/Transmute from a stack local.
-                                Rvalue::Cast(_, Operand::Copy(src) | Operand::Move(src), _)
+                                // Exclude PtrToPtr from a large stack local: the
+                                // PtrToPtr handler in translate_rvalue already
+                                // loads the actual value from the slot, so val is
+                                // data (not a slot address) and the destination
+                                // must NOT be marked as stack.
+                                Rvalue::Cast(kind, Operand::Copy(src) | Operand::Move(src), cast_ty)
                                     if src.projection.is_empty()
                                         && self.stack_locals.is_stack(src.local) =>
                                 {
                                     let src_ty = self.monomorphize(self.mir.local_decls[src.local].ty);
-                                    type_size(self.tcx, src_ty).unwrap_or(8) > 8
+                                    let src_size = type_size(self.tcx, src_ty).unwrap_or(8);
+                                    if src_size > 8 {
+                                        // PtrToPtr with target ≤ 8 bytes already
+                                        // loaded the value — don't propagate.
+                                        let target_ty = self.monomorphize(*cast_ty);
+                                        let target_size = type_size(self.tcx, target_ty).unwrap_or(0);
+                                        if matches!(kind, CastKind::PtrToPtr) && target_size <= 8 {
+                                            false
+                                        } else {
+                                            true
+                                        }
+                                    } else {
+                                        false
+                                    }
                                 }
                                 // Projected place where the projected type is
                                 // > 8 bytes.  translate_operand returns an
