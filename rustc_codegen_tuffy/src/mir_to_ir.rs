@@ -457,6 +457,26 @@ pub fn translate_function<'tcx>(
         }
     }
 
+    // Pre-allocate stack slots for i128/u128 locals.  These are always
+    // 16 bytes and must be stored in memory (two 64-bit words).  Without
+    // this, translate_const creates an ad-hoc stack slot but the local
+    // isn't marked as a stack local, so call-site decomposition doesn't
+    // trigger and the raw pointer gets passed where integers are expected.
+    for local in mir.local_decls.indices() {
+        if local.as_usize() == 0 || (local.as_usize() > 0 && local.as_usize() <= mir.arg_count) {
+            continue;
+        }
+        if ctx.stack_locals.is_stack(local) {
+            continue;
+        }
+        let ty = monomorphize(mir.local_decls[local].ty);
+        if matches!(ty.kind(), ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)) {
+            let slot = ctx.builder.stack_slot(16, Origin::synthetic());
+            ctx.locals.set(local, slot);
+            ctx.stack_locals.mark(local);
+        }
+    }
+
     // Pre-allocate a stack slot for the return place (_0) when it is a
     // multi-word type (9-16 bytes, e.g. &str, &[T]).  MIR does not
     // guarantee that the block assigning _0 precedes the return block in
@@ -4179,23 +4199,19 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     mir_ty.is_floating_point()
                 };
 
-                // Detect 128-bit integer operands for multi-word comparison.
-                let is_128bit = matches!(
-                    op,
-                    BinOp::Eq | BinOp::Ne
-                ) && {
-                    let mir_ty = match lhs {
-                        Operand::Copy(p) | Operand::Move(p) => {
-                            self.monomorphize(self.mir.local_decls[p.local].ty)
-                        }
-                        Operand::Constant(c) => self.monomorphize(c.ty()),
-                        _ => self.tcx.types.i32,
-                    };
-                    matches!(
-                        mir_ty.kind(),
-                        ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
-                    )
+                // Detect 128-bit integer operands for multi-word operations.
+                let lhs_mir_ty = match lhs {
+                    Operand::Copy(p) | Operand::Move(p) => {
+                        self.monomorphize(self.mir.local_decls[p.local].ty)
+                    }
+                    Operand::Constant(c) => self.monomorphize(c.ty()),
+                    _ => self.tcx.types.i32,
                 };
+                let is_128bit = matches!(
+                    lhs_mir_ty.kind(),
+                    ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
+                );
+
 
                 // For i128/u128 Eq/Ne: compare both 64-bit words.
                 if is_128bit && matches!(op, BinOp::Eq | BinOp::Ne) {
@@ -4254,6 +4270,121 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             Origin::synthetic(),
                         ).into());
                     }
+                }
+
+                // For i128/u128 Add/Sub: decompose into two 64-bit operations.
+                if is_128bit
+                    && matches!(
+                        op,
+                        BinOp::Add
+                            | BinOp::AddWithOverflow
+                            | BinOp::AddUnchecked
+                            | BinOp::Sub
+                            | BinOp::SubWithOverflow
+                            | BinOp::SubUnchecked
+                    )
+                {
+                    let l_ptr = self.coerce_to_ptr(l_raw);
+                    let r_ptr = self.coerce_to_ptr(r_raw);
+                    // Load low words
+                    let l_lo = self.builder.load(
+                        l_ptr.into(), 8, Type::Int,
+                        self.current_mem.into(), None, Origin::synthetic(),
+                    );
+                    let r_lo = self.builder.load(
+                        r_ptr.into(), 8, Type::Int,
+                        self.current_mem.into(), None, Origin::synthetic(),
+                    );
+                    // Load high words
+                    let off8 = self.builder.iconst(8, Origin::synthetic());
+                    let l_hi_addr = self.builder.ptradd(
+                        l_ptr.into(), off8.into(), 0, Origin::synthetic(),
+                    );
+                    let off8b = self.builder.iconst(8, Origin::synthetic());
+                    let r_hi_addr = self.builder.ptradd(
+                        r_ptr.into(), off8b.into(), 0, Origin::synthetic(),
+                    );
+                    let l_hi = self.builder.load(
+                        l_hi_addr.into(), 8, Type::Int,
+                        self.current_mem.into(), None, Origin::synthetic(),
+                    );
+                    let r_hi = self.builder.load(
+                        r_hi_addr.into(), 8, Type::Int,
+                        self.current_mem.into(), None, Origin::synthetic(),
+                    );
+
+                    let is_sub = matches!(
+                        op,
+                        BinOp::Sub | BinOp::SubWithOverflow | BinOp::SubUnchecked
+                    );
+
+                    // Compute lo result and carry/borrow
+                    let res_lo = if is_sub {
+                        self.builder.sub(
+                            l_lo.into(), r_lo.into(), None, Origin::synthetic(),
+                        )
+                    } else {
+                        self.builder.add(
+                            l_lo.into(), r_lo.into(), None, Origin::synthetic(),
+                        )
+                    };
+
+                    // carry/borrow detection via unsigned comparison
+                    let carry = if is_sub {
+                        // borrow = (a_lo < b_lo) unsigned
+                        let borrow_cmp = self.builder.icmp(
+                            ICmpOp::Lt,
+                            IrOperand::annotated(l_lo, Annotation::Unsigned(64)),
+                            IrOperand::annotated(r_lo, Annotation::Unsigned(64)),
+                            Origin::synthetic(),
+                        );
+                        self.builder.bool_to_int(borrow_cmp.into(), Origin::synthetic())
+                    } else {
+                        // carry = (result_lo < a_lo) unsigned
+                        let carry_cmp = self.builder.icmp(
+                            ICmpOp::Lt,
+                            IrOperand::annotated(res_lo, Annotation::Unsigned(64)),
+                            IrOperand::annotated(l_lo, Annotation::Unsigned(64)),
+                            Origin::synthetic(),
+                        );
+                        self.builder.bool_to_int(carry_cmp.into(), Origin::synthetic())
+                    };
+
+                    // Compute hi result: hi = a_hi op b_hi, then adjust for carry/borrow
+                    let hi_partial = if is_sub {
+                        self.builder.sub(
+                            l_hi.into(), r_hi.into(), None, Origin::synthetic(),
+                        )
+                    } else {
+                        self.builder.add(
+                            l_hi.into(), r_hi.into(), None, Origin::synthetic(),
+                        )
+                    };
+                    let res_hi = if is_sub {
+                        self.builder.sub(
+                            hi_partial.into(), carry.into(), None, Origin::synthetic(),
+                        )
+                    } else {
+                        self.builder.add(
+                            hi_partial.into(), carry.into(), None, Origin::synthetic(),
+                        )
+                    };
+
+                    // Store result to a 16-byte stack slot
+                    let result_slot = self.builder.stack_slot(16, Origin::synthetic());
+                    self.current_mem = self.builder.store(
+                        res_lo.into(), result_slot.into(), 8,
+                        self.current_mem.into(), Origin::synthetic(),
+                    );
+                    let off8c = self.builder.iconst(8, Origin::synthetic());
+                    let hi_addr = self.builder.ptradd(
+                        result_slot.into(), off8c.into(), 0, Origin::synthetic(),
+                    );
+                    self.current_mem = self.builder.store(
+                        res_hi.into(), hi_addr.into(), 8,
+                        self.current_mem.into(), Origin::synthetic(),
+                    );
+                    return Some(result_slot);
                 }
 
                 let val = match op {
@@ -4903,6 +5034,66 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             Rvalue::UnaryOp(mir::UnOp::PtrMetadata, _) => None,
             Rvalue::UnaryOp(mir::UnOp::Neg, operand) => {
                 let v = self.translate_operand(operand)?;
+                // Check for 128-bit Neg: decompose into two 64-bit words.
+                let neg_mir_ty = match operand {
+                    Operand::Copy(p) | Operand::Move(p) => {
+                        self.monomorphize(self.mir.local_decls[p.local].ty)
+                    }
+                    Operand::Constant(c) => self.monomorphize(c.ty()),
+                    _ => self.tcx.types.i32,
+                };
+                if matches!(
+                    neg_mir_ty.kind(),
+                    ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
+                ) {
+                    let ptr = self.coerce_to_ptr(v);
+                    let lo = self.builder.load(
+                        ptr.into(), 8, Type::Int,
+                        self.current_mem.into(), None, Origin::synthetic(),
+                    );
+                    let off8 = self.builder.iconst(8, Origin::synthetic());
+                    let hi_addr = self.builder.ptradd(
+                        ptr.into(), off8.into(), 0, Origin::synthetic(),
+                    );
+                    let hi = self.builder.load(
+                        hi_addr.into(), 8, Type::Int,
+                        self.current_mem.into(), None, Origin::synthetic(),
+                    );
+                    // neg(x) = 0 - x: res_lo = 0 - lo, borrow = (lo != 0),
+                    // res_hi = 0 - hi - borrow
+                    let zero = self.builder.iconst(0, Origin::synthetic());
+                    let res_lo = self.builder.sub(
+                        zero.into(), lo.into(), None, Origin::synthetic(),
+                    );
+                    let zero2 = self.builder.iconst(0, Origin::synthetic());
+                    let borrow_cmp = self.builder.icmp(
+                        ICmpOp::Ne, lo.into(), zero2.into(), Origin::synthetic(),
+                    );
+                    let borrow = self.builder.bool_to_int(
+                        borrow_cmp.into(), Origin::synthetic(),
+                    );
+                    let zero3 = self.builder.iconst(0, Origin::synthetic());
+                    let hi_neg = self.builder.sub(
+                        zero3.into(), hi.into(), None, Origin::synthetic(),
+                    );
+                    let res_hi = self.builder.sub(
+                        hi_neg.into(), borrow.into(), None, Origin::synthetic(),
+                    );
+                    let result_slot = self.builder.stack_slot(16, Origin::synthetic());
+                    self.current_mem = self.builder.store(
+                        res_lo.into(), result_slot.into(), 8,
+                        self.current_mem.into(), Origin::synthetic(),
+                    );
+                    let off8b = self.builder.iconst(8, Origin::synthetic());
+                    let hi_store = self.builder.ptradd(
+                        result_slot.into(), off8b.into(), 0, Origin::synthetic(),
+                    );
+                    self.current_mem = self.builder.store(
+                        res_hi.into(), hi_store.into(), 8,
+                        self.current_mem.into(), Origin::synthetic(),
+                    );
+                    return Some(result_slot);
+                }
                 // Coerce Bool/Ptr to Int; reject unsupported types (floats → Unit).
                 let v = self.coerce_to_int(v);
                 if !matches!(self.builder.value_type(v), Some(Type::Int)) {
@@ -4929,6 +5120,50 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     _ => None,
                 };
                 let is_bool = mir_ty.is_some_and(|t| t.is_bool());
+                // 128-bit Not: XOR each 64-bit word with -1.
+                let is_128bit_not = mir_ty.is_some_and(|t| {
+                    matches!(
+                        t.kind(),
+                        ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
+                    )
+                });
+                if is_128bit_not {
+                    let ptr = self.coerce_to_ptr(v);
+                    let lo = self.builder.load(
+                        ptr.into(), 8, Type::Int,
+                        self.current_mem.into(), None, Origin::synthetic(),
+                    );
+                    let off8 = self.builder.iconst(8, Origin::synthetic());
+                    let hi_addr = self.builder.ptradd(
+                        ptr.into(), off8.into(), 0, Origin::synthetic(),
+                    );
+                    let hi = self.builder.load(
+                        hi_addr.into(), 8, Type::Int,
+                        self.current_mem.into(), None, Origin::synthetic(),
+                    );
+                    let ones = self.builder.iconst(-1, Origin::synthetic());
+                    let not_lo = self.builder.xor(
+                        lo.into(), ones.into(), None, Origin::synthetic(),
+                    );
+                    let ones2 = self.builder.iconst(-1, Origin::synthetic());
+                    let not_hi = self.builder.xor(
+                        hi.into(), ones2.into(), None, Origin::synthetic(),
+                    );
+                    let result_slot = self.builder.stack_slot(16, Origin::synthetic());
+                    self.current_mem = self.builder.store(
+                        not_lo.into(), result_slot.into(), 8,
+                        self.current_mem.into(), Origin::synthetic(),
+                    );
+                    let off8b = self.builder.iconst(8, Origin::synthetic());
+                    let hi_store = self.builder.ptradd(
+                        result_slot.into(), off8b.into(), 0, Origin::synthetic(),
+                    );
+                    self.current_mem = self.builder.store(
+                        not_hi.into(), hi_store.into(), 8,
+                        self.current_mem.into(), Origin::synthetic(),
+                    );
+                    return Some(result_slot);
+                }
                 if is_bool {
                     // Boolean NOT: XOR 1.
                     let int_v = self.coerce_to_int(v);
@@ -5250,7 +5485,37 @@ fn translate_const<'tcx>(
                 }
             }
         }
-        mir::ConstValue::Scalar(scalar) => translate_scalar(scalar, ty, builder),
+        mir::ConstValue::Scalar(scalar) => {
+            // For 128-bit integer constants, decompose into two 64-bit words
+            // in a stack slot instead of emitting a single oversized iconst.
+            if matches!(
+                ty.kind(),
+                ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
+            ) {
+                if let mir::interpret::Scalar::Int(int) = scalar {
+                    let bits = int.to_bits(int.size());
+                    let lo = (bits & u128::from(u64::MAX)) as u64;
+                    let hi = (bits >> 64) as u64;
+                    let slot = builder.stack_slot(16, Origin::synthetic());
+                    let lo_val = builder.iconst(lo as i64, Origin::synthetic());
+                    *current_mem = builder.store(
+                        lo_val.into(), slot.into(), 8,
+                        (*current_mem).into(), Origin::synthetic(),
+                    );
+                    let off8 = builder.iconst(8, Origin::synthetic());
+                    let hi_addr = builder.ptradd(
+                        slot.into(), off8.into(), 0, Origin::synthetic(),
+                    );
+                    let hi_val = builder.iconst(hi as i64, Origin::synthetic());
+                    *current_mem = builder.store(
+                        hi_val.into(), hi_addr.into(), 8,
+                        (*current_mem).into(), Origin::synthetic(),
+                    );
+                    return Some(slot);
+                }
+            }
+            translate_scalar(scalar, ty, builder)
+        }
         mir::ConstValue::ZeroSized => Some(builder.iconst(0, Origin::synthetic())),
         mir::ConstValue::Slice { alloc_id, meta } => {
             translate_const_slice(tcx, alloc_id, meta, builder, symbols, static_data)
