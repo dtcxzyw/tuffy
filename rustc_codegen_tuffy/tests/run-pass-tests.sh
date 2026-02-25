@@ -94,9 +94,13 @@ for test_file in "${tests[@]}"; do
     bin_path="$OUT_DIR/test_bin"
     rm -f "$bin_path"
 
+    # Parse edition directive from test file (default: 2021)
+    test_edition=$(grep -oP '//@ edition:\s*\K\S+' "$test_file" 2>/dev/null | head -1 || true)
+    test_edition="${test_edition:-2021}"
+
     # Step 1: Compile and link as binary
     set +e
-    compile_out=$(timeout 30 rustc --edition 2021 \
+    compile_out=$(timeout 30 rustc --edition "$test_edition" \
         -Z codegen-backend="$BACKEND" \
         -o "$bin_path" \
         "$test_file" 2>&1)
