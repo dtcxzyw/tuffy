@@ -2775,6 +2775,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let adt_def = self.tcx.adt_def(*def_id);
                         Some(self.monomorphize(ty::Ty::new_adt(self.tcx, adt_def, args)))
                     }
+                    // RawPtr aggregates: *const [T], *mut [T], etc.
+                    mir::AggregateKind::RawPtr(pointee_ty, mutbl) => {
+                        let pointee_ty = self.monomorphize(*pointee_ty);
+                        Some(ty::Ty::new_ptr(self.tcx, pointee_ty, *mutbl))
+                    }
                     // Tuples are never fat pointers.
                     mir::AggregateKind::Tuple => None,
                     _ => None,
