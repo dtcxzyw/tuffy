@@ -128,7 +128,6 @@ const-generics/late-bound-vars/in_closure.rs
 const-generics/late-bound-vars/late-bound-in-return-issue-77357.rs
 const-generics/late-bound-vars/late-bound-in-where-issue-83993.rs
 const-generics/late-bound-vars/simple.rs
-const-generics/mgca/tuple_ctor_arg_simple.rs
 const-generics/occurs-check/bind-param.rs
 const-generics/type-dependent/issue-70586.rs
 const_prop/dont-propagate-generic-instance.rs
@@ -341,7 +340,6 @@ mir/issue-80949.rs
 mir/mir_calls_to_shims.rs
 mir/mir_codegen_calls.rs
 mir/mir_coercions.rs
-mir/mir_constval_adts.rs
 mir/mir_fat_ptr_drop.rs
 mir/mir_fat_ptr.rs
 mir/mir_misc_casts.rs
