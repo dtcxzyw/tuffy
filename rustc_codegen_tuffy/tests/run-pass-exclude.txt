@@ -387,19 +387,15 @@ pattern/usefulness/const-pat-ice.rs
 privacy/restricted/lookup-ignores-private.rs
 process/env-args-reverse-iterator.rs
 process/env-null-vars.rs
-process/env-vars.rs
 process/inherit-env.rs
 process/issue-13304.rs
 process/issue-14456.rs
 process/issue-14940.rs
-process/issue-16272.rs
-process/issue-20091.rs
 process/process-exit.rs
 process/process-status-inherits-stdin.rs
 process/sigpipe-should-be-ignored.rs
 process-termination/process-termination-blocking-io.rs
 process-termination/process-termination-simple.rs
-process/try-wait.rs
 proc-macro/attributes-on-modules.rs
 proc-macro/attr-stmt-expr-rpass.rs
 proc-macro/cfg-attr-trace.rs
@@ -600,7 +596,6 @@ typeck/inference-method-chain-diverging-fallback.rs
 typeck/issue-55810-must-typeck-match-pats-before-guards.rs
 typeck/issue-72225-call-fnmut-through-derefmut.rs
 typeck/issue-88609.rs
-typeck/osstring-str-equality.rs
 type-inference/partial-type-hint-12909.rs
 unboxed-closures/callback-trait-prediction-70746.rs
 unboxed-closures/unboxed-closures-boxed.rs
