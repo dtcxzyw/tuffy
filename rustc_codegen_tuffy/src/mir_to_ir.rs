@@ -1090,6 +1090,17 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     /// For locals with no projections that are stack-allocated, returns the
     /// local's value directly (which is already a pointer).
     fn translate_place_to_addr(&mut self, place: &Place<'tcx>) -> Option<(ValueRef, ty::Ty<'tcx>)> {
+        self.translate_place_to_addr_inner(place, false)
+    }
+
+    /// Like `translate_place_to_addr`, but when `persist_spill` is true,
+    /// a register-to-stack spill is made permanent so that subsequent
+    /// reads of the local see the mutated value.
+    fn translate_place_to_addr_inner(
+        &mut self,
+        place: &Place<'tcx>,
+        persist_spill: bool,
+    ) -> Option<(ValueRef, ty::Ty<'tcx>)> {
         let mut addr = self.locals.get(place.local)?;
         let mut cur_ty = self.monomorphize(self.mir.local_decls[place.local].ty);
 
@@ -1181,6 +1192,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 );
             }
             addr = slot;
+            if persist_spill {
+                self.locals.set(place.local, slot);
+                self.stack_locals.mark(place.local);
+            }
         }
 
         let mut downcast_variant: Option<rustc_abi::VariantIdx> = None;
@@ -2134,7 +2149,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         }
                     } else {
                         // Projected destination: compute address and emit Store.
-                        if let Some((addr, projected_ty)) = self.translate_place_to_addr(place) {
+                        // persist_spill=true: if the base local was a register
+                        // that got spilled to a stack slot for field access,
+                        // make the spill permanent so later reads see the mutation.
+                        if let Some((addr, projected_ty)) = self.translate_place_to_addr_inner(place, true) {
                             let addr = self.coerce_to_ptr(addr);
                             let bytes = type_size(self.tcx, projected_ty).unwrap_or(8) as u32;
                             let val_ty = self.builder.value_type(val).cloned();
