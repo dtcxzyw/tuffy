@@ -482,8 +482,6 @@ self/arbitrary_self_types_pointers_and_wrappers.rs
 self/arbitrary_self_types_stdlib_pointers.rs
 self/arbitrary_self_types_unsized_struct.rs
 self/builtin-superkinds-self-type.rs
-self/by-value-self-in-mut-slot.rs
-self/self-in-mut-slot-immediate-value.rs
 simd/array-type.rs
 simd/generics.rs
 simd/intrinsic/ptr-cast.rs
