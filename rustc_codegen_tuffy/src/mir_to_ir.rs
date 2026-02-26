@@ -1357,7 +1357,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         {
             let local_ty = self.monomorphize(self.mir.local_decls[place.local].ty);
             let is_checked_op = matches!(local_ty.kind(), ty::Tuple(fields)
-                if fields.len() == 2 && fields[1].is_bool());
+                if fields.len() == 2 && fields[1].is_bool()
+                   && !fields[0].is_bool());
             if is_checked_op && let PlaceElem::Field(idx, _) = place.projection[0] {
                 if idx.as_usize() == 0 {
                     return self.locals.get(place.local);
