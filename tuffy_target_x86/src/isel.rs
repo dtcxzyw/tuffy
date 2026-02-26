@@ -59,7 +59,11 @@ impl IselCtx {
         if let Some(symbol) = self.sym_addrs.get(&val.index()).cloned() {
             let dst = self.alloc.alloc();
             self.out.push(MInst::LeaSymbol { dst, symbol });
-            self.regs.assign(val, dst);
+            // Do NOT cache in self.regs: symbol_addr values may be used
+            // on divergent control-flow paths (e.g. main path AND cleanup
+            // blocks). Caching would emit the LEA only at the first use
+            // site, leaving the vreg uninitialised on other paths.
+            // Re-materialising a LEA at each use is cheap and correct.
             return Some(dst);
         }
         // Materialize a deferred icmp result into a register via SetCC + MovzxB.
