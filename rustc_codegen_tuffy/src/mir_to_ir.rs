@@ -3110,7 +3110,38 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     // value, we need to spill to a stack slot so
                                     // drop_in_place gets a valid &mut T.
                                     let ty_size = type_size(self.tcx, drop_ty).unwrap_or(8);
-                                    if ty_size > 8
+                                    if let Some(fat_val) = self.fat_locals.get(place.local) {
+                                        // Fat pointer (Box<dyn Trait>, &[T], etc.):
+                                        // spill both data ptr and metadata to a
+                                        // 16-byte stack slot so drop_in_place
+                                        // receives a valid &mut FatPtr.
+                                        let slot = self
+                                            .builder
+                                            .stack_slot(16, Origin::synthetic());
+                                        self.current_mem = self.builder.store(
+                                            v.into(),
+                                            slot.into(),
+                                            8,
+                                            self.current_mem.into(),
+                                            Origin::synthetic(),
+                                        );
+                                        let off8 =
+                                            self.builder.iconst(8, Origin::synthetic());
+                                        let hi = self.builder.ptradd(
+                                            slot.into(),
+                                            off8.into(),
+                                            0,
+                                            Origin::synthetic(),
+                                        );
+                                        self.current_mem = self.builder.store(
+                                            fat_val.into(),
+                                            hi.into(),
+                                            8,
+                                            self.current_mem.into(),
+                                            Origin::synthetic(),
+                                        );
+                                        Some(slot)
+                                    } else if ty_size > 8
                                         || matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
                                     {
                                         Some(v)
