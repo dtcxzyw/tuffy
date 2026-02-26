@@ -5239,6 +5239,32 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 }
                             }
                         }
+                        // Transmute / PtrToPtr from a pointer-typed source
+                        // to a non-pointer target (e.g. `*const () as usize`):
+                        // convert Ptr→Int so the local stores an Int value
+                        // and later operand reads don't mistake it for a
+                        // memory address to load from.
+                        // Only when the SOURCE Rust type is a pointer — if the
+                        // source is a struct/array whose constant data happens
+                        // to live behind a symbol_addr, we must NOT convert.
+                        if matches!(self.builder.value_type(val), Some(Type::Ptr(_)))
+                            && !matches!(target_ty_mono.kind(), ty::RawPtr(..) | ty::Ref(..) | ty::FnPtr(..))
+                        {
+                            let src_ty = match operand {
+                                Operand::Copy(p) | Operand::Move(p) => {
+                                    Some(self.monomorphize(self.mir.local_decls[p.local].ty))
+                                }
+                                Operand::Constant(c) => Some(self.monomorphize(c.ty())),
+                                _ => None,
+                            };
+                            if let Some(st) = src_ty {
+                                if matches!(st.kind(), ty::RawPtr(..) | ty::Ref(..) | ty::FnPtr(..)) {
+                                    return Some(
+                                        self.builder.ptrtoaddr(val.into(), Origin::synthetic()),
+                                    );
+                                }
+                            }
+                        }
                         Some(val)
                     }
                 }
