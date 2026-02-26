@@ -225,6 +225,19 @@ fn encode_inst(
         MInst::FpBinOp { op, dst, lhs, rhs } => {
             encode_fp_binop(*op, *dst, *lhs, *rhs, buf);
         }
+        MInst::CvtFpToInt { dst, src, double } => {
+            encode_cvt_fp_to_int(*dst, *src, *double, buf);
+        }
+        MInst::CvtIntToFp { dst, src, double } => {
+            encode_cvt_int_to_fp(*dst, *src, *double, buf);
+        }
+        MInst::CvtFpToFp {
+            dst,
+            src,
+            src_double,
+        } => {
+            encode_cvt_fp_to_fp(*dst, *src, *src_double, buf);
+        }
     }
 }
 
@@ -761,4 +774,80 @@ fn encode_fp_binop(op: FpBinOpKind, dst: Gpr, lhs: Gpr, rhs: Gpr, buf: &mut Vec<
     buf.extend_from_slice(&[0xf2, 0x0f, 0x11, 0x44, 0x24, 0xf8]);
     // 6. mov dst, [rsp-8]
     encode_mov_rm(OpSize::S64, dst, Gpr::Rsp, -8, buf);
+}
+
+/// Encode CvtFpToInt pseudo-instruction: float (GPR bits) → signed integer via red-zone.
+///
+/// Sequence: mov [rsp-8], src; cvttsd2si/cvttss2si dst, [rsp-8]
+fn encode_cvt_fp_to_int(dst: Gpr, src: Gpr, double: bool, buf: &mut Vec<u8>) {
+    // 1. mov [rsp-8], src  (store float bits)
+    encode_mov_mr(OpSize::S64, Gpr::Rsp, -8, src, buf);
+    // 2. cvttsd2si/cvttss2si dst, [rsp-8]
+    //    F2/F3 REX.W 0F 2C modrm_mem(dst, rsp, -8)
+    let prefix = if double { 0xf2 } else { 0xf3 };
+    buf.push(prefix);
+    // REX.W=1, REX.R if dst needs it, REX.B=0 (base is RSP, no REX.B needed)
+    let rex_byte = 0x48 | if dst.needs_rex() { 0x04 } else { 0 };
+    buf.push(rex_byte);
+    buf.extend_from_slice(&[0x0f, 0x2c]);
+    modrm_mem(dst.encoding(), Gpr::Rsp, -8, buf);
+}
+
+/// Encode CvtIntToFp pseudo-instruction: signed integer → float (GPR bits) via red-zone.
+///
+/// Sequence: cvtsi2sd/cvtsi2ss xmm0, src; movsd/movss [rsp-8], xmm0; mov dst, [rsp-8]
+fn encode_cvt_int_to_fp(dst: Gpr, src: Gpr, double: bool, buf: &mut Vec<u8>) {
+    let prefix = if double { 0xf2 } else { 0xf3 };
+    // 1. cvtsi2sd/cvtsi2ss xmm0, src_gpr
+    //    F2/F3 REX.W 0F 2A ModRM(xmm0, src)
+    buf.push(prefix);
+    let rex_byte = 0x48 | if src.needs_rex() { 0x01 } else { 0 };
+    buf.push(rex_byte);
+    buf.extend_from_slice(&[0x0f, 0x2a]);
+    buf.push(0xc0 | src.encoding()); // ModRM: mod=11, reg=000(xmm0), rm=src
+    // 2. movsd/movss [rsp-8], xmm0
+    if double {
+        // movsd [rsp-8], xmm0 → F2 0F 11 44 24 F8
+        buf.extend_from_slice(&[0xf2, 0x0f, 0x11, 0x44, 0x24, 0xf8]);
+    } else {
+        // movss [rsp-8], xmm0 → F3 0F 11 44 24 F8
+        buf.extend_from_slice(&[0xf3, 0x0f, 0x11, 0x44, 0x24, 0xf8]);
+    }
+    // 3. mov dst, [rsp-8]
+    if double {
+        encode_mov_rm(OpSize::S64, dst, Gpr::Rsp, -8, buf);
+    } else {
+        // 32-bit load zero-extends to 64 bits
+        encode_mov_rm(OpSize::S32, dst, Gpr::Rsp, -8, buf);
+    }
+}
+
+/// Encode CvtFpToFp pseudo-instruction: float format conversion (f32↔f64) via red-zone.
+///
+/// src_double=true  (f64→f32): movsd xmm0,[rsp-8]; cvtsd2ss xmm0,xmm0; movss [rsp-8],xmm0
+/// src_double=false (f32→f64): movss xmm0,[rsp-8]; cvtss2sd xmm0,xmm0; movsd [rsp-8],xmm0
+fn encode_cvt_fp_to_fp(dst: Gpr, src: Gpr, src_double: bool, buf: &mut Vec<u8>) {
+    // 1. mov [rsp-8], src
+    encode_mov_mr(OpSize::S64, Gpr::Rsp, -8, src, buf);
+    if src_double {
+        // f64 → f32 (narrowing)
+        // 2. movsd xmm0, [rsp-8]
+        buf.extend_from_slice(&[0xf2, 0x0f, 0x10, 0x44, 0x24, 0xf8]);
+        // 3. cvtsd2ss xmm0, xmm0
+        buf.extend_from_slice(&[0xf2, 0x0f, 0x5a, 0xc0]);
+        // 4. movss [rsp-8], xmm0
+        buf.extend_from_slice(&[0xf3, 0x0f, 0x11, 0x44, 0x24, 0xf8]);
+        // 5. 32-bit load (zero-extends)
+        encode_mov_rm(OpSize::S32, dst, Gpr::Rsp, -8, buf);
+    } else {
+        // f32 → f64 (widening)
+        // 2. movss xmm0, [rsp-8]
+        buf.extend_from_slice(&[0xf3, 0x0f, 0x10, 0x44, 0x24, 0xf8]);
+        // 3. cvtss2sd xmm0, xmm0
+        buf.extend_from_slice(&[0xf3, 0x0f, 0x5a, 0xc0]);
+        // 4. movsd [rsp-8], xmm0
+        buf.extend_from_slice(&[0xf2, 0x0f, 0x11, 0x44, 0x24, 0xf8]);
+        // 5. 64-bit load
+        encode_mov_rm(OpSize::S64, dst, Gpr::Rsp, -8, buf);
+    }
 }

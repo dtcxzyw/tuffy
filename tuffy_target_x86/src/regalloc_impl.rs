@@ -143,6 +143,12 @@ impl RegAllocInst for VInst {
                 ops.push(use_op(*lhs));
                 ops.push(use_op(*rhs));
             }
+            MInst::CvtFpToInt { dst, src, .. }
+            | MInst::CvtIntToFp { dst, src, .. }
+            | MInst::CvtFpToFp { dst, src, .. } => {
+                ops.push(def_op(*dst));
+                ops.push(use_op(*src));
+            }
             // Indirect call: callee register is a use operand
             MInst::CallReg { callee, ret, ret2 } => {
                 ops.push(use_op(*callee));

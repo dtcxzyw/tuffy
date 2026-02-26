@@ -219,6 +219,23 @@ pub enum MInst<R: RegType> {
         lhs: R,
         rhs: R,
     },
+    /// Pseudo-instruction: convert float (in GPR as bit pattern) to signed integer.
+    ///
+    /// Uses cvttsd2si (double=true) or cvttss2si (double=false) via red-zone.
+    CvtFpToInt { dst: R, src: R, double: bool },
+    /// Pseudo-instruction: convert signed integer (in GPR) to float bit pattern in GPR.
+    ///
+    /// Uses cvtsi2sd (double=true) or cvtsi2ss (double=false) via red-zone.
+    CvtIntToFp { dst: R, src: R, double: bool },
+    /// Pseudo-instruction: convert between float formats (f32↔f64) via red-zone.
+    ///
+    /// Uses cvtss2sd (src_double=false) or cvtsd2ss (src_double=true).
+    CvtFpToFp {
+        dst: R,
+        src: R,
+        /// true if source is f64 (narrowing to f32), false if source is f32 (widening to f64).
+        src_double: bool,
+    },
 }
 
 /// SSE2 floating-point binary operation kind.

@@ -431,6 +431,11 @@ fn fmt_inst(
         Op::Bitcast(src) => format!("{v} = bitcast {}", ctx.fmt_operand(src)),
         Op::Sext(src, bits) => format!("{v} = sext {}, {bits}", ctx.fmt_operand(src)),
         Op::Zext(src, bits) => format!("{v} = zext {}, {bits}", ctx.fmt_operand(src)),
+        Op::FpToSi(src) => format!("{v} = fp_to_si {}", ctx.fmt_operand(src)),
+        Op::FpToUi(src) => format!("{v} = fp_to_ui {}", ctx.fmt_operand(src)),
+        Op::SiToFp(src, ft) => format!("{v} = si_to_fp {}, {ft:?}", ctx.fmt_operand(src)),
+        Op::UiToFp(src, ft) => format!("{v} = ui_to_fp {}, {ft:?}", ctx.fmt_operand(src)),
+        Op::FpConvert(src) => format!("{v} = fp_convert {}", ctx.fmt_operand(src)),
         Op::PtrAdd(ptr, offset) => {
             format!(
                 "{v} = ptradd {}, {}",

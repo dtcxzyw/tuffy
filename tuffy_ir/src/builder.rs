@@ -7,7 +7,7 @@ use num_bigint::BigInt;
 use crate::function::{BasicBlock, BlockArg, CfgNode, Function, Region, RegionKind};
 use crate::instruction::{AtomicRmwOp, ICmpOp, Instruction, Op, Operand, Origin};
 use crate::module::SymbolId;
-use crate::types::{Annotation, FpRewriteFlags, MemoryOrdering, Type};
+use crate::types::{Annotation, FloatType, FpRewriteFlags, MemoryOrdering, Type};
 use crate::value::{BlockRef, RegionRef, ValueRef};
 
 /// Builder for constructing a function's IR.
@@ -657,6 +657,31 @@ impl<'a> Builder<'a> {
     /// Zero-extend to n bits.
     pub fn zext(&mut self, val: Operand, bits: u32, origin: Origin) -> ValueRef {
         self.push_inst(Op::Zext(val, bits), Type::Int, None, origin, None)
+    }
+
+    /// Float to signed integer (truncation toward zero).
+    pub fn fp_to_si(&mut self, val: Operand, origin: Origin) -> ValueRef {
+        self.push_inst(Op::FpToSi(val), Type::Int, None, origin, None)
+    }
+
+    /// Float to unsigned integer (truncation toward zero).
+    pub fn fp_to_ui(&mut self, val: Operand, origin: Origin) -> ValueRef {
+        self.push_inst(Op::FpToUi(val), Type::Int, None, origin, None)
+    }
+
+    /// Signed integer to float.
+    pub fn si_to_fp(&mut self, val: Operand, ft: FloatType, origin: Origin) -> ValueRef {
+        self.push_inst(Op::SiToFp(val, ft), Type::Float(ft), None, origin, None)
+    }
+
+    /// Unsigned integer to float.
+    pub fn ui_to_fp(&mut self, val: Operand, ft: FloatType, origin: Origin) -> ValueRef {
+        self.push_inst(Op::UiToFp(val, ft), Type::Float(ft), None, origin, None)
+    }
+
+    /// Float-to-float conversion (widen or narrow).
+    pub fn fp_convert(&mut self, val: Operand, ft: FloatType, origin: Origin) -> ValueRef {
+        self.push_inst(Op::FpConvert(val), Type::Float(ft), None, origin, None)
     }
 
     // ── Pointer operations ──

@@ -388,6 +388,42 @@ fn select_inst(
             select_zext(ctx, vref, val)?;
         }
 
+        Op::FpToSi(val) | Op::FpToUi(val) => {
+            let src = ctx.ensure_in_reg(val.value)?;
+            let dst = ctx.alloc.alloc();
+            // Determine f32 vs f64 from the source value's type
+            let double = !matches!(
+                func.instructions.get(val.value.index() as usize),
+                Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
+            );
+            ctx.out.push(MInst::CvtFpToInt { dst, src, double });
+            ctx.regs.assign(vref, dst);
+        }
+
+        Op::SiToFp(val, ft) | Op::UiToFp(val, ft) => {
+            let src = ctx.ensure_in_reg(val.value)?;
+            let dst = ctx.alloc.alloc();
+            let double = !matches!(ft, tuffy_ir::types::FloatType::F32);
+            ctx.out.push(MInst::CvtIntToFp { dst, src, double });
+            ctx.regs.assign(vref, dst);
+        }
+
+        Op::FpConvert(val) => {
+            let src = ctx.ensure_in_reg(val.value)?;
+            let dst = ctx.alloc.alloc();
+            // Determine source float type from the operand's instruction type
+            let src_double = !matches!(
+                func.instructions.get(val.value.index() as usize),
+                Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
+            );
+            ctx.out.push(MInst::CvtFpToFp {
+                dst,
+                src,
+                src_double,
+            });
+            ctx.regs.assign(vref, dst);
+        }
+
         Op::Div(lhs, rhs) => {
             select_divrem(ctx, vref, lhs, rhs, DivRemKind::Div)?;
         }

@@ -294,6 +294,25 @@ fn rewrite_inst(inst: &VInst, assignments: &[PReg]) -> PInst {
             lhs: r(lhs),
             rhs: r(rhs),
         },
+        MInst::CvtFpToInt { dst, src, double } => MInst::CvtFpToInt {
+            dst: r(dst),
+            src: r(src),
+            double: *double,
+        },
+        MInst::CvtIntToFp { dst, src, double } => MInst::CvtIntToFp {
+            dst: r(dst),
+            src: r(src),
+            double: *double,
+        },
+        MInst::CvtFpToFp {
+            dst,
+            src,
+            src_double,
+        } => MInst::CvtFpToFp {
+            dst: r(dst),
+            src: r(src),
+            src_double: *src_double,
+        },
     }
 }
 

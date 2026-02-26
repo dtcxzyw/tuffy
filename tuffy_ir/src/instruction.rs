@@ -3,7 +3,7 @@
 use num_bigint::BigInt;
 
 use crate::module::SymbolId;
-use crate::types::{Annotation, FpRewriteFlags, MemoryOrdering, Type};
+use crate::types::{Annotation, FloatType, FpRewriteFlags, MemoryOrdering, Type};
 use crate::value::{BlockRef, ValueRef};
 
 /// An operand: a value reference with an optional use-side annotation.
@@ -209,6 +209,16 @@ pub enum Op {
     Sext(Operand, u32),
     /// Zero-extend to n bits (for lowering).
     Zext(Operand, u32),
+    /// Float to signed integer (truncation toward zero).
+    FpToSi(Operand),
+    /// Float to unsigned integer (truncation toward zero).
+    FpToUi(Operand),
+    /// Signed integer to float.
+    SiToFp(Operand, FloatType),
+    /// Unsigned integer to float.
+    UiToFp(Operand, FloatType),
+    /// Float-to-float conversion (widen or narrow).
+    FpConvert(Operand),
 
     // -- Floating point arithmetic --
     /// Floating point addition: fadd %a, %b

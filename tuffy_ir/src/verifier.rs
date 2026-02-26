@@ -726,6 +726,33 @@ impl FuncVerifier<'_> {
                     );
                 }
             }
+            Op::FpToSi(a) | Op::FpToUi(a) => {
+                self.check_operand(a, loc);
+                if inst.ty != Type::Int {
+                    self.result.error(
+                        loc.clone(),
+                        format!("fp_to_si/fp_to_ui result must be Int, got {:?}", inst.ty),
+                    );
+                }
+            }
+            Op::SiToFp(a, _) | Op::UiToFp(a, _) => {
+                self.check_operand(a, loc);
+                if !matches!(inst.ty, Type::Float(_)) {
+                    self.result.error(
+                        loc.clone(),
+                        format!("si_to_fp/ui_to_fp result must be Float, got {:?}", inst.ty),
+                    );
+                }
+            }
+            Op::FpConvert(a) => {
+                self.check_operand(a, loc);
+                if !matches!(inst.ty, Type::Float(_)) {
+                    self.result.error(
+                        loc.clone(),
+                        format!("fp_convert result must be Float, got {:?}", inst.ty),
+                    );
+                }
+            }
 
             // -- Terminators --
             Op::Ret(val, mem) => {
