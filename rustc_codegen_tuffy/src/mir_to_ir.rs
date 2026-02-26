@@ -2964,6 +2964,23 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         // Coerce to match the declared return type.
                         let ret_ir_ty = translate_ty(ret_mir_ty);
                         let coerced = match (ret_ir_ty, self.builder.value_type(v).cloned()) {
+                            (Some(Type::Int), Some(Type::Ptr(_)))
+                                if self.builder.is_memory_address(v) =>
+                            {
+                                // v is a pointer to data (e.g. symbol_addr for an
+                                // indirect constant).  Load the actual value instead
+                                // of converting the address to an integer.
+                                let ret_size =
+                                    type_size(self.tcx, ret_mir_ty).unwrap_or(8).min(8) as u32;
+                                self.builder.load(
+                                    v.into(),
+                                    ret_size,
+                                    Type::Int,
+                                    self.current_mem.into(),
+                                    None,
+                                    Origin::synthetic(),
+                                )
+                            }
                             (Some(Type::Int), _) => self.coerce_to_int(v),
                             (Some(Type::Ptr(_)), _) => self.coerce_to_ptr(v),
                             (Some(Type::Bool), Some(Type::Int)) => {
@@ -5698,6 +5715,29 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 slot.into(),
                                 size as u32,
                                 ir_ty,
+                                self.current_mem.into(),
+                                None,
+                                Origin::synthetic(),
+                            );
+                            return Some(loaded);
+                        }
+                    }
+                    // Non-stack local holding a memory address (e.g. symbol_addr
+                    // for an indirect constant like `const S: Point = ...`).
+                    // For small scalar types (≤8 bytes, mapped to Int), load the
+                    // actual data instead of returning the raw pointer.
+                    if !self.stack_locals.is_stack(place.local)
+                        && let Some(v) = val
+                        && matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
+                        && self.builder.is_memory_address(v)
+                    {
+                        let ty = self.monomorphize(self.mir.local_decls[place.local].ty);
+                        let size = type_size(self.tcx, ty).unwrap_or(8);
+                        if size <= 8 && matches!(translate_ty(ty), Some(Type::Int)) {
+                            let loaded = self.builder.load(
+                                v.into(),
+                                size as u32,
+                                Type::Int,
                                 self.current_mem.into(),
                                 None,
                                 Origin::synthetic(),
