@@ -208,8 +208,6 @@ enum-discriminant/issue-70509-partial_eq.rs
 enum-discriminant/repr128.rs
 env-macro/env-not-env.rs
 explicit-tail-calls/become-macro.rs
-expr/block-generic.rs
-expr/if-generic.rs
 expr/weird-exprs.rs
 extern/extern-methods.rs
 extern/extern-thiscall.rs
