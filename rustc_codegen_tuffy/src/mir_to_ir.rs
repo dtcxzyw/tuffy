@@ -2702,10 +2702,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         if src_inner.is_trait() {
                             return None;
                         }
-                        let principal = predicates.principal().map(ty::Binder::skip_binder);
-                        if principal.is_some_and(|p| p.has_escaping_bound_vars()) {
-                            return None;
-                        }
+                        let principal = predicates.principal().map(|p| {
+                            self.tcx.instantiate_bound_regions_with_erased(p)
+                        });
                         let vtable_alloc_id = self.tcx.vtable_allocation((src_inner, principal));
                         let vtable_alloc = self.tcx.global_alloc(vtable_alloc_id);
                         if let rustc_middle::mir::interpret::GlobalAlloc::Memory(alloc) =
@@ -2805,52 +2804,48 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 {
                                     let principal = predicates
                                         .principal()
-                                        .map(ty::Binder::skip_binder);
-                                    if !principal.is_some_and(|p| {
-                                        p.has_escaping_bound_vars()
-                                    }) {
-                                        let vtable_alloc_id = self
-                                            .tcx
-                                            .vtable_allocation((
-                                                src_tail, principal,
-                                            ));
-                                        let vtable_alloc = self
-                                            .tcx
-                                            .global_alloc(vtable_alloc_id);
-                                        if let rustc_middle::mir::interpret::GlobalAlloc::Memory(alloc) = vtable_alloc {
-                                            let inner_alloc = alloc.inner();
-                                            let size = inner_alloc.len();
-                                            let bytes = inner_alloc
-                                                .inspect_with_uninit_and_ptr_outside_interpreter(0..size)
-                                                .to_vec();
-                                            let sym = format!(
-                                                ".Lvtable.{}",
-                                                STATIC_DATA_COUNTER.fetch_add(
-                                                    1,
-                                                    Ordering::Relaxed,
-                                                )
-                                            );
-                                            let sym_id =
-                                                self.symbols.intern(&sym);
-                                            let relocs = extract_alloc_relocs(
-                                                self.tcx,
-                                                inner_alloc,
-                                                0,
-                                                size,
-                                                &mut self.symbols,
-                                                &mut self.static_data,
-                                                &mut self.referenced_instances,
-                                            );
-                                            self.static_data.push((
-                                                sym_id, bytes, relocs,
-                                            ));
-                                            return Some(
-                                                self.builder.symbol_addr(
-                                                    sym_id,
-                                                    Origin::synthetic(),
-                                                ),
-                                            );
-                                        }
+                                        .map(|p| self.tcx.instantiate_bound_regions_with_erased(p));
+                                    let vtable_alloc_id = self
+                                        .tcx
+                                        .vtable_allocation((
+                                            src_tail, principal,
+                                        ));
+                                    let vtable_alloc = self
+                                        .tcx
+                                        .global_alloc(vtable_alloc_id);
+                                    if let rustc_middle::mir::interpret::GlobalAlloc::Memory(alloc) = vtable_alloc {
+                                        let inner_alloc = alloc.inner();
+                                        let size = inner_alloc.len();
+                                        let bytes = inner_alloc
+                                            .inspect_with_uninit_and_ptr_outside_interpreter(0..size)
+                                            .to_vec();
+                                        let sym = format!(
+                                            ".Lvtable.{}",
+                                            STATIC_DATA_COUNTER.fetch_add(
+                                                1,
+                                                Ordering::Relaxed,
+                                            )
+                                        );
+                                        let sym_id =
+                                            self.symbols.intern(&sym);
+                                        let relocs = extract_alloc_relocs(
+                                            self.tcx,
+                                            inner_alloc,
+                                            0,
+                                            size,
+                                            &mut self.symbols,
+                                            &mut self.static_data,
+                                            &mut self.referenced_instances,
+                                        );
+                                        self.static_data.push((
+                                            sym_id, bytes, relocs,
+                                        ));
+                                        return Some(
+                                            self.builder.symbol_addr(
+                                                sym_id,
+                                                Origin::synthetic(),
+                                            ),
+                                        );
                                     }
                                 }
                             }
@@ -6297,7 +6292,9 @@ fn translate_const<'tcx>(
                 rustc_middle::mir::interpret::GlobalAlloc::VTable(vtable_ty, vtable_trait_ref) => {
                     // Construct vtable as static data with function pointer relocations.
                     // Extract the principal trait ref from the existential predicates list.
-                    let principal = vtable_trait_ref.principal().map(|p| p.skip_binder());
+                    let principal = vtable_trait_ref.principal().map(|p| {
+                        tcx.instantiate_bound_regions_with_erased(p)
+                    });
                     let vtable_alloc_id = tcx.vtable_allocation((vtable_ty, principal));
                     let vtable_alloc = tcx.global_alloc(vtable_alloc_id);
                     if let rustc_middle::mir::interpret::GlobalAlloc::Memory(alloc) = vtable_alloc {
@@ -6491,35 +6488,32 @@ fn extract_alloc_relocs<'tcx>(
                 relocs.push((rel_offset, symbols.resolve(sym_id).to_string()));
             }
             rustc_middle::mir::interpret::GlobalAlloc::VTable(vtable_ty, vtable_trait_ref) => {
-                let principal = vtable_trait_ref.principal().map(|p| p.skip_binder());
-                if let Ok(vtable_alloc_id) =
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        tcx.vtable_allocation((vtable_ty, principal))
-                    }))
-                {
-                    let vtable_alloc = tcx.global_alloc(vtable_alloc_id);
-                    if let rustc_middle::mir::interpret::GlobalAlloc::Memory(va) = vtable_alloc {
-                        let inner = va.inner();
-                        let bytes = inner
-                            .inspect_with_uninit_and_ptr_outside_interpreter(0..inner.len())
-                            .to_vec();
-                        let sym = format!(
-                            ".Lvtable.{}",
-                            STATIC_DATA_COUNTER.fetch_add(1, Ordering::Relaxed)
-                        );
-                        let sym_id = symbols.intern(&sym);
-                        let nested_relocs = extract_alloc_relocs(
-                            tcx,
-                            inner,
-                            0,
-                            inner.len(),
-                            symbols,
-                            static_data,
-                            referenced_instances,
-                        );
-                        static_data.push((sym_id, bytes, nested_relocs));
-                        relocs.push((rel_offset, symbols.resolve(sym_id).to_string()));
-                    }
+                let principal = vtable_trait_ref.principal().map(|p| {
+                    tcx.instantiate_bound_regions_with_erased(p)
+                });
+                let vtable_alloc_id = tcx.vtable_allocation((vtable_ty, principal));
+                let vtable_alloc = tcx.global_alloc(vtable_alloc_id);
+                if let rustc_middle::mir::interpret::GlobalAlloc::Memory(va) = vtable_alloc {
+                    let inner = va.inner();
+                    let bytes = inner
+                        .inspect_with_uninit_and_ptr_outside_interpreter(0..inner.len())
+                        .to_vec();
+                    let sym = format!(
+                        ".Lvtable.{}",
+                        STATIC_DATA_COUNTER.fetch_add(1, Ordering::Relaxed)
+                    );
+                    let sym_id = symbols.intern(&sym);
+                    let nested_relocs = extract_alloc_relocs(
+                        tcx,
+                        inner,
+                        0,
+                        inner.len(),
+                        symbols,
+                        static_data,
+                        referenced_instances,
+                    );
+                    static_data.push((sym_id, bytes, nested_relocs));
+                    relocs.push((rel_offset, symbols.resolve(sym_id).to_string()));
                 }
             }
             _ => {}
