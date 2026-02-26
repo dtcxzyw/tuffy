@@ -74,7 +74,6 @@ attributes/use-extern-crate-named-macro-use.rs
 autoref-autoderef/autoderef-vec-box-fn-36786.rs
 binding/irrefutable-slice-patterns.rs
 binding/match-with-ret-arm.rs
-binop/augmented-assignment.rs
 binop/binops-issue-22743.rs
 binop/compound-assign-by-ref.rs
 borrowck/alias-liveness/higher-ranked-outlives-for-capture.rs
@@ -103,7 +102,6 @@ closures/2229_closure_analysis/run_pass/lit-pattern-matching-with-methods.rs
 closures/closure_no_cap_coerce_many_run_pass.rs
 closures/closure_no_cap_coerce_many_unsafe_1.rs
 closures/closure-upvar-last-use-analysis.rs
-closures/issue-22864-2.rs
 closures/issue-46742.rs
 codegen/issue-27859.rs
 codegen/issue-99551.rs
@@ -139,7 +137,6 @@ consts/const-endianess.rs
 consts/const-eval/issue-84957-const-str-as-bytes.rs
 consts/const-eval/ptr_fragments.rs
 consts/constifconst-call-in-const-position.rs
-consts/const-int-arithmetic.rs
 consts/const_let_eq_float.rs
 consts/const-promoted-opaque.rs
 consts/const-region-ptrs-noncopy.rs
@@ -455,7 +452,6 @@ proc-macro/unsafe-foreign-mod.rs
 proc-macro/unsafe-mod.rs
 range/range_inclusive.rs
 regions/regions-copy-closure.rs
-regions/regions-early-bound-trait-param.rs
 regions/regions-refcell.rs
 regions/regions-relate-bound-regions-on-closures-to-inference-variables.rs
 regions/regions-static-closure.rs
