@@ -2759,13 +2759,32 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     None
                 }
             }
-            // Multi-field Aggregate: second field becomes the fat component.
-            // Exclude arrays — their elements are not fat pointer metadata.
+            // Multi-field Aggregate: second field becomes the fat component,
+            // but ONLY when the aggregate type is a fat pointer (e.g.
+            // NonNull<[T]>, &str wrapper struct).  Plain tuples and
+            // non-fat-pointer structs must not have their second field
+            // treated as metadata — doing so causes a spurious store at
+            // slot+8 that overflows the stack slot.
             Rvalue::Aggregate(box kind, operands)
                 if operands.len() >= 2 && !matches!(kind, mir::AggregateKind::Array(_)) =>
             {
-                let second_op = operands.iter().nth(1).unwrap();
-                self.translate_operand(second_op)
+                // Determine the aggregate's result type to check if it's
+                // actually a fat pointer.
+                let agg_ty = match kind {
+                    mir::AggregateKind::Adt(def_id, _, args, _, _) => {
+                        let adt_def = self.tcx.adt_def(*def_id);
+                        Some(self.monomorphize(ty::Ty::new_adt(self.tcx, adt_def, args)))
+                    }
+                    // Tuples are never fat pointers.
+                    mir::AggregateKind::Tuple => None,
+                    _ => None,
+                };
+                if agg_ty.is_some_and(|t| is_fat_ptr(self.tcx, t)) {
+                    let second_op = operands.iter().nth(1).unwrap();
+                    self.translate_operand(second_op)
+                } else {
+                    None
+                }
             }
             _ => None,
         }
