@@ -62,10 +62,7 @@ pub fn translate_function<'tcx>(
     if let ty::InstanceKind::Item(def_id) = instance.def
         && !def_id.is_local()
         && !tcx.is_mir_available(def_id)
-        && !matches!(
-            tcx.def_kind(def_id),
-            rustc_hir::def::DefKind::Ctor(..)
-        )
+        && !matches!(tcx.def_kind(def_id), rustc_hir::def::DefKind::Ctor(..))
     {
         return None;
     }
@@ -318,9 +315,7 @@ pub fn translate_function<'tcx>(
             for stmt in &bb_data.statements {
                 if let StatementKind::Assign(box (_, rvalue)) = &stmt.kind {
                     match rvalue {
-                        Rvalue::Use(op)
-                        | Rvalue::UnaryOp(_, op)
-                        | Rvalue::Cast(_, op, _) => {
+                        Rvalue::Use(op) | Rvalue::UnaryOp(_, op) | Rvalue::Cast(_, op, _) => {
                             used_locals.extend(collect_used_locals(op));
                         }
                         Rvalue::BinaryOp(_, box (a, b)) => {
@@ -470,7 +465,10 @@ pub fn translate_function<'tcx>(
             continue;
         }
         let ty = monomorphize(mir.local_decls[local].ty);
-        if matches!(ty.kind(), ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)) {
+        if matches!(
+            ty.kind(),
+            ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
+        ) {
             let slot = ctx.builder.stack_slot(16, Origin::synthetic());
             ctx.locals.set(local, slot);
             ctx.stack_locals.mark(local);
@@ -1987,14 +1985,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                         | ty::Uint(ty::UintTy::U128)
                                                 );
                                                 if is_i128_dest && bytes > 8 {
-                                                    let hi_word =
-                                                        if matches!(dest_ty.kind(), ty::Int(ty::IntTy::I128))
-                                                    {
+                                                    let hi_word = if matches!(
+                                                        dest_ty.kind(),
+                                                        ty::Int(ty::IntTy::I128)
+                                                    ) {
                                                         // Signed: high word = sar(val, 63)
-                                                        let c63 = self.builder.iconst(
-                                                            63,
-                                                            Origin::synthetic(),
-                                                        );
+                                                        let c63 = self
+                                                            .builder
+                                                            .iconst(63, Origin::synthetic());
                                                         let signed_op = IrOperand::annotated(
                                                             val,
                                                             Annotation::Signed(64),
@@ -2007,15 +2005,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                         )
                                                     } else {
                                                         // Unsigned: high word = 0
-                                                        self.builder.iconst(
-                                                            0,
-                                                            Origin::synthetic(),
-                                                        )
+                                                        self.builder.iconst(0, Origin::synthetic())
                                                     };
-                                                    let off8 = self.builder.iconst(
-                                                        8,
-                                                        Origin::synthetic(),
-                                                    );
+                                                    let off8 =
+                                                        self.builder.iconst(8, Origin::synthetic());
                                                     let hi_addr = self.builder.ptradd(
                                                         slot.into(),
                                                         off8.into(),
@@ -2098,7 +2091,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     if src.projection.is_empty()
                                         && self.stack_locals.is_stack(src.local) =>
                                 {
-                                    let src_ty = self.monomorphize(self.mir.local_decls[src.local].ty);
+                                    let src_ty =
+                                        self.monomorphize(self.mir.local_decls[src.local].ty);
                                     type_size(self.tcx, src_ty).unwrap_or(8) > 8
                                 }
                                 // Cast/Transmute from a stack local.
@@ -2107,17 +2101,22 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 // loads the actual value from the slot, so val is
                                 // data (not a slot address) and the destination
                                 // must NOT be marked as stack.
-                                Rvalue::Cast(kind, Operand::Copy(src) | Operand::Move(src), cast_ty)
-                                    if src.projection.is_empty()
-                                        && self.stack_locals.is_stack(src.local) =>
+                                Rvalue::Cast(
+                                    kind,
+                                    Operand::Copy(src) | Operand::Move(src),
+                                    cast_ty,
+                                ) if src.projection.is_empty()
+                                    && self.stack_locals.is_stack(src.local) =>
                                 {
-                                    let src_ty = self.monomorphize(self.mir.local_decls[src.local].ty);
+                                    let src_ty =
+                                        self.monomorphize(self.mir.local_decls[src.local].ty);
                                     let src_size = type_size(self.tcx, src_ty).unwrap_or(8);
                                     if src_size > 8 {
                                         // PtrToPtr with target ≤ 8 bytes already
                                         // loaded the value — don't propagate.
                                         let target_ty = self.monomorphize(*cast_ty);
-                                        let target_size = type_size(self.tcx, target_ty).unwrap_or(0);
+                                        let target_size =
+                                            type_size(self.tcx, target_ty).unwrap_or(0);
                                         if matches!(kind, CastKind::PtrToPtr) && target_size <= 8 {
                                             false
                                         } else {
@@ -2152,7 +2151,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         // persist_spill=true: if the base local was a register
                         // that got spilled to a stack slot for field access,
                         // make the spill permanent so later reads see the mutation.
-                        if let Some((addr, projected_ty)) = self.translate_place_to_addr_inner(place, true) {
+                        if let Some((addr, projected_ty)) =
+                            self.translate_place_to_addr_inner(place, true)
+                        {
                             let addr = self.coerce_to_ptr(addr);
                             let bytes = type_size(self.tcx, projected_ty).unwrap_or(8) as u32;
                             let val_ty = self.builder.value_type(val).cloned();
@@ -4272,97 +4273,129 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
                 );
 
-
                 // For i128/u128 Eq/Ne: compare both 64-bit words.
                 if is_128bit && matches!(op, BinOp::Eq | BinOp::Ne) {
                     let l_ptr = self.coerce_to_ptr(l_raw);
                     let r_ptr = self.coerce_to_ptr(r_raw);
                     // Load low words
                     let l_lo = self.builder.load(
-                        l_ptr.into(), 8, Type::Int,
-                        self.current_mem.into(), None, Origin::synthetic(),
+                        l_ptr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
                     );
                     let r_lo = self.builder.load(
-                        r_ptr.into(), 8, Type::Int,
-                        self.current_mem.into(), None, Origin::synthetic(),
+                        r_ptr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
                     );
                     // Load high words
                     let off8 = self.builder.iconst(8, Origin::synthetic());
-                    let l_hi_addr = self.builder.ptradd(
-                        l_ptr.into(), off8.into(), 0, Origin::synthetic(),
-                    );
+                    let l_hi_addr =
+                        self.builder
+                            .ptradd(l_ptr.into(), off8.into(), 0, Origin::synthetic());
                     let off8b = self.builder.iconst(8, Origin::synthetic());
-                    let r_hi_addr = self.builder.ptradd(
-                        r_ptr.into(), off8b.into(), 0, Origin::synthetic(),
-                    );
+                    let r_hi_addr =
+                        self.builder
+                            .ptradd(r_ptr.into(), off8b.into(), 0, Origin::synthetic());
                     let l_hi = self.builder.load(
-                        l_hi_addr.into(), 8, Type::Int,
-                        self.current_mem.into(), None, Origin::synthetic(),
+                        l_hi_addr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
                     );
                     let r_hi = self.builder.load(
-                        r_hi_addr.into(), 8, Type::Int,
-                        self.current_mem.into(), None, Origin::synthetic(),
+                        r_hi_addr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
                     );
                     let lo_cmp = self.builder.icmp(
-                        ICmpOp::Eq, l_lo.into(), r_lo.into(), Origin::synthetic(),
+                        ICmpOp::Eq,
+                        l_lo.into(),
+                        r_lo.into(),
+                        Origin::synthetic(),
                     );
                     let hi_cmp = self.builder.icmp(
-                        ICmpOp::Eq, l_hi.into(), r_hi.into(), Origin::synthetic(),
+                        ICmpOp::Eq,
+                        l_hi.into(),
+                        r_hi.into(),
+                        Origin::synthetic(),
                     );
                     // Convert Bool results to Int (0/1) so we can AND them.
-                    let lo_int = self.builder.bool_to_int(
-                        lo_cmp.into(), Origin::synthetic(),
-                    );
-                    let hi_int = self.builder.bool_to_int(
-                        hi_cmp.into(), Origin::synthetic(),
-                    );
+                    let lo_int = self.builder.bool_to_int(lo_cmp.into(), Origin::synthetic());
+                    let hi_int = self.builder.bool_to_int(hi_cmp.into(), Origin::synthetic());
                     // Eq: both words must match; Ne: any word differs
-                    let combined = self.builder.and(
-                        lo_int.into(), hi_int.into(), None, Origin::synthetic(),
-                    );
+                    let combined =
+                        self.builder
+                            .and(lo_int.into(), hi_int.into(), None, Origin::synthetic());
                     if matches!(op, BinOp::Eq) {
                         return Some(combined);
                     } else {
                         // Ne: invert the Eq result
                         let one = self.builder.iconst(1, Origin::synthetic());
-                        return Some(self.builder.icmp(
-                            ICmpOp::Ne, combined.into(), one.into(),
-                            Origin::synthetic(),
-                        ).into());
+                        return Some(
+                            self.builder
+                                .icmp(ICmpOp::Ne, combined.into(), one.into(), Origin::synthetic())
+                                .into(),
+                        );
                     }
                 }
 
                 // For i128/u128 Lt/Le/Gt/Ge: compare hi words first,
                 // then lo words if hi are equal.  For signed i128 the
                 // hi comparison is signed; lo is always unsigned.
-                if is_128bit
-                    && matches!(op, BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge)
-                {
+                if is_128bit && matches!(op, BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge) {
                     let l_ptr = self.coerce_to_ptr(l_raw);
                     let r_ptr = self.coerce_to_ptr(r_raw);
                     let l_lo = self.builder.load(
-                        l_ptr.into(), 8, Type::Int,
-                        self.current_mem.into(), None, Origin::synthetic(),
+                        l_ptr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
                     );
                     let r_lo = self.builder.load(
-                        r_ptr.into(), 8, Type::Int,
-                        self.current_mem.into(), None, Origin::synthetic(),
+                        r_ptr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
                     );
                     let off8 = self.builder.iconst(8, Origin::synthetic());
-                    let l_hi_addr = self.builder.ptradd(
-                        l_ptr.into(), off8.into(), 0, Origin::synthetic(),
-                    );
+                    let l_hi_addr =
+                        self.builder
+                            .ptradd(l_ptr.into(), off8.into(), 0, Origin::synthetic());
                     let off8b = self.builder.iconst(8, Origin::synthetic());
-                    let r_hi_addr = self.builder.ptradd(
-                        r_ptr.into(), off8b.into(), 0, Origin::synthetic(),
-                    );
+                    let r_hi_addr =
+                        self.builder
+                            .ptradd(r_ptr.into(), off8b.into(), 0, Origin::synthetic());
                     let l_hi = self.builder.load(
-                        l_hi_addr.into(), 8, Type::Int,
-                        self.current_mem.into(), None, Origin::synthetic(),
+                        l_hi_addr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
                     );
                     let r_hi = self.builder.load(
-                        r_hi_addr.into(), 8, Type::Int,
-                        self.current_mem.into(), None, Origin::synthetic(),
+                        r_hi_addr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
                     );
 
                     let is_signed = matches!(lhs_mir_ty.kind(), ty::Int(ty::IntTy::I128));
@@ -4393,7 +4426,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         )
                     };
                     let hi_eq = self.builder.icmp(
-                        ICmpOp::Eq, l_hi.into(), r_hi.into(),
+                        ICmpOp::Eq,
+                        l_hi.into(),
+                        r_hi.into(),
                         Origin::synthetic(),
                     );
                     // lo comparison (always unsigned)
@@ -4414,21 +4449,21 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     );
 
                     // result = hi_strict || (hi_eq && lo_cmp)
-                    let hi_strict_int = self.builder.bool_to_int(
-                        hi_strict.into(), Origin::synthetic(),
-                    );
-                    let hi_eq_int = self.builder.bool_to_int(
-                        hi_eq.into(), Origin::synthetic(),
-                    );
-                    let lo_cmp_int = self.builder.bool_to_int(
-                        lo_cmp.into(), Origin::synthetic(),
-                    );
+                    let hi_strict_int = self
+                        .builder
+                        .bool_to_int(hi_strict.into(), Origin::synthetic());
+                    let hi_eq_int = self.builder.bool_to_int(hi_eq.into(), Origin::synthetic());
+                    let lo_cmp_int = self.builder.bool_to_int(lo_cmp.into(), Origin::synthetic());
                     let eq_and_lo = self.builder.and(
-                        hi_eq_int.into(), lo_cmp_int.into(), None,
+                        hi_eq_int.into(),
+                        lo_cmp_int.into(),
+                        None,
                         Origin::synthetic(),
                     );
                     let result = self.builder.or(
-                        hi_strict_int.into(), eq_and_lo.into(), None,
+                        hi_strict_int.into(),
+                        eq_and_lo.into(),
+                        None,
                         Origin::synthetic(),
                     );
                     return Some(result);
@@ -4450,29 +4485,45 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let r_ptr = self.coerce_to_ptr(r_raw);
                     // Load low words
                     let l_lo = self.builder.load(
-                        l_ptr.into(), 8, Type::Int,
-                        self.current_mem.into(), None, Origin::synthetic(),
+                        l_ptr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
                     );
                     let r_lo = self.builder.load(
-                        r_ptr.into(), 8, Type::Int,
-                        self.current_mem.into(), None, Origin::synthetic(),
+                        r_ptr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
                     );
                     // Load high words
                     let off8 = self.builder.iconst(8, Origin::synthetic());
-                    let l_hi_addr = self.builder.ptradd(
-                        l_ptr.into(), off8.into(), 0, Origin::synthetic(),
-                    );
+                    let l_hi_addr =
+                        self.builder
+                            .ptradd(l_ptr.into(), off8.into(), 0, Origin::synthetic());
                     let off8b = self.builder.iconst(8, Origin::synthetic());
-                    let r_hi_addr = self.builder.ptradd(
-                        r_ptr.into(), off8b.into(), 0, Origin::synthetic(),
-                    );
+                    let r_hi_addr =
+                        self.builder
+                            .ptradd(r_ptr.into(), off8b.into(), 0, Origin::synthetic());
                     let l_hi = self.builder.load(
-                        l_hi_addr.into(), 8, Type::Int,
-                        self.current_mem.into(), None, Origin::synthetic(),
+                        l_hi_addr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
                     );
                     let r_hi = self.builder.load(
-                        r_hi_addr.into(), 8, Type::Int,
-                        self.current_mem.into(), None, Origin::synthetic(),
+                        r_hi_addr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
                     );
 
                     let is_sub = matches!(
@@ -4482,13 +4533,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
                     // Compute lo result and carry/borrow
                     let res_lo = if is_sub {
-                        self.builder.sub(
-                            l_lo.into(), r_lo.into(), None, Origin::synthetic(),
-                        )
+                        self.builder
+                            .sub(l_lo.into(), r_lo.into(), None, Origin::synthetic())
                     } else {
-                        self.builder.add(
-                            l_lo.into(), r_lo.into(), None, Origin::synthetic(),
-                        )
+                        self.builder
+                            .add(l_lo.into(), r_lo.into(), None, Origin::synthetic())
                     };
 
                     // carry/borrow detection via unsigned comparison
@@ -4500,7 +4549,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             IrOperand::annotated(r_lo, Annotation::Unsigned(64)),
                             Origin::synthetic(),
                         );
-                        self.builder.bool_to_int(borrow_cmp.into(), Origin::synthetic())
+                        self.builder
+                            .bool_to_int(borrow_cmp.into(), Origin::synthetic())
                     } else {
                         // carry = (result_lo < a_lo) unsigned
                         let carry_cmp = self.builder.icmp(
@@ -4509,115 +4559,138 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             IrOperand::annotated(l_lo, Annotation::Unsigned(64)),
                             Origin::synthetic(),
                         );
-                        self.builder.bool_to_int(carry_cmp.into(), Origin::synthetic())
+                        self.builder
+                            .bool_to_int(carry_cmp.into(), Origin::synthetic())
                     };
 
                     // Compute hi result: hi = a_hi op b_hi, then adjust for carry/borrow
                     let hi_partial = if is_sub {
-                        self.builder.sub(
-                            l_hi.into(), r_hi.into(), None, Origin::synthetic(),
-                        )
+                        self.builder
+                            .sub(l_hi.into(), r_hi.into(), None, Origin::synthetic())
                     } else {
-                        self.builder.add(
-                            l_hi.into(), r_hi.into(), None, Origin::synthetic(),
-                        )
+                        self.builder
+                            .add(l_hi.into(), r_hi.into(), None, Origin::synthetic())
                     };
                     let res_hi = if is_sub {
-                        self.builder.sub(
-                            hi_partial.into(), carry.into(), None, Origin::synthetic(),
-                        )
+                        self.builder
+                            .sub(hi_partial.into(), carry.into(), None, Origin::synthetic())
                     } else {
-                        self.builder.add(
-                            hi_partial.into(), carry.into(), None, Origin::synthetic(),
-                        )
+                        self.builder
+                            .add(hi_partial.into(), carry.into(), None, Origin::synthetic())
                     };
 
                     // Store result to a 16-byte stack slot
                     let result_slot = self.builder.stack_slot(16, Origin::synthetic());
                     self.current_mem = self.builder.store(
-                        res_lo.into(), result_slot.into(), 8,
-                        self.current_mem.into(), Origin::synthetic(),
+                        res_lo.into(),
+                        result_slot.into(),
+                        8,
+                        self.current_mem.into(),
+                        Origin::synthetic(),
                     );
                     let off8c = self.builder.iconst(8, Origin::synthetic());
                     let hi_addr = self.builder.ptradd(
-                        result_slot.into(), off8c.into(), 0, Origin::synthetic(),
+                        result_slot.into(),
+                        off8c.into(),
+                        0,
+                        Origin::synthetic(),
                     );
                     self.current_mem = self.builder.store(
-                        res_hi.into(), hi_addr.into(), 8,
-                        self.current_mem.into(), Origin::synthetic(),
+                        res_hi.into(),
+                        hi_addr.into(),
+                        8,
+                        self.current_mem.into(),
+                        Origin::synthetic(),
                     );
                     return Some(result_slot);
                 }
 
                 // For i128/u128 BitAnd/BitOr/BitXor: apply to each 64-bit word.
-                if is_128bit
-                    && matches!(op, BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor)
-                {
+                if is_128bit && matches!(op, BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor) {
                     let l_ptr = self.coerce_to_ptr(l_raw);
                     let r_ptr = self.coerce_to_ptr(r_raw);
                     let l_lo = self.builder.load(
-                        l_ptr.into(), 8, Type::Int,
-                        self.current_mem.into(), None, Origin::synthetic(),
+                        l_ptr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
                     );
                     let r_lo = self.builder.load(
-                        r_ptr.into(), 8, Type::Int,
-                        self.current_mem.into(), None, Origin::synthetic(),
+                        r_ptr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
                     );
                     let off8 = self.builder.iconst(8, Origin::synthetic());
-                    let l_hi_addr = self.builder.ptradd(
-                        l_ptr.into(), off8.into(), 0, Origin::synthetic(),
-                    );
+                    let l_hi_addr =
+                        self.builder
+                            .ptradd(l_ptr.into(), off8.into(), 0, Origin::synthetic());
                     let off8b = self.builder.iconst(8, Origin::synthetic());
-                    let r_hi_addr = self.builder.ptradd(
-                        r_ptr.into(), off8b.into(), 0, Origin::synthetic(),
-                    );
+                    let r_hi_addr =
+                        self.builder
+                            .ptradd(r_ptr.into(), off8b.into(), 0, Origin::synthetic());
                     let l_hi = self.builder.load(
-                        l_hi_addr.into(), 8, Type::Int,
-                        self.current_mem.into(), None, Origin::synthetic(),
+                        l_hi_addr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
                     );
                     let r_hi = self.builder.load(
-                        r_hi_addr.into(), 8, Type::Int,
-                        self.current_mem.into(), None, Origin::synthetic(),
+                        r_hi_addr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
                     );
                     let (res_lo, res_hi) = match op {
                         BinOp::BitAnd => (
-                            self.builder.and(
-                                l_lo.into(), r_lo.into(), None, Origin::synthetic(),
-                            ),
-                            self.builder.and(
-                                l_hi.into(), r_hi.into(), None, Origin::synthetic(),
-                            ),
+                            self.builder
+                                .and(l_lo.into(), r_lo.into(), None, Origin::synthetic()),
+                            self.builder
+                                .and(l_hi.into(), r_hi.into(), None, Origin::synthetic()),
                         ),
                         BinOp::BitOr => (
-                            self.builder.or(
-                                l_lo.into(), r_lo.into(), None, Origin::synthetic(),
-                            ),
-                            self.builder.or(
-                                l_hi.into(), r_hi.into(), None, Origin::synthetic(),
-                            ),
+                            self.builder
+                                .or(l_lo.into(), r_lo.into(), None, Origin::synthetic()),
+                            self.builder
+                                .or(l_hi.into(), r_hi.into(), None, Origin::synthetic()),
                         ),
                         BinOp::BitXor => (
-                            self.builder.xor(
-                                l_lo.into(), r_lo.into(), None, Origin::synthetic(),
-                            ),
-                            self.builder.xor(
-                                l_hi.into(), r_hi.into(), None, Origin::synthetic(),
-                            ),
+                            self.builder
+                                .xor(l_lo.into(), r_lo.into(), None, Origin::synthetic()),
+                            self.builder
+                                .xor(l_hi.into(), r_hi.into(), None, Origin::synthetic()),
                         ),
                         _ => unreachable!(),
                     };
                     let result_slot = self.builder.stack_slot(16, Origin::synthetic());
                     self.current_mem = self.builder.store(
-                        res_lo.into(), result_slot.into(), 8,
-                        self.current_mem.into(), Origin::synthetic(),
+                        res_lo.into(),
+                        result_slot.into(),
+                        8,
+                        self.current_mem.into(),
+                        Origin::synthetic(),
                     );
                     let off8c = self.builder.iconst(8, Origin::synthetic());
                     let hi_addr = self.builder.ptradd(
-                        result_slot.into(), off8c.into(), 0, Origin::synthetic(),
+                        result_slot.into(),
+                        off8c.into(),
+                        0,
+                        Origin::synthetic(),
                     );
                     self.current_mem = self.builder.store(
-                        res_hi.into(), hi_addr.into(), 8,
-                        self.current_mem.into(), Origin::synthetic(),
+                        res_hi.into(),
+                        hi_addr.into(),
+                        8,
+                        self.current_mem.into(),
+                        Origin::synthetic(),
                     );
                     return Some(result_slot);
                 }
@@ -4625,31 +4698,41 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // For i128/u128 Shl/Shr: decompose into two 64-bit shifts
                 // with select for the shift >= 64 case.
                 if is_128bit
-                    && matches!(op, BinOp::Shl | BinOp::ShlUnchecked
-                                  | BinOp::Shr | BinOp::ShrUnchecked)
+                    && matches!(
+                        op,
+                        BinOp::Shl | BinOp::ShlUnchecked | BinOp::Shr | BinOp::ShrUnchecked
+                    )
                 {
                     let l_ptr = self.coerce_to_ptr(l_raw);
                     // Shift amount is a regular int, not i128
                     let shift = self.coerce_to_int(r_raw);
                     let lo = self.builder.load(
-                        l_ptr.into(), 8, Type::Int,
-                        self.current_mem.into(), None, Origin::synthetic(),
+                        l_ptr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
                     );
                     let off8 = self.builder.iconst(8, Origin::synthetic());
-                    let hi_addr = self.builder.ptradd(
-                        l_ptr.into(), off8.into(), 0, Origin::synthetic(),
-                    );
+                    let hi_addr =
+                        self.builder
+                            .ptradd(l_ptr.into(), off8.into(), 0, Origin::synthetic());
                     let hi = self.builder.load(
-                        hi_addr.into(), 8, Type::Int,
-                        self.current_mem.into(), None, Origin::synthetic(),
+                        hi_addr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
                     );
 
                     let c63 = self.builder.iconst(63, Origin::synthetic());
                     let c64 = self.builder.iconst(64, Origin::synthetic());
                     let c1 = self.builder.iconst(1, Origin::synthetic());
-                    let mask = self.builder.and(
-                        shift.into(), c63.into(), None, Origin::synthetic(),
-                    );
+                    let mask =
+                        self.builder
+                            .and(shift.into(), c63.into(), None, Origin::synthetic());
                     let is_large_bool = self.builder.icmp(
                         ICmpOp::Ge,
                         IrOperand::annotated(shift, Annotation::Unsigned(64)),
@@ -4659,105 +4742,108 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // Materialize the condition into a register immediately so
                     // that the downstream `select` uses TEST+CMOVcc instead of
                     // relying on flags surviving through the shr/shl sequence.
-                    let is_large = self.builder.bool_to_int(
-                        is_large_bool.into(), Origin::synthetic(),
-                    );
+                    let is_large = self
+                        .builder
+                        .bool_to_int(is_large_bool.into(), Origin::synthetic());
 
                     let is_shl = matches!(op, BinOp::Shl | BinOp::ShlUnchecked);
-                    let is_signed = matches!(
-                        lhs_mir_ty.kind(), ty::Int(ty::IntTy::I128)
-                    );
+                    let is_signed = matches!(lhs_mir_ty.kind(), ty::Int(ty::IntTy::I128));
 
                     let (res_lo, res_hi) = if is_shl {
                         // Small shift: lo_s = lo << mask,
                         //   hi_s = (hi << mask) | ((lo >> 1) >> (63 - mask))
-                        let lo_s = self.builder.shl(
-                            lo.into(), mask.into(), None, Origin::synthetic(),
-                        );
-                        let hi_s = self.builder.shl(
-                            hi.into(), mask.into(), None, Origin::synthetic(),
-                        );
-                        let lo_r1 = self.builder.shr(
-                            lo.into(), c1.into(), None, Origin::synthetic(),
-                        );
+                        let lo_s =
+                            self.builder
+                                .shl(lo.into(), mask.into(), None, Origin::synthetic());
+                        let hi_s =
+                            self.builder
+                                .shl(hi.into(), mask.into(), None, Origin::synthetic());
+                        let lo_r1 =
+                            self.builder
+                                .shr(lo.into(), c1.into(), None, Origin::synthetic());
                         let c63b = self.builder.iconst(63, Origin::synthetic());
-                        let compl = self.builder.sub(
-                            c63b.into(), mask.into(), None, Origin::synthetic(),
-                        );
-                        let carry = self.builder.shr(
-                            lo_r1.into(), compl.into(), None, Origin::synthetic(),
-                        );
-                        let hi_small = self.builder.or(
-                            hi_s.into(), carry.into(), None, Origin::synthetic(),
-                        );
+                        let compl =
+                            self.builder
+                                .sub(c63b.into(), mask.into(), None, Origin::synthetic());
+                        let carry =
+                            self.builder
+                                .shr(lo_r1.into(), compl.into(), None, Origin::synthetic());
+                        let hi_small =
+                            self.builder
+                                .or(hi_s.into(), carry.into(), None, Origin::synthetic());
                         // Large shift: lo = 0, hi = lo << mask
                         let zero = self.builder.iconst(0, Origin::synthetic());
-                        let hi_large = self.builder.shl(
-                            lo.into(), mask.into(), None, Origin::synthetic(),
-                        );
+                        let hi_large =
+                            self.builder
+                                .shl(lo.into(), mask.into(), None, Origin::synthetic());
                         // Refresh flags right before selects so TEST is
                         // adjacent to CMOVcc (shl/shr above clobber flags).
-                        let cond = self.builder.int_to_bool(
-                            is_large.into(), Origin::synthetic(),
-                        );
+                        let cond = self
+                            .builder
+                            .int_to_bool(is_large.into(), Origin::synthetic());
                         let final_lo = self.builder.select(
-                            cond.into(), zero.into(), lo_s.into(),
-                            Type::Int, Origin::synthetic(),
+                            cond.into(),
+                            zero.into(),
+                            lo_s.into(),
+                            Type::Int,
+                            Origin::synthetic(),
                         );
                         let final_hi = self.builder.select(
-                            cond.into(), hi_large.into(), hi_small.into(),
-                            Type::Int, Origin::synthetic(),
+                            cond.into(),
+                            hi_large.into(),
+                            hi_small.into(),
+                            Type::Int,
+                            Origin::synthetic(),
                         );
                         (final_lo, final_hi)
                     } else {
                         // Shr: unsigned or arithmetic
                         // Small shift: hi_s = hi >> mask,
                         //   lo_s = (lo >> mask) | ((hi << 1) << (63 - mask))
-                        let lo_s = self.builder.shr(
-                            lo.into(), mask.into(), None, Origin::synthetic(),
-                        );
+                        let lo_s =
+                            self.builder
+                                .shr(lo.into(), mask.into(), None, Origin::synthetic());
                         let hi_s = if is_signed {
                             self.builder.shr(
-                                hi.into(), mask.into(),
+                                hi.into(),
+                                mask.into(),
                                 Some(Annotation::Signed(64)),
                                 Origin::synthetic(),
                             )
                         } else {
-                            self.builder.shr(
-                                hi.into(), mask.into(), None,
-                                Origin::synthetic(),
-                            )
+                            self.builder
+                                .shr(hi.into(), mask.into(), None, Origin::synthetic())
                         };
-                        let hi_l1 = self.builder.shl(
-                            hi.into(), c1.into(), None, Origin::synthetic(),
-                        );
+                        let hi_l1 =
+                            self.builder
+                                .shl(hi.into(), c1.into(), None, Origin::synthetic());
                         let c63b = self.builder.iconst(63, Origin::synthetic());
-                        let compl = self.builder.sub(
-                            c63b.into(), mask.into(), None, Origin::synthetic(),
-                        );
-                        let carry = self.builder.shl(
-                            hi_l1.into(), compl.into(), None, Origin::synthetic(),
-                        );
-                        let lo_small = self.builder.or(
-                            lo_s.into(), carry.into(), None, Origin::synthetic(),
-                        );
+                        let compl =
+                            self.builder
+                                .sub(c63b.into(), mask.into(), None, Origin::synthetic());
+                        let carry =
+                            self.builder
+                                .shl(hi_l1.into(), compl.into(), None, Origin::synthetic());
+                        let lo_small =
+                            self.builder
+                                .or(lo_s.into(), carry.into(), None, Origin::synthetic());
                         // Large shift: hi = 0 (or sign-ext), lo = hi >> mask
                         let lo_large = if is_signed {
                             self.builder.shr(
-                                hi.into(), mask.into(),
+                                hi.into(),
+                                mask.into(),
                                 Some(Annotation::Signed(64)),
                                 Origin::synthetic(),
                             )
                         } else {
-                            self.builder.shr(
-                                hi.into(), mask.into(), None,
-                                Origin::synthetic(),
-                            )
+                            self.builder
+                                .shr(hi.into(), mask.into(), None, Origin::synthetic())
                         };
                         let hi_large = if is_signed {
                             let c63c = self.builder.iconst(63, Origin::synthetic());
                             self.builder.shr(
-                                hi.into(), c63c.into(),
+                                hi.into(),
+                                c63c.into(),
                                 Some(Annotation::Signed(64)),
                                 Origin::synthetic(),
                             )
@@ -4765,32 +4851,47 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             self.builder.iconst(0, Origin::synthetic())
                         };
                         // Refresh flags right before selects (same reason as Shl).
-                        let cond = self.builder.int_to_bool(
-                            is_large.into(), Origin::synthetic(),
-                        );
+                        let cond = self
+                            .builder
+                            .int_to_bool(is_large.into(), Origin::synthetic());
                         let final_lo = self.builder.select(
-                            cond.into(), lo_large.into(), lo_small.into(),
-                            Type::Int, Origin::synthetic(),
+                            cond.into(),
+                            lo_large.into(),
+                            lo_small.into(),
+                            Type::Int,
+                            Origin::synthetic(),
                         );
                         let final_hi = self.builder.select(
-                            cond.into(), hi_large.into(), hi_s.into(),
-                            Type::Int, Origin::synthetic(),
+                            cond.into(),
+                            hi_large.into(),
+                            hi_s.into(),
+                            Type::Int,
+                            Origin::synthetic(),
                         );
                         (final_lo, final_hi)
                     };
 
                     let result_slot = self.builder.stack_slot(16, Origin::synthetic());
                     self.current_mem = self.builder.store(
-                        res_lo.into(), result_slot.into(), 8,
-                        self.current_mem.into(), Origin::synthetic(),
+                        res_lo.into(),
+                        result_slot.into(),
+                        8,
+                        self.current_mem.into(),
+                        Origin::synthetic(),
                     );
                     let off8b = self.builder.iconst(8, Origin::synthetic());
                     let hi_store = self.builder.ptradd(
-                        result_slot.into(), off8b.into(), 0, Origin::synthetic(),
+                        result_slot.into(),
+                        off8b.into(),
+                        0,
+                        Origin::synthetic(),
                     );
                     self.current_mem = self.builder.store(
-                        res_hi.into(), hi_store.into(), 8,
-                        self.current_mem.into(), Origin::synthetic(),
+                        res_hi.into(),
+                        hi_store.into(),
+                        8,
+                        self.current_mem.into(),
+                        Origin::synthetic(),
                     );
                     return Some(result_slot);
                 }
@@ -4912,17 +5013,18 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let val = if matches!(
                             src_ty.kind(),
                             ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
-                        ) && matches!(
-                            self.builder.value_type(val),
-                            Some(Type::Ptr(_))
-                        ) {
+                        ) && matches!(self.builder.value_type(val), Some(Type::Ptr(_)))
+                        {
                             let target_ty_m = self.monomorphize(*target_ty);
                             let dst_bits = int_bitwidth(target_ty_m).unwrap_or(64);
                             if dst_bits <= 64 {
                                 // Narrowing: just load the lo word.
                                 self.builder.load(
-                                    val.into(), 8, Type::Int,
-                                    self.current_mem.into(), None,
+                                    val.into(),
+                                    8,
+                                    Type::Int,
+                                    self.current_mem.into(),
+                                    None,
                                     Origin::synthetic(),
                                 )
                             } else {
@@ -4972,6 +5074,107 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         } else {
                             Some(val)
                         }
+                    }
+                    CastKind::FloatToInt => {
+                        let src_ty = match operand {
+                            Operand::Copy(p) | Operand::Move(p) => {
+                                self.monomorphize(self.mir.local_decls[p.local].ty)
+                            }
+                            Operand::Constant(c) => self.monomorphize(c.ty()),
+                            _ => return Some(val),
+                        };
+                        let ft = match src_ty.kind() {
+                            ty::Float(ty::FloatTy::F32) => FloatType::F32,
+                            ty::Float(ty::FloatTy::F64) => FloatType::F64,
+                            _ => return Some(val),
+                        };
+                        let target_ty_m = self.monomorphize(*target_ty);
+                        let signed = matches!(target_ty_m.kind(), ty::Int(_));
+                        // Bitcast Int (bit pattern) → Float
+                        let float_val = self.builder.bitcast(
+                            val.into(),
+                            Type::Float(ft),
+                            None,
+                            Origin::synthetic(),
+                        );
+                        let result = if signed {
+                            self.builder.fp_to_si(float_val.into(), Origin::synthetic())
+                        } else {
+                            self.builder.fp_to_ui(float_val.into(), Origin::synthetic())
+                        };
+                        Some(result)
+                    }
+                    CastKind::IntToFloat => {
+                        let src_ty = match operand {
+                            Operand::Copy(p) | Operand::Move(p) => {
+                                self.monomorphize(self.mir.local_decls[p.local].ty)
+                            }
+                            Operand::Constant(c) => self.monomorphize(c.ty()),
+                            _ => return Some(val),
+                        };
+                        let signed = matches!(src_ty.kind(), ty::Int(_));
+                        let target_ty_m = self.monomorphize(*target_ty);
+                        let ft = match target_ty_m.kind() {
+                            ty::Float(ty::FloatTy::F32) => FloatType::F32,
+                            ty::Float(ty::FloatTy::F64) => FloatType::F64,
+                            _ => return Some(val),
+                        };
+                        let int_val = self.coerce_to_int(val);
+                        let float_res = if signed {
+                            self.builder
+                                .si_to_fp(int_val.into(), ft, Origin::synthetic())
+                        } else {
+                            self.builder
+                                .ui_to_fp(int_val.into(), ft, Origin::synthetic())
+                        };
+                        // Bitcast Float → Int (bit pattern)
+                        Some(self.builder.bitcast(
+                            float_res.into(),
+                            Type::Int,
+                            None,
+                            Origin::synthetic(),
+                        ))
+                    }
+                    CastKind::FloatToFloat => {
+                        let src_ty = match operand {
+                            Operand::Copy(p) | Operand::Move(p) => {
+                                self.monomorphize(self.mir.local_decls[p.local].ty)
+                            }
+                            Operand::Constant(c) => self.monomorphize(c.ty()),
+                            _ => return Some(val),
+                        };
+                        let src_ft = match src_ty.kind() {
+                            ty::Float(ty::FloatTy::F32) => FloatType::F32,
+                            ty::Float(ty::FloatTy::F64) => FloatType::F64,
+                            _ => return Some(val),
+                        };
+                        let target_ty_m = self.monomorphize(*target_ty);
+                        let dst_ft = match target_ty_m.kind() {
+                            ty::Float(ty::FloatTy::F32) => FloatType::F32,
+                            ty::Float(ty::FloatTy::F64) => FloatType::F64,
+                            _ => return Some(val),
+                        };
+                        if src_ft == dst_ft {
+                            return Some(val);
+                        }
+                        // Bitcast Int (bit pattern) → source Float
+                        let float_val = self.builder.bitcast(
+                            val.into(),
+                            Type::Float(src_ft),
+                            None,
+                            Origin::synthetic(),
+                        );
+                        // Convert between float formats
+                        let converted =
+                            self.builder
+                                .fp_convert(float_val.into(), dst_ft, Origin::synthetic());
+                        // Bitcast result Float → Int (bit pattern)
+                        Some(self.builder.bitcast(
+                            converted.into(),
+                            Type::Int,
+                            None,
+                            Origin::synthetic(),
+                        ))
                     }
                     // Pointer casts and transmutes are bitwise moves.
                     // Special case: when casting a projected non-fat type
@@ -5481,49 +5684,66 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 ) {
                     let ptr = self.coerce_to_ptr(v);
                     let lo = self.builder.load(
-                        ptr.into(), 8, Type::Int,
-                        self.current_mem.into(), None, Origin::synthetic(),
+                        ptr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
                     );
                     let off8 = self.builder.iconst(8, Origin::synthetic());
-                    let hi_addr = self.builder.ptradd(
-                        ptr.into(), off8.into(), 0, Origin::synthetic(),
-                    );
+                    let hi_addr =
+                        self.builder
+                            .ptradd(ptr.into(), off8.into(), 0, Origin::synthetic());
                     let hi = self.builder.load(
-                        hi_addr.into(), 8, Type::Int,
-                        self.current_mem.into(), None, Origin::synthetic(),
+                        hi_addr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
                     );
                     // neg(x) = 0 - x: res_lo = 0 - lo, borrow = (lo != 0),
                     // res_hi = 0 - hi - borrow
                     let zero = self.builder.iconst(0, Origin::synthetic());
-                    let res_lo = self.builder.sub(
-                        zero.into(), lo.into(), None, Origin::synthetic(),
-                    );
+                    let res_lo =
+                        self.builder
+                            .sub(zero.into(), lo.into(), None, Origin::synthetic());
                     let zero2 = self.builder.iconst(0, Origin::synthetic());
-                    let borrow_cmp = self.builder.icmp(
-                        ICmpOp::Ne, lo.into(), zero2.into(), Origin::synthetic(),
-                    );
-                    let borrow = self.builder.bool_to_int(
-                        borrow_cmp.into(), Origin::synthetic(),
-                    );
+                    let borrow_cmp =
+                        self.builder
+                            .icmp(ICmpOp::Ne, lo.into(), zero2.into(), Origin::synthetic());
+                    let borrow = self
+                        .builder
+                        .bool_to_int(borrow_cmp.into(), Origin::synthetic());
                     let zero3 = self.builder.iconst(0, Origin::synthetic());
-                    let hi_neg = self.builder.sub(
-                        zero3.into(), hi.into(), None, Origin::synthetic(),
-                    );
-                    let res_hi = self.builder.sub(
-                        hi_neg.into(), borrow.into(), None, Origin::synthetic(),
-                    );
+                    let hi_neg =
+                        self.builder
+                            .sub(zero3.into(), hi.into(), None, Origin::synthetic());
+                    let res_hi =
+                        self.builder
+                            .sub(hi_neg.into(), borrow.into(), None, Origin::synthetic());
                     let result_slot = self.builder.stack_slot(16, Origin::synthetic());
                     self.current_mem = self.builder.store(
-                        res_lo.into(), result_slot.into(), 8,
-                        self.current_mem.into(), Origin::synthetic(),
+                        res_lo.into(),
+                        result_slot.into(),
+                        8,
+                        self.current_mem.into(),
+                        Origin::synthetic(),
                     );
                     let off8b = self.builder.iconst(8, Origin::synthetic());
                     let hi_store = self.builder.ptradd(
-                        result_slot.into(), off8b.into(), 0, Origin::synthetic(),
+                        result_slot.into(),
+                        off8b.into(),
+                        0,
+                        Origin::synthetic(),
                     );
                     self.current_mem = self.builder.store(
-                        res_hi.into(), hi_store.into(), 8,
-                        self.current_mem.into(), Origin::synthetic(),
+                        res_hi.into(),
+                        hi_store.into(),
+                        8,
+                        self.current_mem.into(),
+                        Origin::synthetic(),
                     );
                     return Some(result_slot);
                 }
@@ -5563,37 +5783,54 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 if is_128bit_not {
                     let ptr = self.coerce_to_ptr(v);
                     let lo = self.builder.load(
-                        ptr.into(), 8, Type::Int,
-                        self.current_mem.into(), None, Origin::synthetic(),
+                        ptr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
                     );
                     let off8 = self.builder.iconst(8, Origin::synthetic());
-                    let hi_addr = self.builder.ptradd(
-                        ptr.into(), off8.into(), 0, Origin::synthetic(),
-                    );
+                    let hi_addr =
+                        self.builder
+                            .ptradd(ptr.into(), off8.into(), 0, Origin::synthetic());
                     let hi = self.builder.load(
-                        hi_addr.into(), 8, Type::Int,
-                        self.current_mem.into(), None, Origin::synthetic(),
+                        hi_addr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
                     );
                     let ones = self.builder.iconst(-1, Origin::synthetic());
-                    let not_lo = self.builder.xor(
-                        lo.into(), ones.into(), None, Origin::synthetic(),
-                    );
+                    let not_lo =
+                        self.builder
+                            .xor(lo.into(), ones.into(), None, Origin::synthetic());
                     let ones2 = self.builder.iconst(-1, Origin::synthetic());
-                    let not_hi = self.builder.xor(
-                        hi.into(), ones2.into(), None, Origin::synthetic(),
-                    );
+                    let not_hi =
+                        self.builder
+                            .xor(hi.into(), ones2.into(), None, Origin::synthetic());
                     let result_slot = self.builder.stack_slot(16, Origin::synthetic());
                     self.current_mem = self.builder.store(
-                        not_lo.into(), result_slot.into(), 8,
-                        self.current_mem.into(), Origin::synthetic(),
+                        not_lo.into(),
+                        result_slot.into(),
+                        8,
+                        self.current_mem.into(),
+                        Origin::synthetic(),
                     );
                     let off8b = self.builder.iconst(8, Origin::synthetic());
                     let hi_store = self.builder.ptradd(
-                        result_slot.into(), off8b.into(), 0, Origin::synthetic(),
+                        result_slot.into(),
+                        off8b.into(),
+                        0,
+                        Origin::synthetic(),
                     );
                     self.current_mem = self.builder.store(
-                        not_hi.into(), hi_store.into(), 8,
-                        self.current_mem.into(), Origin::synthetic(),
+                        not_hi.into(),
+                        hi_store.into(),
+                        8,
+                        self.current_mem.into(),
+                        Origin::synthetic(),
                     );
                     return Some(result_slot);
                 }
@@ -5955,17 +6192,21 @@ fn translate_const<'tcx>(
                     let slot = builder.stack_slot(16, Origin::synthetic());
                     let lo_val = builder.iconst(lo as i64, Origin::synthetic());
                     *current_mem = builder.store(
-                        lo_val.into(), slot.into(), 8,
-                        (*current_mem).into(), Origin::synthetic(),
+                        lo_val.into(),
+                        slot.into(),
+                        8,
+                        (*current_mem).into(),
+                        Origin::synthetic(),
                     );
                     let off8 = builder.iconst(8, Origin::synthetic());
-                    let hi_addr = builder.ptradd(
-                        slot.into(), off8.into(), 0, Origin::synthetic(),
-                    );
+                    let hi_addr = builder.ptradd(slot.into(), off8.into(), 0, Origin::synthetic());
                     let hi_val = builder.iconst(hi as i64, Origin::synthetic());
                     *current_mem = builder.store(
-                        hi_val.into(), hi_addr.into(), 8,
-                        (*current_mem).into(), Origin::synthetic(),
+                        hi_val.into(),
+                        hi_addr.into(),
+                        8,
+                        (*current_mem).into(),
+                        Origin::synthetic(),
                     );
                     return Some(slot);
                 }
@@ -6328,17 +6569,27 @@ fn translate_intrinsic<'tcx>(
                     };
                     let mask = builder.iconst(0xFF, Origin::synthetic());
                     let mut result = {
-                        let shift = builder.iconst(((byte_size - 1) * 8) as i64, Origin::synthetic());
+                        let shift =
+                            builder.iconst(((byte_size - 1) * 8) as i64, Origin::synthetic());
                         let byte0 = builder.and(v.into(), mask.into(), None, Origin::synthetic());
                         builder.shl(byte0.into(), shift.into(), None, Origin::synthetic())
                     };
                     for i in 1..byte_size {
                         let extract_shift = builder.iconst((i * 8) as i64, Origin::synthetic());
-                        let shifted = builder.shr(v.into(), extract_shift.into(), None, Origin::synthetic());
-                        let byte_i = builder.and(shifted.into(), mask.into(), None, Origin::synthetic());
-                        let place_shift = builder.iconst(((byte_size - 1 - i) * 8) as i64, Origin::synthetic());
-                        let placed = builder.shl(byte_i.into(), place_shift.into(), None, Origin::synthetic());
-                        result = builder.or(result.into(), placed.into(), None, Origin::synthetic());
+                        let shifted =
+                            builder.shr(v.into(), extract_shift.into(), None, Origin::synthetic());
+                        let byte_i =
+                            builder.and(shifted.into(), mask.into(), None, Origin::synthetic());
+                        let place_shift =
+                            builder.iconst(((byte_size - 1 - i) * 8) as i64, Origin::synthetic());
+                        let placed = builder.shl(
+                            byte_i.into(),
+                            place_shift.into(),
+                            None,
+                            Origin::synthetic(),
+                        );
+                        result =
+                            builder.or(result.into(), placed.into(), None, Origin::synthetic());
                     }
                     locals.set(destination_local, result);
                 }
