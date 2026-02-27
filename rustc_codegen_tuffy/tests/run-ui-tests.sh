@@ -5,6 +5,7 @@
 # Options:
 #   --fail-fast       Stop at first failure
 #   --shuffle         Randomize test order (default: sorted for determinism)
+#   --filter PATTERN  Only run tests whose path contains PATTERN
 #
 # Requires: scratch/rust/tests/ui/ (shallow clone of rust-lang/rust)
 
@@ -17,13 +18,16 @@ REPO_ROOT="$(cd "$CRATE_ROOT/.." && pwd)"
 # Options
 FAIL_FAST="${FAIL_FAST:-0}"
 SHUFFLE=0
+FILTER=""
 UI_DIR_ARG=""
-for arg in "$@"; do
-    case "$arg" in
+while [ $# -gt 0 ]; do
+    case "$1" in
         --fail-fast) FAIL_FAST=1 ;;
         --shuffle)   SHUFFLE=1 ;;
-        *)           UI_DIR_ARG="$arg" ;;
+        --filter)    shift; FILTER="${1:-}" ;;
+        *)           UI_DIR_ARG="$1" ;;
     esac
+    shift
 done
 
 # Find backend .so: env var > crate-local target > workspace target
@@ -67,6 +71,10 @@ if [ -f "$EXCLUDE_FILE" ]; then
     done < "$EXCLUDE_FILE"
 fi
 
+if [ -n "$FILTER" ]; then
+    echo "Filter: $FILTER"
+fi
+
 pass=0; fail=0; skip=0; total=0
 panic_count=0
 failures=""
@@ -74,9 +82,9 @@ panics=""
 
 # Find tests: no auxiliary dirs
 if [ "$SHUFFLE" -eq 1 ]; then
-    mapfile -t tests < <(find "$UI_DIR" -name '*.rs' -not -path '*/auxiliary/*' | shuf)
+    mapfile -t tests < <(find "$UI_DIR" -name '*.rs' -not -path '*/auxiliary/*' | { [ -n "$FILTER" ] && grep "$FILTER" || cat; } | shuf)
 else
-    mapfile -t tests < <(find "$UI_DIR" -name '*.rs' -not -path '*/auxiliary/*' | sort)
+    mapfile -t tests < <(find "$UI_DIR" -name '*.rs' -not -path '*/auxiliary/*' | { [ -n "$FILTER" ] && grep "$FILTER" || cat; } | sort)
 fi
 
 for test_file in "${tests[@]}"; do
