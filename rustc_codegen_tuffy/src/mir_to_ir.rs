@@ -4300,6 +4300,103 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             }
         };
 
+        // i128/u128 discriminants: the value lives in a stack slot (pointer).
+        // We need to load both 64-bit halves and compare them separately.
+        let is_i128_discr = discr_bits == 128
+            && matches!(self.builder.value_type(discr_val), Some(Type::Ptr(_)));
+
+        if is_i128_discr {
+            // Handle i128/u128 SwitchInt with two-word comparison.
+            // For each target value, compare low word first, then high word
+            // using nested brif (avoids Bool AND issues).
+            let all_targets: Vec<_> = targets.iter().collect();
+            let otherwise = targets.otherwise();
+
+            // Load low and high 64-bit halves from the stack slot.
+            let lo = self.builder.load(
+                discr_val.into(), 8, Type::Int,
+                self.current_mem.into(), None, Origin::synthetic(),
+            );
+            let off8 = self.builder.iconst(8, Origin::synthetic());
+            let hi_addr = self.builder.ptradd(
+                discr_val.into(), off8.into(), 0, Origin::synthetic(),
+            );
+            let hi = self.builder.load(
+                hi_addr.into(), 8, Type::Int,
+                self.current_mem.into(), None, Origin::synthetic(),
+            );
+
+            let otherwise_block = self.block_map.get(otherwise);
+
+            if all_targets.is_empty() {
+                self.builder.br(
+                    otherwise_block,
+                    vec![self.current_mem.into()],
+                    Origin::synthetic(),
+                );
+            } else {
+                for (i, (test_val, target_bb)) in all_targets.iter().enumerate() {
+                    let target_lo = (*test_val & ((1u128 << 64) - 1)) as i64;
+                    let target_hi = (*test_val >> 64) as i64;
+                    let clo = self.builder.iconst(target_lo, Origin::synthetic());
+                    let chi = self.builder.iconst(target_hi, Origin::synthetic());
+
+                    // Compare low word first.
+                    let eq_lo = self.builder.icmp(
+                        ICmpOp::Eq, lo.into(), clo.into(), Origin::synthetic(),
+                    );
+
+                    // Create a block for the high-word check.
+                    let hi_check = self.builder.create_block();
+                    let hi_check_mem =
+                        self.builder.add_block_arg(hi_check, Type::Mem);
+
+                    // Determine the "miss" block: either the next comparison
+                    // or the otherwise block.
+                    let (miss_block, miss_mem) = if i == all_targets.len() - 1 {
+                        (otherwise_block, None)
+                    } else {
+                        let nb = self.builder.create_block();
+                        let nm = self.builder.add_block_arg(nb, Type::Mem);
+                        (nb, Some(nm))
+                    };
+
+                    // If lo doesn't match, skip to miss_block.
+                    self.builder.brif(
+                        eq_lo.into(),
+                        hi_check,
+                        vec![self.current_mem.into()],
+                        miss_block,
+                        vec![self.current_mem.into()],
+                        Origin::synthetic(),
+                    );
+
+                    // In the hi_check block, compare the high word.
+                    self.builder.switch_to_block(hi_check);
+                    self.current_mem = hi_check_mem;
+                    let eq_hi = self.builder.icmp(
+                        ICmpOp::Eq, hi.into(), chi.into(), Origin::synthetic(),
+                    );
+                    let then_block = self.block_map.get(*target_bb);
+                    self.builder.brif(
+                        eq_hi.into(),
+                        then_block,
+                        vec![self.current_mem.into()],
+                        miss_block,
+                        vec![self.current_mem.into()],
+                        Origin::synthetic(),
+                    );
+
+                    // Continue from the miss block for the next comparison.
+                    if let Some(nm) = miss_mem {
+                        self.builder.switch_to_block(miss_block);
+                        self.current_mem = nm;
+                    }
+                }
+            }
+            return;
+        }
+
         // If the discriminant is a pointer (e.g. nullable pointer optimization),
         // convert it to an integer so icmp gets Int operands.
         // Similarly, Bool discriminants need BoolToInt for icmp.
