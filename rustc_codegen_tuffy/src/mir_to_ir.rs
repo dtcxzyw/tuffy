@@ -209,20 +209,27 @@ pub fn translate_function<'tcx>(
     // at loop headers (SSA values can't be mutated in place).
     {
         let mut assign_bb: Vec<Option<BasicBlock>> = vec![None; mir.local_decls.len()];
+        // Function parameters are effectively assigned in the entry block
+        // by translate_params.  Seed assign_bb so that any MIR assignment
+        // to a parameter in a different block triggers stack promotion.
+        let entry_bb = mir::BasicBlock::from_u32(0);
+        for i in 0..mir.arg_count {
+            let local = mir::Local::from_usize(i + 1);
+            // Only seed non-stack params (large structs / two-reg structs
+            // are already stack locals from translate_params).
+            if !ctx.stack_locals.is_stack(local) {
+                assign_bb[local.as_usize()] = Some(entry_bb);
+            }
+        }
         for (bb, bb_data) in mir.basic_blocks.iter_enumerated() {
             for stmt in &bb_data.statements {
                 if let StatementKind::Assign(box (place, _)) = &stmt.kind
                     && place.projection.is_empty()
                 {
                     let local = place.local;
-                    // Skip function params (handled by translate_params).
                     // _0 (return place) is only skipped when it already has
                     // a stack slot (sret); otherwise it may need promotion
-                    // when assigned in multiple BBs (e.g. Option::None in
-                    // one BB and Aggregate::Some in another).
-                    if local.as_usize() > 0 && local.as_usize() <= mir.arg_count {
-                        continue;
-                    }
+                    // when assigned in multiple BBs.
                     if local.as_usize() == 0 && ctx.stack_locals.is_stack(local) {
                         continue;
                     }
@@ -236,6 +243,19 @@ pub fn translate_function<'tcx>(
                             let slot = ctx
                                 .builder
                                 .stack_slot(std::cmp::max(size as u32, 1), Origin::synthetic());
+                            // If the local already holds a value (e.g. a
+                            // function parameter from translate_params),
+                            // store it into the new stack slot so it isn't
+                            // lost.
+                            if let Some(old_val) = ctx.locals.get(local) {
+                                ctx.current_mem = ctx.builder.store(
+                                    old_val.into(),
+                                    slot.into(),
+                                    std::cmp::max(size as u32, 1),
+                                    ctx.current_mem.into(),
+                                    Origin::synthetic(),
+                                );
+                            }
                             ctx.locals.set(local, slot);
                             ctx.stack_locals.mark(local);
                         }
@@ -250,9 +270,8 @@ pub fn translate_function<'tcx>(
                 && destination.projection.is_empty()
             {
                 let local = destination.local;
-                if (local.as_usize() > 0 && local.as_usize() <= mir.arg_count)
-                    || (local.as_usize() == 0 && ctx.stack_locals.is_stack(local))
-                {
+                if local.as_usize() == 0 && ctx.stack_locals.is_stack(local) {
+                    // _0 with sret already has a stack slot — skip.
                 } else {
                     let ty = monomorphize(mir.local_decls[local].ty);
                     let size = type_size(tcx, ty).unwrap_or(0);
@@ -262,6 +281,15 @@ pub fn translate_function<'tcx>(
                                 let slot = ctx
                                     .builder
                                     .stack_slot(std::cmp::max(size as u32, 1), Origin::synthetic());
+                                if let Some(old_val) = ctx.locals.get(local) {
+                                    ctx.current_mem = ctx.builder.store(
+                                        old_val.into(),
+                                        slot.into(),
+                                        std::cmp::max(size as u32, 1),
+                                        ctx.current_mem.into(),
+                                        Origin::synthetic(),
+                                    );
+                                }
                                 ctx.locals.set(local, slot);
                                 ctx.stack_locals.mark(local);
                             }
@@ -282,15 +310,21 @@ pub fn translate_function<'tcx>(
                     && !ctx.stack_locals.is_stack(place.local)
                 {
                     let local = place.local;
-                    if local.as_usize() > 0 && local.as_usize() <= mir.arg_count {
-                        continue;
-                    }
                     let ty = monomorphize(mir.local_decls[local].ty);
                     let size = type_size(tcx, ty).unwrap_or(0);
                     if size > 0 {
                         let slot = ctx
                             .builder
                             .stack_slot(std::cmp::max(size as u32, 1), Origin::synthetic());
+                        if let Some(old_val) = ctx.locals.get(local) {
+                            ctx.current_mem = ctx.builder.store(
+                                old_val.into(),
+                                slot.into(),
+                                std::cmp::max(size as u32, 1),
+                                ctx.current_mem.into(),
+                                Origin::synthetic(),
+                            );
+                        }
                         ctx.locals.set(local, slot);
                         ctx.stack_locals.mark(local);
                     }
