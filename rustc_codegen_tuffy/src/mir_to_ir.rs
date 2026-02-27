@@ -3406,6 +3406,20 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             for arg in args {
                 if let Some(v) = self.translate_operand(&arg.node) {
                     intrinsic_args.push(v);
+                    // Also push fat pointer metadata for intrinsics that
+                    // need it (e.g. size_of_val on unsized types).
+                    if let Operand::Copy(place) | Operand::Move(place) = &arg.node {
+                        if place.projection.is_empty() {
+                            if let Some(fat_v) = self.fat_locals.get(place.local) {
+                                let local_ty = self.monomorphize(
+                                    self.mir.local_decls[place.local].ty,
+                                );
+                                if is_fat_ptr(self.tcx, local_ty) {
+                                    intrinsic_args.push(fat_v);
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -7353,11 +7367,56 @@ fn translate_intrinsic<'tcx>(
 
         // size_of_val: return the size of the pointed-to type.
         // For sized types this is a compile-time constant.
+        // For unsized types (slices), compute len * elem_size at runtime.
         "size_of_val" => {
             if let Some(t) = substs.first().and_then(|a| a.as_type()) {
-                let sz = type_size(tcx, t).unwrap_or(0);
-                let result = builder.iconst(sz as i64, Origin::synthetic());
-                locals.set(destination_local, result);
+                // Check if the type is unsized first — type_size returns
+                // Some(0) for unsized types like [T] (zero-element slice),
+                // so we can't rely on type_size alone.
+                let typing_env = ty::TypingEnv::fully_monomorphized();
+                let tail = tcx.struct_tail_for_codegen(t, typing_env);
+                if matches!(tail.kind(), ty::Slice(..) | ty::Str | ty::Dynamic(..)) {
+                    // Unsized type: compute size at runtime from metadata.
+                    if let ty::Slice(elem_ty) = tail.kind() {
+                        let elem_sz = type_size(tcx, *elem_ty).unwrap_or(0);
+                        if ir_args.len() >= 2 {
+                            let len = ir_args[1];
+                            if elem_sz == 1 {
+                                locals.set(destination_local, len);
+                            } else {
+                                let esz = builder.iconst(elem_sz as i64, Origin::synthetic());
+                                let result = builder.mul(
+                                    len.into(), esz.into(), None, Origin::synthetic(),
+                                );
+                                locals.set(destination_local, result);
+                            }
+                        } else {
+                            let result = builder.iconst(0, Origin::synthetic());
+                            locals.set(destination_local, result);
+                        }
+                    } else {
+                        // str: size = len (metadata is byte length).
+                        if let ty::Str = tail.kind() {
+                            if ir_args.len() >= 2 {
+                                locals.set(destination_local, ir_args[1]);
+                            } else {
+                                let result = builder.iconst(0, Origin::synthetic());
+                                locals.set(destination_local, result);
+                            }
+                        } else {
+                            // dyn Trait: read size from vtable (fallback to 0 for now).
+                            let result = builder.iconst(0, Origin::synthetic());
+                            locals.set(destination_local, result);
+                        }
+                    }
+                } else if let Some(sz) = type_size(tcx, t) {
+                    // Sized type: compile-time constant.
+                    let result = builder.iconst(sz as i64, Origin::synthetic());
+                    locals.set(destination_local, result);
+                } else {
+                    let result = builder.iconst(0, Origin::synthetic());
+                    locals.set(destination_local, result);
+                }
             }
             true
         }
