@@ -1,0 +1,62 @@
+diff --git a/config/src/lib.rs b/config/src/lib.rs
+index 030ef3c..42d9133 100644
+--- a/config/src/lib.rs
++++ b/config/src/lib.rs
+@@ -50,6 +50,10 @@ pub enum BackendConfig {
+         path: String,
+         flags: Vec<String>,
+     },
++    Tuffy {
++        path: String,
++        flags: Vec<String>,
++    },
+ }
+
+ #[derive(Deserialize, Clone)]
+diff --git a/difftest/src/backends.rs b/difftest/src/backends.rs
+index 7cc0aee..534ebae 100644
+--- a/difftest/src/backends.rs
++++ b/difftest/src/backends.rs
+@@ -93,6 +93,9 @@ pub fn from_config(config: Config) -> HashMap<String, Box<dyn Backend>> {
+             BackendConfig::GCC { path, flags } => {
+                 Box::new(GCC::from_built_repo(path, flags).unwrap())
+             }
++            BackendConfig::Tuffy { path, flags } => {
++                Box::new(Tuffy::new(path, flags))
++            }
+         };
+         backends.insert(name, backend);
+     }
+@@ -469,3 +472,32 @@ impl Backend for GCC {
+         run_compile_command(command, source).into()
+     }
+ }
++
++struct Tuffy {
++    library: PathBuf,
++    flags: Vec<String>,
++}
++
++impl Tuffy {
++    fn new(path: String, flags: Vec<String>) -> Self {
++        let library = PathBuf::from(&path)
++            .canonicalize()
++            .expect("can find tuffy codegen library");
++        Self { library, flags }
++    }
++}
++
++impl Backend for Tuffy {
++    fn compile(&self, source: &Source, target: &Path) -> ProcessOutput {
++        let mut command = Command::new("rustc");
++        command
++            .arg("+nightly")
++            .args([
++                "-Z",
++                &format!("codegen-backend={}", self.library.to_str().unwrap()),
++            ])
++            .args(["-o", target.to_str().unwrap()])
++            .args(self.flags.clone());
++        run_compile_command(command, source).into()
++    }
++}

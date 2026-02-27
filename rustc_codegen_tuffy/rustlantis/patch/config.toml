@@ -1,0 +1,23 @@
+bb_max_len = 5
+max_switch_targets = 2
+max_bb_count = 5
+max_bb_count_hard = 10
+max_fn_count = 2
+max_args_count = 4
+var_dump_chance = 0.5
+tuple_max_len = 2
+array_max_len = 3
+struct_max_fields = 3
+adt_max_variants = 2
+composite_count = 4
+adt_count = 2
+
+[backends.llvm]
+type = "llvm"
+toolchain = "nightly"
+flags = ["-Zmir-opt-level=0"]
+
+[backends.tuffy]
+type = "tuffy"
+path = "/tuffy/rustc_codegen_tuffy/target/release/librustc_codegen_tuffy.so"
+flags = ["-Zmir-opt-level=0"]
