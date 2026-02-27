@@ -629,6 +629,7 @@ fn translate_ty(ty: ty::Ty<'_>) -> Option<Type> {
         ty::Tuple(fields) if fields.is_empty() => Some(Type::Unit),
         ty::FnDef(..) => Some(Type::Int),
         ty::Never => Some(Type::Int),
+        ty::Float(..) => Some(Type::Int),
         ty::Adt(..) | ty::Tuple(..) | ty::Array(..) | ty::Slice(..) | ty::Str => Some(Type::Int),
         // Closure / coroutine-closure structs that capture variables are
         // laid out like regular structs — treat them as Int so they are
@@ -937,6 +938,163 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         } else {
             val
         }
+    }
+
+    /// Convert a 128-bit integer (split into two 64-bit words) to a float.
+    ///
+    /// `lo` and `hi` are the lower and upper 64-bit halves.  `signed` indicates
+    /// whether the original type was i128 (vs u128).  The result is a float
+    /// value (Type::Float) — caller must bitcast back to Int if needed.
+    fn emit_u128_to_float(
+        &mut self,
+        lo: ValueRef,
+        hi: ValueRef,
+        signed: bool,
+        ft: FloatType,
+    ) -> ValueRef {
+        if signed {
+            // i128 → float: compute abs value, convert as unsigned, apply sign.
+            //
+            // IMPORTANT: int_to_bool stores a condition code (FLAGS) that gets
+            // clobbered by subsequent int_to_bool calls.  We must recompute
+            // the Bool immediately before each select that consumes it.
+            let c63 = self.builder.iconst(63i64, Origin::synthetic());
+            let sign_bit = self.builder.shr(
+                hi.into(), c63.into(),
+                Some(Annotation::Unsigned(64)), Origin::synthetic(),
+            );
+
+            // Negate 128-bit: neg_lo = 0 - lo, neg_hi = 0 - hi - (lo != 0)
+            let zero = self.builder.iconst(0i64, Origin::synthetic());
+            let neg_lo = self.builder.sub(
+                zero.into(), lo.into(), None, Origin::synthetic(),
+            );
+            let lo_nz = self.builder.int_to_bool(lo.into(), Origin::synthetic());
+            let borrow = self.builder.bool_to_int(lo_nz.into(), Origin::synthetic());
+            let neg_hi_tmp = self.builder.sub(
+                zero.into(), hi.into(), None, Origin::synthetic(),
+            );
+            let neg_hi = self.builder.sub(
+                neg_hi_tmp.into(), borrow.into(), None, Origin::synthetic(),
+            );
+
+            // Select abs value — recompute Bool fresh before each select
+            let is_neg1 = self.builder.int_to_bool(
+                sign_bit.into(), Origin::synthetic(),
+            );
+            let abs_lo = self.builder.select(
+                is_neg1.into(), neg_lo.into(), lo.into(),
+                Type::Int, Origin::synthetic(),
+            );
+            let is_neg2 = self.builder.int_to_bool(
+                sign_bit.into(), Origin::synthetic(),
+            );
+            let abs_hi = self.builder.select(
+                is_neg2.into(), neg_hi.into(), hi.into(),
+                Type::Int, Origin::synthetic(),
+            );
+
+            // Convert absolute value as unsigned
+            let abs_f = self.emit_u64_pair_to_float(abs_lo, abs_hi, ft);
+
+            // Apply sign via XOR — pure integer arithmetic, no select needed.
+            let abs_bits = self.builder.bitcast(
+                abs_f.into(), Type::Int, None, Origin::synthetic(),
+            );
+            let sign_bit_pos: i64 = match ft {
+                FloatType::F64 => 63,
+                FloatType::F32 => 31,
+                _ => 63,
+            };
+            let pos_c = self.builder.iconst(sign_bit_pos, Origin::synthetic());
+            let sign_mask = self.builder.shl(
+                sign_bit.into(), pos_c.into(), None, Origin::synthetic(),
+            );
+            let result_bits = self.builder.xor(
+                abs_bits.into(), sign_mask.into(), None, Origin::synthetic(),
+            );
+            self.builder.bitcast(
+                result_bits.into(), Type::Float(ft), None, Origin::synthetic(),
+            )
+        } else {
+            self.emit_u64_pair_to_float(lo, hi, ft)
+        }
+    }
+
+    /// Convert an unsigned 128-bit value (two u64 words) to float.
+    ///
+    /// Each half is converted via si_to_fp (the only x86 instruction available)
+    /// with a 2^64 correction when the high bit is set, then combined as
+    /// `hi_f * 2^64 + lo_f`.
+    fn emit_u64_pair_to_float(
+        &mut self,
+        lo: ValueRef,
+        hi: ValueRef,
+        ft: FloatType,
+    ) -> ValueRef {
+        let flags = FpRewriteFlags::default();
+
+        // 2^64 as a float constant (bit pattern in integer domain)
+        let pow2_64_bits: i64 = match ft {
+            FloatType::F64 => 0x43F0000000000000u64 as i64,
+            FloatType::F32 => 0x5F800000i64,
+            _ => 0x43F0000000000000u64 as i64,
+        };
+        let pow2_64_int = self.builder.iconst(pow2_64_bits, Origin::synthetic());
+        let zero_int = self.builder.iconst(0i64, Origin::synthetic());
+        let c63 = self.builder.iconst(63i64, Origin::synthetic());
+
+        // lo: si_to_fp + correction if high bit set
+        let lo_f = self.builder.si_to_fp(lo.into(), ft, Origin::synthetic());
+        let lo_sign = self.builder.shr(
+            lo.into(), c63.into(),
+            Some(Annotation::Unsigned(64)), Origin::synthetic(),
+        );
+        let lo_hi_bit = self.builder.int_to_bool(lo_sign.into(), Origin::synthetic());
+        // Select correction in Int domain, then bitcast to Float
+        let lo_corr_int = self.builder.select(
+            lo_hi_bit.into(), pow2_64_int.into(), zero_int.into(),
+            Type::Int, Origin::synthetic(),
+        );
+        let lo_corr_f = self.builder.bitcast(
+            lo_corr_int.into(), Type::Float(ft), None, Origin::synthetic(),
+        );
+        let lo_corrected = self.builder.fadd(
+            lo_f.into(), lo_corr_f.into(), flags,
+            Type::Float(ft), Origin::synthetic(),
+        );
+
+        // hi: si_to_fp + correction if high bit set
+        let hi_f = self.builder.si_to_fp(hi.into(), ft, Origin::synthetic());
+        let hi_sign = self.builder.shr(
+            hi.into(), c63.into(),
+            Some(Annotation::Unsigned(64)), Origin::synthetic(),
+        );
+        let hi_hi_bit = self.builder.int_to_bool(hi_sign.into(), Origin::synthetic());
+        let hi_corr_int = self.builder.select(
+            hi_hi_bit.into(), pow2_64_int.into(), zero_int.into(),
+            Type::Int, Origin::synthetic(),
+        );
+        let hi_corr_f = self.builder.bitcast(
+            hi_corr_int.into(), Type::Float(ft), None, Origin::synthetic(),
+        );
+        let hi_corrected = self.builder.fadd(
+            hi_f.into(), hi_corr_f.into(), flags,
+            Type::Float(ft), Origin::synthetic(),
+        );
+
+        // result = hi_f * 2^64 + lo_f
+        let pow2_64_f = self.builder.bitcast(
+            pow2_64_int.into(), Type::Float(ft), None, Origin::synthetic(),
+        );
+        let hi_scaled = self.builder.fmul(
+            hi_corrected.into(), pow2_64_f.into(),
+            flags, Type::Float(ft), Origin::synthetic(),
+        );
+        self.builder.fadd(
+            hi_scaled.into(), lo_corrected.into(),
+            flags, Type::Float(ft), Origin::synthetic(),
+        )
     }
 
     /// Transform an IEEE 754 float bit-pattern so unsigned integer comparison
@@ -6006,21 +6164,47 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             ty::Float(ty::FloatTy::F64) => FloatType::F64,
                             _ => return Some(val),
                         };
-                        let int_val = self.coerce_to_int(val);
-                        let float_res = if signed {
-                            self.builder
-                                .si_to_fp(int_val.into(), ft, Origin::synthetic())
+                        let is_128bit = matches!(
+                            src_ty.kind(),
+                            ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
+                        );
+                        if is_128bit {
+                            // i128/u128 → float: decompose into two 64-bit words
+                            // and combine via floating point arithmetic.
+                            let ptr = self.coerce_to_ptr(val);
+                            let lo = self.builder.load(
+                                ptr.into(), 8, Type::Int,
+                                self.current_mem.into(), None, Origin::synthetic(),
+                            );
+                            let off8 = self.builder.iconst(8, Origin::synthetic());
+                            let hi_addr = self.builder.ptradd(
+                                ptr.into(), off8.into(), 0, Origin::synthetic(),
+                            );
+                            let hi = self.builder.load(
+                                hi_addr.into(), 8, Type::Int,
+                                self.current_mem.into(), None, Origin::synthetic(),
+                            );
+                            let float_res =
+                                self.emit_u128_to_float(lo, hi, signed, ft);
+                            Some(self.builder.bitcast(
+                                float_res.into(), Type::Int, None,
+                                Origin::synthetic(),
+                            ))
                         } else {
-                            self.builder
-                                .ui_to_fp(int_val.into(), ft, Origin::synthetic())
-                        };
-                        // Bitcast Float → Int (bit pattern)
-                        Some(self.builder.bitcast(
-                            float_res.into(),
-                            Type::Int,
-                            None,
-                            Origin::synthetic(),
-                        ))
+                            let int_val = self.coerce_to_int(val);
+                            let float_res = if signed {
+                                self.builder
+                                    .si_to_fp(int_val.into(), ft, Origin::synthetic())
+                            } else {
+                                self.builder
+                                    .ui_to_fp(int_val.into(), ft, Origin::synthetic())
+                            };
+                            // Bitcast Float → Int (bit pattern)
+                            Some(self.builder.bitcast(
+                                float_res.into(), Type::Int, None,
+                                Origin::synthetic(),
+                            ))
+                        }
                     }
                     CastKind::FloatToFloat => {
                         let src_ty = match operand {
