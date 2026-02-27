@@ -109,6 +109,10 @@ Templates are available for reference:
 
 When the user provides reference documents, categorize and add them to `docs/references.md`. Download a local copy to `scratch/` when possible. Each reference entry should include a brief summary of key conclusions and their relevance to tuffy.
 
+## Code Review Mode
+
+When the user is reviewing code and providing feedback, record each piece of feedback as a task document in `docs/tasks/`. Do not modify code directly and do not enter plan mode during code review.
+
 ## Standard Operating Procedures
 
 Before starting a task, check `docs/SOPs/` for a matching SOP. If one exists, follow the procedure defined in it.
