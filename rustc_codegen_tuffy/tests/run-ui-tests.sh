@@ -7,7 +7,10 @@
 #   --shuffle         Randomize test order (default: sorted for determinism)
 #   --filter PATTERN  Only run tests whose path contains PATTERN
 #
-# Requires: scratch/rust/tests/ui/ (shallow clone of rust-lang/rust)
+# Requires: scratch/rust/tests/ui/ (sparse clone of rust-lang/rust at RUST_UI_VERSION)
+
+# Pinned rust-lang/rust version for UI tests.
+RUST_UI_VERSION="1.93.1"
 
 set -euo pipefail
 
@@ -49,9 +52,21 @@ mkdir -p "$OUT_DIR"
 
 if [ ! -d "$UI_DIR" ]; then
     echo "ERROR: UI test directory not found: $UI_DIR"
-    echo "Run: git clone --depth 1 --filter=blob:none --sparse https://github.com/rust-lang/rust.git scratch/rust"
+    echo "Run: git clone --filter=blob:none --sparse -b $RUST_UI_VERSION https://github.com/rust-lang/rust.git scratch/rust"
     echo "     cd scratch/rust && git sparse-checkout set tests/ui"
     exit 1
+fi
+
+# Verify pinned version (skip if custom UI_DIR_ARG was given)
+if [ -z "$UI_DIR_ARG" ]; then
+    RUST_SRC_DIR="$(cd "$UI_DIR/../.." && pwd)"
+    if git -C "$RUST_SRC_DIR" describe --tags --exact-match HEAD 2>/dev/null | grep -qx "$RUST_UI_VERSION"; then
+        :
+    else
+        actual=$(git -C "$RUST_SRC_DIR" describe --tags HEAD 2>/dev/null || git -C "$RUST_SRC_DIR" rev-parse --short HEAD)
+        echo "WARNING: scratch/rust is at $actual, expected $RUST_UI_VERSION"
+        echo "Run: cd scratch/rust && git fetch origin tag $RUST_UI_VERSION && git checkout $RUST_UI_VERSION"
+    fi
 fi
 
 if [ ! -f "$BACKEND" ]; then
