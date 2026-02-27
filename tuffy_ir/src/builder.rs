@@ -316,12 +316,17 @@ impl<'a> Builder<'a> {
     /// Signedness is a property of operand annotations, not the operation.
     pub fn shr(
         &mut self,
-        a: Operand,
+        mut a: Operand,
         b: Operand,
         ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::Shr(a, b), Type::Int, None, origin, ann)
+        // Signedness is a property of the operand annotation (determines
+        // SAR vs SHR in the backend), not the result annotation.
+        if ann.is_some() {
+            a.annotation = ann;
+        }
+        self.push_inst(Op::Shr(a, b), Type::Int, None, origin, None)
     }
 
     /// Integer minimum.
