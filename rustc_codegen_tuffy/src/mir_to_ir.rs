@@ -4144,6 +4144,22 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     }
 
     fn translate_switch_int(&mut self, discr: &Operand<'tcx>, targets: &mir::SwitchTargets) {
+        // Get the discriminant type's byte size so we can truncate switch
+        // target values to the correct bit width.  MIR stores switch values
+        // as u128, but the runtime discriminant is stored in a sized slot
+        // (e.g. 32-bit for i32) and zero-extended on load.
+        let discr_ty = match discr {
+            Operand::Copy(place) | Operand::Move(place) => {
+                Some(self.monomorphize(place.ty(&self.mir.local_decls, self.tcx).ty))
+            }
+            Operand::Constant(c) => Some(self.monomorphize(c.ty())),
+            _ => None,
+        };
+        let discr_bits = discr_ty
+            .and_then(|t| type_size(self.tcx, t))
+            .map(|sz| sz * 8)
+            .unwrap_or(64);
+
         let mut discr_val = match self.translate_operand(discr) {
             Some(v) => v,
             None => {
@@ -4169,6 +4185,17 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 .bool_to_int(discr_val.into(), Origin::synthetic());
         }
 
+        // Mask the discriminant to its type's bit width so that a sign-extended
+        // 64-bit register value matches the zero-extended switch target constants.
+        if discr_bits < 64 {
+            let mask_val = self
+                .builder
+                .iconst((1i64 << discr_bits) - 1, Origin::synthetic());
+            discr_val =
+                self.builder
+                    .and(discr_val.into(), mask_val.into(), None, Origin::synthetic());
+        }
+
         let all_targets: Vec<_> = targets.iter().collect();
         let otherwise = targets.otherwise();
 
@@ -4185,7 +4212,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         } else if all_targets.len() == 1 {
             // Two-way branch: compare discriminant with the single value.
             let (test_val, target_bb) = all_targets[0];
-            let const_val = self.builder.iconst(test_val as i64, Origin::synthetic());
+            // Truncate u128 switch value to discriminant bit width so it
+            // matches the zero-extended runtime value loaded from a sized slot.
+            let truncated = if discr_bits < 128 {
+                test_val & ((1u128 << discr_bits) - 1)
+            } else {
+                test_val
+            };
+            let const_val = self.builder.iconst(truncated as i64, Origin::synthetic());
             let cmp = self.builder.icmp(
                 ICmpOp::Eq,
                 discr_val.into(),
@@ -4206,7 +4240,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // Multi-way: chain of brif comparisons with fallthrough blocks.
             let otherwise_block = self.block_map.get(otherwise);
             for (i, (test_val, target_bb)) in all_targets.iter().enumerate() {
-                let const_val = self.builder.iconst(*test_val as i64, Origin::synthetic());
+                let truncated = if discr_bits < 128 {
+                    *test_val & ((1u128 << discr_bits) - 1)
+                } else {
+                    *test_val
+                };
+                let const_val = self.builder.iconst(truncated as i64, Origin::synthetic());
                 let cmp = self.builder.icmp(
                     ICmpOp::Eq,
                     discr_val.into(),
