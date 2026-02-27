@@ -193,10 +193,8 @@ drop/trait-object-drop-10802.rs
 dst/dst-coerce-custom.rs
 dst/dst-coerce-rc.rs
 dst/dst-field-align.rs
-dst/dst-raw.rs
 dst/dst-struct.rs
 dst/dst-struct-sole.rs
-dst/dst-trait.rs
 duplicate/inherent-impls-overlap-check/no-overlap.rs
 dyn-compatibility/elaborated-predicates-ordering.rs
 dyn-compatibility/metasized.rs
