@@ -3714,7 +3714,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let is_virtual = virtual_fn_ptr.is_some();
 
         // Check if the callee returns a large struct (needs sret on caller side).
-        let dest_ty = self.monomorphize(self.mir.local_decls[destination.local].ty);
+        // When the destination has a projection (e.g. `_3.fld0 = fn1(...)`),
+        // use the projected field type, not the local's aggregate type.
+        let dest_ty = if destination.projection.is_empty() {
+            self.monomorphize(self.mir.local_decls[destination.local].ty)
+        } else {
+            self.monomorphize(destination.ty(&self.mir.local_decls, self.tcx).ty)
+        };
         let dest_size = type_size(self.tcx, dest_ty);
         let callee_sret = needs_indirect_return(self.tcx, dest_ty);
 
