@@ -348,3 +348,6 @@ structs-enums/align-struct.rs
 
 # Nightly frontend syntax change — `use self as A` not yet supported.
 use/use-keyword.rs
+
+# Upstream lint issue — #[expect(redundant_lifetimes)] not propagated into derive expansion.
+lint/rfc-2383-lint-reason/derive-expect-issue-150553.rs
