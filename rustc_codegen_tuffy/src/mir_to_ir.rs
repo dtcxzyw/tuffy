@@ -2019,6 +2019,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                 // 128-bit integer destination: the low
                                                 // word was stored above; now store the
                                                 // high word (sign- or zero-extended).
+                                                // For IntToInt casts, the SOURCE type
+                                                // determines sign vs zero extension
+                                                // (e.g. i16 as u128 sign-extends).
                                                 let dest_ty = self.monomorphize(
                                                     self.mir.local_decls[place.local].ty,
                                                 );
@@ -2028,10 +2031,28 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                         | ty::Uint(ty::UintTy::U128)
                                                 );
                                                 if is_i128_dest && bytes > 8 {
-                                                    let hi_word = if matches!(
-                                                        dest_ty.kind(),
-                                                        ty::Int(ty::IntTy::I128)
-                                                    ) {
+                                                    // Determine if the source is signed.
+                                                    // For casts, use the source operand type;
+                                                    // otherwise fall back to the dest type.
+                                                    let src_is_signed = match rvalue {
+                                                        Rvalue::Cast(CastKind::IntToInt, op, _) => {
+                                                            let src_ty = match op {
+                                                                Operand::Copy(p) | Operand::Move(p) => {
+                                                                    self.monomorphize(
+                                                                        p.ty(&self.mir.local_decls, self.tcx).ty,
+                                                                    )
+                                                                }
+                                                                Operand::Constant(c) => self.monomorphize(c.ty()),
+                                                                _ => dest_ty,
+                                                            };
+                                                            is_signed_int(src_ty)
+                                                        }
+                                                        _ => matches!(
+                                                            dest_ty.kind(),
+                                                            ty::Int(ty::IntTy::I128)
+                                                        ),
+                                                    };
+                                                    let hi_word = if src_is_signed {
                                                         // Signed: high word = sar(val, 63)
                                                         let c63 = self
                                                             .builder
