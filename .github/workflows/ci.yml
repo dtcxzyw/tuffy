@@ -70,9 +70,9 @@ jobs:
           chmod +x rustc_codegen_tuffy/tests/run-tests.sh
           rustc_codegen_tuffy/tests/run-tests.sh
 
-      - name: Clone rustc UI tests
+      - name: Clone rustc UI tests (pinned to 1.93.1)
         run: |
-          git clone --depth 1 --filter=blob:none --sparse https://github.com/rust-lang/rust.git scratch/rust
+          git clone --filter=blob:none --sparse -b 1.93.1 https://github.com/rust-lang/rust.git scratch/rust
           cd scratch/rust && git sparse-checkout set tests/ui library
 
       - name: Run UI tests
