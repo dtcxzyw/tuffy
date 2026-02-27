@@ -36,6 +36,7 @@ Both compare tuffy output against LLVM with `-Zmir-opt-level=0`.
 Hints:
 - Adjust `config.toml` to generate smaller inputs (fewer basic blocks, functions, args, etc.) when debugging — smaller programs are much easier to minimize and reason about. The shipped config already uses reduced values compared to upstream defaults.
 - Use `minimise.py` to reduce a reproducer: copy the failing program to `repro.rs` in the rustlantis directory, then run `python3 minimise.py`. It iteratively comments out or replaces MIR statements with `Return()`, keeping only lines needed to reproduce the bug. Output goes to `minimised.rs`.
+- Always minimize reproducers before reading them. Raw generated programs contain a lot of noise; minimised versions isolate the root cause much faster.
 
 ## Subtasks
 
