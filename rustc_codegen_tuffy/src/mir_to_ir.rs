@@ -4767,6 +4767,149 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     return Some(result_slot);
                 }
 
+                // For i128/u128 Mul: decompose into 32-bit multiplications.
+                // (a_hi:a_lo) * (b_hi:b_lo) mod 2^128:
+                //   result_lo = lower64(a_lo * b_lo)
+                //   result_hi = upper64(a_lo * b_lo) + a_lo*b_hi + a_hi*b_lo
+                if is_128bit && matches!(op, BinOp::Mul | BinOp::MulUnchecked) {
+                    let l_ptr = self.coerce_to_ptr(l_raw);
+                    let r_ptr = self.coerce_to_ptr(r_raw);
+                    let l_lo = self.builder.load(
+                        l_ptr.into(), 8, Type::Int,
+                        self.current_mem.into(), None, Origin::synthetic(),
+                    );
+                    let r_lo = self.builder.load(
+                        r_ptr.into(), 8, Type::Int,
+                        self.current_mem.into(), None, Origin::synthetic(),
+                    );
+                    let off8 = self.builder.iconst(8, Origin::synthetic());
+                    let l_hi_addr = self.builder.ptradd(
+                        l_ptr.into(), off8.into(), 0, Origin::synthetic(),
+                    );
+                    let off8b = self.builder.iconst(8, Origin::synthetic());
+                    let r_hi_addr = self.builder.ptradd(
+                        r_ptr.into(), off8b.into(), 0, Origin::synthetic(),
+                    );
+                    let l_hi = self.builder.load(
+                        l_hi_addr.into(), 8, Type::Int,
+                        self.current_mem.into(), None, Origin::synthetic(),
+                    );
+                    let r_hi = self.builder.load(
+                        r_hi_addr.into(), 8, Type::Int,
+                        self.current_mem.into(), None, Origin::synthetic(),
+                    );
+
+                    // Split a_lo and b_lo into 32-bit halves
+                    let mask32 = self.builder.iconst(0xFFFFFFFF_i64, Origin::synthetic());
+                    let c32 = self.builder.iconst(32, Origin::synthetic());
+                    let a0 = self.builder.and(
+                        l_lo.into(), mask32.into(), None, Origin::synthetic(),
+                    );
+                    let a1 = self.builder.shr(
+                        IrOperand::annotated(l_lo, Annotation::Unsigned(64)),
+                        c32.into(), None, Origin::synthetic(),
+                    );
+                    let b0 = self.builder.and(
+                        r_lo.into(), mask32.into(), None, Origin::synthetic(),
+                    );
+                    let b1 = self.builder.shr(
+                        IrOperand::annotated(r_lo, Annotation::Unsigned(64)),
+                        c32.into(), None, Origin::synthetic(),
+                    );
+
+                    // 32x32 -> 64 products
+                    let p00 = self.builder.mul(
+                        a0.into(), b0.into(), None, Origin::synthetic(),
+                    );
+                    let p01 = self.builder.mul(
+                        a0.into(), b1.into(), None, Origin::synthetic(),
+                    );
+                    let p10 = self.builder.mul(
+                        a1.into(), b0.into(), None, Origin::synthetic(),
+                    );
+                    let p11 = self.builder.mul(
+                        a1.into(), b1.into(), None, Origin::synthetic(),
+                    );
+
+                    // mid = p01 + p10 (with carry)
+                    let mid = self.builder.add(
+                        p01.into(), p10.into(), None, Origin::synthetic(),
+                    );
+                    let mid_carry_cmp = self.builder.icmp(
+                        ICmpOp::Lt,
+                        IrOperand::annotated(mid, Annotation::Unsigned(64)),
+                        IrOperand::annotated(p01, Annotation::Unsigned(64)),
+                        Origin::synthetic(),
+                    );
+                    let mid_carry = self.builder.bool_to_int(
+                        mid_carry_cmp.into(), Origin::synthetic(),
+                    );
+
+                    // result_lo = p00 + (mid << 32)
+                    let mid_lo = self.builder.shl(
+                        mid.into(), c32.into(), None, Origin::synthetic(),
+                    );
+                    let res_lo = self.builder.add(
+                        p00.into(), mid_lo.into(), None, Origin::synthetic(),
+                    );
+                    let lo_carry_cmp = self.builder.icmp(
+                        ICmpOp::Lt,
+                        IrOperand::annotated(res_lo, Annotation::Unsigned(64)),
+                        IrOperand::annotated(p00, Annotation::Unsigned(64)),
+                        Origin::synthetic(),
+                    );
+                    let lo_carry = self.builder.bool_to_int(
+                        lo_carry_cmp.into(), Origin::synthetic(),
+                    );
+
+                    // result_hi = p11 + (mid >> 32) + (mid_carry << 32) + lo_carry
+                    //           + a_lo*b_hi + a_hi*b_lo
+                    let mid_hi = self.builder.shr(
+                        IrOperand::annotated(mid, Annotation::Unsigned(64)),
+                        c32.into(), None, Origin::synthetic(),
+                    );
+                    let mc_shifted = self.builder.shl(
+                        mid_carry.into(), c32.into(), None, Origin::synthetic(),
+                    );
+                    let h1 = self.builder.add(
+                        p11.into(), mid_hi.into(), None, Origin::synthetic(),
+                    );
+                    let h2 = self.builder.add(
+                        h1.into(), mc_shifted.into(), None, Origin::synthetic(),
+                    );
+                    let h3 = self.builder.add(
+                        h2.into(), lo_carry.into(), None, Origin::synthetic(),
+                    );
+                    let cross1 = self.builder.mul(
+                        l_lo.into(), r_hi.into(), None, Origin::synthetic(),
+                    );
+                    let cross2 = self.builder.mul(
+                        l_hi.into(), r_lo.into(), None, Origin::synthetic(),
+                    );
+                    let h4 = self.builder.add(
+                        h3.into(), cross1.into(), None, Origin::synthetic(),
+                    );
+                    let res_hi = self.builder.add(
+                        h4.into(), cross2.into(), None, Origin::synthetic(),
+                    );
+
+                    // Store result to 16-byte stack slot
+                    let result_slot = self.builder.stack_slot(16, Origin::synthetic());
+                    self.current_mem = self.builder.store(
+                        res_lo.into(), result_slot.into(), 8,
+                        self.current_mem.into(), Origin::synthetic(),
+                    );
+                    let off8c = self.builder.iconst(8, Origin::synthetic());
+                    let hi_addr = self.builder.ptradd(
+                        result_slot.into(), off8c.into(), 0, Origin::synthetic(),
+                    );
+                    self.current_mem = self.builder.store(
+                        res_hi.into(), hi_addr.into(), 8,
+                        self.current_mem.into(), Origin::synthetic(),
+                    );
+                    return Some(result_slot);
+                }
+
                 // For i128/u128 BitAnd/BitOr/BitXor: apply to each 64-bit word.
                 if is_128bit && matches!(op, BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor) {
                     let l_ptr = self.coerce_to_ptr(l_raw);
