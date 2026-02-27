@@ -713,7 +713,16 @@ fn needs_indirect_return<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> bool {
                 use rustc_abi::Primitive;
                 let has_float = matches!(a.primitive(), Primitive::Float(..))
                     || matches!(b.primitive(), Primitive::Float(..));
-                has_float
+                // ScalarPair is only register-returnable when the total
+                // size fits in two 8-byte GPRs (≤ 16 bytes).  Pairs
+                // containing i128/u128 exceed this and need sret.
+                has_float || size > 16
+            }
+            rustc_abi::BackendRepr::Scalar(s) => {
+                use rustc_abi::Primitive;
+                // i128/u128 (16 bytes) are returned in rax+rdx, no sret.
+                // Floats > 8 bytes would need XMM — force sret for those.
+                matches!(s.primitive(), Primitive::Float(..)) || size > 16
             }
             _ => true,
         }
@@ -3087,9 +3096,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             Origin::synthetic(),
                         );
                     } else {
-                        // Return local was never assigned — this path is
-                        // unreachable at runtime (diverging function).
-                        self.builder.unreachable(Origin::synthetic());
+                        // Return local was never assigned — return a dummy
+                        // value.  This can happen in custom MIR where the
+                        // return place is left uninitialised (the value is
+                        // garbage but the function must still return).
+                        let dummy = self.builder.iconst(0, Origin::synthetic());
+                        self.builder.ret(
+                            Some(dummy.into()),
+                            self.current_mem.into(),
+                            Origin::synthetic(),
+                        );
                     }
                 }
             }
@@ -3315,6 +3331,22 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             } => {
                 self.translate_call(func, args, destination, target, term.source_info);
             }
+            TerminatorKind::InlineAsm { targets, .. } => {
+                // Inline assembly is not supported — treat as a no-op and
+                // branch to the first target block (the normal destination).
+                // This is enough for identity functions like `black_box` that
+                // use asm only as an optimisation barrier.
+                if let Some(&target) = targets.first() {
+                    let target_block = self.block_map.get(target);
+                    self.builder.br(
+                        target_block,
+                        vec![self.current_mem.into()],
+                        Origin::synthetic(),
+                    );
+                } else {
+                    self.builder.unreachable(Origin::synthetic());
+                }
+            }
             _ => {
                 // Unhandled terminator kind — emit unreachable so the block
                 // is never empty and the IR verifier stays happy.
@@ -3366,18 +3398,80 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // If the destination is a stack local, the intrinsic set the
                 // local to the raw result value.  Store it into the stack slot
                 // and restore the local to point at the slot.
+                // If the local still points at the slot (result_val == slot),
+                // the intrinsic already wrote to the slot directly (e.g. i128
+                // bswap) — skip the redundant store.
                 if let Some(slot) = saved_slot
                     && let Some(result_val) = self.locals.get(destination.local)
+                    && result_val != slot
                 {
                     let dest_ty = self.monomorphize(self.mir.local_decls[destination.local].ty);
                     let size = type_size(self.tcx, dest_ty).unwrap_or(8) as u32;
-                    self.current_mem = self.builder.store(
-                        result_val.into(),
-                        slot.into(),
-                        size.max(1),
-                        self.current_mem.into(),
-                        Origin::synthetic(),
+                    // When result_val is a pointer (another stack slot) and
+                    // the type is wider than 8 bytes, copy word-by-word
+                    // instead of storing the pointer value as data.
+                    let val_is_ptr = matches!(
+                        self.builder.value_type(result_val),
+                        Some(Type::Ptr(_))
                     );
+                    if val_is_ptr && size > 8 {
+                        let mut offset = 0u32;
+                        while offset < size {
+                            let chunk = std::cmp::min(8, size - offset);
+                            let src_addr = if offset == 0 {
+                                result_val
+                            } else {
+                                let off = self.builder.iconst(
+                                    offset as i64,
+                                    Origin::synthetic(),
+                                );
+                                self.builder.ptradd(
+                                    result_val.into(),
+                                    off.into(),
+                                    0,
+                                    Origin::synthetic(),
+                                )
+                            };
+                            let word = self.builder.load(
+                                src_addr.into(),
+                                chunk,
+                                Type::Int,
+                                self.current_mem.into(),
+                                None,
+                                Origin::synthetic(),
+                            );
+                            let dst_addr = if offset == 0 {
+                                slot
+                            } else {
+                                let off = self.builder.iconst(
+                                    offset as i64,
+                                    Origin::synthetic(),
+                                );
+                                self.builder.ptradd(
+                                    slot.into(),
+                                    off.into(),
+                                    0,
+                                    Origin::synthetic(),
+                                )
+                            };
+                            self.current_mem = self.builder.store(
+                                word.into(),
+                                dst_addr.into(),
+                                chunk,
+                                self.current_mem.into(),
+                                Origin::synthetic(),
+                            );
+                            offset += chunk;
+                        }
+                    } else {
+                        self.current_mem = self.builder.store(
+                            result_val.into(),
+                            slot.into(),
+                            size.max(1),
+                            self.current_mem.into(),
+                            Origin::synthetic(),
+                        );
+                    }
                     self.locals.set(destination.local, slot);
                 }
                 if let Some(target) = target {
@@ -5035,12 +5129,17 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let c63 = self.builder.iconst(63, Origin::synthetic());
                     let c64 = self.builder.iconst(64, Origin::synthetic());
                     let c1 = self.builder.iconst(1, Origin::synthetic());
+                    // Rust masks i128/u128 shift amounts to % 128.
+                    let c127 = self.builder.iconst(127, Origin::synthetic());
+                    let shift128 =
+                        self.builder
+                            .and(shift.into(), c127.into(), None, Origin::synthetic());
                     let mask =
                         self.builder
-                            .and(shift.into(), c63.into(), None, Origin::synthetic());
+                            .and(shift128.into(), c63.into(), None, Origin::synthetic());
                     let is_large_bool = self.builder.icmp(
                         ICmpOp::Ge,
-                        IrOperand::annotated(shift, Annotation::Unsigned(64)),
+                        IrOperand::annotated(shift128, Annotation::Unsigned(64)),
                         IrOperand::annotated(c64, Annotation::Unsigned(64)),
                         Origin::synthetic(),
                     );
@@ -5256,13 +5355,83 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             .sub(gt_int.into(), lt_int.into(), res_ann, Origin::synthetic())
                     }
                     BinOp::Shl | BinOp::ShlUnchecked => {
-                        self.builder.shl(l_op, r_op, res_ann, Origin::synthetic())
+                        // When the shift amount is i128/u128, r_op holds a
+                        // stack-slot pointer (from coerce_to_int → ptrtoaddr).
+                        // Load the actual low word instead.
+                        let rhs_mir_ty = match rhs {
+                            Operand::Copy(p) | Operand::Move(p) => {
+                                self.monomorphize(self.mir.local_decls[p.local].ty)
+                            }
+                            Operand::Constant(c) => self.monomorphize(c.ty()),
+                            _ => self.tcx.types.i32,
+                        };
+                        let shift_val = if matches!(
+                            rhs_mir_ty.kind(),
+                            ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
+                        ) {
+                            let ptr = self.coerce_to_ptr(r_raw);
+                            self.builder.load(
+                                ptr.into(), 8, Type::Int,
+                                self.current_mem.into(), None,
+                                Origin::synthetic(),
+                            )
+                        } else {
+                            r_op.value
+                        };
+                        // Rust masks shift amounts to % bit_width.
+                        let lhs_bits = type_size(self.tcx, lhs_mir_ty)
+                            .unwrap_or(8) as i64 * 8;
+                        let mask_val = self.builder.iconst(
+                            lhs_bits - 1, Origin::synthetic(),
+                        );
+                        let masked = self.builder.and(
+                            shift_val.into(), mask_val.into(), None,
+                            Origin::synthetic(),
+                        );
+                        let masked_op = IrOperand {
+                            value: masked,
+                            annotation: None,
+                        };
+                        self.builder.shl(l_op, masked_op, res_ann, Origin::synthetic())
                     }
                     BinOp::BitOr => self.builder.or(l_op, r_op, res_ann, Origin::synthetic()),
                     BinOp::BitAnd => self.builder.and(l_op, r_op, res_ann, Origin::synthetic()),
                     BinOp::BitXor => self.builder.xor(l_op, r_op, res_ann, Origin::synthetic()),
                     BinOp::Shr | BinOp::ShrUnchecked => {
-                        self.builder.shr(l_op, r_op, res_ann, Origin::synthetic())
+                        let rhs_mir_ty = match rhs {
+                            Operand::Copy(p) | Operand::Move(p) => {
+                                self.monomorphize(self.mir.local_decls[p.local].ty)
+                            }
+                            Operand::Constant(c) => self.monomorphize(c.ty()),
+                            _ => self.tcx.types.i32,
+                        };
+                        let shift_val = if matches!(
+                            rhs_mir_ty.kind(),
+                            ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
+                        ) {
+                            let ptr = self.coerce_to_ptr(r_raw);
+                            self.builder.load(
+                                ptr.into(), 8, Type::Int,
+                                self.current_mem.into(), None,
+                                Origin::synthetic(),
+                            )
+                        } else {
+                            r_op.value
+                        };
+                        let lhs_bits = type_size(self.tcx, lhs_mir_ty)
+                            .unwrap_or(8) as i64 * 8;
+                        let mask_val = self.builder.iconst(
+                            lhs_bits - 1, Origin::synthetic(),
+                        );
+                        let masked = self.builder.and(
+                            shift_val.into(), mask_val.into(), None,
+                            Origin::synthetic(),
+                        );
+                        let masked_op = IrOperand {
+                            value: masked,
+                            annotation: None,
+                        };
+                        self.builder.shr(l_op, masked_op, res_ann, Origin::synthetic())
                     }
                     BinOp::Div => self.builder.div(l_op, r_op, res_ann, Origin::synthetic()),
                     BinOp::Rem => self.builder.rem(l_op, r_op, res_ann, Origin::synthetic()),
@@ -6803,6 +6972,25 @@ fn translate_const_slice<'tcx>(
     Some(ptr_val)
 }
 
+/// Byte-swap a single 64-bit word using shift/mask operations.
+fn emit_bswap8(builder: &mut Builder<'_>, v: ValueRef) -> ValueRef {
+    let mask = builder.iconst(0xFF, Origin::synthetic());
+    let mut result = {
+        let shift = builder.iconst(56, Origin::synthetic());
+        let byte0 = builder.and(v.into(), mask.into(), None, Origin::synthetic());
+        builder.shl(byte0.into(), shift.into(), None, Origin::synthetic())
+    };
+    for i in 1..8usize {
+        let extract_shift = builder.iconst((i * 8) as i64, Origin::synthetic());
+        let shifted = builder.shr(v.into(), extract_shift.into(), None, Origin::synthetic());
+        let byte_i = builder.and(shifted.into(), mask.into(), None, Origin::synthetic());
+        let place_shift = builder.iconst(((7 - i) * 8) as i64, Origin::synthetic());
+        let placed = builder.shl(byte_i.into(), place_shift.into(), None, Origin::synthetic());
+        result = builder.or(result.into(), placed.into(), None, Origin::synthetic());
+    }
+    result
+}
+
 /// Handle compiler intrinsics inline during MIR translation.
 /// Returns true if the intrinsic was handled, false to fall through to normal call.
 #[allow(clippy::too_many_arguments)]
@@ -6888,8 +7076,44 @@ fn translate_intrinsic<'tcx>(
                 if byte_size <= 1 {
                     locals.set(destination_local, v);
                 } else if byte_size > 8 {
-                    // u128 bswap not yet supported — fall through to false
-                    return false;
+                    // i128/u128 bswap: load both 64-bit words from the input
+                    // stack slot, bswap each, and store in swapped order to
+                    // the destination slot.
+                    let src = v; // input operand (stack slot pointer)
+                    let dst = locals
+                        .get(destination_local)
+                        .expect("i128 local must have a stack slot");
+                    let lo = builder.load(
+                        src.into(), 8, Type::Int,
+                        current_mem.into(), None, Origin::synthetic(),
+                    );
+                    let off8 = builder.iconst(8, Origin::synthetic());
+                    let hi_addr = builder.ptradd(
+                        src.into(), off8.into(), 0, Origin::synthetic(),
+                    );
+                    let hi = builder.load(
+                        hi_addr.into(), 8, Type::Int,
+                        current_mem.into(), None, Origin::synthetic(),
+                    );
+
+                    // Bswap each 8-byte word.
+                    let lo_swapped = emit_bswap8(builder, lo);
+                    let hi_swapped = emit_bswap8(builder, hi);
+
+                    // Store in swapped order: bswapped hi → low, bswapped lo → high.
+                    let mem1 = builder.store(
+                        hi_swapped.into(), dst.into(), 8,
+                        current_mem.into(), Origin::synthetic(),
+                    );
+                    let off8b = builder.iconst(8, Origin::synthetic());
+                    let dst_hi = builder.ptradd(
+                        dst.into(), off8b.into(), 0, Origin::synthetic(),
+                    );
+                    builder.store(
+                        lo_swapped.into(), dst_hi.into(), 8,
+                        mem1.into(), Origin::synthetic(),
+                    );
+                    // Local already points at the slot; leave it unchanged.
                 } else {
                     // Coerce Ptr to Int for arithmetic.
                     let v = if matches!(builder.value_type(v), Some(Type::Ptr(_))) {
