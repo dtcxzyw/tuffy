@@ -332,23 +332,29 @@ impl<'a> Builder<'a> {
     /// Integer minimum.
     pub fn min(
         &mut self,
-        a: Operand,
+        mut a: Operand,
         b: Operand,
         ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::Min(a, b), Type::Int, None, origin, ann)
+        if ann.is_some() {
+            a.annotation = ann;
+        }
+        self.push_inst(Op::Min(a, b), Type::Int, None, origin, None)
     }
 
     /// Integer maximum.
     pub fn max(
         &mut self,
-        a: Operand,
+        mut a: Operand,
         b: Operand,
         ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::Max(a, b), Type::Int, None, origin, ann)
+        if ann.is_some() {
+            a.annotation = ann;
+        }
+        self.push_inst(Op::Max(a, b), Type::Int, None, origin, None)
     }
 
     // ── Floating point arithmetic ──
