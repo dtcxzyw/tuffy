@@ -3857,6 +3857,26 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let dest_size = type_size(self.tcx, dest_ty);
         let callee_sret = needs_indirect_return(self.tcx, dest_ty);
 
+        // When the destination has projections (e.g. `_5.fld0 = fn1()`),
+        // pre-compute the projected address before translating arguments
+        // (which may modify locals).  We also save the original local value
+        // so we can restore it after storing the call result.
+        let has_call_dest_proj = !destination.projection.is_empty();
+        let (call_proj_addr, call_proj_size, _call_saved_local) = if has_call_dest_proj {
+            let saved = self.locals.get(destination.local);
+            let info = self.translate_place_to_addr(destination).map(|(a, ty)| {
+                let a = self.coerce_to_ptr(a);
+                let sz = type_size(self.tcx, ty).unwrap_or(8) as u32;
+                (a, sz)
+            });
+            match info {
+                Some((a, sz)) => (Some(a), sz, saved),
+                None => (None, 0, saved),
+            }
+        } else {
+            (None, 0, None)
+        };
+
         // Translate arguments to IR operands, decomposing fat pointers.
         let mut ir_args: Vec<tuffy_ir::instruction::Operand> = Vec::new();
 
@@ -4243,7 +4263,22 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         // For void calls, call_data is None — use a dummy zero.
         let call_vref = call_data.unwrap_or_else(|| self.builder.iconst(0, Origin::synthetic()));
 
-        if callee_sret {
+        if has_call_dest_proj {
+            // Destination has projections (e.g. `_5.fld0 = fn1()`).
+            // Store the call result through the pre-computed projected
+            // address and leave the base local unchanged.
+            if let Some(addr) = call_proj_addr {
+                if call_proj_size > 0 {
+                    self.current_mem = self.builder.store(
+                        call_vref.into(),
+                        addr.into(),
+                        call_proj_size,
+                        self.current_mem.into(),
+                        Origin::synthetic(),
+                    );
+                }
+            }
+        } else if callee_sret {
             // For sret calls, the result is in the stack slot we allocated.
             // The destination local becomes a pointer to that slot.
             let slot = sret_slot.unwrap();
@@ -6128,11 +6163,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     }
                     mir::AggregateKind::Adt(def_id, _, args, _, _) => {
                         let adt_def = self.tcx.adt_def(*def_id);
-                        if adt_def.is_enum() {
-                            self.monomorphize(self.mir.local_decls[dest_place.local].ty)
-                        } else {
-                            self.monomorphize(ty::Ty::new_adt(self.tcx, adt_def, args))
-                        }
+                        self.monomorphize(ty::Ty::new_adt(self.tcx, adt_def, args))
                     }
                     _ => {
                         let ty = if dest_place.projection.is_empty() {
@@ -6201,7 +6232,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 for (i, op) in operands.iter().enumerate() {
                     let field_ty = match op {
                         Operand::Copy(p) | Operand::Move(p) => {
-                            Some(self.monomorphize(self.mir.local_decls[p.local].ty))
+                            Some(self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty))
                         }
                         Operand::Constant(c) => Some(self.monomorphize(c.ty())),
                         _ => None,
