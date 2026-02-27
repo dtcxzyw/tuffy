@@ -6745,6 +6745,42 @@ fn translate_intrinsic<'tcx>(
             true
         }
 
+        // rotate_left / rotate_right: bitwise rotation.
+        // Synthesized as (x << n) | (x >> (bits - n)) with masked shift amounts.
+        "rotate_left" | "rotate_right" => {
+            if ir_args.len() >= 2 {
+                let x = ir_args[0];
+                let n = ir_args[1];
+                let bits = substs
+                    .first()
+                    .and_then(|a| a.as_type())
+                    .and_then(|t| type_size(tcx, t))
+                    .map(|sz| (sz * 8) as i64)
+                    .unwrap_or(64);
+                let bits_const = builder.iconst(bits, Origin::synthetic());
+                let mask = builder.iconst(bits - 1, Origin::synthetic());
+                let masked_n =
+                    builder.and(n.into(), mask.into(), None, Origin::synthetic());
+                let complement =
+                    builder.sub(bits_const.into(), masked_n.into(), None, Origin::synthetic());
+                let masked_complement =
+                    builder.and(complement.into(), mask.into(), None, Origin::synthetic());
+                let (left_amt, right_amt) = if name == "rotate_left" {
+                    (masked_n, masked_complement)
+                } else {
+                    (masked_complement, masked_n)
+                };
+                let left =
+                    builder.shl(x.into(), left_amt.into(), None, Origin::synthetic());
+                let right =
+                    builder.shr(x.into(), right_amt.into(), None, Origin::synthetic());
+                let result =
+                    builder.or(left.into(), right.into(), None, Origin::synthetic());
+                locals.set(destination_local, result);
+            }
+            true
+        }
+
         // is_val_statically_known: always false in a non-optimizing backend.
         "is_val_statically_known" => {
             let result = builder.bconst(false, Origin::synthetic());
