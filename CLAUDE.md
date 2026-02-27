@@ -121,6 +121,10 @@ Before starting a task, check `docs/SOPs/` for a matching SOP. If one exists, fo
 
 When outputting content using tools, output in multiple smaller segments rather than one large block. Avoid writing excessively large amounts of content in a single tool call.
 
+## Coding Rules
+
+Do not use `static` global variables for mutable state (including `AtomicU64`, `Mutex`, etc.). Counters and other session state must live on a context struct, not at module scope. This ensures deterministic behavior and avoids cross-compilation-unit interference.
+
 ## Architecture
 
 The IR definition in Lean 4 (`lean/TuffyLean/IR/`) is the **source of truth**. The Rust implementation (`tuffy_ir/`) and the spec (`docs/spec/`) must conform to the Lean definitions. When there is a conflict, the Lean code takes precedence.
