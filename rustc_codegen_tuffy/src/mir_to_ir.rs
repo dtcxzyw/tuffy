@@ -2761,12 +2761,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // Handle struct unsizing: the target inner type is
                     // a struct whose unsized tail is a slice or trait
                     // object (e.g. Box<Node<[isize; 0]>> → Box<Node<[isize]>>).
-                    // Walk through the struct to find the tail and extract
-                    // the metadata from the source type.
+                    // Use struct_lockstep_tails_for_codegen to walk source
+                    // and target in lockstep, stopping at the unsizing
+                    // boundary (matching codegen_ssa::base::unsized_info).
                     if let Some(inner) = target_inner {
                         let typing_env = ty::TypingEnv::fully_monomorphized();
-                        let tail =
-                            self.tcx.struct_tail_for_codegen(inner, typing_env);
                         let src_ty = match op {
                             Operand::Copy(p) | Operand::Move(p) => {
                                 self.monomorphize(self.mir.local_decls[p.local].ty)
@@ -2780,11 +2779,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             _ if src_ty.is_box() => src_ty.boxed_ty().unwrap(),
                             _ => src_ty,
                         };
-                        match tail.kind() {
+                        let (src_tail, dst_tail) = self
+                            .tcx
+                            .struct_lockstep_tails_for_codegen(
+                                src_inner, inner, typing_env,
+                            );
+                        match dst_tail.kind() {
                             ty::Slice(_) => {
-                                let src_tail = self.tcx.struct_tail_for_codegen(
-                                    src_inner, typing_env,
-                                );
                                 if let ty::Array(_, len) = src_tail.kind()
                                     && let Some(n) =
                                         len.try_to_target_usize(self.tcx)
@@ -2796,9 +2797,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 }
                             }
                             ty::Dynamic(predicates, _) => {
-                                let src_tail = self.tcx.struct_tail_for_codegen(
-                                    src_inner, typing_env,
-                                );
                                 if !src_tail.has_escaping_bound_vars()
                                     && !src_tail.is_trait()
                                 {
