@@ -422,9 +422,7 @@ pub fn translate_function<'tcx>(
             for stmt in &bb_data.statements {
                 if let StatementKind::Assign(box (_, rvalue)) = &stmt.kind {
                     let referenced_local = match rvalue {
-                        Rvalue::Ref(_, _, place) | Rvalue::RawPtr(_, place)
-                            if place.projection.is_empty() =>
-                        {
+                        Rvalue::Ref(_, _, place) | Rvalue::RawPtr(_, place) => {
                             Some(place.local)
                         }
                         _ => None,
@@ -4789,9 +4787,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 };
 
                 // Detect 128-bit integer operands for multi-word operations.
+                // Use the projected type (p.ty()) so that struct field
+                // accesses like `_6.fld2` where fld2 is u128 are detected.
                 let lhs_mir_ty = match lhs {
                     Operand::Copy(p) | Operand::Move(p) => {
-                        self.monomorphize(self.mir.local_decls[p.local].ty)
+                        self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty)
                     }
                     Operand::Constant(c) => self.monomorphize(c.ty()),
                     _ => self.tcx.types.i32,
@@ -5375,8 +5375,32 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     )
                 {
                     let l_ptr = self.coerce_to_ptr(l_raw);
-                    // Shift amount is a regular int, not i128
-                    let shift = self.coerce_to_int(r_raw);
+                    // Shift amount: if the RHS is i128/u128, r_raw is a
+                    // stack-slot pointer — load the low word.  Otherwise
+                    // coerce the scalar to Int.
+                    let rhs_mir_ty = match rhs {
+                        Operand::Copy(p) | Operand::Move(p) => {
+                            self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty)
+                        }
+                        Operand::Constant(c) => self.monomorphize(c.ty()),
+                        _ => self.tcx.types.i32,
+                    };
+                    let shift = if matches!(
+                        rhs_mir_ty.kind(),
+                        ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
+                    ) {
+                        let ptr = self.coerce_to_ptr(r_raw);
+                        self.builder.load(
+                            ptr.into(),
+                            8,
+                            Type::Int,
+                            self.current_mem.into(),
+                            None,
+                            Origin::synthetic(),
+                        )
+                    } else {
+                        self.coerce_to_int(r_raw)
+                    };
                     let lo = self.builder.load(
                         l_ptr.into(),
                         8,
