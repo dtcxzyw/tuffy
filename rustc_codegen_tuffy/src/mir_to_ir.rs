@@ -5509,9 +5509,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         // When the shift amount is i128/u128, r_op holds a
                         // stack-slot pointer (from coerce_to_int → ptrtoaddr).
                         // Load the actual low word instead.
+                        // Use projected type so (*ptr_to_u128) resolves to u128,
+                        // not &mut u128.
                         let rhs_mir_ty = match rhs {
                             Operand::Copy(p) | Operand::Move(p) => {
-                                self.monomorphize(self.mir.local_decls[p.local].ty)
+                                self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty)
                             }
                             Operand::Constant(c) => self.monomorphize(c.ty()),
                             _ => self.tcx.types.i32,
@@ -5551,7 +5553,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     BinOp::Shr | BinOp::ShrUnchecked => {
                         let rhs_mir_ty = match rhs {
                             Operand::Copy(p) | Operand::Move(p) => {
-                                self.monomorphize(self.mir.local_decls[p.local].ty)
+                                self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty)
                             }
                             Operand::Constant(c) => self.monomorphize(c.ty()),
                             _ => self.tcx.types.i32,
