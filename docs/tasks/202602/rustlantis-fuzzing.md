@@ -33,6 +33,8 @@ Two approaches are available:
 
 Both compare tuffy output against LLVM with `-Zmir-opt-level=0`.
 
+Hint: adjust `config.toml` to generate smaller inputs (fewer basic blocks, functions, args, etc.) when debugging — smaller programs are much easier to minimize and reason about. The shipped config already uses reduced values compared to upstream defaults.
+
 ## Subtasks
 
 - Run initial fuzzing campaign (e.g. seeds 1..100) and triage results
