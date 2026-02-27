@@ -5629,8 +5629,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let val = self.translate_operand(operand)?;
                 match kind {
                     CastKind::IntToInt => {
+                        // Use projected type so field accesses like
+                        // _struct.field resolve to the field type, not
+                        // the struct type.
                         let src_ty = match operand {
-                            Operand::Copy(p) | Operand::Move(p) => self.mir.local_decls[p.local].ty,
+                            Operand::Copy(p) | Operand::Move(p) => {
+                                p.ty(&self.mir.local_decls, self.tcx).ty
+                            }
                             Operand::Constant(c) => c.ty(),
                             _ => return Some(val),
                         };
