@@ -2331,6 +2331,63 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         Origin::synthetic(),
                                     );
                                 }
+                            } else if bytes > 8 {
+                                // Scalar Int value being stored to a >8-byte
+                                // projected field (e.g. u16 as u128 → _2.0).
+                                // Store low word, then compute and store high word.
+                                self.current_mem = self.builder.store(
+                                    val.into(),
+                                    addr.into(),
+                                    8,
+                                    self.current_mem.into(),
+                                    Origin::synthetic(),
+                                );
+                                let src_is_signed = match rvalue {
+                                    Rvalue::Cast(CastKind::IntToInt, op, _) => {
+                                        let src_ty = match op {
+                                            Operand::Copy(p) | Operand::Move(p) => {
+                                                self.monomorphize(
+                                                    p.ty(&self.mir.local_decls, self.tcx).ty,
+                                                )
+                                            }
+                                            Operand::Constant(c) => self.monomorphize(c.ty()),
+                                            _ => projected_ty,
+                                        };
+                                        is_signed_int(src_ty)
+                                    }
+                                    _ => matches!(
+                                        projected_ty.kind(),
+                                        ty::Int(ty::IntTy::I128)
+                                    ),
+                                };
+                                let hi_word = if src_is_signed {
+                                    let c63 =
+                                        self.builder.iconst(63, Origin::synthetic());
+                                    let signed_op =
+                                        IrOperand::annotated(val, Annotation::Signed(64));
+                                    self.builder.shr(
+                                        signed_op,
+                                        c63.into(),
+                                        None,
+                                        Origin::synthetic(),
+                                    )
+                                } else {
+                                    self.builder.iconst(0, Origin::synthetic())
+                                };
+                                let off8 = self.builder.iconst(8, Origin::synthetic());
+                                let hi_addr = self.builder.ptradd(
+                                    addr.into(),
+                                    off8.into(),
+                                    0,
+                                    Origin::synthetic(),
+                                );
+                                self.current_mem = self.builder.store(
+                                    hi_word.into(),
+                                    hi_addr.into(),
+                                    8,
+                                    self.current_mem.into(),
+                                    Origin::synthetic(),
+                                );
                             } else if bytes > 0 {
                                 self.current_mem = self.builder.store(
                                     val.into(),
@@ -3452,6 +3509,24 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             } else {
                 None
             };
+            // When the destination has projections (e.g. `(*RET) = bswap(...)`),
+            // pre-compute the projected address before the intrinsic overwrites
+            // the local.  We also save the original local value to restore it.
+            let has_dest_projection = !destination.projection.is_empty();
+            let (proj_addr, proj_size, saved_local_for_proj) = if has_dest_projection {
+                let saved = self.locals.get(destination.local);
+                let info = self.translate_place_to_addr(destination).map(|(a, ty)| {
+                    let a = self.coerce_to_ptr(a);
+                    let sz = type_size(self.tcx, ty).unwrap_or(8) as u32;
+                    (a, sz)
+                });
+                match info {
+                    Some((a, sz)) => (Some(a), sz, saved),
+                    None => (None, 0, saved),
+                }
+            } else {
+                (None, 0, None)
+            };
             let handled = translate_intrinsic(
                 self.tcx,
                 &intrinsic_name,
@@ -3464,6 +3539,30 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 self.current_mem,
             );
             if handled {
+                // Capture the intrinsic result before any store-back.
+                let intrinsic_result = self.locals.get(destination.local);
+
+                if has_dest_projection {
+                    // Destination has projections (e.g. `(*RET) = bswap(...)`).
+                    // Store the result through the pre-computed projected
+                    // address and restore the original local value.
+                    if let Some(orig) = saved_local_for_proj {
+                        self.locals.set(destination.local, orig);
+                    }
+                    if let Some(result) = intrinsic_result {
+                        if let Some(addr) = proj_addr {
+                            if proj_size > 0 {
+                                self.current_mem = self.builder.store(
+                                    result.into(),
+                                    addr.into(),
+                                    proj_size,
+                                    self.current_mem.into(),
+                                    Origin::synthetic(),
+                                );
+                            }
+                        }
+                    }
+                } else {
                 // If the destination is a stack local, the intrinsic set the
                 // local to the raw result value.  Store it into the stack slot
                 // and restore the local to point at the slot.
@@ -3543,6 +3642,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     }
                     self.locals.set(destination.local, slot);
                 }
+                } // end else (no dest projection)
                 if let Some(target) = target {
                     let target_block = self.block_map.get(*target);
                     self.builder.br(
@@ -7820,6 +7920,252 @@ fn translate_memory_intrinsic<'tcx>(
                 mem = builder.store(vx.into(), ya.into(), chunk, mem.into(), Origin::synthetic());
             }
             Some(mem)
+        }
+
+        // ── Atomic intrinsics ──────────────────────────────────────────
+        // For single-threaded programs all atomics reduce to plain
+        // loads / stores / read-modify-write sequences.
+
+        // atomic_load_relaxed, atomic_load_acquire, atomic_load_seqcst
+        _ if name.starts_with("atomic_load") => {
+            if ir_args.is_empty() {
+                return None;
+            }
+            let ptr = ir_args[0];
+            let size = elem_size as u32;
+            let val = builder.load(
+                ptr.into(),
+                size,
+                Type::Int,
+                current_mem.into(),
+                None,
+                Origin::synthetic(),
+            );
+            locals.set(destination_local, val);
+            Some(current_mem)
+        }
+
+        // atomic_store_relaxed, atomic_store_release, atomic_store_seqcst
+        _ if name.starts_with("atomic_store") => {
+            if ir_args.len() < 2 {
+                return None;
+            }
+            let ptr = ir_args[0];
+            let val = ir_args[1];
+            let size = elem_size as u32;
+            let new_mem = builder.store(
+                val.into(),
+                ptr.into(),
+                size,
+                current_mem.into(),
+                Origin::synthetic(),
+            );
+            Some(new_mem)
+        }
+
+        // atomic_cxchg_*, atomic_cxchgweak_* → (old_val, success: bool)
+        _ if name.starts_with("atomic_cxchg") => {
+            if ir_args.len() < 3 {
+                return None;
+            }
+            let ptr = ir_args[0];
+            let expected = ir_args[1];
+            let new_val = ir_args[2];
+            let size = elem_size as u32;
+
+            // Load current value.
+            let old = builder.load(
+                ptr.into(),
+                size,
+                Type::Int,
+                current_mem.into(),
+                None,
+                Origin::synthetic(),
+            );
+
+            // Compare old == expected.
+            let eq = builder.icmp(
+                tuffy_ir::instruction::ICmpOp::Eq,
+                old.into(),
+                expected.into(),
+                Origin::synthetic(),
+            );
+
+            // Conditionally store: new_val if equal, else old (no-op store).
+            let store_val = builder.select(
+                eq.into(),
+                new_val.into(),
+                old.into(),
+                Type::Int,
+                Origin::synthetic(),
+            );
+            let new_mem = builder.store(
+                store_val.into(),
+                ptr.into(),
+                size,
+                current_mem.into(),
+                Origin::synthetic(),
+            );
+
+            // Write (old, eq) into the destination stack slot.
+            if let Some(slot) = locals.get(destination_local) {
+                let mem2 = builder.store(
+                    old.into(),
+                    slot.into(),
+                    size,
+                    new_mem.into(),
+                    Origin::synthetic(),
+                );
+                let bool_off = builder.iconst(elem_size as i64, Origin::synthetic());
+                let bool_ptr = builder.ptradd(
+                    slot.into(),
+                    bool_off.into(),
+                    0,
+                    Origin::synthetic(),
+                );
+                let mem3 = builder.store(
+                    eq.into(),
+                    bool_ptr.into(),
+                    1,
+                    mem2.into(),
+                    Origin::synthetic(),
+                );
+                Some(mem3)
+            } else {
+                // Destination not yet allocated — just set the scalar
+                // (field projection will handle it like checked ops).
+                locals.set(destination_local, old);
+                Some(new_mem)
+            }
+        }
+
+        // atomic_xchg_* → returns old value
+        _ if name.starts_with("atomic_xchg") => {
+            if ir_args.len() < 2 {
+                return None;
+            }
+            let ptr = ir_args[0];
+            let new_val = ir_args[1];
+            let size = elem_size as u32;
+            let old = builder.load(
+                ptr.into(),
+                size,
+                Type::Int,
+                current_mem.into(),
+                None,
+                Origin::synthetic(),
+            );
+            let new_mem = builder.store(
+                new_val.into(),
+                ptr.into(),
+                size,
+                current_mem.into(),
+                Origin::synthetic(),
+            );
+            locals.set(destination_local, old);
+            Some(new_mem)
+        }
+
+        // atomic_fence_*, atomic_singlethreadfence_* → no-op
+        _ if name.starts_with("atomic_fence")
+            || name.starts_with("atomic_singlethreadfence") =>
+        {
+            Some(current_mem)
+        }
+
+        // Read-modify-write: atomic_{and,or,xor,nand,xadd,xsub,
+        //                     max,min,umax,umin}_*
+        // All return the OLD value.
+        _ if name.starts_with("atomic_and")
+            || name.starts_with("atomic_or")
+            || name.starts_with("atomic_xor")
+            || name.starts_with("atomic_nand")
+            || name.starts_with("atomic_xadd")
+            || name.starts_with("atomic_xsub")
+            || name.starts_with("atomic_max")
+            || name.starts_with("atomic_min")
+            || name.starts_with("atomic_umax")
+            || name.starts_with("atomic_umin") =>
+        {
+            if ir_args.len() < 2 {
+                return None;
+            }
+            let ptr = ir_args[0];
+            let operand = ir_args[1];
+            let size = elem_size as u32;
+
+            let old = builder.load(
+                ptr.into(),
+                size,
+                Type::Int,
+                current_mem.into(),
+                None,
+                Origin::synthetic(),
+            );
+
+            // Compute new value based on the operation.
+            let new_val = if name.starts_with("atomic_and") {
+                builder.and(old.into(), operand.into(), None, Origin::synthetic())
+            } else if name.starts_with("atomic_or") {
+                builder.or(old.into(), operand.into(), None, Origin::synthetic())
+            } else if name.starts_with("atomic_xor") {
+                builder.xor(old.into(), operand.into(), None, Origin::synthetic())
+            } else if name.starts_with("atomic_nand") {
+                let a = builder.and(old.into(), operand.into(), None, Origin::synthetic());
+                let all_ones = builder.iconst(-1, Origin::synthetic());
+                builder.xor(a.into(), all_ones.into(), None, Origin::synthetic())
+            } else if name.starts_with("atomic_xadd") {
+                builder.add(old.into(), operand.into(), None, Origin::synthetic())
+            } else if name.starts_with("atomic_xsub") {
+                builder.sub(old.into(), operand.into(), None, Origin::synthetic())
+            } else if name.starts_with("atomic_umax") {
+                let bits = (elem_size * 8) as u32;
+                let gt = builder.icmp(
+                    ICmpOp::Gt,
+                    IrOperand::annotated(old, Annotation::Unsigned(bits)),
+                    IrOperand::annotated(operand, Annotation::Unsigned(bits)),
+                    Origin::synthetic(),
+                );
+                builder.select(gt.into(), old.into(), operand.into(), Type::Int, Origin::synthetic())
+            } else if name.starts_with("atomic_umin") {
+                let bits = (elem_size * 8) as u32;
+                let lt = builder.icmp(
+                    ICmpOp::Lt,
+                    IrOperand::annotated(old, Annotation::Unsigned(bits)),
+                    IrOperand::annotated(operand, Annotation::Unsigned(bits)),
+                    Origin::synthetic(),
+                );
+                builder.select(lt.into(), old.into(), operand.into(), Type::Int, Origin::synthetic())
+            } else if name.starts_with("atomic_max") {
+                let bits = (elem_size * 8) as u32;
+                let gt = builder.icmp(
+                    ICmpOp::Gt,
+                    IrOperand::annotated(old, Annotation::Signed(bits)),
+                    IrOperand::annotated(operand, Annotation::Signed(bits)),
+                    Origin::synthetic(),
+                );
+                builder.select(gt.into(), old.into(), operand.into(), Type::Int, Origin::synthetic())
+            } else {
+                // atomic_min
+                let bits = (elem_size * 8) as u32;
+                let lt = builder.icmp(
+                    ICmpOp::Lt,
+                    IrOperand::annotated(old, Annotation::Signed(bits)),
+                    IrOperand::annotated(operand, Annotation::Signed(bits)),
+                    Origin::synthetic(),
+                );
+                builder.select(lt.into(), old.into(), operand.into(), Type::Int, Origin::synthetic())
+            };
+
+            let new_mem = builder.store(
+                new_val.into(),
+                ptr.into(),
+                size,
+                current_mem.into(),
+                Origin::synthetic(),
+            );
+            locals.set(destination_local, old);
+            Some(new_mem)
         }
 
         _ => None,
