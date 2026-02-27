@@ -3535,6 +3535,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 &mut self.locals,
                 &mut self.symbols,
                 self.current_mem,
+                if has_dest_projection { proj_addr } else { None },
             );
             if handled {
                 // Capture the intrinsic result before any store-back.
@@ -3547,16 +3548,24 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     if let Some(orig) = saved_local_for_proj {
                         self.locals.set(destination.local, orig);
                     }
-                    if let Some(result) = intrinsic_result {
-                        if let Some(addr) = proj_addr {
-                            if proj_size > 0 {
-                                self.current_mem = self.builder.store(
-                                    result.into(),
-                                    addr.into(),
-                                    proj_size,
-                                    self.current_mem.into(),
-                                    Origin::synthetic(),
-                                );
+                    // If the intrinsic didn't change the local (e.g. i128
+                    // bswap writes directly through the pointer obtained from
+                    // locals.get()), the data is already at the correct
+                    // location — skip the redundant store which would
+                    // overwrite the result with the raw pointer value.
+                    let intrinsic_changed_local = intrinsic_result != saved_local_for_proj;
+                    if intrinsic_changed_local {
+                        if let Some(result) = intrinsic_result {
+                            if let Some(addr) = proj_addr {
+                                if proj_size > 0 {
+                                    self.current_mem = self.builder.store(
+                                        result.into(),
+                                        addr.into(),
+                                        proj_size,
+                                        self.current_mem.into(),
+                                        Origin::synthetic(),
+                                    );
+                                }
                             }
                         }
                     }
@@ -3910,7 +3919,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // occupy an ABI slot, matching the callee's param skipping.
             let arg_ty = match &arg.node {
                 Operand::Copy(place) | Operand::Move(place) => {
-                    self.monomorphize(self.mir.local_decls[place.local].ty)
+                    self.monomorphize(place.ty(&self.mir.local_decls, self.tcx).ty)
                 }
                 Operand::Constant(c) => self.monomorphize(c.ty()),
                 _ => self.monomorphize(self.mir.local_decls[mir::Local::from_usize(0)].ty),
@@ -4040,7 +4049,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         // For ≤8-byte stack locals, translate_operand already
                         // loaded the value from the slot — decomposing again
                         // would double-dereference pointer-typed values.
-                        let slot = self.locals.get(place.local).unwrap_or(v);
+                        // For projected places, use the projected address (v)
+                        // returned by translate_operand, not the base local's slot.
+                        let slot = if !place.projection.is_empty() {
+                            v
+                        } else {
+                            self.locals.get(place.local).unwrap_or(v)
+                        };
                         let slot_is_ptr =
                             matches!(self.builder.value_type(slot), Some(Type::Ptr(_)));
                         if slot_is_ptr {
@@ -4698,7 +4713,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let float_ty = {
                     let mir_ty = match lhs {
                         Operand::Copy(p) | Operand::Move(p) => {
-                            self.monomorphize(self.mir.local_decls[p.local].ty)
+                            self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty)
                         }
                         Operand::Constant(c) => self.monomorphize(c.ty()),
                         _ => self.tcx.types.i32,
@@ -4813,7 +4828,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 ) && {
                     let mir_ty = match lhs {
                         Operand::Copy(p) | Operand::Move(p) => {
-                            self.monomorphize(self.mir.local_decls[p.local].ty)
+                            self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty)
                         }
                         Operand::Constant(c) => self.monomorphize(c.ty()),
                         _ => self.tcx.types.i32,
@@ -5772,7 +5787,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         // ptr.wrapping_offset(count) = ptr + count * sizeof(T).
                         let pointee_ty = match lhs {
                             Operand::Copy(p) | Operand::Move(p) => {
-                                let ty = self.monomorphize(self.mir.local_decls[p.local].ty);
+                                let ty = self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty);
                                 match ty.kind() {
                                     ty::RawPtr(inner, _) => Some(*inner),
                                     _ => None,
@@ -5890,7 +5905,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     CastKind::FloatToInt => {
                         let src_ty = match operand {
                             Operand::Copy(p) | Operand::Move(p) => {
-                                self.monomorphize(self.mir.local_decls[p.local].ty)
+                                self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty)
                             }
                             Operand::Constant(c) => self.monomorphize(c.ty()),
                             _ => return Some(val),
@@ -5909,17 +5924,77 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             None,
                             Origin::synthetic(),
                         );
-                        let result = if signed {
+                        let raw = if signed {
                             self.builder.fp_to_si(float_val.into(), Origin::synthetic())
                         } else {
                             self.builder.fp_to_ui(float_val.into(), Origin::synthetic())
+                        };
+                        // Rust's FloatToInt is saturating: clamp to target range.
+                        let bit_width = type_size(self.tcx, target_ty_m)
+                            .map(|s| s * 8)
+                            .unwrap_or(64);
+                        let result = if bit_width < 64 {
+                            let ann_s = Some(Annotation::Signed(64));
+                            if signed {
+                                let lo = -(1i64 << (bit_width - 1));
+                                let hi = (1i64 << (bit_width - 1)) - 1;
+                                let lo_c = self.builder.iconst(lo, Origin::synthetic());
+                                let hi_c = self.builder.iconst(hi, Origin::synthetic());
+                                // clamp: max(min(raw, hi), lo)
+                                let clamped_hi = self.builder.min(
+                                    raw.into(), hi_c.into(), ann_s, Origin::synthetic(),
+                                );
+                                self.builder.max(
+                                    clamped_hi.into(), lo_c.into(), ann_s, Origin::synthetic(),
+                                )
+                            } else {
+                                let hi = (1i64 << bit_width) - 1;
+                                let hi_c = self.builder.iconst(hi, Origin::synthetic());
+                                let zero = self.builder.iconst(0, Origin::synthetic());
+                                // clamp: max(min(raw, hi), 0)
+                                let clamped_hi = self.builder.min(
+                                    raw.into(), hi_c.into(), ann_s, Origin::synthetic(),
+                                );
+                                self.builder.max(
+                                    clamped_hi.into(), zero.into(), ann_s, Origin::synthetic(),
+                                )
+                            }
+                        } else if !signed {
+                            // For unsigned 64-bit: negative floats must saturate to 0.
+                            // Check the sign bit of the float's bit pattern (val).
+                            let sign_bit_pos: u32 = match ft {
+                                FloatType::F16 => 15,
+                                FloatType::BF16 => 15,
+                                FloatType::F32 => 31,
+                                FloatType::F64 => 63,
+                            };
+                            let shift_c = self.builder.iconst(
+                                sign_bit_pos as i64, Origin::synthetic(),
+                            );
+                            let sign = self.builder.shr(
+                                val.into(), shift_c.into(), None, Origin::synthetic(),
+                            );
+                            let one = self.builder.iconst(1, Origin::synthetic());
+                            let sign_masked = self.builder.and(
+                                sign.into(), one.into(), None, Origin::synthetic(),
+                            );
+                            let is_neg = self.builder.int_to_bool(
+                                sign_masked.into(), Origin::synthetic(),
+                            );
+                            let zero = self.builder.iconst(0, Origin::synthetic());
+                            self.builder.select(
+                                is_neg.into(), zero.into(), raw.into(),
+                                Type::Int, Origin::synthetic(),
+                            )
+                        } else {
+                            raw
                         };
                         Some(result)
                     }
                     CastKind::IntToFloat => {
                         let src_ty = match operand {
                             Operand::Copy(p) | Operand::Move(p) => {
-                                self.monomorphize(self.mir.local_decls[p.local].ty)
+                                self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty)
                             }
                             Operand::Constant(c) => self.monomorphize(c.ty()),
                             _ => return Some(val),
@@ -5950,7 +6025,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     CastKind::FloatToFloat => {
                         let src_ty = match operand {
                             Operand::Copy(p) | Operand::Move(p) => {
-                                self.monomorphize(self.mir.local_decls[p.local].ty)
+                                self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty)
                             }
                             Operand::Constant(c) => self.monomorphize(c.ty()),
                             _ => return Some(val),
@@ -6064,7 +6139,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         {
                             let src_ty = match operand {
                                 Operand::Copy(p) | Operand::Move(p) => {
-                                    Some(self.monomorphize(self.mir.local_decls[p.local].ty))
+                                    Some(self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty))
                                 }
                                 Operand::Constant(c) => Some(self.monomorphize(c.ty())),
                                 _ => None,
@@ -6507,7 +6582,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // Check for 128-bit Neg: decompose into two 64-bit words.
                 let neg_mir_ty = match operand {
                     Operand::Copy(p) | Operand::Move(p) => {
-                        self.monomorphize(self.mir.local_decls[p.local].ty)
+                        self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty)
                     }
                     Operand::Constant(c) => self.monomorphize(c.ty()),
                     _ => self.tcx.types.i32,
@@ -7338,6 +7413,7 @@ fn translate_intrinsic<'tcx>(
     locals: &mut LocalMap,
     symbols: &mut SymbolTable,
     current_mem: ValueRef,
+    dest_override: Option<ValueRef>,
 ) -> bool {
     // Helper: coerce an Int value to Ptr (needed when NonNull<T> or similar
     // #[repr(transparent)] pointer wrappers are loaded as Int).
@@ -7414,9 +7490,11 @@ fn translate_intrinsic<'tcx>(
                     // stack slot, bswap each, and store in swapped order to
                     // the destination slot.
                     let src = v; // input operand (stack slot pointer)
-                    let dst = locals
-                        .get(destination_local)
-                        .expect("i128 local must have a stack slot");
+                    let dst = dest_override.unwrap_or_else(|| {
+                        locals
+                            .get(destination_local)
+                            .expect("i128 local must have a stack slot")
+                    });
                     let lo = builder.load(
                         src.into(), 8, Type::Int,
                         current_mem.into(), None, Origin::synthetic(),
