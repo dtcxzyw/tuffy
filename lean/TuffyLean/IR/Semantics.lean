@@ -144,6 +144,20 @@ def evalSplitLo (a : Int) (width : Nat) : Value :=
   if width = 0 then .poison
   else .int ((a % ((2 : Int) ^ width)).toNat)
 
+/-- Carry-less multiplication (polynomial multiplication over GF(2)).
+    Multiplies two non-negative integers using XOR instead of addition
+    for accumulating partial products. Negative inputs produce poison. -/
+def clmulNat : Nat → Nat → Nat
+  | _, 0 => 0
+  | a, b + 1 =>
+    let rest := clmulNat a ((b + 1) / 2)
+    let shifted := rest + rest  -- left shift by 1
+    if (b + 1) % 2 = 1 then Nat.xor shifted a else shifted
+
+def evalClmul (a b : Int) : Value :=
+  if a < 0 ∨ b < 0 then .poison
+  else .int (clmulNat a.toNat b.toNat)
+
 /-- Left shift. Poison if shift amount is negative. -/
 def evalShl (a b : Int) : Value :=
   if b < 0 then .poison else .int (a <<< b.toNat)
