@@ -40,6 +40,8 @@ Hints:
 
 ## Results (2026-02-28)
 
+### Run 1 (pre-fix baseline)
+
 Seeds 0–1000:
 
 | Category | Count | % of total |
@@ -47,6 +49,21 @@ Seeds 0–1000:
 | Pass | 396 | 39.6 |
 | Crash (compile fail) | 602 | 60.2 |
 | Mismatch (wrong code) | 3 | 0.3 |
+
+### Run 2 (after bswap + u128 + legalization fixes)
+
+Seeds 0–1000:
+
+| Category | Count | % of total |
+|----------|------:|-----:|
+| Pass | 721 | 72.0 |
+| Crash (compile fail) | 0 | 0.0 |
+| Mismatch (runtime crash) | 263 | 26.3 |
+| Mismatch (wrong code) | 17 | 1.7 |
+
+Compile crashes eliminated entirely. 325 previously-crashing seeds now
+pass. The remaining 280 mismatches are mostly runtime crashes (segfaults)
+with 17 silent wrong-code bugs producing different hash output.
 
 ### Mismatches
 
