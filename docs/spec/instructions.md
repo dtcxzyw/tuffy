@@ -160,6 +160,17 @@ Decompose `vA` at bit position `width`. Produces two results:
 Produces `poison` if `width` is 0. This is a multi-result instruction.
 **Semantics**: `evalSplitHi(a, width) = a >>> width`, `evalSplitLo(a, width) = a mod 2^width`
 
+### `clmul`
+
+```
+vN = clmul vA, vB
+```
+
+Carry-less multiplication (polynomial multiplication over GF(2)). Multiplies `vA`
+and `vB` using XOR instead of addition for accumulating partial products. Produces
+`poison` if either operand is negative.
+**Semantics**: `evalClmul(a, b) = if a < 0 ∨ b < 0 then poison else clmulNat(a, b)`
+
 ## Floating Point Arithmetic
 
 Floating point operations operate on values of `float` type (`bf16`, `f16`, `f32`, `f64`).
