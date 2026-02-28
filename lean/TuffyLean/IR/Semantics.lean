@@ -123,6 +123,27 @@ def evalSaturatingSub (a b : Int) (n : Nat) : Value :=
     let diff := a - b
     if diff < 0 then .int 0 else .int diff
 
+/-- Merge: replace the low `width` bits of `a` with the low `width` bits of `b`.
+    width = 0 produces poison. -/
+def evalMerge (a b : Int) (width : Nat) : Value :=
+  if width = 0 then .poison
+  else
+    let mask := (2 : Int) ^ width - 1
+    let hi := a - (a % ((2 : Int) ^ width))
+    .int (hi + Int.land b mask)
+
+/-- Split: decompose `a` at bit position `width`.
+    Returns (hi, lo) where lo = low `width` bits of `a` (zero-extended),
+    hi = `a` right-shifted by `width` bits.
+    width = 0 produces poison. -/
+def evalSplitHi (a : Int) (width : Nat) : Value :=
+  if width = 0 then .poison
+  else .int (a >>> width)
+
+def evalSplitLo (a : Int) (width : Nat) : Value :=
+  if width = 0 then .poison
+  else .int ((a % ((2 : Int) ^ width)).toNat)
+
 /-- Left shift. Poison if shift amount is negative. -/
 def evalShl (a b : Int) : Value :=
   if b < 0 then .poison else .int (a <<< b.toNat)
@@ -182,8 +203,12 @@ def evalFMul (a b : Float) : Float := a * b
 /-- Floating point division. -/
 def evalFDiv (a b : Float) : Float := a / b
 
-/-- Floating point remainder (IEEE 754). -/
-def evalFRem (a b : Float) : Float := a % b
+/-- Floating point remainder (IEEE 754 fmod: truncation toward zero).
+    Lean 4's Float lacks a Mod instance, so we define it explicitly. -/
+def evalFRem (a b : Float) : Float :=
+  let q := a / b
+  let t := if q ≥ 0.0 then q.floor else q.ceil
+  a - t * b
 
 /-- Floating point negation. -/
 def evalFNeg (a : Float) : Float := -a
