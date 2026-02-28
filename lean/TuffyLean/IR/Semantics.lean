@@ -79,6 +79,17 @@ def evalBswap (a : Int) (n : Nat) : Value :=
       else go (i + 1) (acc + ((v >>> (i * 8)) % 256) <<< ((n - 1 - i) * 8))
     .int (go 0 0 &&& mask.toNat)
 
+/-- Bit-reverse an n-bit integer. n = 0 produces poison.
+    Reverses the bit order of the low n bits (value mod 2^n). -/
+def evalBitReverse (a : Int) (n : Nat) : Value :=
+  if n = 0 then .poison
+  else
+    let v := (a % ((2 : Int) ^ n)).toNat
+    let rec go (i : Nat) (acc : Nat) : Nat :=
+      if i >= n then acc
+      else go (i + 1) (acc + ((v >>> i) % 2) <<< (n - 1 - i))
+    .int (go 0 0)
+
 /-- Rotate left by `amt` positions in an n-bit field. n = 0 produces poison. -/
 def evalRotateLeft (a amt : Int) (n : Nat) : Value :=
   if n = 0 then .poison

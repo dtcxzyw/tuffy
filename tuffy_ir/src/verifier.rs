@@ -404,6 +404,21 @@ impl FuncVerifier<'_> {
                 }
             }
 
+            Op::BitReverse(a, bits) => {
+                self.check_operand(a, &loc);
+                self.expect_int(a, "bit_reverse", &loc);
+                if *bits == 0 {
+                    self.result
+                        .error(loc.clone(), "bit_reverse bit width must be > 0");
+                }
+                if inst.ty != Type::Int {
+                    self.result.error(
+                        loc,
+                        format!("bit_reverse result must be Int, got {:?}", inst.ty),
+                    );
+                }
+            }
+
             Op::RotateLeft(a, b, bits) | Op::RotateRight(a, b, bits) => {
                 self.check_operand(a, &loc);
                 self.check_operand(b, &loc);

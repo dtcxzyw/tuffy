@@ -483,6 +483,11 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::Bswap(val, bytes), Type::Int, None, origin, None)
     }
 
+    /// Bit-reverse: reverse bit order of the low `bits` bits.
+    pub fn bit_reverse(&mut self, val: Operand, bits: u32, origin: Origin) -> ValueRef {
+        self.push_inst(Op::BitReverse(val, bits), Type::Int, None, origin, None)
+    }
+
     /// Rotate left in an `bits`-bit field.
     pub fn rotate_left(
         &mut self,

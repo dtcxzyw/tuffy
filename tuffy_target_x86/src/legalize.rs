@@ -542,6 +542,7 @@ fn copy_inst(
         Op::CountLeadingZeros(a, bits) => b.count_leading_zeros(remap_op(s, a), *bits, o()),
         Op::CountTrailingZeros(a) => b.count_trailing_zeros(remap_op(s, a), o()),
         Op::Bswap(a, bytes) => b.bswap(remap_op(s, a), *bytes, o()),
+        Op::BitReverse(a, bits) => b.bit_reverse(remap_op(s, a), *bits, o()),
         Op::RotateLeft(a, amt, bits) => b.rotate_left(remap_op(s, a), remap_op(s, amt), *bits, o()),
         Op::RotateRight(a, amt, bits) => {
             b.rotate_right(remap_op(s, a), remap_op(s, amt), *bits, o())

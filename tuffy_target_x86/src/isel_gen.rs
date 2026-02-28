@@ -661,6 +661,10 @@ pub(super) fn try_select_generated(
             let s = ctx.ensure_in_reg(val.value)?;
             gen_bswap(ctx, vref, s, *bytes)
         }
+        Op::BitReverse(..) => {
+            // TODO: lower bit_reverse to x86 instructions
+            None
+        }
         Op::RotateLeft(val, amt, _) => {
             let v = ctx.ensure_in_reg(val.value)?;
             let a = ctx.ensure_in_reg(amt.value)?;

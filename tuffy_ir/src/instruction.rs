@@ -150,6 +150,8 @@ pub enum Op {
     CountTrailingZeros(Operand),
     /// Byte-swap: reverse byte order of the low n bytes. n = 0 produces poison.
     Bswap(Operand, u32),
+    /// Bit-reverse: reverse bit order of the low n bits. n = 0 produces poison.
+    BitReverse(Operand, u32),
     /// Rotate left: rotate value left by amount in an n-bit field. n = 0 produces poison.
     RotateLeft(Operand, Operand, u32),
     /// Rotate right: rotate value right by amount in an n-bit field. n = 0 produces poison.

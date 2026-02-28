@@ -120,6 +120,41 @@ pub(super) fn translate_intrinsic<'tcx>(
             true
         }
 
+        // bitreverse: reverse bit order of an integer value.
+        "bitreverse" => {
+            if let Some(&v) = ir_args.first() {
+                let bit_size = substs
+                    .first()
+                    .and_then(|a| a.as_type())
+                    .and_then(|t| type_size(tcx, t))
+                    .map(|sz| (sz * 8) as u32)
+                    .unwrap_or(64);
+                if bit_size <= 1 {
+                    locals.set(destination_local, v);
+                } else {
+                    // For large types (e.g. u128), translate_operand returns
+                    // a stack slot pointer. Load the value before bit_reverse.
+                    let val = if matches!(builder.value_type(v), Some(Type::Ptr(_))) {
+                        let byte_size = (bit_size / 8) as u32;
+                        builder.load(
+                            v.into(),
+                            byte_size,
+                            Type::Int,
+                            current_mem.into(),
+                            None,
+                            Origin::synthetic(),
+                        )
+                    } else {
+                        v
+                    };
+                    let result =
+                        builder.bit_reverse(val.into(), bit_size, Origin::synthetic());
+                    locals.set(destination_local, result);
+                }
+            }
+            true
+        }
+
         // rotate_left / rotate_right: bitwise rotation.
         "rotate_left" | "rotate_right" => {
             if ir_args.len() >= 2 {

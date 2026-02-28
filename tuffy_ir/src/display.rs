@@ -496,6 +496,9 @@ fn fmt_inst(
         Op::Bswap(val, bytes) => {
             format!("{v} = bswap.{bytes} {}", ctx.fmt_operand(val))
         }
+        Op::BitReverse(val, bits) => {
+            format!("{v} = bit_reverse.{bits} {}", ctx.fmt_operand(val))
+        }
         Op::RotateLeft(val, amt, bits) => {
             format!(
                 "{v} = rotate_left.{bits} {}, {}",
