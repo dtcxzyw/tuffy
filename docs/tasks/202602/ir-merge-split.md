@@ -1,8 +1,8 @@
 # Add merge/split IR instructions for wide integer legalization
 
-- Status: Draft
+- Status: Completed
 - Created: 2026-02-28
-- Completed: N/A
+- Completed: 2026-02-28
 - Parent: docs/tasks/202602/type-legalization.md
 
 ## Description
