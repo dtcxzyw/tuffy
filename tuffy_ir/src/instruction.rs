@@ -148,6 +148,16 @@ pub enum Op {
     /// Count trailing zeros: number of zero bits after the least significant set bit.
     /// Defined for non-negative integers; negative values and zero produce poison.
     CountTrailingZeros(Operand),
+    /// Byte-swap: reverse byte order of the low n bytes. n = 0 produces poison.
+    Bswap(Operand, u32),
+    /// Rotate left: rotate value left by amount in an n-bit field. n = 0 produces poison.
+    RotateLeft(Operand, Operand, u32),
+    /// Rotate right: rotate value right by amount in an n-bit field. n = 0 produces poison.
+    RotateRight(Operand, Operand, u32),
+    /// Unsigned saturating addition in n bits. n = 0 produces poison.
+    SaturatingAdd(Operand, Operand, u32),
+    /// Unsigned saturating subtraction in n bits. n = 0 produces poison.
+    SaturatingSub(Operand, Operand, u32),
     /// Integer constant (arbitrary precision, matching Lean `Int`).
     Const(BigInt),
     /// Boolean constant: true or false.

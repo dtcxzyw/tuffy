@@ -478,6 +478,67 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::CountTrailingZeros(val), Type::Int, None, origin, None)
     }
 
+    /// Byte-swap: reverse byte order of the low `bytes` bytes.
+    pub fn bswap(&mut self, val: Operand, bytes: u32, origin: Origin) -> ValueRef {
+        self.push_inst(Op::Bswap(val, bytes), Type::Int, None, origin, None)
+    }
+
+    /// Rotate left in an `bits`-bit field.
+    pub fn rotate_left(
+        &mut self,
+        val: Operand,
+        amt: Operand,
+        bits: u32,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(
+            Op::RotateLeft(val, amt, bits),
+            Type::Int,
+            None,
+            origin,
+            None,
+        )
+    }
+
+    /// Rotate right in an `bits`-bit field.
+    pub fn rotate_right(
+        &mut self,
+        val: Operand,
+        amt: Operand,
+        bits: u32,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(
+            Op::RotateRight(val, amt, bits),
+            Type::Int,
+            None,
+            origin,
+            None,
+        )
+    }
+
+    /// Unsigned saturating addition in `bits` bits.
+    pub fn saturating_add(
+        &mut self,
+        a: Operand,
+        b: Operand,
+        bits: u32,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::SaturatingAdd(a, b, bits), Type::Int, None, origin, None)
+    }
+
+    /// Unsigned saturating subtraction in `bits` bits.
+    pub fn saturating_sub(
+        &mut self,
+        a: Operand,
+        b: Operand,
+        bits: u32,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::SaturatingSub(a, b, bits), Type::Int, None, origin, None)
+    }
+
     // ── Memory ──
 
     /// Load from pointer. `bytes` is the access width in bytes. Takes mem token input.

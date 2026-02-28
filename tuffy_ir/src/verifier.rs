@@ -391,6 +391,51 @@ impl FuncVerifier<'_> {
                 }
             }
 
+            Op::Bswap(a, bytes) => {
+                self.check_operand(a, &loc);
+                self.expect_int(a, "bswap", &loc);
+                if *bytes == 0 {
+                    self.result
+                        .error(loc.clone(), "bswap byte count must be > 0");
+                }
+                if inst.ty != Type::Int {
+                    self.result
+                        .error(loc, format!("bswap result must be Int, got {:?}", inst.ty));
+                }
+            }
+
+            Op::RotateLeft(a, b, bits) | Op::RotateRight(a, b, bits) => {
+                self.check_operand(a, &loc);
+                self.check_operand(b, &loc);
+                self.expect_int(a, "rotate value", &loc);
+                self.expect_int(b, "rotate amount", &loc);
+                if *bits == 0 {
+                    self.result
+                        .error(loc.clone(), "rotate bit width must be > 0");
+                }
+                if inst.ty != Type::Int {
+                    self.result
+                        .error(loc, format!("rotate result must be Int, got {:?}", inst.ty));
+                }
+            }
+
+            Op::SaturatingAdd(a, b, bits) | Op::SaturatingSub(a, b, bits) => {
+                self.check_operand(a, &loc);
+                self.check_operand(b, &loc);
+                self.expect_int(a, "saturating arith lhs", &loc);
+                self.expect_int(b, "saturating arith rhs", &loc);
+                if *bits == 0 {
+                    self.result
+                        .error(loc.clone(), "saturating arith bit width must be > 0");
+                }
+                if inst.ty != Type::Int {
+                    self.result.error(
+                        loc,
+                        format!("saturating arith result must be Int, got {:?}", inst.ty),
+                    );
+                }
+            }
+
             Op::Const(_) => {
                 if inst.ty != Type::Int {
                     self.result

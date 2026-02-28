@@ -493,6 +493,37 @@ fn fmt_inst(
         Op::CountTrailingZeros(val) => {
             format!("{v} = count_trailing_zeros {}", ctx.fmt_operand(val))
         }
+        Op::Bswap(val, bytes) => {
+            format!("{v} = bswap.{bytes} {}", ctx.fmt_operand(val))
+        }
+        Op::RotateLeft(val, amt, bits) => {
+            format!(
+                "{v} = rotate_left.{bits} {}, {}",
+                ctx.fmt_operand(val),
+                ctx.fmt_operand(amt)
+            )
+        }
+        Op::RotateRight(val, amt, bits) => {
+            format!(
+                "{v} = rotate_right.{bits} {}, {}",
+                ctx.fmt_operand(val),
+                ctx.fmt_operand(amt)
+            )
+        }
+        Op::SaturatingAdd(a, b, bits) => {
+            format!(
+                "{v} = saturating_add.{bits} {}, {}",
+                ctx.fmt_operand(a),
+                ctx.fmt_operand(b)
+            )
+        }
+        Op::SaturatingSub(a, b, bits) => {
+            format!(
+                "{v} = saturating_sub.{bits} {}, {}",
+                ctx.fmt_operand(a),
+                ctx.fmt_operand(b)
+            )
+        }
         Op::Unreachable => "unreachable".to_string(),
         Op::Trap => "trap".to_string(),
     }
