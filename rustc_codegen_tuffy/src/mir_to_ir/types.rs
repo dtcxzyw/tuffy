@@ -49,9 +49,11 @@ pub(super) fn translate_annotation(ty: ty::Ty<'_>) -> Option<Annotation> {
     }
 }
 
-
 /// Extract the type annotation from a MIR operand.
-pub(super) fn operand_annotation<'tcx>(operand: &Operand<'tcx>, mir: &mir::Body<'tcx>) -> Option<Annotation> {
+pub(super) fn operand_annotation<'tcx>(
+    operand: &Operand<'tcx>,
+    mir: &mir::Body<'tcx>,
+) -> Option<Annotation> {
     let ty = match operand {
         Operand::Copy(place) | Operand::Move(place) => mir.local_decls[place.local].ty,
         Operand::Constant(c) => c.ty(),
@@ -61,7 +63,11 @@ pub(super) fn operand_annotation<'tcx>(operand: &Operand<'tcx>, mir: &mir::Body<
 }
 
 /// Query the byte offset of field `field_idx` within type `ty`.
-pub(super) fn field_offset<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>, field_idx: usize) -> Option<u64> {
+pub(super) fn field_offset<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    ty: ty::Ty<'tcx>,
+    field_idx: usize,
+) -> Option<u64> {
     let typing_env = ty::TypingEnv::fully_monomorphized();
     let layout = tcx.layout_of(typing_env.as_query_input(ty)).ok()?;
     if field_idx >= layout.fields.count() {

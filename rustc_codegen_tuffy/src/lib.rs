@@ -96,7 +96,8 @@ impl CodegenBackend for TuffyCodegenBackend {
                         continue;
                     }
                     compiled_symbols.insert(tcx.symbol_name(*instance).name.to_string());
-                    let result_opt = mir_to_ir::translate_function(tcx, *instance, &session, &mut data_counter);
+                    let result_opt =
+                        mir_to_ir::translate_function(tcx, *instance, &session, &mut data_counter);
                     if let Some(result) = result_opt {
                         pending_instances.extend(result.referenced_instances.iter().copied());
                         if dump_ir {
@@ -243,7 +244,13 @@ impl CodegenBackend for TuffyCodegenBackend {
                     let bytes = inner
                         .inspect_with_uninit_and_ptr_outside_interpreter(0..inner.len())
                         .to_vec();
-                    let relocs = collect_alloc_relocs(tcx, inner, &mut all_static_data, &mut pending_instances, &mut data_counter);
+                    let relocs = collect_alloc_relocs(
+                        tcx,
+                        inner,
+                        &mut all_static_data,
+                        &mut pending_instances,
+                        &mut data_counter,
+                    );
                     all_static_data.push(StaticData {
                         name: sym_name,
                         data: bytes,
@@ -284,12 +291,18 @@ impl CodegenBackend for TuffyCodegenBackend {
             "__rust_alloc_zeroed",
             "__rust_no_alloc_shim_is_unstable_v2",
         ] {
-            compiled_symbols
-                .insert(rustc_symbol_mangling::mangle_internal_symbol(tcx, name));
+            compiled_symbols.insert(rustc_symbol_mangling::mangle_internal_symbol(tcx, name));
         }
 
         // Skip C library functions that must be resolved by the linker.
-        for name in ["free", "malloc", "realloc", "calloc", "posix_memalign", "aligned_alloc"] {
+        for name in [
+            "free",
+            "malloc",
+            "realloc",
+            "calloc",
+            "posix_memalign",
+            "aligned_alloc",
+        ] {
             compiled_symbols.insert(name.to_string());
         }
 
@@ -310,7 +323,12 @@ impl CodegenBackend for TuffyCodegenBackend {
                 break;
             }
             for inst in batch {
-                let result = match mir_to_ir::translate_function(tcx, inst, &session, &mut inline_data_counter) {
+                let result = match mir_to_ir::translate_function(
+                    tcx,
+                    inst,
+                    &session,
+                    &mut inline_data_counter,
+                ) {
                     Some(r) => r,
                     None => {
                         let sym_name = tcx.symbol_name(inst).name.to_string();
@@ -318,7 +336,11 @@ impl CodegenBackend for TuffyCodegenBackend {
                             || sym_name.contains("precondition_check");
                         inline_funcs.push(CompiledFunction {
                             name: sym_name,
-                            code: if is_noop { vec![0xC3] } else { vec![0x0F, 0x0B] },
+                            code: if is_noop {
+                                vec![0xC3]
+                            } else {
+                                vec![0x0F, 0x0B]
+                            },
                             relocations: vec![],
                             weak: true,
                             local: false,
@@ -327,15 +349,18 @@ impl CodegenBackend for TuffyCodegenBackend {
                     }
                 };
                 pending_instances.extend(result.referenced_instances.iter().copied());
-                let vr =
-                    tuffy_ir::verifier::verify_function(&result.func, &result.symbols);
+                let vr = tuffy_ir::verifier::verify_function(&result.func, &result.symbols);
                 if !vr.is_ok() {
                     let sym_name = tcx.symbol_name(inst).name.to_string();
                     let is_noop = sym_name.contains("drop_in_place")
                         || sym_name.contains("precondition_check");
                     inline_funcs.push(CompiledFunction {
                         name: sym_name,
-                        code: if is_noop { vec![0xC3] } else { vec![0x0F, 0x0B] },
+                        code: if is_noop {
+                            vec![0xC3]
+                        } else {
+                            vec![0x0F, 0x0B]
+                        },
                         relocations: vec![],
                         weak: true,
                         local: false,
@@ -357,11 +382,9 @@ impl CodegenBackend for TuffyCodegenBackend {
                         writable: false,
                     });
                 }
-                if let Some(mut cf) = session.compile_function(
-                    &result.func,
-                    &result.symbols,
-                    &result.abi_metadata,
-                ) {
+                if let Some(mut cf) =
+                    session.compile_function(&result.func, &result.symbols, &result.abi_metadata)
+                {
                     cf.weak = true;
                     inline_funcs.push(cf);
                 } else {
@@ -370,7 +393,11 @@ impl CodegenBackend for TuffyCodegenBackend {
                         || sym_name.contains("precondition_check");
                     inline_funcs.push(CompiledFunction {
                         name: sym_name,
-                        code: if is_noop { vec![0xC3] } else { vec![0x0F, 0x0B] },
+                        code: if is_noop {
+                            vec![0xC3]
+                        } else {
+                            vec![0x0F, 0x0B]
+                        },
                         relocations: vec![],
                         weak: true,
                         local: false,
@@ -565,7 +592,6 @@ fn collect_alloc_relocs<'tcx>(
     referenced_instances: &mut Vec<Instance<'tcx>>,
     data_counter: &mut u64,
 ) -> Vec<tuffy_target::reloc::Relocation> {
-
     let mut relocs = Vec::new();
     for (offset, prov) in alloc.provenance().ptrs().iter() {
         let rel_offset = offset.bytes() as usize;
@@ -584,8 +610,18 @@ fn collect_alloc_relocs<'tcx>(
                 let bytes = inner
                     .inspect_with_uninit_and_ptr_outside_interpreter(0..inner.len())
                     .to_vec();
-                let name = format!(".Lstatic.{}", { let id = *data_counter; *data_counter += 1; id });
-                let nested_relocs = collect_alloc_relocs(tcx, inner, static_data, referenced_instances, data_counter);
+                let name = format!(".Lstatic.{}", {
+                    let id = *data_counter;
+                    *data_counter += 1;
+                    id
+                });
+                let nested_relocs = collect_alloc_relocs(
+                    tcx,
+                    inner,
+                    static_data,
+                    referenced_instances,
+                    data_counter,
+                );
                 static_data.push(StaticData {
                     name: name.clone(),
                     data: bytes,
@@ -601,18 +637,23 @@ fn collect_alloc_relocs<'tcx>(
                         tcx.vtable_allocation((ty, principal))
                     }))
                 {
-                    if let GlobalAlloc::Memory(vtable_alloc) =
-                        tcx.global_alloc(vtable_id)
-                    {
+                    if let GlobalAlloc::Memory(vtable_alloc) = tcx.global_alloc(vtable_id) {
                         let inner = vtable_alloc.inner();
                         let bytes = inner
-                            .inspect_with_uninit_and_ptr_outside_interpreter(
-                                0..inner.len(),
-                            )
+                            .inspect_with_uninit_and_ptr_outside_interpreter(0..inner.len())
                             .to_vec();
-                        let name = format!(".Lvtable.{}", { let id = *data_counter; *data_counter += 1; id });
-                        let nested_relocs =
-                            collect_alloc_relocs(tcx, inner, static_data, referenced_instances, data_counter);
+                        let name = format!(".Lvtable.{}", {
+                            let id = *data_counter;
+                            *data_counter += 1;
+                            id
+                        });
+                        let nested_relocs = collect_alloc_relocs(
+                            tcx,
+                            inner,
+                            static_data,
+                            referenced_instances,
+                            data_counter,
+                        );
                         static_data.push(StaticData {
                             name: name.clone(),
                             data: bytes,

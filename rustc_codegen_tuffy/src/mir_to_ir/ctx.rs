@@ -10,8 +10,8 @@ use tuffy_ir::module::{SymbolId, SymbolTable};
 use tuffy_ir::types::{Annotation, FloatType, FpRewriteFlags, Type};
 use tuffy_ir::value::{BlockRef, ValueRef};
 
-use super::types::*;
 use super::StaticDataVec;
+use super::types::*;
 
 pub(super) struct LocalMap {
     pub(super) values: Vec<Option<ValueRef>>,
@@ -84,7 +84,10 @@ impl StackLocalSet {
 /// (0-based), with `Some(SymbolId)` for named params and `None` otherwise.
 /// Synthetic ABI params (sret, fat pointer metadata) are not covered here —
 /// the caller is responsible for prepending `None` entries for those.
-pub(super) fn extract_param_names(mir: &mir::Body<'_>, symbols: &mut SymbolTable) -> Vec<Option<SymbolId>> {
+pub(super) fn extract_param_names(
+    mir: &mir::Body<'_>,
+    symbols: &mut SymbolTable,
+) -> Vec<Option<SymbolId>> {
     let mut names: Vec<Option<SymbolId>> = vec![None; mir.arg_count];
     for info in &mir.var_debug_info {
         if let Some(arg_idx) = info.argument_index {
@@ -208,61 +211,72 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // the Bool immediately before each select that consumes it.
             let c63 = self.builder.iconst(63i64, Origin::synthetic());
             let sign_bit = self.builder.shr(
-                hi.into(), c63.into(),
-                Some(Annotation::Unsigned(64)), Origin::synthetic(),
+                hi.into(),
+                c63.into(),
+                Some(Annotation::Unsigned(64)),
+                Origin::synthetic(),
             );
 
             // Negate 128-bit: neg_lo = 0 - lo, neg_hi = 0 - hi - (lo != 0)
             let zero = self.builder.iconst(0i64, Origin::synthetic());
-            let neg_lo = self.builder.sub(
-                zero.into(), lo.into(), None, Origin::synthetic(),
-            );
+            let neg_lo = self
+                .builder
+                .sub(zero.into(), lo.into(), None, Origin::synthetic());
             let lo_nz = self.builder.int_to_bool(lo.into(), Origin::synthetic());
             let borrow = self.builder.bool_to_int(lo_nz.into(), Origin::synthetic());
-            let neg_hi_tmp = self.builder.sub(
-                zero.into(), hi.into(), None, Origin::synthetic(),
-            );
-            let neg_hi = self.builder.sub(
-                neg_hi_tmp.into(), borrow.into(), None, Origin::synthetic(),
-            );
+            let neg_hi_tmp = self
+                .builder
+                .sub(zero.into(), hi.into(), None, Origin::synthetic());
+            let neg_hi =
+                self.builder
+                    .sub(neg_hi_tmp.into(), borrow.into(), None, Origin::synthetic());
 
             // Select abs value — recompute Bool fresh before each select
-            let is_neg1 = self.builder.int_to_bool(
-                sign_bit.into(), Origin::synthetic(),
-            );
+            let is_neg1 = self
+                .builder
+                .int_to_bool(sign_bit.into(), Origin::synthetic());
             let abs_lo = self.builder.select(
-                is_neg1.into(), neg_lo.into(), lo.into(),
-                Type::Int, Origin::synthetic(),
+                is_neg1.into(),
+                neg_lo.into(),
+                lo.into(),
+                Type::Int,
+                Origin::synthetic(),
             );
-            let is_neg2 = self.builder.int_to_bool(
-                sign_bit.into(), Origin::synthetic(),
-            );
+            let is_neg2 = self
+                .builder
+                .int_to_bool(sign_bit.into(), Origin::synthetic());
             let abs_hi = self.builder.select(
-                is_neg2.into(), neg_hi.into(), hi.into(),
-                Type::Int, Origin::synthetic(),
+                is_neg2.into(),
+                neg_hi.into(),
+                hi.into(),
+                Type::Int,
+                Origin::synthetic(),
             );
 
             // Convert absolute value as unsigned
             let abs_f = self.emit_u64_pair_to_float(abs_lo, abs_hi, ft);
 
             // Apply sign via XOR — pure integer arithmetic, no select needed.
-            let abs_bits = self.builder.bitcast(
-                abs_f.into(), Type::Int, None, Origin::synthetic(),
-            );
+            let abs_bits = self
+                .builder
+                .bitcast(abs_f.into(), Type::Int, None, Origin::synthetic());
             let sign_bit_pos: i64 = match ft {
                 FloatType::F64 => 63,
                 FloatType::F32 => 31,
                 _ => 63,
             };
             let pos_c = self.builder.iconst(sign_bit_pos, Origin::synthetic());
-            let sign_mask = self.builder.shl(
-                sign_bit.into(), pos_c.into(), None, Origin::synthetic(),
-            );
-            let result_bits = self.builder.xor(
-                abs_bits.into(), sign_mask.into(), None, Origin::synthetic(),
-            );
+            let sign_mask =
+                self.builder
+                    .shl(sign_bit.into(), pos_c.into(), None, Origin::synthetic());
+            let result_bits =
+                self.builder
+                    .xor(abs_bits.into(), sign_mask.into(), None, Origin::synthetic());
             self.builder.bitcast(
-                result_bits.into(), Type::Float(ft), None, Origin::synthetic(),
+                result_bits.into(),
+                Type::Float(ft),
+                None,
+                Origin::synthetic(),
             )
         } else {
             self.emit_u64_pair_to_float(lo, hi, ft)
@@ -295,53 +309,88 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         // lo: si_to_fp + correction if high bit set
         let lo_f = self.builder.si_to_fp(lo.into(), ft, Origin::synthetic());
         let lo_sign = self.builder.shr(
-            lo.into(), c63.into(),
-            Some(Annotation::Unsigned(64)), Origin::synthetic(),
+            lo.into(),
+            c63.into(),
+            Some(Annotation::Unsigned(64)),
+            Origin::synthetic(),
         );
-        let lo_hi_bit = self.builder.int_to_bool(lo_sign.into(), Origin::synthetic());
+        let lo_hi_bit = self
+            .builder
+            .int_to_bool(lo_sign.into(), Origin::synthetic());
         // Select correction in Int domain, then bitcast to Float
         let lo_corr_int = self.builder.select(
-            lo_hi_bit.into(), pow2_64_int.into(), zero_int.into(),
-            Type::Int, Origin::synthetic(),
+            lo_hi_bit.into(),
+            pow2_64_int.into(),
+            zero_int.into(),
+            Type::Int,
+            Origin::synthetic(),
         );
         let lo_corr_f = self.builder.bitcast(
-            lo_corr_int.into(), Type::Float(ft), None, Origin::synthetic(),
+            lo_corr_int.into(),
+            Type::Float(ft),
+            None,
+            Origin::synthetic(),
         );
         let lo_corrected = self.builder.fadd(
-            lo_f.into(), lo_corr_f.into(), flags,
-            Type::Float(ft), Origin::synthetic(),
+            lo_f.into(),
+            lo_corr_f.into(),
+            flags,
+            Type::Float(ft),
+            Origin::synthetic(),
         );
 
         // hi: si_to_fp + correction if high bit set
         let hi_f = self.builder.si_to_fp(hi.into(), ft, Origin::synthetic());
         let hi_sign = self.builder.shr(
-            hi.into(), c63.into(),
-            Some(Annotation::Unsigned(64)), Origin::synthetic(),
+            hi.into(),
+            c63.into(),
+            Some(Annotation::Unsigned(64)),
+            Origin::synthetic(),
         );
-        let hi_hi_bit = self.builder.int_to_bool(hi_sign.into(), Origin::synthetic());
+        let hi_hi_bit = self
+            .builder
+            .int_to_bool(hi_sign.into(), Origin::synthetic());
         let hi_corr_int = self.builder.select(
-            hi_hi_bit.into(), pow2_64_int.into(), zero_int.into(),
-            Type::Int, Origin::synthetic(),
+            hi_hi_bit.into(),
+            pow2_64_int.into(),
+            zero_int.into(),
+            Type::Int,
+            Origin::synthetic(),
         );
         let hi_corr_f = self.builder.bitcast(
-            hi_corr_int.into(), Type::Float(ft), None, Origin::synthetic(),
+            hi_corr_int.into(),
+            Type::Float(ft),
+            None,
+            Origin::synthetic(),
         );
         let hi_corrected = self.builder.fadd(
-            hi_f.into(), hi_corr_f.into(), flags,
-            Type::Float(ft), Origin::synthetic(),
+            hi_f.into(),
+            hi_corr_f.into(),
+            flags,
+            Type::Float(ft),
+            Origin::synthetic(),
         );
 
         // result = hi_f * 2^64 + lo_f
         let pow2_64_f = self.builder.bitcast(
-            pow2_64_int.into(), Type::Float(ft), None, Origin::synthetic(),
+            pow2_64_int.into(),
+            Type::Float(ft),
+            None,
+            Origin::synthetic(),
         );
         let hi_scaled = self.builder.fmul(
-            hi_corrected.into(), pow2_64_f.into(),
-            flags, Type::Float(ft), Origin::synthetic(),
+            hi_corrected.into(),
+            pow2_64_f.into(),
+            flags,
+            Type::Float(ft),
+            Origin::synthetic(),
         );
         self.builder.fadd(
-            hi_scaled.into(), lo_corrected.into(),
-            flags, Type::Float(ft), Origin::synthetic(),
+            hi_scaled.into(),
+            lo_corrected.into(),
+            flags,
+            Type::Float(ft),
+            Origin::synthetic(),
         )
     }
 

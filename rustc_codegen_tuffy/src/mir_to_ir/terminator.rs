@@ -317,9 +317,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         // spill both data ptr and metadata to a
                                         // 16-byte stack slot so drop_in_place
                                         // receives a valid &mut FatPtr.
-                                        let slot = self
-                                            .builder
-                                            .stack_slot(16, Origin::synthetic());
+                                        let slot = self.builder.stack_slot(16, Origin::synthetic());
                                         self.current_mem = self.builder.store(
                                             v.into(),
                                             slot.into(),
@@ -327,8 +325,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                             self.current_mem.into(),
                                             Origin::synthetic(),
                                         );
-                                        let off8 =
-                                            self.builder.iconst(8, Origin::synthetic());
+                                        let off8 = self.builder.iconst(8, Origin::synthetic());
                                         let hi = self.builder.ptradd(
                                             slot.into(),
                                             off8.into(),
@@ -449,7 +446,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         }
     }
 
-    pub(super) fn translate_switch_int(&mut self, discr: &Operand<'tcx>, targets: &mir::SwitchTargets) {
+    pub(super) fn translate_switch_int(
+        &mut self,
+        discr: &Operand<'tcx>,
+        targets: &mir::SwitchTargets,
+    ) {
         // Get the discriminant type's byte size so we can truncate switch
         // target values to the correct bit width.  MIR stores switch values
         // as u128, but the runtime discriminant is stored in a sized slot
@@ -480,8 +481,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
         // i128/u128 discriminants: the value lives in a stack slot (pointer).
         // We need to load both 64-bit halves and compare them separately.
-        let is_i128_discr = discr_bits == 128
-            && matches!(self.builder.value_type(discr_val), Some(Type::Ptr(_)));
+        let is_i128_discr =
+            discr_bits == 128 && matches!(self.builder.value_type(discr_val), Some(Type::Ptr(_)));
 
         if is_i128_discr {
             // Handle i128/u128 SwitchInt with two-word comparison.
@@ -492,16 +493,24 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
             // Load low and high 64-bit halves from the stack slot.
             let lo = self.builder.load(
-                discr_val.into(), 8, Type::Int,
-                self.current_mem.into(), None, Origin::synthetic(),
+                discr_val.into(),
+                8,
+                Type::Int,
+                self.current_mem.into(),
+                None,
+                Origin::synthetic(),
             );
             let off8 = self.builder.iconst(8, Origin::synthetic());
-            let hi_addr = self.builder.ptradd(
-                discr_val.into(), off8.into(), 0, Origin::synthetic(),
-            );
+            let hi_addr =
+                self.builder
+                    .ptradd(discr_val.into(), off8.into(), 0, Origin::synthetic());
             let hi = self.builder.load(
-                hi_addr.into(), 8, Type::Int,
-                self.current_mem.into(), None, Origin::synthetic(),
+                hi_addr.into(),
+                8,
+                Type::Int,
+                self.current_mem.into(),
+                None,
+                Origin::synthetic(),
             );
 
             let otherwise_block = self.block_map.get(otherwise);
@@ -520,14 +529,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let chi = self.builder.iconst(target_hi, Origin::synthetic());
 
                     // Compare low word first.
-                    let eq_lo = self.builder.icmp(
-                        ICmpOp::Eq, lo.into(), clo.into(), Origin::synthetic(),
-                    );
+                    let eq_lo =
+                        self.builder
+                            .icmp(ICmpOp::Eq, lo.into(), clo.into(), Origin::synthetic());
 
                     // Create a block for the high-word check.
                     let hi_check = self.builder.create_block();
-                    let hi_check_mem =
-                        self.builder.add_block_arg(hi_check, Type::Mem);
+                    let hi_check_mem = self.builder.add_block_arg(hi_check, Type::Mem);
 
                     // Determine the "miss" block: either the next comparison
                     // or the otherwise block.
@@ -552,9 +560,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // In the hi_check block, compare the high word.
                     self.builder.switch_to_block(hi_check);
                     self.current_mem = hi_check_mem;
-                    let eq_hi = self.builder.icmp(
-                        ICmpOp::Eq, hi.into(), chi.into(), Origin::synthetic(),
-                    );
+                    let eq_hi =
+                        self.builder
+                            .icmp(ICmpOp::Eq, hi.into(), chi.into(), Origin::synthetic());
                     let then_block = self.block_map.get(*target_bb);
                     self.builder.brif(
                         eq_hi.into(),

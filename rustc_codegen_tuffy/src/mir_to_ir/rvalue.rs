@@ -9,7 +9,10 @@ use super::ctx::TranslationCtx;
 use super::types::*;
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
-    pub(super) fn translate_place_to_addr(&mut self, place: &Place<'tcx>) -> Option<(ValueRef, ty::Ty<'tcx>)> {
+    pub(super) fn translate_place_to_addr(
+        &mut self,
+        place: &Place<'tcx>,
+    ) -> Option<(ValueRef, ty::Ty<'tcx>)> {
         self.translate_place_to_addr_inner(place, false)
     }
 
@@ -620,9 +623,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         if src_inner.is_trait() {
                             return None;
                         }
-                        let principal = predicates.principal().map(|p| {
-                            self.tcx.instantiate_bound_regions_with_erased(p)
-                        });
+                        let principal = predicates
+                            .principal()
+                            .map(|p| self.tcx.instantiate_bound_regions_with_erased(p));
                         let vtable_alloc_id = self.tcx.vtable_allocation((src_inner, principal));
                         let vtable_alloc = self.tcx.global_alloc(vtable_alloc_id);
                         if let rustc_middle::mir::interpret::GlobalAlloc::Memory(alloc) =
@@ -697,45 +700,38 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         };
                         let (src_tail, dst_tail) = self
                             .tcx
-                            .struct_lockstep_tails_for_codegen(
-                                src_inner, inner, typing_env,
-                            );
+                            .struct_lockstep_tails_for_codegen(src_inner, inner, typing_env);
                         match dst_tail.kind() {
                             ty::Slice(_) => {
                                 if let ty::Array(_, len) = src_tail.kind()
-                                    && let Some(n) =
-                                        len.try_to_target_usize(self.tcx)
+                                    && let Some(n) = len.try_to_target_usize(self.tcx)
                                 {
-                                    return Some(self.builder.iconst(
-                                        n as i64,
-                                        Origin::synthetic(),
-                                    ));
+                                    return Some(
+                                        self.builder.iconst(n as i64, Origin::synthetic()),
+                                    );
                                 }
                             }
                             ty::Dynamic(predicates, _) => {
-                                if !src_tail.has_escaping_bound_vars()
-                                    && !src_tail.is_trait()
-                                {
+                                if !src_tail.has_escaping_bound_vars() && !src_tail.is_trait() {
                                     let principal = predicates
                                         .principal()
                                         .map(|p| self.tcx.instantiate_bound_regions_with_erased(p));
-                                    let vtable_alloc_id = self
-                                        .tcx
-                                        .vtable_allocation((
-                                            src_tail, principal,
-                                        ));
-                                    let vtable_alloc = self
-                                        .tcx
-                                        .global_alloc(vtable_alloc_id);
-                                    if let rustc_middle::mir::interpret::GlobalAlloc::Memory(alloc) = vtable_alloc {
+                                    let vtable_alloc_id =
+                                        self.tcx.vtable_allocation((src_tail, principal));
+                                    let vtable_alloc = self.tcx.global_alloc(vtable_alloc_id);
+                                    if let rustc_middle::mir::interpret::GlobalAlloc::Memory(
+                                        alloc,
+                                    ) = vtable_alloc
+                                    {
                                         let inner_alloc = alloc.inner();
                                         let size = inner_alloc.len();
                                         let bytes = inner_alloc
-                                            .inspect_with_uninit_and_ptr_outside_interpreter(0..size)
+                                            .inspect_with_uninit_and_ptr_outside_interpreter(
+                                                0..size,
+                                            )
                                             .to_vec();
                                         let sym = format!(".Lvtable.{}", self.next_data_id());
-                                        let sym_id =
-                                            self.symbols.intern(&sym);
+                                        let sym_id = self.symbols.intern(&sym);
                                         let relocs = extract_alloc_relocs(
                                             self.tcx,
                                             inner_alloc,
@@ -746,14 +742,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                             &mut self.referenced_instances,
                                             self.data_counter,
                                         );
-                                        self.static_data.push((
-                                            sym_id, bytes, relocs,
-                                        ));
+                                        self.static_data.push((sym_id, bytes, relocs));
                                         return Some(
-                                            self.builder.symbol_addr(
-                                                sym_id,
-                                                Origin::synthetic(),
-                                            ),
+                                            self.builder.symbol_addr(sym_id, Origin::synthetic()),
                                         );
                                     }
                                 }
@@ -1312,137 +1303,168 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let l_ptr = self.coerce_to_ptr(l_raw);
                     let r_ptr = self.coerce_to_ptr(r_raw);
                     let l_lo = self.builder.load(
-                        l_ptr.into(), 8, Type::Int,
-                        self.current_mem.into(), None, Origin::synthetic(),
+                        l_ptr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
                     );
                     let r_lo = self.builder.load(
-                        r_ptr.into(), 8, Type::Int,
-                        self.current_mem.into(), None, Origin::synthetic(),
+                        r_ptr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
                     );
                     let off8 = self.builder.iconst(8, Origin::synthetic());
-                    let l_hi_addr = self.builder.ptradd(
-                        l_ptr.into(), off8.into(), 0, Origin::synthetic(),
-                    );
+                    let l_hi_addr =
+                        self.builder
+                            .ptradd(l_ptr.into(), off8.into(), 0, Origin::synthetic());
                     let off8b = self.builder.iconst(8, Origin::synthetic());
-                    let r_hi_addr = self.builder.ptradd(
-                        r_ptr.into(), off8b.into(), 0, Origin::synthetic(),
-                    );
+                    let r_hi_addr =
+                        self.builder
+                            .ptradd(r_ptr.into(), off8b.into(), 0, Origin::synthetic());
                     let l_hi = self.builder.load(
-                        l_hi_addr.into(), 8, Type::Int,
-                        self.current_mem.into(), None, Origin::synthetic(),
+                        l_hi_addr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
                     );
                     let r_hi = self.builder.load(
-                        r_hi_addr.into(), 8, Type::Int,
-                        self.current_mem.into(), None, Origin::synthetic(),
+                        r_hi_addr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
                     );
 
                     // Split a_lo and b_lo into 32-bit halves
                     let mask32 = self.builder.iconst(0xFFFFFFFF_i64, Origin::synthetic());
                     let c32 = self.builder.iconst(32, Origin::synthetic());
-                    let a0 = self.builder.and(
-                        l_lo.into(), mask32.into(), None, Origin::synthetic(),
-                    );
+                    let a0 =
+                        self.builder
+                            .and(l_lo.into(), mask32.into(), None, Origin::synthetic());
                     let a1 = self.builder.shr(
                         IrOperand::annotated(l_lo, Annotation::Unsigned(64)),
-                        c32.into(), None, Origin::synthetic(),
+                        c32.into(),
+                        None,
+                        Origin::synthetic(),
                     );
-                    let b0 = self.builder.and(
-                        r_lo.into(), mask32.into(), None, Origin::synthetic(),
-                    );
+                    let b0 =
+                        self.builder
+                            .and(r_lo.into(), mask32.into(), None, Origin::synthetic());
                     let b1 = self.builder.shr(
                         IrOperand::annotated(r_lo, Annotation::Unsigned(64)),
-                        c32.into(), None, Origin::synthetic(),
+                        c32.into(),
+                        None,
+                        Origin::synthetic(),
                     );
 
                     // 32x32 -> 64 products
-                    let p00 = self.builder.mul(
-                        a0.into(), b0.into(), None, Origin::synthetic(),
-                    );
-                    let p01 = self.builder.mul(
-                        a0.into(), b1.into(), None, Origin::synthetic(),
-                    );
-                    let p10 = self.builder.mul(
-                        a1.into(), b0.into(), None, Origin::synthetic(),
-                    );
-                    let p11 = self.builder.mul(
-                        a1.into(), b1.into(), None, Origin::synthetic(),
-                    );
+                    let p00 = self
+                        .builder
+                        .mul(a0.into(), b0.into(), None, Origin::synthetic());
+                    let p01 = self
+                        .builder
+                        .mul(a0.into(), b1.into(), None, Origin::synthetic());
+                    let p10 = self
+                        .builder
+                        .mul(a1.into(), b0.into(), None, Origin::synthetic());
+                    let p11 = self
+                        .builder
+                        .mul(a1.into(), b1.into(), None, Origin::synthetic());
 
                     // mid = p01 + p10 (with carry)
-                    let mid = self.builder.add(
-                        p01.into(), p10.into(), None, Origin::synthetic(),
-                    );
+                    let mid = self
+                        .builder
+                        .add(p01.into(), p10.into(), None, Origin::synthetic());
                     let mid_carry_cmp = self.builder.icmp(
                         ICmpOp::Lt,
                         IrOperand::annotated(mid, Annotation::Unsigned(64)),
                         IrOperand::annotated(p01, Annotation::Unsigned(64)),
                         Origin::synthetic(),
                     );
-                    let mid_carry = self.builder.bool_to_int(
-                        mid_carry_cmp.into(), Origin::synthetic(),
-                    );
+                    let mid_carry = self
+                        .builder
+                        .bool_to_int(mid_carry_cmp.into(), Origin::synthetic());
 
                     // result_lo = p00 + (mid << 32)
-                    let mid_lo = self.builder.shl(
-                        mid.into(), c32.into(), None, Origin::synthetic(),
-                    );
-                    let res_lo = self.builder.add(
-                        p00.into(), mid_lo.into(), None, Origin::synthetic(),
-                    );
+                    let mid_lo =
+                        self.builder
+                            .shl(mid.into(), c32.into(), None, Origin::synthetic());
+                    let res_lo =
+                        self.builder
+                            .add(p00.into(), mid_lo.into(), None, Origin::synthetic());
                     let lo_carry_cmp = self.builder.icmp(
                         ICmpOp::Lt,
                         IrOperand::annotated(res_lo, Annotation::Unsigned(64)),
                         IrOperand::annotated(p00, Annotation::Unsigned(64)),
                         Origin::synthetic(),
                     );
-                    let lo_carry = self.builder.bool_to_int(
-                        lo_carry_cmp.into(), Origin::synthetic(),
-                    );
+                    let lo_carry = self
+                        .builder
+                        .bool_to_int(lo_carry_cmp.into(), Origin::synthetic());
 
                     // result_hi = p11 + (mid >> 32) + (mid_carry << 32) + lo_carry
                     //           + a_lo*b_hi + a_hi*b_lo
                     let mid_hi = self.builder.shr(
                         IrOperand::annotated(mid, Annotation::Unsigned(64)),
-                        c32.into(), None, Origin::synthetic(),
+                        c32.into(),
+                        None,
+                        Origin::synthetic(),
                     );
-                    let mc_shifted = self.builder.shl(
-                        mid_carry.into(), c32.into(), None, Origin::synthetic(),
-                    );
-                    let h1 = self.builder.add(
-                        p11.into(), mid_hi.into(), None, Origin::synthetic(),
-                    );
-                    let h2 = self.builder.add(
-                        h1.into(), mc_shifted.into(), None, Origin::synthetic(),
-                    );
-                    let h3 = self.builder.add(
-                        h2.into(), lo_carry.into(), None, Origin::synthetic(),
-                    );
-                    let cross1 = self.builder.mul(
-                        l_lo.into(), r_hi.into(), None, Origin::synthetic(),
-                    );
-                    let cross2 = self.builder.mul(
-                        l_hi.into(), r_lo.into(), None, Origin::synthetic(),
-                    );
-                    let h4 = self.builder.add(
-                        h3.into(), cross1.into(), None, Origin::synthetic(),
-                    );
-                    let res_hi = self.builder.add(
-                        h4.into(), cross2.into(), None, Origin::synthetic(),
-                    );
+                    let mc_shifted =
+                        self.builder
+                            .shl(mid_carry.into(), c32.into(), None, Origin::synthetic());
+                    let h1 = self
+                        .builder
+                        .add(p11.into(), mid_hi.into(), None, Origin::synthetic());
+                    let h2 =
+                        self.builder
+                            .add(h1.into(), mc_shifted.into(), None, Origin::synthetic());
+                    let h3 =
+                        self.builder
+                            .add(h2.into(), lo_carry.into(), None, Origin::synthetic());
+                    let cross1 =
+                        self.builder
+                            .mul(l_lo.into(), r_hi.into(), None, Origin::synthetic());
+                    let cross2 =
+                        self.builder
+                            .mul(l_hi.into(), r_lo.into(), None, Origin::synthetic());
+                    let h4 = self
+                        .builder
+                        .add(h3.into(), cross1.into(), None, Origin::synthetic());
+                    let res_hi =
+                        self.builder
+                            .add(h4.into(), cross2.into(), None, Origin::synthetic());
 
                     // Store result to 16-byte stack slot
                     let result_slot = self.builder.stack_slot(16, Origin::synthetic());
                     self.current_mem = self.builder.store(
-                        res_lo.into(), result_slot.into(), 8,
-                        self.current_mem.into(), Origin::synthetic(),
+                        res_lo.into(),
+                        result_slot.into(),
+                        8,
+                        self.current_mem.into(),
+                        Origin::synthetic(),
                     );
                     let off8c = self.builder.iconst(8, Origin::synthetic());
                     let hi_addr = self.builder.ptradd(
-                        result_slot.into(), off8c.into(), 0, Origin::synthetic(),
+                        result_slot.into(),
+                        off8c.into(),
+                        0,
+                        Origin::synthetic(),
                     );
                     self.current_mem = self.builder.store(
-                        res_hi.into(), hi_addr.into(), 8,
-                        self.current_mem.into(), Origin::synthetic(),
+                        res_hi.into(),
+                        hi_addr.into(),
+                        8,
+                        self.current_mem.into(),
+                        Origin::synthetic(),
                     );
                     return Some(result_slot);
                 }
@@ -1841,28 +1863,31 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         ) {
                             let ptr = self.coerce_to_ptr(r_raw);
                             self.builder.load(
-                                ptr.into(), 8, Type::Int,
-                                self.current_mem.into(), None,
+                                ptr.into(),
+                                8,
+                                Type::Int,
+                                self.current_mem.into(),
+                                None,
                                 Origin::synthetic(),
                             )
                         } else {
                             r_op.value
                         };
                         // Rust masks shift amounts to % bit_width.
-                        let lhs_bits = type_size(self.tcx, lhs_mir_ty)
-                            .unwrap_or(8) as i64 * 8;
-                        let mask_val = self.builder.iconst(
-                            lhs_bits - 1, Origin::synthetic(),
-                        );
+                        let lhs_bits = type_size(self.tcx, lhs_mir_ty).unwrap_or(8) as i64 * 8;
+                        let mask_val = self.builder.iconst(lhs_bits - 1, Origin::synthetic());
                         let masked = self.builder.and(
-                            shift_val.into(), mask_val.into(), None,
+                            shift_val.into(),
+                            mask_val.into(),
+                            None,
                             Origin::synthetic(),
                         );
                         let masked_op = IrOperand {
                             value: masked,
                             annotation: None,
                         };
-                        self.builder.shl(l_op, masked_op, res_ann, Origin::synthetic())
+                        self.builder
+                            .shl(l_op, masked_op, res_ann, Origin::synthetic())
                     }
                     BinOp::BitOr => self.builder.or(l_op, r_op, res_ann, Origin::synthetic()),
                     BinOp::BitAnd => self.builder.and(l_op, r_op, res_ann, Origin::synthetic()),
@@ -1881,27 +1906,30 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         ) {
                             let ptr = self.coerce_to_ptr(r_raw);
                             self.builder.load(
-                                ptr.into(), 8, Type::Int,
-                                self.current_mem.into(), None,
+                                ptr.into(),
+                                8,
+                                Type::Int,
+                                self.current_mem.into(),
+                                None,
                                 Origin::synthetic(),
                             )
                         } else {
                             r_op.value
                         };
-                        let lhs_bits = type_size(self.tcx, lhs_mir_ty)
-                            .unwrap_or(8) as i64 * 8;
-                        let mask_val = self.builder.iconst(
-                            lhs_bits - 1, Origin::synthetic(),
-                        );
+                        let lhs_bits = type_size(self.tcx, lhs_mir_ty).unwrap_or(8) as i64 * 8;
+                        let mask_val = self.builder.iconst(lhs_bits - 1, Origin::synthetic());
                         let masked = self.builder.and(
-                            shift_val.into(), mask_val.into(), None,
+                            shift_val.into(),
+                            mask_val.into(),
+                            None,
                             Origin::synthetic(),
                         );
                         let masked_op = IrOperand {
                             value: masked,
                             annotation: None,
                         };
-                        self.builder.shr(l_op, masked_op, res_ann, Origin::synthetic())
+                        self.builder
+                            .shr(l_op, masked_op, res_ann, Origin::synthetic())
                     }
                     BinOp::Div => self.builder.div(l_op, r_op, res_ann, Origin::synthetic()),
                     BinOp::Rem => self.builder.rem(l_op, r_op, res_ann, Origin::synthetic()),
@@ -1909,7 +1937,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         // ptr.wrapping_offset(count) = ptr + count * sizeof(T).
                         let pointee_ty = match lhs {
                             Operand::Copy(p) | Operand::Move(p) => {
-                                let ty = self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty);
+                                let ty =
+                                    self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty);
                                 match ty.kind() {
                                     ty::RawPtr(inner, _) => Some(*inner),
                                     _ => None,
@@ -2065,10 +2094,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 let hi_c = self.builder.iconst(hi, Origin::synthetic());
                                 // clamp: max(min(raw, hi), lo)
                                 let clamped_hi = self.builder.min(
-                                    raw.into(), hi_c.into(), ann_s, Origin::synthetic(),
+                                    raw.into(),
+                                    hi_c.into(),
+                                    ann_s,
+                                    Origin::synthetic(),
                                 );
                                 self.builder.max(
-                                    clamped_hi.into(), lo_c.into(), ann_s, Origin::synthetic(),
+                                    clamped_hi.into(),
+                                    lo_c.into(),
+                                    ann_s,
+                                    Origin::synthetic(),
                                 )
                             } else {
                                 let hi = (1i64 << bit_width) - 1;
@@ -2076,10 +2111,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 let zero = self.builder.iconst(0, Origin::synthetic());
                                 // clamp: max(min(raw, hi), 0)
                                 let clamped_hi = self.builder.min(
-                                    raw.into(), hi_c.into(), ann_s, Origin::synthetic(),
+                                    raw.into(),
+                                    hi_c.into(),
+                                    ann_s,
+                                    Origin::synthetic(),
                                 );
                                 self.builder.max(
-                                    clamped_hi.into(), zero.into(), ann_s, Origin::synthetic(),
+                                    clamped_hi.into(),
+                                    zero.into(),
+                                    ann_s,
+                                    Origin::synthetic(),
                                 )
                             }
                         } else if !signed {
@@ -2091,23 +2132,32 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 FloatType::F32 => 31,
                                 FloatType::F64 => 63,
                             };
-                            let shift_c = self.builder.iconst(
-                                sign_bit_pos as i64, Origin::synthetic(),
-                            );
+                            let shift_c = self
+                                .builder
+                                .iconst(sign_bit_pos as i64, Origin::synthetic());
                             let sign = self.builder.shr(
-                                val.into(), shift_c.into(), None, Origin::synthetic(),
+                                val.into(),
+                                shift_c.into(),
+                                None,
+                                Origin::synthetic(),
                             );
                             let one = self.builder.iconst(1, Origin::synthetic());
                             let sign_masked = self.builder.and(
-                                sign.into(), one.into(), None, Origin::synthetic(),
+                                sign.into(),
+                                one.into(),
+                                None,
+                                Origin::synthetic(),
                             );
-                            let is_neg = self.builder.int_to_bool(
-                                sign_masked.into(), Origin::synthetic(),
-                            );
+                            let is_neg = self
+                                .builder
+                                .int_to_bool(sign_masked.into(), Origin::synthetic());
                             let zero = self.builder.iconst(0, Origin::synthetic());
                             self.builder.select(
-                                is_neg.into(), zero.into(), raw.into(),
-                                Type::Int, Origin::synthetic(),
+                                is_neg.into(),
+                                zero.into(),
+                                raw.into(),
+                                Type::Int,
+                                Origin::synthetic(),
                             )
                         } else {
                             raw
@@ -2138,21 +2188,33 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             // and combine via floating point arithmetic.
                             let ptr = self.coerce_to_ptr(val);
                             let lo = self.builder.load(
-                                ptr.into(), 8, Type::Int,
-                                self.current_mem.into(), None, Origin::synthetic(),
+                                ptr.into(),
+                                8,
+                                Type::Int,
+                                self.current_mem.into(),
+                                None,
+                                Origin::synthetic(),
                             );
                             let off8 = self.builder.iconst(8, Origin::synthetic());
                             let hi_addr = self.builder.ptradd(
-                                ptr.into(), off8.into(), 0, Origin::synthetic(),
+                                ptr.into(),
+                                off8.into(),
+                                0,
+                                Origin::synthetic(),
                             );
                             let hi = self.builder.load(
-                                hi_addr.into(), 8, Type::Int,
-                                self.current_mem.into(), None, Origin::synthetic(),
+                                hi_addr.into(),
+                                8,
+                                Type::Int,
+                                self.current_mem.into(),
+                                None,
+                                Origin::synthetic(),
                             );
-                            let float_res =
-                                self.emit_u128_to_float(lo, hi, signed, ft);
+                            let float_res = self.emit_u128_to_float(lo, hi, signed, ft);
                             Some(self.builder.bitcast(
-                                float_res.into(), Type::Int, None,
+                                float_res.into(),
+                                Type::Int,
+                                None,
                                 Origin::synthetic(),
                             ))
                         } else {
@@ -2166,7 +2228,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             };
                             // Bitcast Float → Int (bit pattern)
                             Some(self.builder.bitcast(
-                                float_res.into(), Type::Int, None,
+                                float_res.into(),
+                                Type::Int,
+                                None,
                                 Origin::synthetic(),
                             ))
                         }
@@ -2264,17 +2328,21 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         // Transmute / PtrToPtr from a pointer-typed source
                         // to a non-pointer target
                         if matches!(self.builder.value_type(val), Some(Type::Ptr(_)))
-                            && !matches!(target_ty_mono.kind(), ty::RawPtr(..) | ty::Ref(..) | ty::FnPtr(..))
+                            && !matches!(
+                                target_ty_mono.kind(),
+                                ty::RawPtr(..) | ty::Ref(..) | ty::FnPtr(..)
+                            )
                         {
                             let src_ty = match operand {
-                                Operand::Copy(p) | Operand::Move(p) => {
-                                    Some(self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty))
-                                }
+                                Operand::Copy(p) | Operand::Move(p) => Some(
+                                    self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty),
+                                ),
                                 Operand::Constant(c) => Some(self.monomorphize(c.ty())),
                                 _ => None,
                             };
                             if let Some(st) = src_ty {
-                                if matches!(st.kind(), ty::RawPtr(..) | ty::Ref(..) | ty::FnPtr(..)) {
+                                if matches!(st.kind(), ty::RawPtr(..) | ty::Ref(..) | ty::FnPtr(..))
+                                {
                                     return Some(
                                         self.builder.ptrtoaddr(val.into(), Origin::synthetic()),
                                     );
@@ -2513,7 +2581,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             }
                         }
                         _ => None,
-                    };                    if let Some(fat_val) = fat_op {
+                    };
+                    if let Some(fat_val) = fat_op {
                         // Store data pointer into dst[0..8].
                         self.current_mem = self.builder.store(
                             val.into(),
@@ -2787,16 +2856,24 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 if is_128bit_not {
                     let ptr = self.coerce_to_ptr(v);
                     let lo = self.builder.load(
-                        ptr.into(), 8, Type::Int,
-                        self.current_mem.into(), None, Origin::synthetic(),
+                        ptr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
                     );
                     let off8 = self.builder.iconst(8, Origin::synthetic());
                     let hi_addr =
                         self.builder
                             .ptradd(ptr.into(), off8.into(), 0, Origin::synthetic());
                     let hi = self.builder.load(
-                        hi_addr.into(), 8, Type::Int,
-                        self.current_mem.into(), None, Origin::synthetic(),
+                        hi_addr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
                     );
                     let ones = self.builder.iconst(-1, Origin::synthetic());
                     let not_lo =
@@ -2808,16 +2885,25 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             .xor(hi.into(), ones2.into(), None, Origin::synthetic());
                     let result_slot = self.builder.stack_slot(16, Origin::synthetic());
                     self.current_mem = self.builder.store(
-                        not_lo.into(), result_slot.into(), 8,
-                        self.current_mem.into(), Origin::synthetic(),
+                        not_lo.into(),
+                        result_slot.into(),
+                        8,
+                        self.current_mem.into(),
+                        Origin::synthetic(),
                     );
                     let off8b = self.builder.iconst(8, Origin::synthetic());
                     let hi_store = self.builder.ptradd(
-                        result_slot.into(), off8b.into(), 0, Origin::synthetic(),
+                        result_slot.into(),
+                        off8b.into(),
+                        0,
+                        Origin::synthetic(),
                     );
                     self.current_mem = self.builder.store(
-                        not_hi.into(), hi_store.into(), 8,
-                        self.current_mem.into(), Origin::synthetic(),
+                        not_hi.into(),
+                        hi_store.into(),
+                        8,
+                        self.current_mem.into(),
+                        Origin::synthetic(),
                     );
                     return Some(result_slot);
                 }
@@ -2835,7 +2921,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             let int_v = self.builder.bool_to_int(v.into(), Origin::synthetic());
                             let one = self.builder.iconst(1, Origin::synthetic());
                             Some(self.builder.xor(
-                                int_v.into(), one.into(), None, Origin::synthetic(),
+                                int_v.into(),
+                                one.into(),
+                                None,
+                                Origin::synthetic(),
                             ))
                         }
                         _ => {

@@ -427,12 +427,18 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                     let src_is_signed = match rvalue {
                                                         Rvalue::Cast(CastKind::IntToInt, op, _) => {
                                                             let src_ty = match op {
-                                                                Operand::Copy(p) | Operand::Move(p) => {
-                                                                    self.monomorphize(
-                                                                        p.ty(&self.mir.local_decls, self.tcx).ty,
-                                                                    )
+                                                                Operand::Copy(p)
+                                                                | Operand::Move(p) => self
+                                                                    .monomorphize(
+                                                                        p.ty(
+                                                                            &self.mir.local_decls,
+                                                                            self.tcx,
+                                                                        )
+                                                                        .ty,
+                                                                    ),
+                                                                Operand::Constant(c) => {
+                                                                    self.monomorphize(c.ty())
                                                                 }
-                                                                Operand::Constant(c) => self.monomorphize(c.ty()),
                                                                 _ => dest_ty,
                                                             };
                                                             is_signed_int(src_ty)
@@ -735,24 +741,19 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 let src_is_signed = match rvalue {
                                     Rvalue::Cast(CastKind::IntToInt, op, _) => {
                                         let src_ty = match op {
-                                            Operand::Copy(p) | Operand::Move(p) => {
-                                                self.monomorphize(
+                                            Operand::Copy(p) | Operand::Move(p) => self
+                                                .monomorphize(
                                                     p.ty(&self.mir.local_decls, self.tcx).ty,
-                                                )
-                                            }
+                                                ),
                                             Operand::Constant(c) => self.monomorphize(c.ty()),
                                             _ => projected_ty,
                                         };
                                         is_signed_int(src_ty)
                                     }
-                                    _ => matches!(
-                                        projected_ty.kind(),
-                                        ty::Int(ty::IntTy::I128)
-                                    ),
+                                    _ => matches!(projected_ty.kind(), ty::Int(ty::IntTy::I128)),
                                 };
                                 let hi_word = if src_is_signed {
-                                    let c63 =
-                                        self.builder.iconst(63, Origin::synthetic());
+                                    let c63 = self.builder.iconst(63, Origin::synthetic());
                                     let signed_op =
                                         IrOperand::annotated(val, Annotation::Signed(64));
                                     self.builder.shr(

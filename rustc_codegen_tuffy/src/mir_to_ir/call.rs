@@ -9,7 +9,9 @@ use tuffy_ir::types::Type;
 use tuffy_ir::value::ValueRef;
 
 use super::ctx::TranslationCtx;
-use super::intrinsic::{detect_intrinsic, intrinsic_to_libc, translate_intrinsic, translate_memory_intrinsic};
+use super::intrinsic::{
+    detect_intrinsic, intrinsic_to_libc, translate_intrinsic, translate_memory_intrinsic,
+};
 use super::types::*;
 
 /// Resolved call target: direct symbol or virtual dispatch.
@@ -252,9 +254,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     if let Operand::Copy(place) | Operand::Move(place) = &arg.node {
                         if place.projection.is_empty() {
                             if let Some(fat_v) = self.fat_locals.get(place.local) {
-                                let local_ty = self.monomorphize(
-                                    self.mir.local_decls[place.local].ty,
-                                );
+                                let local_ty =
+                                    self.monomorphize(self.mir.local_decls[place.local].ty);
                                 if is_fat_ptr(self.tcx, local_ty) {
                                     intrinsic_args.push(fat_v);
                                 }
@@ -335,85 +336,79 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         }
                     }
                 } else {
-                // If the destination is a stack local, the intrinsic set the
-                // local to the raw result value.  Store it into the stack slot
-                // and restore the local to point at the slot.
-                // If the local still points at the slot (result_val == slot),
-                // the intrinsic already wrote to the slot directly (e.g. i128
-                // bswap) — skip the redundant store.
-                if let Some(slot) = saved_slot
-                    && let Some(result_val) = self.locals.get(destination.local)
-                    && result_val != slot
-                {
-                    let dest_ty = self.monomorphize(self.mir.local_decls[destination.local].ty);
-                    let size = type_size(self.tcx, dest_ty).unwrap_or(8) as u32;
-                    // When result_val is a pointer (another stack slot) and
-                    // the type is wider than 8 bytes, copy word-by-word
-                    // instead of storing the pointer value as data.
-                    let val_is_ptr = matches!(
-                        self.builder.value_type(result_val),
-                        Some(Type::Ptr(_))
-                    );
-                    if val_is_ptr && size > 8 {
-                        let mut offset = 0u32;
-                        while offset < size {
-                            let chunk = std::cmp::min(8, size - offset);
-                            let src_addr = if offset == 0 {
-                                result_val
-                            } else {
-                                let off = self.builder.iconst(
-                                    offset as i64,
+                    // If the destination is a stack local, the intrinsic set the
+                    // local to the raw result value.  Store it into the stack slot
+                    // and restore the local to point at the slot.
+                    // If the local still points at the slot (result_val == slot),
+                    // the intrinsic already wrote to the slot directly (e.g. i128
+                    // bswap) — skip the redundant store.
+                    if let Some(slot) = saved_slot
+                        && let Some(result_val) = self.locals.get(destination.local)
+                        && result_val != slot
+                    {
+                        let dest_ty = self.monomorphize(self.mir.local_decls[destination.local].ty);
+                        let size = type_size(self.tcx, dest_ty).unwrap_or(8) as u32;
+                        // When result_val is a pointer (another stack slot) and
+                        // the type is wider than 8 bytes, copy word-by-word
+                        // instead of storing the pointer value as data.
+                        let val_is_ptr =
+                            matches!(self.builder.value_type(result_val), Some(Type::Ptr(_)));
+                        if val_is_ptr && size > 8 {
+                            let mut offset = 0u32;
+                            while offset < size {
+                                let chunk = std::cmp::min(8, size - offset);
+                                let src_addr = if offset == 0 {
+                                    result_val
+                                } else {
+                                    let off =
+                                        self.builder.iconst(offset as i64, Origin::synthetic());
+                                    self.builder.ptradd(
+                                        result_val.into(),
+                                        off.into(),
+                                        0,
+                                        Origin::synthetic(),
+                                    )
+                                };
+                                let word = self.builder.load(
+                                    src_addr.into(),
+                                    chunk,
+                                    Type::Int,
+                                    self.current_mem.into(),
+                                    None,
                                     Origin::synthetic(),
                                 );
-                                self.builder.ptradd(
-                                    result_val.into(),
-                                    off.into(),
-                                    0,
-                                    Origin::synthetic(),
-                                )
-                            };
-                            let word = self.builder.load(
-                                src_addr.into(),
-                                chunk,
-                                Type::Int,
-                                self.current_mem.into(),
-                                None,
-                                Origin::synthetic(),
-                            );
-                            let dst_addr = if offset == 0 {
-                                slot
-                            } else {
-                                let off = self.builder.iconst(
-                                    offset as i64,
+                                let dst_addr = if offset == 0 {
+                                    slot
+                                } else {
+                                    let off =
+                                        self.builder.iconst(offset as i64, Origin::synthetic());
+                                    self.builder.ptradd(
+                                        slot.into(),
+                                        off.into(),
+                                        0,
+                                        Origin::synthetic(),
+                                    )
+                                };
+                                self.current_mem = self.builder.store(
+                                    word.into(),
+                                    dst_addr.into(),
+                                    chunk,
+                                    self.current_mem.into(),
                                     Origin::synthetic(),
                                 );
-                                self.builder.ptradd(
-                                    slot.into(),
-                                    off.into(),
-                                    0,
-                                    Origin::synthetic(),
-                                )
-                            };
+                                offset += chunk;
+                            }
+                        } else {
                             self.current_mem = self.builder.store(
-                                word.into(),
-                                dst_addr.into(),
-                                chunk,
+                                result_val.into(),
+                                slot.into(),
+                                size.max(1),
                                 self.current_mem.into(),
                                 Origin::synthetic(),
                             );
-                            offset += chunk;
                         }
-                    } else {
-                        self.current_mem = self.builder.store(
-                            result_val.into(),
-                            slot.into(),
-                            size.max(1),
-                            self.current_mem.into(),
-                            Origin::synthetic(),
-                        );
+                        self.locals.set(destination.local, slot);
                     }
-                    self.locals.set(destination.local, slot);
-                }
                 } // end else (no dest projection)
                 if let Some(target) = target {
                     let target_block = self.block_map.get(*target);

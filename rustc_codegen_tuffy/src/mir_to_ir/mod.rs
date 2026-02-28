@@ -419,9 +419,7 @@ pub fn translate_function<'tcx>(
             for stmt in &bb_data.statements {
                 if let StatementKind::Assign(box (_, rvalue)) = &stmt.kind {
                     let referenced_local = match rvalue {
-                        Rvalue::Ref(_, _, place) | Rvalue::RawPtr(_, place) => {
-                            Some(place.local)
-                        }
+                        Rvalue::Ref(_, _, place) | Rvalue::RawPtr(_, place) => Some(place.local),
                         _ => None,
                     };
                     if let Some(local) = referenced_local {
