@@ -39,6 +39,12 @@ The core translation layer, organized into submodules by concern:
 | `constant.rs`    | Constant evaluation and literal translation          |
 | `intrinsic.rs`   | Rust intrinsic function lowering                     |
 
+## Boundary Rule
+
+This crate is the **sole boundary** between rustc and the Tuffy compiler infrastructure. All Rust-specific semantics, ABI conventions, MIR quirks, and language-level workarounds must be fully resolved here before emitting tuffy IR.
+
+The downstream crates (`tuffy_ir`, `tuffy_opt`, `tuffy_target`, `tuffy_target_x86`, `tuffy_codegen`, etc.) are language-agnostic. They must never contain Rust-specific logic, special cases, or workarounds. If a Rust construct cannot be directly expressed in tuffy IR, this crate is responsible for lowering it into a valid IR representation.
+
 ## Key Design Decisions
 
 - Uses `tuffy_codegen::AbiMetadataBox` to communicate ABI details (secondary returns, wide returns) to the backend without target coupling.
