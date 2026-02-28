@@ -113,4 +113,11 @@ impl AbiMetadataBox {
             AbiMetadataBox::X86(meta) => meta.mark_secondary_return_move(inst_idx, source_idx),
         }
     }
+
+    /// Mark a call instruction as returning an i128/u128 value.
+    pub fn mark_wide_return_call(&mut self, call_idx: u32) {
+        match self {
+            AbiMetadataBox::X86(meta) => meta.mark_wide_return_call(call_idx),
+        }
+    }
 }

@@ -215,6 +215,13 @@ pub enum MInst<R: RegType> {
     RorRCL { size: OpSize, dst: R },
     /// ud2 (undefined instruction trap)
     Ud2,
+    /// Pseudo-instruction: parallel copy of two register pairs.
+    ///
+    /// Used after calls returning i128/u128 in RAX:RDX to copy both return
+    /// registers to unconstrained vregs without cross-clobbering. The encoder
+    /// emits two `mov` instructions in the correct order (or uses `xchg` if
+    /// the destinations cross).
+    MovRR2 { dst1: R, src1: R, dst2: R, src2: R },
     /// Pseudo-instruction: SSE2 f64 binary operation via memory.
     ///
     /// Moves lhs/rhs GPRs through stack memory into xmm0/xmm1,

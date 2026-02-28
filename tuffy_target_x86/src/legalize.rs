@@ -112,7 +112,7 @@ pub fn legalize_i128(
     func: &Function,
     metadata: &X86AbiMetadata,
 ) -> Option<(Function, X86AbiMetadata)> {
-    if !has_128bit_values(func) {
+    if !has_128bit_values(func) && metadata.wide_return_calls.is_empty() {
         return None;
     }
     let (out, state) = build_new_func(func, metadata);
@@ -125,19 +125,26 @@ pub fn legalize_i128(
 
 struct State {
     meta: X86AbiMetadata,
+    /// Original ABI metadata from before legalization, used to transfer
+    /// non-128-bit secondary return info (e.g. 16-byte struct returns in
+    /// RAX+RDX) that would otherwise be lost when instruction indices change.
+    old_meta: X86AbiMetadata,
     vmap: VMap,
     bmap: HashMap<u32, BlockRef>,
     /// Old param index → (new_lo_index, Option<new_hi_index>).
     param_map: Vec<(u32, Option<u32>)>,
     /// Set of old ValueRef raw values that are 128-bit.
     wide: HashSet<u32>,
+    /// Old RDX-capture instruction index → new ValueRef created in leg_call.
+    /// Used to avoid re-creating the capture in copy_inst.
+    rdx_capture_remap: HashMap<u32, ValueRef>,
 }
 
 fn o() -> Origin {
     Origin::synthetic()
 }
 
-fn build_new_func(old: &Function, _meta: &X86AbiMetadata) -> (Function, State) {
+fn build_new_func(old: &Function, old_meta: &X86AbiMetadata) -> (Function, State) {
     let mut params = Vec::new();
     let mut param_anns = Vec::new();
     let mut param_names = Vec::new();
@@ -172,14 +179,16 @@ fn build_new_func(old: &Function, _meta: &X86AbiMetadata) -> (Function, State) {
         old.ret_annotation
     };
 
-    let wide = collect_wide_values(old);
+    let wide = collect_wide_values(old, old_meta);
     let out = Function::new(old.name, params, param_anns, param_names, ret_ty, ret_ann);
     let state = State {
         meta: X86AbiMetadata::default(),
+        old_meta: old_meta.clone(),
         vmap: VMap::new(),
         bmap: HashMap::new(),
         param_map,
         wide,
+        rdx_capture_remap: HashMap::new(),
     };
     (out, state)
 }
@@ -188,7 +197,7 @@ fn build_new_func(old: &Function, _meta: &X86AbiMetadata) -> (Function, State) {
 // Pre-scan: identify 128-bit values in the old function
 // ---------------------------------------------------------------------------
 
-fn collect_wide_values(old: &Function) -> HashSet<u32> {
+fn collect_wide_values(old: &Function, meta: &X86AbiMetadata) -> HashSet<u32> {
     let mut wide = HashSet::new();
 
     // Mark instructions that produce 128-bit results.
@@ -197,6 +206,13 @@ fn collect_wide_values(old: &Function) -> HashSet<u32> {
         if is_128(inst.result_annotation.as_ref()) {
             wide.insert(vref.raw());
             continue;
+        }
+        // Calls returning i128/u128 are marked in ABI metadata (the call
+        // instruction itself has no result_annotation because its primary
+        // result type is Mem).
+        if meta.wide_return_calls.contains(&(i as u32)) {
+            let sec = ValueRef::inst_secondary_result(i as u32);
+            wide.insert(sec.raw());
         }
         match &inst.op {
             Op::Const(v) if needs_wide_const(v) => {
@@ -459,7 +475,28 @@ fn legalize_inst(
             let v = b.bitcast(Operand::new(lo), inst.ty.clone(), ann.cloned(), o());
             s.vmap.set(old_vref, Mapped::One(v));
         }
+        Op::Store(val, ptr, bytes, mem) if is_wide(s, val.value) => {
+            // Store both halves of a 128-bit value to the target address.
+            let (lo, hi) = s.vmap.pair(val.value);
+            let p = remap_op(s, ptr);
+            let m = remap_op(s, mem);
+            let m1 = b.store(Operand::new(lo), p.clone(), 8, m, o());
+            let off = b.iconst(8i64, o());
+            let hi_addr = b.ptradd(p, Operand::new(off), 0, o());
+            let m2 = b.store(
+                Operand::new(hi),
+                Operand::new(hi_addr),
+                8,
+                Operand::new(m1),
+                o(),
+            );
+            s.vmap.set(old_vref, Mapped::One(m2));
+        }
         _ => {
+            // Skip instructions already remapped as RDX captures in leg_call.
+            if s.rdx_capture_remap.contains_key(&old_vref.index()) {
+                return;
+            }
             copy_inst(s, b, old_vref, inst);
         }
     }
@@ -818,28 +855,56 @@ fn leg_mul(s: &mut State, b: &mut Builder, old_vref: ValueRef, a: &Operand, op_b
     let p3 = b.mul(Operand::new(a1), Operand::new(b1), ann64, o());
 
     // Accumulate middle column: mid = (p0 >> 32) + p1 + p2
+    // This sum can overflow 64 bits, so we track carries.
     let p0_hi = b.shr(
         Operand::annotated(p0, Annotation::Unsigned(64)),
         Operand::new(c32),
         ann64,
         o(),
     );
-    let mid = b.add(Operand::new(p0_hi), Operand::new(p1), ann64, o());
-    let mid = b.add(Operand::new(mid), Operand::new(p2), ann64, o());
+    let mid1 = b.add(Operand::new(p0_hi), Operand::new(p1), ann64, o());
+    let carry1 = b.icmp(
+        ICmpOp::Lt,
+        Operand::annotated(mid1, Annotation::Unsigned(64)),
+        Operand::annotated(p1, Annotation::Unsigned(64)),
+        o(),
+    );
+    let carry1_int = b.bool_to_int(Operand::new(carry1), o());
+    let mid = b.add(Operand::new(mid1), Operand::new(p2), ann64, o());
+    let carry2 = b.icmp(
+        ICmpOp::Lt,
+        Operand::annotated(mid, Annotation::Unsigned(64)),
+        Operand::annotated(p2, Annotation::Unsigned(64)),
+        o(),
+    );
+    let carry2_int = b.bool_to_int(Operand::new(carry2), o());
+    let total_carry = b.add(
+        Operand::new(carry1_int),
+        Operand::new(carry2_int),
+        ann64,
+        o(),
+    );
 
     // lo = (mid << 32) | (p0 & 0xFFFFFFFF)
     let mid_shifted = b.shl(Operand::new(mid), Operand::new(c32), ann64, o());
     let p0_lo = b.and(Operand::new(p0), Operand::new(mask32), ann64, o());
     let lo = b.or(Operand::new(mid_shifted), Operand::new(p0_lo), ann64, o());
 
-    // hi = (mid >> 32) + p3 + a_lo*b_hi + a_hi*b_lo
+    // hi = (mid >> 32) + (total_carry << 32) + p3 + a_lo*b_hi + a_hi*b_lo
     let mid_hi = b.shr(
         Operand::annotated(mid, Annotation::Unsigned(64)),
         Operand::new(c32),
         ann64,
         o(),
     );
-    let hi = b.add(Operand::new(mid_hi), Operand::new(p3), ann64, o());
+    let carry_shifted = b.shl(Operand::new(total_carry), Operand::new(c32), ann64, o());
+    let hi = b.add(
+        Operand::new(mid_hi),
+        Operand::new(carry_shifted),
+        ann64,
+        o(),
+    );
+    let hi = b.add(Operand::new(hi), Operand::new(p3), ann64, o());
     let cross1 = b.mul(Operand::new(a_lo), Operand::new(b_hi), ann64, o());
     let hi = b.add(Operand::new(hi), Operand::new(cross1), ann64, o());
     let cross2 = b.mul(Operand::new(a_hi), Operand::new(b_lo), ann64, o());
@@ -901,14 +966,6 @@ fn leg_shl(
     let c0 = b.iconst(0i64, o());
     let c64 = b.iconst(64i64, o());
 
-    // is_large = amt >= 64
-    let is_large = b.icmp(
-        ICmpOp::Ge,
-        Operand::annotated(amt, Annotation::Unsigned(64)),
-        Operand::new(c64),
-        o(),
-    );
-
     // Small shift path: amt < 64
     let lo_small = b.shl(Operand::new(a_lo), Operand::new(amt), ann64, o());
     let hi_shifted = b.shl(Operand::new(a_hi), Operand::new(amt), ann64, o());
@@ -919,11 +976,41 @@ fn leg_shl(
         ann64,
         o(),
     );
-    let hi_small = b.or(Operand::new(hi_shifted), Operand::new(lo_spill), ann64, o());
+    // When amt=0, comp=64 and x86 masks 64-bit shifts mod 64, so
+    // `a_lo >> 64` becomes `a_lo >> 0 = a_lo` instead of 0.
+    // Zero out the spill when amt=0.
+    let is_nonzero = b.icmp(
+        ICmpOp::Ne,
+        Operand::annotated(amt, Annotation::Unsigned(64)),
+        Operand::new(c0),
+        o(),
+    );
+    let lo_spill_safe = b.select(
+        Operand::new(is_nonzero),
+        Operand::new(lo_spill),
+        Operand::new(c0),
+        Type::Int,
+        o(),
+    );
+    let hi_small = b.or(
+        Operand::new(hi_shifted),
+        Operand::new(lo_spill_safe),
+        ann64,
+        o(),
+    );
 
     // Large shift path: amt >= 64
     let amt_minus_64 = b.sub(Operand::new(amt), Operand::new(c64), ann64, o());
     let hi_large = b.shl(Operand::new(a_lo), Operand::new(amt_minus_64), ann64, o());
+
+    // Emit is_large immediately before the selects so no arithmetic
+    // instructions clobber FLAGS between the icmp and CMOVcc.
+    let is_large = b.icmp(
+        ICmpOp::Ge,
+        Operand::annotated(amt, Annotation::Unsigned(64)),
+        Operand::new(c64),
+        o(),
+    );
 
     // Select between paths.
     let lo = b.select(
@@ -964,13 +1051,6 @@ fn leg_shr(
     let c0 = b.iconst(0i64, o());
     let c64 = b.iconst(64i64, o());
 
-    let is_large = b.icmp(
-        ICmpOp::Ge,
-        Operand::annotated(amt, Annotation::Unsigned(64)),
-        Operand::new(c64),
-        o(),
-    );
-
     // For the hi half, use signed or unsigned shift.
     let hi_ann = if signed {
         Annotation::Signed(64)
@@ -982,7 +1062,7 @@ fn leg_shr(
     let hi_small = b.shr(
         Operand::annotated(a_hi, hi_ann),
         Operand::new(amt),
-        ann64,
+        None,
         o(),
     );
     let lo_shifted = b.shr(
@@ -993,14 +1073,35 @@ fn leg_shr(
     );
     let comp = b.sub(Operand::new(c64), Operand::new(amt), ann64, o());
     let hi_spill = b.shl(Operand::new(a_hi), Operand::new(comp), ann64, o());
-    let lo_small = b.or(Operand::new(lo_shifted), Operand::new(hi_spill), ann64, o());
+    // When amt=0, comp=64 and x86 masks 64-bit shifts mod 64, so
+    // `a_hi << 64` becomes `a_hi << 0 = a_hi` instead of 0.
+    // Zero out the spill when amt=0.
+    let is_nonzero = b.icmp(
+        ICmpOp::Ne,
+        Operand::annotated(amt, Annotation::Unsigned(64)),
+        Operand::new(c0),
+        o(),
+    );
+    let hi_spill_safe = b.select(
+        Operand::new(is_nonzero),
+        Operand::new(hi_spill),
+        Operand::new(c0),
+        Type::Int,
+        o(),
+    );
+    let lo_small = b.or(
+        Operand::new(lo_shifted),
+        Operand::new(hi_spill_safe),
+        ann64,
+        o(),
+    );
 
     // Large shift path: amt >= 64
     let amt_minus_64 = b.sub(Operand::new(amt), Operand::new(c64), ann64, o());
     let lo_large = b.shr(
         Operand::annotated(a_hi, hi_ann),
         Operand::new(amt_minus_64),
-        ann64,
+        None,
         o(),
     );
     // hi_large = 0 for unsigned, sign-fill for signed
@@ -1009,12 +1110,21 @@ fn leg_shr(
         b.shr(
             Operand::annotated(a_hi, Annotation::Signed(64)),
             Operand::new(c63),
-            ann64,
+            None,
             o(),
         )
     } else {
         c0
     };
+
+    // Emit is_large immediately before the selects so no arithmetic
+    // instructions clobber FLAGS between the icmp and CMOVcc.
+    let is_large = b.icmp(
+        ICmpOp::Ge,
+        Operand::annotated(amt, Annotation::Unsigned(64)),
+        Operand::new(c64),
+        o(),
+    );
 
     let lo = b.select(
         Operand::new(is_large),
@@ -1170,7 +1280,7 @@ fn leg_sext_128(s: &mut State, b: &mut Builder, old_vref: ValueRef, val: &Operan
     let hi = b.shr(
         Operand::annotated(lo, Annotation::Signed(64)),
         Operand::new(c63),
-        Some(Annotation::Unsigned(64)),
+        None,
         o(),
     );
     s.vmap.set(old_vref, Mapped::Pair(lo, hi));
@@ -1253,7 +1363,15 @@ fn leg_ret(
 ) {
     let m = s.vmap.one(mem.value);
     if let Some(rv) = val {
-        let (lo, hi) = s.vmap.pair(rv.value);
+        // If the return value is wide (Pair mapping), split into (lo, hi).
+        // Otherwise the value fits in 64 bits — use it as lo with hi = 0.
+        let (lo, hi) = if is_wide(s, rv.value) {
+            s.vmap.pair(rv.value)
+        } else {
+            let lo = s.vmap.one(rv.value);
+            let hi = b.iconst(0i64, o());
+            (lo, hi)
+        };
         // Emit a move for the hi half; record it in metadata so isel
         // knows to place it in RDX.
         let hi_idx = b.iconst(0i64, o()); // placeholder; we overwrite below
@@ -1302,12 +1420,20 @@ fn leg_call(
             let (lo, hi) = s.vmap.pair(arg.value);
             new_args.push(Operand::annotated(lo, Annotation::Unsigned(64)));
             new_args.push(Operand::annotated(hi, Annotation::Unsigned(64)));
+        } else if is_128(arg.annotation.as_ref()) {
+            // The value fits in 64 bits (e.g. a small u128 constant) but
+            // the callee expects a 128-bit parameter.  Split into (lo, hi=0).
+            let lo = remap_op(s, arg);
+            let hi = b.iconst(0i64, o());
+            new_args.push(Operand::annotated(lo.value, Annotation::Unsigned(64)));
+            new_args.push(Operand::annotated(hi, Annotation::Unsigned(64)));
         } else {
             new_args.push(remap_op(s, arg));
         }
     }
 
-    let wide_ret = is_128(inst.result_annotation.as_ref());
+    let wide_ret = is_128(inst.result_annotation.as_ref())
+        || s.old_meta.wide_return_calls.contains(&old_vref.index());
     let ret_ty = if wide_ret {
         Type::Int
     } else {
@@ -1344,6 +1470,33 @@ fn leg_call(
     } else if let Some(data) = data_out {
         let old_sec = ValueRef::inst_secondary_result(old_vref.index());
         s.vmap.set(old_sec, Mapped::One(data));
+
+        // Transfer secondary return (RDX) metadata for non-wide calls.
+        // When legalization runs on a function that has i128 values, calls
+        // to functions returning 16-byte structs (e.g. fmt::Arguments) also
+        // get new instruction indices.  Without transferring the metadata,
+        // isel won't know to capture RDX after the call.
+        let old_call_idx = old_vref.index();
+        if s.old_meta.call_has_ret2.contains(&old_call_idx) {
+            let new_call_idx = mem_out.index();
+            s.meta.mark_call_secondary_return(new_call_idx);
+
+            // Create a new RDX capture placeholder (same pattern as codegen).
+            let rdx_capture = b.iconst(0i64, o());
+            s.meta
+                .mark_secondary_return_capture(rdx_capture.index(), new_call_idx);
+
+            // Find the old RDX capture instruction for this call and record
+            // the mapping so legalize_inst can remap uses of it.
+            for (&old_cap_idx, &old_target_call) in &s.old_meta.rdx_captures {
+                if old_target_call == old_call_idx {
+                    let old_cap_vref = ValueRef::inst_result(old_cap_idx);
+                    s.vmap.set(old_cap_vref, Mapped::One(rdx_capture));
+                    s.rdx_capture_remap.insert(old_cap_idx, rdx_capture);
+                    break;
+                }
+            }
+        }
     }
 }
 

@@ -58,11 +58,14 @@ const CALLEE_SAVED_REGS: [PReg; 5] = [
 ];
 
 /// X86-64 ABI metadata tracking secondary return register (RDX) usage.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct X86AbiMetadata {
     pub rdx_captures: HashMap<u32, u32>,
     pub rdx_moves: HashMap<u32, u32>,
     pub call_has_ret2: HashSet<u32>,
+    /// Call instruction indices whose return value is i128/u128 (needs
+    /// legalization into a lo/hi pair).
+    pub wide_return_calls: HashSet<u32>,
 }
 
 impl AbiMetadata for X86AbiMetadata {
@@ -76,6 +79,10 @@ impl AbiMetadata for X86AbiMetadata {
 
     fn mark_secondary_return_move(&mut self, inst_idx: u32, source_idx: u32) {
         self.rdx_moves.insert(inst_idx, source_idx);
+    }
+
+    fn mark_wide_return_call(&mut self, call_idx: u32) {
+        self.wide_return_calls.insert(call_idx);
     }
 }
 
@@ -299,6 +306,17 @@ fn rewrite_inst(inst: &VInst, assignments: &[PReg]) -> PInst {
         MInst::RorRCL { size, dst } => MInst::RorRCL {
             size: *size,
             dst: r(dst),
+        },
+        MInst::MovRR2 {
+            dst1,
+            src1,
+            dst2,
+            src2,
+        } => MInst::MovRR2 {
+            dst1: r(dst1),
+            src1: r(src1),
+            dst2: r(dst2),
+            src2: r(src2),
         },
         MInst::Ud2 => MInst::Ud2,
         MInst::FpBinOp { op, dst, lhs, rhs } => MInst::FpBinOp {

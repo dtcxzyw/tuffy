@@ -445,10 +445,20 @@ pub fn translate_function<'tcx>(
                             .builder
                             .stack_slot(std::cmp::max(size as u32, 1), Origin::synthetic());
                         if let Some(prev) = ctx.locals.get(local) {
+                            // i128/u128 are single IR values that need a
+                            // full-width store (16 bytes).  Other large types
+                            // (fat pointers) store only the data-pointer half
+                            // here; their metadata is handled below via
+                            // fat_locals.
+                            let store_bytes = if is_i128_or_u128(ty) {
+                                size as u32
+                            } else {
+                                std::cmp::min(size as u32, 8)
+                            };
                             ctx.current_mem = ctx.builder.store(
                                 prev.into(),
                                 slot.into(),
-                                std::cmp::min(size as u32, 8),
+                                store_bytes,
                                 ctx.current_mem.into(),
                                 Origin::synthetic(),
                             );

@@ -913,8 +913,64 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     return Some(self.builder.iconst(0, Origin::synthetic()));
                 }
 
+                // Detect 128-bit integer operands early so we can load from
+                // stack slot pointers before coercing to int.
+                let lhs_mir_ty = match lhs {
+                    Operand::Copy(p) | Operand::Move(p) => {
+                        self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty)
+                    }
+                    Operand::Constant(c) => self.monomorphize(c.ty()),
+                    _ => self.tcx.types.i32,
+                };
+                let rhs_mir_ty = match rhs {
+                    Operand::Copy(p) | Operand::Move(p) => {
+                        self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty)
+                    }
+                    Operand::Constant(c) => self.monomorphize(c.ty()),
+                    _ => self.tcx.types.i32,
+                };
+
+                // Recompute annotations from the fully-resolved MIR types.
+                // `operand_annotation` uses the local's type which misses
+                // projections (e.g. `RET.fld1` where RET is a struct but
+                // fld1 is i128).  The MIR types computed above resolve
+                // through projections correctly.
+                let l_ann = translate_annotation(lhs_mir_ty).or(l_ann);
+                let r_ann = translate_annotation(rhs_mir_ty).or(r_ann);
+
                 // Coerce pointer operands to integers — needed for both
                 // arithmetic/bitwise ops and comparisons.
+                // For i128/u128 operands, translate_operand returns a stack
+                // slot address (Ptr).  Load the actual value instead of
+                // converting the address to an integer.
+                let mut l_raw = l_raw;
+                let mut r_raw = r_raw;
+                if is_i128_or_u128(lhs_mir_ty) {
+                    let bytes = type_size(self.tcx, lhs_mir_ty).unwrap_or(16) as u32;
+                    if matches!(self.builder.value_type(l_raw), Some(Type::Ptr(_))) {
+                        l_raw = self.builder.load(
+                            l_raw.into(),
+                            bytes,
+                            Type::Int,
+                            self.current_mem.into(),
+                            None,
+                            Origin::synthetic(),
+                        );
+                    }
+                }
+                if is_i128_or_u128(rhs_mir_ty) {
+                    let bytes = type_size(self.tcx, rhs_mir_ty).unwrap_or(16) as u32;
+                    if matches!(self.builder.value_type(r_raw), Some(Type::Ptr(_))) {
+                        r_raw = self.builder.load(
+                            r_raw.into(),
+                            bytes,
+                            Type::Int,
+                            self.current_mem.into(),
+                            None,
+                            Origin::synthetic(),
+                        );
+                    }
+                }
                 let l = self.coerce_to_int(l_raw);
                 let r = self.coerce_to_int(r_raw);
                 let l_op = IrOperand {
@@ -946,17 +1002,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         _ => self.tcx.types.i32,
                     };
                     mir_ty.is_floating_point()
-                };
-
-                // Detect 128-bit integer operands for multi-word operations.
-                // Use the projected type (p.ty()) so that struct field
-                // accesses like `_6.fld2` where fld2 is u128 are detected.
-                let lhs_mir_ty = match lhs {
-                    Operand::Copy(p) | Operand::Move(p) => {
-                        self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty)
-                    }
-                    Operand::Constant(c) => self.monomorphize(c.ty()),
-                    _ => self.tcx.types.i32,
                 };
 
                 let val = match op {
@@ -1050,6 +1095,40 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         };
                         self.builder
                             .shr(l_op, masked_op, res_ann, Origin::synthetic())
+                    }
+                    BinOp::Div if is_i128_or_u128(lhs_mir_ty) => {
+                        let signed = matches!(lhs_mir_ty.kind(), ty::Int(_));
+                        let name = if signed { "__divti3" } else { "__udivti3" };
+                        let sym_id = self.symbols.intern(name);
+                        let callee = self.builder.symbol_addr(sym_id, Origin::synthetic());
+                        let (call_mem, call_data) = self.builder.call(
+                            callee.into(),
+                            vec![l_op, r_op],
+                            Type::Int,
+                            self.current_mem.into(),
+                            None,
+                            Origin::synthetic(),
+                        );
+                        self.current_mem = call_mem;
+                        self.abi_metadata.mark_wide_return_call(call_mem.index());
+                        call_data.unwrap_or(call_mem)
+                    }
+                    BinOp::Rem if is_i128_or_u128(lhs_mir_ty) => {
+                        let signed = matches!(lhs_mir_ty.kind(), ty::Int(_));
+                        let name = if signed { "__modti3" } else { "__umodti3" };
+                        let sym_id = self.symbols.intern(name);
+                        let callee = self.builder.symbol_addr(sym_id, Origin::synthetic());
+                        let (call_mem, call_data) = self.builder.call(
+                            callee.into(),
+                            vec![l_op, r_op],
+                            Type::Int,
+                            self.current_mem.into(),
+                            None,
+                            Origin::synthetic(),
+                        );
+                        self.current_mem = call_mem;
+                        self.abi_metadata.mark_wide_return_call(call_mem.index());
+                        call_data.unwrap_or(call_mem)
                     }
                     BinOp::Div => self.builder.div(l_op, r_op, res_ann, Origin::synthetic()),
                     BinOp::Rem => self.builder.rem(l_op, r_op, res_ann, Origin::synthetic()),
@@ -1802,6 +1881,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             Rvalue::UnaryOp(mir::UnOp::PtrMetadata, _) => None,
             Rvalue::UnaryOp(mir::UnOp::Neg, operand) => {
                 let v = self.translate_operand(operand)?;
+                let neg_ann = match operand {
+                    Operand::Copy(p) | Operand::Move(p) => {
+                        let ty = p.ty(&self.mir.local_decls, self.tcx).ty;
+                        translate_annotation(self.monomorphize(ty))
+                    }
+                    Operand::Constant(c) => translate_annotation(self.monomorphize(c.ty())),
+                    _ => None,
+                };
                 // Coerce Bool/Ptr to Int; reject unsupported types (floats → Unit).
                 let v = self.coerce_to_int(v);
                 if !matches!(self.builder.value_type(v), Some(Type::Int)) {
@@ -1810,7 +1897,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let zero = self.builder.iconst(0, Origin::synthetic());
                 Some(
                     self.builder
-                        .sub(zero.into(), v.into(), None, Origin::synthetic()),
+                        .sub(zero.into(), v.into(), neg_ann, Origin::synthetic()),
                 )
             }
             Rvalue::UnaryOp(mir::UnOp::Not, operand) => {
@@ -1825,6 +1912,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 };
                 // When translate_operand returns a pointer for large types
                 // (e.g. u128 tuple fields), load the value before operating.
+                let not_ann = mir_ty.and_then(|t| translate_annotation(t));
                 if matches!(self.builder.value_type(v), Some(Type::Ptr(_))) {
                     let size = mir_ty
                         .and_then(|t| type_size(self.tcx, t))
@@ -1835,7 +1923,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             size,
                             Type::Int,
                             self.current_mem.into(),
-                            None,
+                            not_ann,
                             Origin::synthetic(),
                         );
                     }
@@ -1866,7 +1954,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             let ones = self.builder.iconst(-1, Origin::synthetic());
                             Some(
                                 self.builder
-                                    .xor(v.into(), ones.into(), None, Origin::synthetic()),
+                                    .xor(v.into(), ones.into(), not_ann, Origin::synthetic()),
                             )
                         }
                     }

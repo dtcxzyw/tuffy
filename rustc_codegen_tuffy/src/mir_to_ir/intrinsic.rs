@@ -98,10 +98,22 @@ pub(super) fn translate_intrinsic<'tcx>(
                 if byte_size <= 1 {
                     locals.set(destination_local, v);
                 } else {
-                    // Emit a single bswap; the backend legalization pass
-                    // handles i128 (byte_size == 16) by splitting into two
-                    // 8-byte bswaps with swapped order.
-                    let result = builder.bswap(v.into(), byte_size as u32, Origin::synthetic());
+                    // For large types (e.g. u128), translate_operand returns
+                    // a stack slot pointer.  Load the value before bswap.
+                    let val = if matches!(builder.value_type(v), Some(Type::Ptr(_))) {
+                        builder.load(
+                            v.into(),
+                            byte_size as u32,
+                            Type::Int,
+                            current_mem.into(),
+                            None,
+                            Origin::synthetic(),
+                        )
+                    } else {
+                        v
+                    };
+                    let result =
+                        builder.bswap(val.into(), byte_size as u32, Origin::synthetic());
                     locals.set(destination_local, result);
                 }
             }

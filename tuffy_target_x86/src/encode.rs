@@ -231,6 +231,14 @@ fn encode_inst(
         MInst::RorRCL { size, dst } => {
             encode_shift_cl(1, *size, *dst, buf);
         }
+        MInst::MovRR2 {
+            dst1,
+            src1,
+            dst2,
+            src2,
+        } => {
+            encode_mov_rr2(*dst1, *src1, *dst2, *src2, buf);
+        }
         MInst::FpBinOp { op, dst, lhs, rhs } => {
             encode_fp_binop(*op, *dst, *lhs, *rhs, buf);
         }
@@ -275,6 +283,41 @@ fn emit_rex_and_opcode(size: OpSize, reg: Gpr, rm: Gpr, opcode: u8, buf: &mut Ve
 
 fn encode_mov_rr(size: OpSize, dst: Gpr, src: Gpr, buf: &mut Vec<u8>) {
     emit_rex_and_opcode(size, src, dst, 0x89, buf);
+}
+
+/// Parallel copy of two register pairs, handling all ordering cases.
+fn encode_mov_rr2(dst1: Gpr, src1: Gpr, dst2: Gpr, src2: Gpr, buf: &mut Vec<u8>) {
+    let need1 = dst1 != src1;
+    let need2 = dst2 != src2;
+    if !need1 && !need2 {
+        // Both are no-ops.
+        return;
+    }
+    if !need1 {
+        encode_mov_rr(OpSize::S64, dst2, src2, buf);
+        return;
+    }
+    if !need2 {
+        encode_mov_rr(OpSize::S64, dst1, src1, buf);
+        return;
+    }
+    if dst1 == src2 && dst2 == src1 {
+        // Cross-assignment: use xchg to swap.
+        let w = true; // 64-bit
+        if let Some(r) = rex(w, dst1, dst2) {
+            buf.push(r);
+        }
+        buf.push(0x87);
+        buf.push(modrm(dst1.encoding(), dst2.encoding()));
+    } else if dst1 != src2 {
+        // Safe to write dst1 first — it doesn't clobber src2.
+        encode_mov_rr(OpSize::S64, dst1, src1, buf);
+        encode_mov_rr(OpSize::S64, dst2, src2, buf);
+    } else {
+        // dst1 == src2, so write dst2 first to preserve src2's value.
+        encode_mov_rr(OpSize::S64, dst2, src2, buf);
+        encode_mov_rr(OpSize::S64, dst1, src1, buf);
+    }
 }
 
 fn encode_alu_rr(opcode: u8, size: OpSize, dst: Gpr, src: Gpr, buf: &mut Vec<u8>) {

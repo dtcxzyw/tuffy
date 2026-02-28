@@ -23,6 +23,10 @@ pub trait AbiMetadata: Default {
     /// Mark an IR instruction as moving a value into the secondary return
     /// register before a return (e.g., moving into RDX on x86-64).
     fn mark_secondary_return_move(&mut self, inst_idx: u32, source_idx: u32);
+
+    /// Mark a call instruction as returning an i128/u128 value that needs
+    /// legalization into a lo/hi register pair.
+    fn mark_wide_return_call(&mut self, call_idx: u32);
 }
 
 /// Allocator stub definition: a pair of (export_name, target_name).

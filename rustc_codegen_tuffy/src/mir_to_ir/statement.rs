@@ -397,12 +397,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                     );
                                                 }
                                             } else {
-                                                // No source slot — store only the bytes
-                                                // we actually have (8 for an Int value).
+                                                // No source slot — store the full
+                                                // type width (including 16 for i128/u128).
                                                 self.current_mem = self.builder.store(
                                                     val.into(),
                                                     slot.into(),
-                                                    std::cmp::min(bytes, 8),
+                                                    bytes,
                                                     self.current_mem.into(),
                                                     Origin::synthetic(),
                                                 );
@@ -527,6 +527,79 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             };
                             if mark_as_stack {
                                 self.stack_locals.mark(place.local);
+                                // When the source is a projected field (e.g.
+                                // `_6 = _5.1`), val is a pointer INTO another
+                                // local's stack slot.  If that field is later
+                                // overwritten, _6 would see the new value
+                                // instead of the copied one.  Allocate a
+                                // private slot and copy the data.
+                                let needs_copy = matches!(rvalue,
+                                    Rvalue::Use(Operand::Copy(src) | Operand::Move(src))
+                                        if !src.projection.is_empty()
+                                );
+                                if needs_copy {
+                                    let dest_ty = self.monomorphize(
+                                        self.mir.local_decls[place.local].ty,
+                                    );
+                                    let sz = type_size(self.tcx, dest_ty)
+                                        .unwrap_or(8) as u32;
+                                    let new_slot = self.builder.stack_slot(
+                                        std::cmp::max(sz, 1),
+                                        Origin::synthetic(),
+                                    );
+                                    let num_words = (sz as u64).div_ceil(8);
+                                    for i in 0..num_words {
+                                        let off = i * 8;
+                                        let chunk = std::cmp::min(
+                                            8,
+                                            sz as u64 - off,
+                                        ) as u32;
+                                        let src_addr = if off == 0 {
+                                            val
+                                        } else {
+                                            let o = self.builder.iconst(
+                                                off as i64,
+                                                Origin::synthetic(),
+                                            );
+                                            self.builder.ptradd(
+                                                val.into(),
+                                                o.into(),
+                                                0,
+                                                Origin::synthetic(),
+                                            )
+                                        };
+                                        let word = self.builder.load(
+                                            src_addr.into(),
+                                            chunk,
+                                            Type::Int,
+                                            self.current_mem.into(),
+                                            None,
+                                            Origin::synthetic(),
+                                        );
+                                        let dst_addr = if off == 0 {
+                                            new_slot
+                                        } else {
+                                            let o = self.builder.iconst(
+                                                off as i64,
+                                                Origin::synthetic(),
+                                            );
+                                            self.builder.ptradd(
+                                                new_slot.into(),
+                                                o.into(),
+                                                0,
+                                                Origin::synthetic(),
+                                            )
+                                        };
+                                        self.current_mem = self.builder.store(
+                                            word.into(),
+                                            dst_addr.into(),
+                                            chunk,
+                                            self.current_mem.into(),
+                                            Origin::synthetic(),
+                                        );
+                                    }
+                                    self.locals.set(place.local, new_slot);
+                                }
                             }
                         }
                     } else {
@@ -651,6 +724,22 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     );
                                 }
                             } else if bytes > 8 {
+                                // Check if the rvalue's source type is also >8 bytes
+                                // (e.g. u128 * u128 produces a 128-bit value).
+                                // In that case, emit a full-width store so the
+                                // legalization pass can split it correctly.
+                                let rvalue_ty = rvalue.ty(&self.mir.local_decls, self.tcx);
+                                let rvalue_ty = self.monomorphize(rvalue_ty);
+                                let src_bytes = type_size(self.tcx, rvalue_ty).unwrap_or(8);
+                                if src_bytes > 8 {
+                                    self.current_mem = self.builder.store(
+                                        val.into(),
+                                        addr.into(),
+                                        bytes,
+                                        self.current_mem.into(),
+                                        Origin::synthetic(),
+                                    );
+                                } else {
                                 // Scalar Int value being stored to a >8-byte
                                 // projected field (e.g. u16 as u128 → _2.0).
                                 // Store low word, then compute and store high word.
@@ -702,6 +791,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     self.current_mem.into(),
                                     Origin::synthetic(),
                                 );
+                                }
                             } else if bytes > 0 {
                                 self.current_mem = self.builder.store(
                                     val.into(),

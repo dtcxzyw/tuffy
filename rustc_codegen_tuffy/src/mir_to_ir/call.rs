@@ -4,8 +4,8 @@ use rustc_middle::mir::{self, BasicBlock, Operand, Place};
 use rustc_middle::ty::{self, Instance, TyCtxt, TypeVisitableExt};
 use rustc_span::source_map::Spanned;
 
-use tuffy_ir::instruction::Origin;
-use tuffy_ir::types::Type;
+use tuffy_ir::instruction::{Operand as IrOperand, Origin};
+use tuffy_ir::types::{Annotation, Type};
 use tuffy_ir::value::ValueRef;
 
 use super::ctx::TranslationCtx;
@@ -904,7 +904,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     if const_decomposed {
                         // Already pushed both words — skip normal arg handling.
                     } else {
-                        ir_args.push(v.into());
+                        // Annotate i128/u128 arguments so the legalization
+                        // pass knows to split them into (lo, hi) even when
+                        // the value fits in 64 bits (e.g. small constants).
+                        if is_i128_or_u128(arg_ty) {
+                            let ann = translate_annotation(arg_ty).unwrap_or(Annotation::Unsigned(128));
+                            ir_args.push(IrOperand::annotated(v, ann));
+                        } else {
+                            ir_args.push(v.into());
+                        }
                         // If this arg is a Copy/Move of a fat local, also pass the high part.
                         // Exception: for virtual dispatch, skip the vtable pointer on the
                         // first argument (self) — the actual method only takes the data ptr.
@@ -1034,6 +1042,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             Origin::synthetic(),
         );
         self.current_mem = call_mem;
+        // Mark calls returning i128/u128 so the legalization pass can split
+        // the return value into a lo/hi register pair.
+        if is_i128_or_u128(dest_ty) {
+            self.abi_metadata.mark_wide_return_call(call_mem.index());
+        }
         // For non-void calls, call_data is Some(data_vref).
         // For void calls, call_data is None — use a dummy zero.
         let call_vref = call_data.unwrap_or_else(|| self.builder.iconst(0, Origin::synthetic()));

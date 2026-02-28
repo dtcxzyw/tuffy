@@ -273,13 +273,48 @@ fn select_inst(
         }
 
         Op::Ret(val, _mem) => {
+            // If this ret has a secondary return value (hi half of i128),
+            // we need to place lo in RAX and hi in RDX.  We must be
+            // careful about ordering to avoid clobbering: read both
+            // source registers first, then write to the fixed regs.
+            let hi_src = if let Some(src_idx) = rdx_moves.get(&vref.index()) {
+                let src_vref = ValueRef::inst_result(*src_idx);
+                Some(ctx.regs.get(src_vref)?)
+            } else {
+                None
+            };
             if let Some(v) = val {
-                let src = ctx.ensure_in_reg(v.value)?;
+                let lo_src = ctx.ensure_in_reg(v.value)?;
+                // Save hi to a temp before we touch RAX/RDX.
+                let hi_tmp = hi_src.map(|h| {
+                    let tmp = ctx.alloc.alloc();
+                    ctx.out.push(MInst::MovRR {
+                        size: OpSize::S64,
+                        dst: tmp,
+                        src: h,
+                    });
+                    tmp
+                });
                 let rax = ctx.alloc.alloc_fixed(Gpr::Rax.to_preg());
                 ctx.out.push(MInst::MovRR {
                     size: OpSize::S64,
                     dst: rax,
-                    src,
+                    src: lo_src,
+                });
+                if let Some(tmp) = hi_tmp {
+                    let rdx = ctx.alloc.alloc_fixed(Gpr::Rdx.to_preg());
+                    ctx.out.push(MInst::MovRR {
+                        size: OpSize::S64,
+                        dst: rdx,
+                        src: tmp,
+                    });
+                }
+            } else if let Some(h) = hi_src {
+                let rdx = ctx.alloc.alloc_fixed(Gpr::Rdx.to_preg());
+                ctx.out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst: rdx,
+                    src: h,
                 });
             }
             ctx.out.push(MInst::Ret);
@@ -700,28 +735,45 @@ fn select_call(
         });
     }
 
-    // Copy the rax-fixed vreg into an unconstrained vreg for downstream use.
-    if let Some(rax) = ret_vreg {
-        let dst = ctx.alloc.alloc();
-        ctx.out.push(MInst::MovRR {
-            size: OpSize::S64,
-            dst,
-            src: rax,
-        });
-        let secondary = ValueRef::inst_secondary_result(vref.index());
-        ctx.regs.assign(secondary, dst);
-    }
-
-    // Copy the rdx-fixed vreg into an unconstrained vreg for downstream use.
-    // The rdx_captures iconst handler will look this up later.
-    if let Some(rdx) = ret2_vreg {
-        let dst = ctx.alloc.alloc();
-        ctx.out.push(MInst::MovRR {
-            size: OpSize::S64,
-            dst,
-            src: rdx,
-        });
-        ctx.rdx_captured.insert(vref.index(), dst);
+    // Copy return values from fixed registers to unconstrained vregs.
+    // When both RAX and RDX are live (i128/u128 return), use MovRR2 to
+    // copy both as a single pseudo-instruction. This prevents the register
+    // allocator from assigning one copy's destination to the other's source
+    // register, which would clobber the value before it's read.
+    match (ret_vreg, ret2_vreg) {
+        (Some(rax), Some(rdx)) => {
+            let dst_rax = ctx.alloc.alloc();
+            let dst_rdx = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR2 {
+                dst1: dst_rax,
+                src1: rax,
+                dst2: dst_rdx,
+                src2: rdx,
+            });
+            ctx.rdx_captured.insert(vref.index(), dst_rdx);
+            let secondary = ValueRef::inst_secondary_result(vref.index());
+            ctx.regs.assign(secondary, dst_rax);
+        }
+        (Some(rax), None) => {
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst,
+                src: rax,
+            });
+            let secondary = ValueRef::inst_secondary_result(vref.index());
+            ctx.regs.assign(secondary, dst);
+        }
+        (None, Some(rdx)) => {
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst,
+                src: rdx,
+            });
+            ctx.rdx_captured.insert(vref.index(), dst);
+        }
+        (None, None) => {}
     }
 
     // Clean up stack arguments after the call.

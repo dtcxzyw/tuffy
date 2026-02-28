@@ -153,6 +153,18 @@ impl RegAllocInst for VInst {
                 ops.push(def_op(*dst));
                 ops.push(use_op(*src));
             }
+            // Parallel copy of two register pairs (used for i128 call returns).
+            MInst::MovRR2 {
+                dst1,
+                src1,
+                dst2,
+                src2,
+            } => {
+                ops.push(def_op(*dst1));
+                ops.push(use_op(*src1));
+                ops.push(def_op(*dst2));
+                ops.push(use_op(*src2));
+            }
             // Indirect call: callee register is a use operand
             MInst::CallReg { callee, ret, ret2 } => {
                 ops.push(use_op(*callee));

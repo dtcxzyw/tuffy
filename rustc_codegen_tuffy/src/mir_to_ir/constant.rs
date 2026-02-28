@@ -26,12 +26,29 @@ pub(super) fn translate_int_to_int_cast(
     if dst_bits > src_bits {
         // Widening cast.
         if dst_bits > 64 {
-            // Widening to 128 bits: emit sext/zext and let the backend
-            // legalization pass handle the split into 64-bit pairs.
-            if is_signed_int(src_ty) {
-                Some(builder.sext(val.into(), dst_bits, Origin::synthetic()))
+            // Widening to 128 bits: the legalization pass's sext/zext
+            // handlers assume the input is already 64-bit.  First widen
+            // narrow sources to 64 bits, then emit the 128-bit extend.
+            let val64 = if src_bits < 64 {
+                if is_signed_int(src_ty) {
+                    let shift_amt = 64 - src_bits;
+                    let sv = builder.iconst(shift_amt as i64, Origin::synthetic());
+                    let shifted = builder.shl(val.into(), sv.into(), None, Origin::synthetic());
+                    let sv2 = builder.iconst(shift_amt as i64, Origin::synthetic());
+                    let shifted_op = IrOperand::annotated(shifted, Annotation::Signed(64));
+                    builder.shr(shifted_op, sv2.into(), None, Origin::synthetic())
+                } else {
+                    let mask = (BigInt::from(1u64) << src_bits) - 1;
+                    let mask_val = builder.iconst(mask, Origin::synthetic());
+                    builder.and(val.into(), mask_val.into(), None, Origin::synthetic())
+                }
             } else {
-                Some(builder.zext(val.into(), dst_bits, Origin::synthetic()))
+                val
+            };
+            if is_signed_int(src_ty) {
+                Some(builder.sext(val64.into(), dst_bits, Origin::synthetic()))
+            } else {
+                Some(builder.zext(val64.into(), dst_bits, Origin::synthetic()))
             }
         } else if is_signed_int(src_ty) && src_bits < dst_bits {
             // Sign-extend: shl by (dst - src), then arithmetic shr.
