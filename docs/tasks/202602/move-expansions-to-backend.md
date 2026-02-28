@@ -1,8 +1,8 @@
 # Move frontend expansion code to backend legalization
 
-- Status: Draft
+- Status: Completed
 - Created: 2026-02-28
-- Completed: N/A
+- Completed: 2026-02-28
 - Parent: N/A
 
 ## Description
@@ -14,32 +14,35 @@ Expanding in the frontend:
 - Bloats the IR with implementation details before optimization
 - Duplicates logic that the backend must handle anyway for other sources
 
-## Functions to remove from mir_to_ir.rs
+## Completed
 
-| Function | Lines | What it expands |
-|----------|-------|-----------------|
-| `emit_u128_to_float` | 948–1027 | i128/u128 → float via abs/negate/select sequence |
-| `emit_u64_pair_to_float` | 1029–1100 | Two-register pair → float conversion |
-| `float_to_orderable` | 1102–1120 | Float → orderable int via sign-bit XOR trick |
-| `emit_bswap8` | 7569–7585 | 8-byte bswap via shift/mask loop |
+Five new IR opcodes added and wired end-to-end (Lean semantics → IR → frontend → x86 backend):
 
-## Intrinsic expansions in translate_intrinsic to simplify
+| Opcode | IR form | x86 lowering |
+|--------|---------|--------------|
+| `Bswap` | `bswap.N val` | Native BSWAP (4/8 bytes), shift/mask (2 bytes) |
+| `RotateLeft` | `rotate_left.N val, amt` | MOV to CL + ROL |
+| `RotateRight` | `rotate_right.N val, amt` | MOV to CL + ROR |
+| `SaturatingAdd` | `saturating_add.N lhs, rhs` | ADD + CMOV on carry |
+| `SaturatingSub` | `saturating_sub.N lhs, rhs` | SUB + CMOV on borrow |
 
-| Intrinsic | Lines | Current expansion |
-|-----------|-------|-------------------|
-| `bswap` (i128) | 7663–7730 | Two-word load, bswap each, store swapped |
-| `rotate_left/right` | 7752–7790 | `(x << a) \| (x >> (bits-a))` |
-| `saturating_add` | 7923–7944 | Add + select on overflow |
-| `saturating_sub` | 7945–7978 | Sub + select on underflow |
+Commits:
+- `feat(lean): add bswap, rotate, and saturating arithmetic semantics`
+- `feat(tuffy_ir): add bswap, rotate, and saturating arithmetic opcodes`
+- `refactor(rustc_codegen_tuffy): emit bswap/rotate/saturating as single IR opcodes`
+- `feat(tuffy_target_x86): add isel and encoding for bswap, rotate, saturating ops`
 
-## Proposed approach
+## Deferred
 
-1. Emit these as single IR instructions (e.g. `bswap`, `rotate`, `saturating_add`, `uitofp`/`sitofp` for i128)
-2. Add a backend legalization pass that expands them to machine-level sequences
-3. This pairs naturally with the type legalization task — i128 operations and their expansions belong together
+| Function | Reason |
+|----------|--------|
+| `emit_u128_to_float` / `emit_u64_pair_to_float` | Tied to i128 type legalization |
+| `bswap` for i128 | Tied to i128 splitting (uses `builder.bswap` per word already) |
+| `float_to_orderable` | Pure integer arithmetic trick, not a semantic operation |
 
 ## Affected Modules
 
-- `rustc_codegen_tuffy/src/mir_to_ir.rs` — remove expansion functions, emit single IR ops
-- `tuffy_ir/` — ensure IR opcodes cover bswap, rotate, saturating arithmetic
-- Backend (new legalization pass) — expand to machine sequences
+- `lean/TuffyLean/IR/Semantics.lean` — formal semantics for 5 new ops
+- `tuffy_ir/src/{instruction,builder,display,verifier}.rs` — IR definition
+- `rustc_codegen_tuffy/src/mir_to_ir/intrinsic.rs` — emit single opcodes
+- `tuffy_target_x86/src/{inst,isel_gen,regalloc_impl,backend,encode}.rs` — x86 backend
