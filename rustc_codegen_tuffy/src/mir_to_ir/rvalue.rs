@@ -264,8 +264,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     };
                 }
                 _ => {
-                    // OpaqueCast, UnwrapUnsafeBinder — not yet handled.
-                    return None;
+                    unimplemented!("MIR place projection: {:?}", elem);
                 }
             }
         }
@@ -838,7 +837,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 };
 
                 // Float arithmetic: bitcast Int→Float, dispatch to fadd/fsub/fmul/fdiv, bitcast back.
-                if let Some(fty) = float_ty {
+                if let Some(ref fty) = float_ty {
                     if matches!(
                         op,
                         BinOp::Add
@@ -868,35 +867,35 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 l_f.into(),
                                 r_f.into(),
                                 flags,
-                                fty,
+                                fty.clone(),
                                 Origin::synthetic(),
                             ),
                             BinOp::Sub | BinOp::SubUnchecked => self.builder.fsub(
                                 l_f.into(),
                                 r_f.into(),
                                 flags,
-                                fty,
+                                fty.clone(),
                                 Origin::synthetic(),
                             ),
                             BinOp::Mul | BinOp::MulUnchecked => self.builder.fmul(
                                 l_f.into(),
                                 r_f.into(),
                                 flags,
-                                fty,
+                                fty.clone(),
                                 Origin::synthetic(),
                             ),
                             BinOp::Rem => self.builder.frem(
                                 l_f.into(),
                                 r_f.into(),
                                 flags,
-                                fty,
+                                fty.clone(),
                                 Origin::synthetic(),
                             ),
                             _ => self.builder.fdiv(
                                 l_f.into(),
                                 r_f.into(),
                                 flags,
-                                fty,
+                                fty.clone(),
                                 Origin::synthetic(),
                             ),
                         };
@@ -1922,7 +1921,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 }
                 None
             }
-            Rvalue::UnaryOp(mir::UnOp::PtrMetadata, _) => None,
+            Rvalue::UnaryOp(mir::UnOp::PtrMetadata, _) => {
+                unimplemented!("MIR rvalue: UnaryOp::PtrMetadata")
+            }
             Rvalue::UnaryOp(mir::UnOp::Neg, operand) => {
                 let v = self.translate_operand(operand)?;
                 let neg_ann = match operand {
@@ -2058,7 +2059,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 self.stack_locals.mark(dest_place.local);
                 Some(slot)
             }
-            _ => None,
+            _ => unimplemented!("MIR rvalue: {:?}", rvalue),
         }
     }
 

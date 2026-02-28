@@ -440,9 +440,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 }
             }
             _ => {
-                // Unhandled terminator kind — emit unreachable so the block
-                // is never empty and the IR verifier stays happy.
-                self.builder.unreachable(Origin::synthetic());
+                unimplemented!("MIR terminator: {:?}", term.kind);
             }
         }
     }

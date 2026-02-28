@@ -429,8 +429,8 @@ pub(super) fn translate_intrinsic<'tcx>(
             true
         }
 
-        // Unhandled intrinsics fall through to normal call path.
-        _ => false,
+        // Unhandled intrinsics must be reported.
+        _ => unimplemented!("MIR intrinsic: {}", name),
     }
 }
 
@@ -892,7 +892,7 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
             Some(new_mem)
         }
 
-        _ => None,
+        _ => unimplemented!("MIR memory intrinsic: {}", name),
     }
 }
 

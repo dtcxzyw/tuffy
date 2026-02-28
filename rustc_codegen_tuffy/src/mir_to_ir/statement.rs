@@ -924,7 +924,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     }
                 }
             }
-            _ => {}
+            _ => {
+                unimplemented!("MIR statement: {:?}", stmt.kind);
+            }
         }
     }
 
