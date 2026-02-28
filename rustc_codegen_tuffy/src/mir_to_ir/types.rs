@@ -5,6 +5,14 @@ use rustc_middle::ty::{self, TyCtxt};
 
 use tuffy_ir::types::{Annotation, Type};
 
+/// Returns true if the type is i128 or u128.
+pub(super) fn is_i128_or_u128(ty: ty::Ty<'_>) -> bool {
+    matches!(
+        ty.kind(),
+        ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
+    )
+}
+
 pub(super) fn translate_ty(ty: ty::Ty<'_>) -> Option<Type> {
     match ty.kind() {
         ty::Bool => Some(Type::Bool),

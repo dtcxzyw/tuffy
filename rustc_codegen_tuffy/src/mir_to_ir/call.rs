@@ -1078,10 +1078,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 );
                 self.fat_locals.set(destination.local, fat_val);
             }
-        } else if dest_size.unwrap_or(0) > 8 {
+        } else if dest_size.unwrap_or(0) > 8 && !is_i128_or_u128(dest_ty) {
             // Two-register return (9-16 bytes): RAX has first word,
             // RDX has second word. Reconstruct into a stack slot so
             // downstream code gets a valid pointer to the struct.
+            // i128/u128 returns are handled by the legalization pass.
             let size = dest_size.unwrap();
             let slot = if let Some(existing) = self.locals.get(destination.local) {
                 if self.stack_locals.is_stack(destination.local) {

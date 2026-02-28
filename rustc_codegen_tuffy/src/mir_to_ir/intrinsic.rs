@@ -25,7 +25,7 @@ pub(super) fn translate_intrinsic<'tcx>(
     locals: &mut LocalMap,
     symbols: &mut SymbolTable,
     current_mem: ValueRef,
-    dest_override: Option<ValueRef>,
+    _dest_override: Option<ValueRef>,
 ) -> bool {
     // Helper: coerce an Int value to Ptr (needed when NonNull<T> or similar
     // #[repr(transparent)] pointer wrappers are loaded as Int).
@@ -97,53 +97,10 @@ pub(super) fn translate_intrinsic<'tcx>(
                     .unwrap_or(8);
                 if byte_size <= 1 {
                     locals.set(destination_local, v);
-                } else if byte_size > 8 {
-                    // i128/u128 bswap: load both 64-bit words, bswap each,
-                    // store in swapped order to the destination slot.
-                    let src = v;
-                    let dst = dest_override.unwrap_or_else(|| {
-                        locals
-                            .get(destination_local)
-                            .expect("i128 local must have a stack slot")
-                    });
-                    let lo = builder.load(
-                        src.into(),
-                        8,
-                        Type::Int,
-                        current_mem.into(),
-                        None,
-                        Origin::synthetic(),
-                    );
-                    let off8 = builder.iconst(8, Origin::synthetic());
-                    let hi_addr = builder.ptradd(src.into(), off8.into(), 0, Origin::synthetic());
-                    let hi = builder.load(
-                        hi_addr.into(),
-                        8,
-                        Type::Int,
-                        current_mem.into(),
-                        None,
-                        Origin::synthetic(),
-                    );
-                    let lo_swapped = builder.bswap(lo.into(), 8, Origin::synthetic());
-                    let hi_swapped = builder.bswap(hi.into(), 8, Origin::synthetic());
-                    // Store in swapped order: bswapped hi → low, bswapped lo → high.
-                    let mem1 = builder.store(
-                        hi_swapped.into(),
-                        dst.into(),
-                        8,
-                        current_mem.into(),
-                        Origin::synthetic(),
-                    );
-                    let off8b = builder.iconst(8, Origin::synthetic());
-                    let dst_hi = builder.ptradd(dst.into(), off8b.into(), 0, Origin::synthetic());
-                    builder.store(
-                        lo_swapped.into(),
-                        dst_hi.into(),
-                        8,
-                        mem1.into(),
-                        Origin::synthetic(),
-                    );
                 } else {
+                    // Emit a single bswap; the backend legalization pass
+                    // handles i128 (byte_size == 16) by splitting into two
+                    // 8-byte bswaps with swapped order.
                     let result = builder.bswap(v.into(), byte_size as u32, Origin::synthetic());
                     locals.set(destination_local, result);
                 }

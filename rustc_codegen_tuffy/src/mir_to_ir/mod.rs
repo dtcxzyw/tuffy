@@ -142,7 +142,14 @@ pub fn translate_function<'tcx>(
                 }
                 param_names.push(all_names.get(i).copied().flatten());
                 // Two-register structs (9-16 bytes) occupy two ABI slots.
-                if param_size > 8 && param_size <= 16 && is_int_ty && !is_fat_ptr(tcx, ty) {
+                // i128/u128 are handled as single values with 128-bit
+                // annotations; the backend legalization pass splits them.
+                if param_size > 8
+                    && param_size <= 16
+                    && is_int_ty
+                    && !is_fat_ptr(tcx, ty)
+                    && !is_i128_or_u128(ty)
+                {
                     params.push(Type::Int);
                     param_anns.push(None);
                     param_names.push(None);
@@ -470,32 +477,17 @@ pub fn translate_function<'tcx>(
         }
     }
 
-    // Pre-allocate stack slots for i128/u128 locals.
-    for local in mir.local_decls.indices() {
-        if local.as_usize() == 0 || (local.as_usize() > 0 && local.as_usize() <= mir.arg_count) {
-            continue;
-        }
-        if ctx.stack_locals.is_stack(local) {
-            continue;
-        }
-        let ty = monomorphize(mir.local_decls[local].ty);
-        if matches!(
-            ty.kind(),
-            ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
-        ) {
-            let slot = ctx.builder.stack_slot(16, Origin::synthetic());
-            ctx.locals.set(local, slot);
-            ctx.stack_locals.mark(local);
-        }
-    }
-
     // Pre-allocate a stack slot for the return place (_0) when it is a
     // multi-word type (9-16 bytes, e.g. &str, &[T]).
     if !use_sret {
         let ret_local = mir::Local::from_usize(0);
         let ret_ty = monomorphize(mir.local_decls[ret_local].ty);
         let ret_size = type_size(tcx, ret_ty).unwrap_or(0);
-        if ret_size > 8 && ret_size <= 16 && !ctx.stack_locals.is_stack(ret_local) {
+        if ret_size > 8
+            && ret_size <= 16
+            && !ctx.stack_locals.is_stack(ret_local)
+            && !is_i128_or_u128(ret_ty)
+        {
             let slot = ctx.builder.stack_slot(ret_size as u32, Origin::synthetic());
             ctx.locals.set(ret_local, slot);
             ctx.stack_locals.mark(ret_local);

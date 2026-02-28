@@ -24,17 +24,22 @@ pub(super) fn translate_int_to_int_cast(
     }
 
     if dst_bits > src_bits {
-        // Widening cast.  Cap effective destination at 64 bits — the IR
-        // operates on 64-bit registers, so shl/shr by ≥64 is undefined.
-        // The high word for 128-bit targets is handled by the caller.
-        let effective_dst = std::cmp::min(dst_bits, 64);
-        if is_signed_int(src_ty) && src_bits < effective_dst {
-            // Sign-extend: shl by (eff_dst - src), then arithmetic shr.
-            let shift_amt = effective_dst - src_bits;
+        // Widening cast.
+        if dst_bits > 64 {
+            // Widening to 128 bits: emit sext/zext and let the backend
+            // legalization pass handle the split into 64-bit pairs.
+            if is_signed_int(src_ty) {
+                Some(builder.sext(val.into(), dst_bits, Origin::synthetic()))
+            } else {
+                Some(builder.zext(val.into(), dst_bits, Origin::synthetic()))
+            }
+        } else if is_signed_int(src_ty) && src_bits < dst_bits {
+            // Sign-extend: shl by (dst - src), then arithmetic shr.
+            let shift_amt = dst_bits - src_bits;
             let shift_val = builder.iconst(shift_amt as i64, Origin::synthetic());
             let shifted = builder.shl(val.into(), shift_val.into(), None, Origin::synthetic());
             let shift_val2 = builder.iconst(shift_amt as i64, Origin::synthetic());
-            let shifted_op = IrOperand::annotated(shifted, Annotation::Signed(effective_dst));
+            let shifted_op = IrOperand::annotated(shifted, Annotation::Signed(dst_bits));
             Some(builder.shr(shifted_op, shift_val2.into(), None, Origin::synthetic()))
         } else if !is_signed_int(src_ty) && src_bits < 64 {
             // Zero-extend: mask off high bits.
@@ -42,8 +47,6 @@ pub(super) fn translate_int_to_int_cast(
             let mask_val = builder.iconst(mask, Origin::synthetic());
             Some(builder.and(val.into(), mask_val.into(), None, Origin::synthetic()))
         } else {
-            // src_bits == 64 widening to 128, or signed 64→128:
-            // low word is val as-is; caller stores the high word.
             Some(val)
         }
     } else {
@@ -179,41 +182,7 @@ pub(super) fn translate_const<'tcx>(
                 }
             }
         }
-        mir::ConstValue::Scalar(scalar) => {
-            // For 128-bit integer constants, decompose into two 64-bit words
-            // in a stack slot instead of emitting a single oversized iconst.
-            if matches!(
-                ty.kind(),
-                ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
-            ) {
-                if let mir::interpret::Scalar::Int(int) = scalar {
-                    let bits = int.to_bits(int.size());
-                    let lo = (bits & u128::from(u64::MAX)) as u64;
-                    let hi = (bits >> 64) as u64;
-                    let slot = builder.stack_slot(16, Origin::synthetic());
-                    let lo_val = builder.iconst(lo as i64, Origin::synthetic());
-                    *current_mem = builder.store(
-                        lo_val.into(),
-                        slot.into(),
-                        8,
-                        (*current_mem).into(),
-                        Origin::synthetic(),
-                    );
-                    let off8 = builder.iconst(8, Origin::synthetic());
-                    let hi_addr = builder.ptradd(slot.into(), off8.into(), 0, Origin::synthetic());
-                    let hi_val = builder.iconst(hi as i64, Origin::synthetic());
-                    *current_mem = builder.store(
-                        hi_val.into(),
-                        hi_addr.into(),
-                        8,
-                        (*current_mem).into(),
-                        Origin::synthetic(),
-                    );
-                    return Some(slot);
-                }
-            }
-            translate_scalar(scalar, ty, builder)
-        }
+        mir::ConstValue::Scalar(scalar) => translate_scalar(scalar, ty, builder),
         mir::ConstValue::ZeroSized => Some(builder.iconst(0, Origin::synthetic())),
         mir::ConstValue::Slice { alloc_id, meta } => translate_const_slice(
             tcx,
