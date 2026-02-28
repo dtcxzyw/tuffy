@@ -1,5 +1,3 @@
-use std::sync::atomic::Ordering;
-
 use rustc_middle::mir::{self, BinOp, CastKind, Operand, Place, PlaceElem, Rvalue};
 use rustc_middle::ty::{self, Instance, TypeVisitableExt};
 use tuffy_ir::instruction::{ICmpOp, Operand as IrOperand, Origin};
@@ -9,7 +7,6 @@ use tuffy_ir::value::ValueRef;
 use super::constant::*;
 use super::ctx::TranslationCtx;
 use super::types::*;
-use super::STATIC_DATA_COUNTER;
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     pub(super) fn translate_place_to_addr(&mut self, place: &Place<'tcx>) -> Option<(ValueRef, ty::Ty<'tcx>)> {
@@ -636,10 +633,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             let bytes = inner_alloc
                                 .inspect_with_uninit_and_ptr_outside_interpreter(0..size)
                                 .to_vec();
-                            let sym = format!(
-                                ".Lvtable.{}",
-                                STATIC_DATA_COUNTER.fetch_add(1, Ordering::Relaxed)
-                            );
+                            let sym = format!(".Lvtable.{}", self.next_data_id());
                             let sym_id = self.symbols.intern(&sym);
                             let relocs = extract_alloc_relocs(
                                 self.tcx,
@@ -649,6 +643,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 &mut self.symbols,
                                 &mut self.static_data,
                                 &mut self.referenced_instances,
+                                self.data_counter,
                             );
                             self.static_data.push((sym_id, bytes, relocs));
                             return Some(self.builder.symbol_addr(sym_id, Origin::synthetic()));
@@ -738,13 +733,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         let bytes = inner_alloc
                                             .inspect_with_uninit_and_ptr_outside_interpreter(0..size)
                                             .to_vec();
-                                        let sym = format!(
-                                            ".Lvtable.{}",
-                                            STATIC_DATA_COUNTER.fetch_add(
-                                                1,
-                                                Ordering::Relaxed,
-                                            )
-                                        );
+                                        let sym = format!(".Lvtable.{}", self.next_data_id());
                                         let sym_id =
                                             self.symbols.intern(&sym);
                                         let relocs = extract_alloc_relocs(
@@ -755,6 +744,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                             &mut self.symbols,
                                             &mut self.static_data,
                                             &mut self.referenced_instances,
+                                            self.data_counter,
                                         );
                                         self.static_data.push((
                                             sym_id, bytes, relocs,
@@ -2984,6 +2974,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 &mut self.static_data,
                 &mut self.current_mem,
                 &mut self.referenced_instances,
+                self.data_counter,
             ),
             Operand::RuntimeChecks(_) => {
                 // UbChecks / ContractChecks / OverflowChecks: emit false (0)

@@ -12,12 +12,6 @@ mod statement;
 mod terminator;
 pub(crate) mod types;
 
-use std::sync::atomic::AtomicU64;
-
-/// Global counter for generating unique `.Lconst.*` / `.Lstr.*` symbol names
-/// across all functions and codegen units within a compilation session.
-static STATIC_DATA_COUNTER: AtomicU64 = AtomicU64::new(0);
-
 use ctx::{BlockMap, FatLocalMap, LocalMap, StackLocalSet, TranslationCtx, extract_param_names};
 use types::*;
 
@@ -54,6 +48,7 @@ pub fn translate_function<'tcx>(
     tcx: TyCtxt<'tcx>,
     instance: Instance<'tcx>,
     session: &CodegenSession,
+    data_counter: &mut u64,
 ) -> Option<TranslationResult<'tcx>> {
     // Skip partially substituted polymorphic instances — the symbol mangler
     // will panic if generic parameters are still present.
@@ -204,6 +199,7 @@ pub fn translate_function<'tcx>(
         current_mem: initial_mem,
         cast_fat_meta: FatLocalMap::new(),
         referenced_instances: Vec::new(),
+        data_counter,
     };
 
     // Emit params into the entry block.

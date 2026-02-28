@@ -85,6 +85,7 @@ impl CodegenBackend for TuffyCodegenBackend {
 
             let mut compiled_funcs: Vec<CompiledFunction> = Vec::new();
             let mut all_static_data: Vec<StaticData> = Vec::new();
+            let mut data_counter: u64 = 0;
 
             for (mono_item, item_data) in &mono_items {
                 if let MonoItem::Fn(instance) = mono_item {
@@ -95,7 +96,7 @@ impl CodegenBackend for TuffyCodegenBackend {
                         continue;
                     }
                     compiled_symbols.insert(tcx.symbol_name(*instance).name.to_string());
-                    let result_opt = mir_to_ir::translate_function(tcx, *instance, &session);
+                    let result_opt = mir_to_ir::translate_function(tcx, *instance, &session, &mut data_counter);
                     if let Some(result) = result_opt {
                         pending_instances.extend(result.referenced_instances.iter().copied());
                         if dump_ir {
@@ -242,7 +243,7 @@ impl CodegenBackend for TuffyCodegenBackend {
                     let bytes = inner
                         .inspect_with_uninit_and_ptr_outside_interpreter(0..inner.len())
                         .to_vec();
-                    let relocs = collect_alloc_relocs(tcx, inner, &mut all_static_data, &mut pending_instances);
+                    let relocs = collect_alloc_relocs(tcx, inner, &mut all_static_data, &mut pending_instances, &mut data_counter);
                     all_static_data.push(StaticData {
                         name: sym_name,
                         data: bytes,
@@ -296,6 +297,7 @@ impl CodegenBackend for TuffyCodegenBackend {
         // items but referenced by direct calls during translation.
         let mut inline_funcs: Vec<CompiledFunction> = Vec::new();
         let mut inline_static_data: Vec<StaticData> = Vec::new();
+        let mut inline_data_counter: u64 = 0;
         loop {
             let batch: Vec<Instance<'tcx>> = pending_instances
                 .drain(..)
@@ -308,7 +310,7 @@ impl CodegenBackend for TuffyCodegenBackend {
                 break;
             }
             for inst in batch {
-                let result = match mir_to_ir::translate_function(tcx, inst, &session) {
+                let result = match mir_to_ir::translate_function(tcx, inst, &session, &mut inline_data_counter) {
                     Some(r) => r,
                     None => {
                         let sym_name = tcx.symbol_name(inst).name.to_string();
@@ -561,9 +563,8 @@ fn collect_alloc_relocs<'tcx>(
     alloc: &rustc_middle::mir::interpret::Allocation,
     static_data: &mut Vec<StaticData>,
     referenced_instances: &mut Vec<Instance<'tcx>>,
+    data_counter: &mut u64,
 ) -> Vec<tuffy_target::reloc::Relocation> {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
 
     let mut relocs = Vec::new();
     for (offset, prov) in alloc.provenance().ptrs().iter() {
@@ -583,11 +584,8 @@ fn collect_alloc_relocs<'tcx>(
                 let bytes = inner
                     .inspect_with_uninit_and_ptr_outside_interpreter(0..inner.len())
                     .to_vec();
-                let name = format!(
-                    ".Lstatic.{}",
-                    COUNTER.fetch_add(1, Ordering::Relaxed)
-                );
-                let nested_relocs = collect_alloc_relocs(tcx, inner, static_data, referenced_instances);
+                let name = format!(".Lstatic.{}", { let id = *data_counter; *data_counter += 1; id });
+                let nested_relocs = collect_alloc_relocs(tcx, inner, static_data, referenced_instances, data_counter);
                 static_data.push(StaticData {
                     name: name.clone(),
                     data: bytes,
@@ -612,12 +610,9 @@ fn collect_alloc_relocs<'tcx>(
                                 0..inner.len(),
                             )
                             .to_vec();
-                        let name = format!(
-                            ".Lvtable.{}",
-                            COUNTER.fetch_add(1, Ordering::Relaxed)
-                        );
+                        let name = format!(".Lvtable.{}", { let id = *data_counter; *data_counter += 1; id });
                         let nested_relocs =
-                            collect_alloc_relocs(tcx, inner, static_data, referenced_instances);
+                            collect_alloc_relocs(tcx, inner, static_data, referenced_instances, data_counter);
                         static_data.push(StaticData {
                             name: name.clone(),
                             data: bytes,

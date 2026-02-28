@@ -1,7 +1,4 @@
-use std::sync::atomic::Ordering;
-
 use super::StaticDataVec;
-use super::STATIC_DATA_COUNTER;
 use super::types::{int_bitwidth, is_signed_int};
 use num_bigint::BigInt;
 use rustc_middle::mir;
@@ -66,6 +63,7 @@ pub(super) fn translate_const<'tcx>(
     static_data: &mut StaticDataVec,
     current_mem: &mut ValueRef,
     referenced_instances: &mut Vec<Instance<'tcx>>,
+    data_counter: &mut u64,
 ) -> Option<ValueRef> {
     // Monomorphize the constant using the instance's substitutions so that
     // associated type projections (e.g. <B as Flags>::Bits) are resolved
@@ -99,10 +97,7 @@ pub(super) fn translate_const<'tcx>(
                     let bytes: Vec<u8> = alloc
                         .inspect_with_uninit_and_ptr_outside_interpreter(offset..offset + size)
                         .to_vec();
-                    let sym = format!(
-                        ".Lconst.{}",
-                        STATIC_DATA_COUNTER.fetch_add(1, Ordering::Relaxed)
-                    );
+                    let sym = format!(".Lconst.{}", { let id = *data_counter; *data_counter += 1; id });
                     let sym_id = symbols.intern(&sym);
                     let relocs = extract_alloc_relocs(
                         tcx,
@@ -112,6 +107,7 @@ pub(super) fn translate_const<'tcx>(
                         symbols,
                         static_data,
                         referenced_instances,
+                        data_counter,
                     );
                     static_data.push((sym_id, bytes, relocs));
                     let base = builder.symbol_addr(sym_id, Origin::synthetic());
@@ -149,10 +145,7 @@ pub(super) fn translate_const<'tcx>(
                         let bytes = inner
                             .inspect_with_uninit_and_ptr_outside_interpreter(0..size)
                             .to_vec();
-                        let sym = format!(
-                            ".Lvtable.{}",
-                            STATIC_DATA_COUNTER.fetch_add(1, Ordering::Relaxed)
-                        );
+                        let sym = format!(".Lvtable.{}", { let id = *data_counter; *data_counter += 1; id });
                         let sym_id = symbols.intern(&sym);
 
                         let relocs = extract_alloc_relocs(
@@ -163,6 +156,7 @@ pub(super) fn translate_const<'tcx>(
                             symbols,
                             static_data,
                             referenced_instances,
+                            data_counter,
                         );
 
                         static_data.push((sym_id, bytes, relocs));
@@ -214,7 +208,7 @@ pub(super) fn translate_const<'tcx>(
         }
         mir::ConstValue::ZeroSized => Some(builder.iconst(0, Origin::synthetic())),
         mir::ConstValue::Slice { alloc_id, meta } => {
-            translate_const_slice(tcx, alloc_id, meta, builder, symbols, static_data)
+            translate_const_slice(tcx, alloc_id, meta, builder, symbols, static_data, data_counter)
         }
         mir::ConstValue::Indirect { alloc_id, offset } => {
             // Multi-byte constant stored in an allocation (e.g. Option::<&str>::None).
@@ -233,10 +227,7 @@ pub(super) fn translate_const<'tcx>(
                         byte_offset..byte_offset + size,
                     )
                     .to_vec();
-                let sym = format!(
-                    ".Lconst.{}",
-                    STATIC_DATA_COUNTER.fetch_add(1, Ordering::Relaxed)
-                );
+                let sym = format!(".Lconst.{}", { let id = *data_counter; *data_counter += 1; id });
                 let sym_id = symbols.intern(&sym);
                 let relocs = extract_alloc_relocs(
                     tcx,
@@ -246,6 +237,7 @@ pub(super) fn translate_const<'tcx>(
                     symbols,
                     static_data,
                     referenced_instances,
+                    data_counter,
                 );
                 static_data.push((sym_id, bytes, relocs));
                 let base = builder.symbol_addr(sym_id, Origin::synthetic());
@@ -290,6 +282,7 @@ pub(super) fn extract_alloc_relocs<'tcx>(
     symbols: &mut SymbolTable,
     static_data: &mut StaticDataVec,
     referenced_instances: &mut Vec<Instance<'tcx>>,
+    data_counter: &mut u64,
 ) -> Vec<(usize, String)> {
     let mut relocs = Vec::new();
     for (offset, prov) in alloc.provenance().ptrs().iter() {
@@ -316,10 +309,7 @@ pub(super) fn extract_alloc_relocs<'tcx>(
                 let bytes = inner
                     .inspect_with_uninit_and_ptr_outside_interpreter(0..inner.len())
                     .to_vec();
-                let sym = format!(
-                    ".Lconst.{}",
-                    STATIC_DATA_COUNTER.fetch_add(1, Ordering::Relaxed)
-                );
+                let sym = format!(".Lconst.{}", { let id = *data_counter; *data_counter += 1; id });
                 let sym_id = symbols.intern(&sym);
                 let nested_relocs = extract_alloc_relocs(
                     tcx,
@@ -329,6 +319,7 @@ pub(super) fn extract_alloc_relocs<'tcx>(
                     symbols,
                     static_data,
                     referenced_instances,
+                    data_counter,
                 );
                 static_data.push((sym_id, bytes, nested_relocs));
                 relocs.push((rel_offset, symbols.resolve(sym_id).to_string()));
@@ -344,10 +335,7 @@ pub(super) fn extract_alloc_relocs<'tcx>(
                     let bytes = inner
                         .inspect_with_uninit_and_ptr_outside_interpreter(0..inner.len())
                         .to_vec();
-                    let sym = format!(
-                        ".Lvtable.{}",
-                        STATIC_DATA_COUNTER.fetch_add(1, Ordering::Relaxed)
-                    );
+                    let sym = format!(".Lvtable.{}", { let id = *data_counter; *data_counter += 1; id });
                     let sym_id = symbols.intern(&sym);
                     let nested_relocs = extract_alloc_relocs(
                         tcx,
@@ -357,6 +345,7 @@ pub(super) fn extract_alloc_relocs<'tcx>(
                         symbols,
                         static_data,
                         referenced_instances,
+                        data_counter,
                     );
                     static_data.push((sym_id, bytes, nested_relocs));
                     relocs.push((rel_offset, symbols.resolve(sym_id).to_string()));
@@ -432,6 +421,7 @@ pub(super) fn translate_const_slice<'tcx>(
     builder: &mut Builder<'_>,
     symbols: &mut SymbolTable,
     static_data: &mut StaticDataVec,
+    data_counter: &mut u64,
 ) -> Option<ValueRef> {
     let rustc_middle::mir::interpret::GlobalAlloc::Memory(alloc) = tcx.global_alloc(alloc_id)
     else {
@@ -443,10 +433,7 @@ pub(super) fn translate_const_slice<'tcx>(
         .to_vec();
 
     // Create a unique symbol name for this data blob.
-    let sym = format!(
-        ".Lstr.{}",
-        STATIC_DATA_COUNTER.fetch_add(1, Ordering::Relaxed)
-    );
+    let sym = format!(".Lstr.{}", { let id = *data_counter; *data_counter += 1; id });
     let sym_id = symbols.intern(&sym);
     static_data.push((sym_id, bytes, vec![]));
 

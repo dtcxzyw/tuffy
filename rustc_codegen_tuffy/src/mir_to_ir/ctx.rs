@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::atomic::Ordering;
 
 use num_bigint::BigInt;
 use rustc_middle::mir::{self, BasicBlock};
@@ -13,7 +12,6 @@ use tuffy_ir::value::{BlockRef, ValueRef};
 
 use super::types::*;
 use super::StaticDataVec;
-use super::STATIC_DATA_COUNTER;
 
 pub(super) struct LocalMap {
     pub(super) values: Vec<Option<ValueRef>>,
@@ -152,9 +150,17 @@ pub(super) struct TranslationCtx<'a, 'tcx> {
     pub(super) cast_fat_meta: FatLocalMap,
     /// Instances referenced by direct calls, for on-demand compilation.
     pub(super) referenced_instances: Vec<Instance<'tcx>>,
+    /// Counter for generating unique static data symbol names within a CGU.
+    pub(super) data_counter: &'a mut u64,
 }
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
+    pub(super) fn next_data_id(&mut self) -> u64 {
+        let id = *self.data_counter;
+        *self.data_counter += 1;
+        id
+    }
+
     /// Monomorphize a MIR type using the current instance's substitutions.
     pub(super) fn monomorphize(&self, ty: ty::Ty<'tcx>) -> ty::Ty<'tcx> {
         self.tcx.instantiate_and_normalize_erasing_regions(
@@ -379,10 +385,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         // 1. Emit the file-name string as a data blob.
         let file_bytes = file_name.as_bytes().to_vec();
         let file_len = file_bytes.len() as u64;
-        let file_sym_name = format!(
-            ".Lloc_file.{}",
-            STATIC_DATA_COUNTER.fetch_add(1, Ordering::Relaxed)
-        );
+        let file_sym_name = format!(".Lloc_file.{}", self.next_data_id());
         let file_sym_id = self.symbols.intern(&file_sym_name);
         self.static_data.push((file_sym_id, file_bytes, vec![]));
 
@@ -394,10 +397,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         loc_bytes[16..20].copy_from_slice(&line.to_le_bytes());
         loc_bytes[20..24].copy_from_slice(&col.to_le_bytes());
 
-        let loc_sym_name = format!(
-            ".Lloc.{}",
-            STATIC_DATA_COUNTER.fetch_add(1, Ordering::Relaxed)
-        );
+        let loc_sym_name = format!(".Lloc.{}", self.next_data_id());
         let loc_sym_id = self.symbols.intern(&loc_sym_name);
         let file_sym_str = self.symbols.resolve(file_sym_id).to_string();
         self.static_data
