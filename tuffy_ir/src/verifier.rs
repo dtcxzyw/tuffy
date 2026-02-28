@@ -478,6 +478,17 @@ impl FuncVerifier<'_> {
                 }
             }
 
+            Op::FCmp(_, a, b) => {
+                self.check_operand(a, &loc);
+                self.check_operand(b, &loc);
+                self.expect_float(a, "fcmp lhs", &loc);
+                self.expect_float(b, "fcmp rhs", &loc);
+                if inst.ty != Type::Bool {
+                    self.result
+                        .error(loc, format!("fcmp result must be Bool, got {:?}", inst.ty));
+                }
+            }
+
             Op::Select(cond, tv, fv) => {
                 self.check_operand(cond, &loc);
                 self.check_operand(tv, &loc);

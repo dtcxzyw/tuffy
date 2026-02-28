@@ -1,13 +1,12 @@
 use std::collections::HashMap;
 
-use num_bigint::BigInt;
 use rustc_middle::mir::{self, BasicBlock};
 use rustc_middle::ty::{self, Instance, TyCtxt};
 use tuffy_codegen::AbiMetadataBox;
 use tuffy_ir::builder::Builder;
-use tuffy_ir::instruction::{Operand as IrOperand, Origin};
+use tuffy_ir::instruction::Origin;
 use tuffy_ir::module::{SymbolId, SymbolTable};
-use tuffy_ir::types::{Annotation, Type};
+use tuffy_ir::types::Type;
 use tuffy_ir::value::{BlockRef, ValueRef};
 
 use super::StaticDataVec;
@@ -184,34 +183,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
     /// If `val` is an Int, insert inttoptr to coerce it to Ptr.
     pub(super) fn coerce_to_ptr(&mut self, val: ValueRef) -> ValueRef {
-        if matches!(self.builder.value_type(val), Some(Type::Int)) {
-            self.builder.inttoptr(val.into(), 0, Origin::synthetic())
-        } else {
-            val
-        }
-    }
-
-    /// Transform an IEEE 754 float bit-pattern so unsigned integer comparison
-    /// gives correct float ordering (works for both positive and negative).
-    pub(super) fn float_to_orderable(&mut self, val: ValueRef) -> IrOperand {
-        let sixty3 = self.builder.iconst(63i64, Origin::synthetic());
-        let mask = self.builder.shr(
-            IrOperand::annotated(val, Annotation::Signed(64)),
-            sixty3.into(),
-            None,
-            Origin::synthetic(),
-        );
-        let sign_bit = self
-            .builder
-            .iconst(BigInt::from(0x8000_0000_0000_0000u64), Origin::synthetic());
-        let flip = self
-            .builder
-            .or(mask.into(), sign_bit.into(), None, Origin::synthetic());
-        let result = self
-            .builder
-            .xor(val.into(), flip.into(), None, Origin::synthetic());
-        result.into()
-    }
 
     /// Create a static `&Location` for a `#[track_caller]` call site.
     ///

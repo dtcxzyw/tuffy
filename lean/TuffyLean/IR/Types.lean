@@ -187,6 +187,16 @@ inductive ICmpOp where
   | eq | ne | lt | le | gt | ge
   deriving DecidableEq, Repr
 
+/-- Floating point comparison predicates (LLVM-style 4-bit encoding).
+    Each predicate is a 4-bit bitmask:
+      bit 0 = equal, bit 1 = greater-than, bit 2 = less-than, bit 3 = unordered.
+    Ordered predicates return false if either operand is NaN.
+    Unordered predicates return true if either operand is NaN. -/
+inductive FCmpOp where
+  | false_ | oeq | ogt | oge | olt | ole | one | ord
+  | uno | ueq | ugt | uge | ult | ule | une | true_
+  deriving DecidableEq, Repr
+
 /-- Interned symbol identifier. Indexes into a module-level symbol table.
     Used for function names, static data labels, and external references. -/
 structure SymbolId where

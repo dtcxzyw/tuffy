@@ -23,7 +23,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use crate::function::{CfgNode, Function, RegionKind};
-use crate::instruction::{AtomicRmwOp, ICmpOp, Op, Operand};
+use crate::instruction::{AtomicRmwOp, FCmpOp, ICmpOp, Op, Operand};
 use crate::module::SymbolTable;
 use crate::types::{Annotation, FloatType, FpRewriteFlags, MemoryOrdering, Type, VectorType};
 use crate::value::{BlockRef, RegionRef, ValueRef};
@@ -133,6 +133,27 @@ fn fmt_icmp_op(op: &ICmpOp) -> &'static str {
         ICmpOp::Le => "le",
         ICmpOp::Gt => "gt",
         ICmpOp::Ge => "ge",
+    }
+}
+
+fn fmt_fcmp_op(op: &FCmpOp) -> &'static str {
+    match op {
+        FCmpOp::False => "false",
+        FCmpOp::OEq => "oeq",
+        FCmpOp::OGt => "ogt",
+        FCmpOp::OGe => "oge",
+        FCmpOp::OLt => "olt",
+        FCmpOp::OLe => "ole",
+        FCmpOp::ONe => "one",
+        FCmpOp::Ord => "ord",
+        FCmpOp::Uno => "uno",
+        FCmpOp::UEq => "ueq",
+        FCmpOp::UGt => "ugt",
+        FCmpOp::UGe => "uge",
+        FCmpOp::ULt => "ult",
+        FCmpOp::ULe => "ule",
+        FCmpOp::UNe => "une",
+        FCmpOp::True => "true",
     }
 }
 
@@ -319,6 +340,14 @@ fn fmt_inst(
             format!(
                 "{v} = icmp.{} {}, {}",
                 fmt_icmp_op(cmp),
+                ctx.fmt_operand(a),
+                ctx.fmt_operand(b)
+            )
+        }
+        Op::FCmp(cmp, a, b) => {
+            format!(
+                "{v} = fcmp.{} {}, {}",
+                fmt_fcmp_op(cmp),
                 ctx.fmt_operand(a),
                 ctx.fmt_operand(b)
             )

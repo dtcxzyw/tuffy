@@ -5,7 +5,7 @@
 use num_bigint::BigInt;
 
 use crate::function::{BasicBlock, BlockArg, CfgNode, Function, Region, RegionKind};
-use crate::instruction::{AtomicRmwOp, ICmpOp, Instruction, Op, Operand, Origin};
+use crate::instruction::{AtomicRmwOp, FCmpOp, ICmpOp, Instruction, Op, Operand, Origin};
 use crate::module::SymbolId;
 use crate::types::{Annotation, FloatType, FpRewriteFlags, MemoryOrdering, Type};
 use crate::value::{BlockRef, RegionRef, ValueRef};
@@ -427,6 +427,11 @@ impl<'a> Builder<'a> {
     /// Integer comparison. Returns Bool.
     pub fn icmp(&mut self, op: ICmpOp, a: Operand, b: Operand, origin: Origin) -> ValueRef {
         self.push_inst(Op::ICmp(op, a, b), Type::Bool, None, origin, None)
+    }
+
+    /// Float comparison. Returns Bool.
+    pub fn fcmp(&mut self, op: FCmpOp, a: Operand, b: Operand, origin: Origin) -> ValueRef {
+        self.push_inst(Op::FCmp(op, a, b), Type::Bool, None, origin, None)
     }
 
     /// Conditional select: if cond then true_val else false_val.

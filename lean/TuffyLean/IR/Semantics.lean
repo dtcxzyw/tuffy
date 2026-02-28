@@ -246,6 +246,30 @@ def evalICmp (op : ICmpOp) (a b : Int) : Value :=
   | .gt => .bool (a > b)
   | .ge => .bool (a ≥ b)
 
+/-- Evaluate a floating point comparison, returning a Bool value.
+    Uses LLVM-style 4-bit predicate encoding.
+    Ordered predicates return false if either operand is NaN.
+    Unordered predicates return true if either operand is NaN. -/
+def evalFCmp (op : FCmpOp) (a b : Float) : Value :=
+  let unord := a.isNaN || b.isNaN
+  match op with
+  | .false_ => .bool false
+  | .oeq => .bool (!unord && a == b)
+  | .ogt => .bool (!unord && a > b)
+  | .oge => .bool (!unord && a ≥ b)
+  | .olt => .bool (!unord && a < b)
+  | .ole => .bool (!unord && a ≤ b)
+  | .one => .bool (!unord && a != b)
+  | .ord => .bool !unord
+  | .uno => .bool unord
+  | .ueq => .bool (unord || a == b)
+  | .ugt => .bool (unord || a > b)
+  | .uge => .bool (unord || a ≥ b)
+  | .ult => .bool (unord || a < b)
+  | .ule => .bool (unord || a ≤ b)
+  | .une => .bool (unord || a != b)
+  | .true_ => .bool true
+
 /-- Select between two values based on a boolean condition. -/
 def evalSelect (cond : Bool) (tv fv : Value) : Value :=
   if cond then tv else fv

@@ -88,6 +88,49 @@ pub enum ICmpOp {
     Ge,
 }
 
+/// Floating point comparison predicates (LLVM-style 4-bit encoding).
+///
+/// Each predicate is a 4-bit bitmask:
+///   bit 0 = equal, bit 1 = greater-than, bit 2 = less-than, bit 3 = unordered.
+/// Ordered predicates return false if either operand is NaN.
+/// Unordered predicates return true if either operand is NaN.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum FCmpOp {
+    /// Always false (0b0000).
+    False = 0,
+    /// Ordered equal (0b0001).
+    OEq = 1,
+    /// Ordered greater-than (0b0010).
+    OGt = 2,
+    /// Ordered greater-or-equal (0b0011).
+    OGe = 3,
+    /// Ordered less-than (0b0100).
+    OLt = 4,
+    /// Ordered less-or-equal (0b0101).
+    OLe = 5,
+    /// Ordered not-equal (0b0110).
+    ONe = 6,
+    /// Ordered: true iff neither operand is NaN (0b0111).
+    Ord = 7,
+    /// Unordered: true iff either operand is NaN (0b1000).
+    Uno = 8,
+    /// Unordered or equal (0b1001).
+    UEq = 9,
+    /// Unordered or greater-than (0b1010).
+    UGt = 10,
+    /// Unordered or greater-or-equal (0b1011).
+    UGe = 11,
+    /// Unordered or less-than (0b1100).
+    ULt = 12,
+    /// Unordered or less-or-equal (0b1101).
+    ULe = 13,
+    /// Unordered or not-equal (0b1110).
+    UNe = 14,
+    /// Always true (0b1111).
+    True = 15,
+}
+
 /// Atomic read-modify-write operation kinds.
 ///
 /// Mirrors `TuffyLean.IR.AtomicRmwOp`.
@@ -168,6 +211,8 @@ pub enum Op {
     // -- Comparison --
     /// Integer comparison. Returns Bool.
     ICmp(ICmpOp, Operand, Operand),
+    /// Float comparison. Returns Bool.
+    FCmp(FCmpOp, Operand, Operand),
 
     // -- Select --
     /// Conditional select: select cond, true_val, false_val. Cond must be Bool.

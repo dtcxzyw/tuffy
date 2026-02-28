@@ -554,6 +554,7 @@ fn copy_inst(
             b.saturating_sub(remap_op(s, a), remap_op(s, op_b), *bits, o())
         }
         Op::ICmp(cmp_op, a, op_b) => b.icmp(*cmp_op, remap_op(s, a), remap_op(s, op_b), o()),
+        Op::FCmp(cmp_op, a, op_b) => b.fcmp(*cmp_op, remap_op(s, a), remap_op(s, op_b), o()),
         Op::Select(c, tv, fv) => b.select(
             remap_op(s, c),
             remap_op(s, tv),
