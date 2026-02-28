@@ -12,25 +12,6 @@ use tuffy_ir::value::ValueRef;
 use super::ctx::LocalMap;
 use super::types::{type_align, type_size};
 
-/// Byte-swap a single 64-bit word using shift/mask operations.
-pub(super) fn emit_bswap8(builder: &mut Builder<'_>, v: ValueRef) -> ValueRef {
-    let mask = builder.iconst(0xFF, Origin::synthetic());
-    let mut result = {
-        let shift = builder.iconst(56, Origin::synthetic());
-        let byte0 = builder.and(v.into(), mask.into(), None, Origin::synthetic());
-        builder.shl(byte0.into(), shift.into(), None, Origin::synthetic())
-    };
-    for i in 1..8usize {
-        let extract_shift = builder.iconst((i * 8) as i64, Origin::synthetic());
-        let shifted = builder.shr(v.into(), extract_shift.into(), None, Origin::synthetic());
-        let byte_i = builder.and(shifted.into(), mask.into(), None, Origin::synthetic());
-        let place_shift = builder.iconst(((7 - i) * 8) as i64, Origin::synthetic());
-        let placed = builder.shl(byte_i.into(), place_shift.into(), None, Origin::synthetic());
-        result = builder.or(result.into(), placed.into(), None, Origin::synthetic());
-    }
-    result
-}
-
 /// Handle compiler intrinsics inline during MIR translation.
 /// Returns true if the intrinsic was handled, false to fall through to normal call.
 #[allow(clippy::too_many_arguments)]
@@ -117,77 +98,53 @@ pub(super) fn translate_intrinsic<'tcx>(
                 if byte_size <= 1 {
                     locals.set(destination_local, v);
                 } else if byte_size > 8 {
-                    // i128/u128 bswap: load both 64-bit words from the input
-                    // stack slot, bswap each, and store in swapped order to
-                    // the destination slot.
-                    let src = v; // input operand (stack slot pointer)
+                    // i128/u128 bswap: load both 64-bit words, bswap each,
+                    // store in swapped order to the destination slot.
+                    let src = v;
                     let dst = dest_override.unwrap_or_else(|| {
                         locals
                             .get(destination_local)
                             .expect("i128 local must have a stack slot")
                     });
                     let lo = builder.load(
-                        src.into(), 8, Type::Int,
-                        current_mem.into(), None, Origin::synthetic(),
+                        src.into(),
+                        8,
+                        Type::Int,
+                        current_mem.into(),
+                        None,
+                        Origin::synthetic(),
                     );
                     let off8 = builder.iconst(8, Origin::synthetic());
-                    let hi_addr = builder.ptradd(
-                        src.into(), off8.into(), 0, Origin::synthetic(),
-                    );
+                    let hi_addr = builder.ptradd(src.into(), off8.into(), 0, Origin::synthetic());
                     let hi = builder.load(
-                        hi_addr.into(), 8, Type::Int,
-                        current_mem.into(), None, Origin::synthetic(),
+                        hi_addr.into(),
+                        8,
+                        Type::Int,
+                        current_mem.into(),
+                        None,
+                        Origin::synthetic(),
                     );
-
-                    // Bswap each 8-byte word.
-                    let lo_swapped = emit_bswap8(builder, lo);
-                    let hi_swapped = emit_bswap8(builder, hi);
-
+                    let lo_swapped = builder.bswap(lo.into(), 8, Origin::synthetic());
+                    let hi_swapped = builder.bswap(hi.into(), 8, Origin::synthetic());
                     // Store in swapped order: bswapped hi → low, bswapped lo → high.
                     let mem1 = builder.store(
-                        hi_swapped.into(), dst.into(), 8,
-                        current_mem.into(), Origin::synthetic(),
+                        hi_swapped.into(),
+                        dst.into(),
+                        8,
+                        current_mem.into(),
+                        Origin::synthetic(),
                     );
                     let off8b = builder.iconst(8, Origin::synthetic());
-                    let dst_hi = builder.ptradd(
-                        dst.into(), off8b.into(), 0, Origin::synthetic(),
-                    );
+                    let dst_hi = builder.ptradd(dst.into(), off8b.into(), 0, Origin::synthetic());
                     builder.store(
-                        lo_swapped.into(), dst_hi.into(), 8,
-                        mem1.into(), Origin::synthetic(),
+                        lo_swapped.into(),
+                        dst_hi.into(),
+                        8,
+                        mem1.into(),
+                        Origin::synthetic(),
                     );
-                    // Local already points at the slot; leave it unchanged.
                 } else {
-                    // Coerce Ptr to Int for arithmetic.
-                    let v = if matches!(builder.value_type(v), Some(Type::Ptr(_))) {
-                        builder.ptrtoint(v.into(), Origin::synthetic())
-                    } else {
-                        v
-                    };
-                    let mask = builder.iconst(0xFF, Origin::synthetic());
-                    let mut result = {
-                        let shift =
-                            builder.iconst(((byte_size - 1) * 8) as i64, Origin::synthetic());
-                        let byte0 = builder.and(v.into(), mask.into(), None, Origin::synthetic());
-                        builder.shl(byte0.into(), shift.into(), None, Origin::synthetic())
-                    };
-                    for i in 1..byte_size {
-                        let extract_shift = builder.iconst((i * 8) as i64, Origin::synthetic());
-                        let shifted =
-                            builder.shr(v.into(), extract_shift.into(), None, Origin::synthetic());
-                        let byte_i =
-                            builder.and(shifted.into(), mask.into(), None, Origin::synthetic());
-                        let place_shift =
-                            builder.iconst(((byte_size - 1 - i) * 8) as i64, Origin::synthetic());
-                        let placed = builder.shl(
-                            byte_i.into(),
-                            place_shift.into(),
-                            None,
-                            Origin::synthetic(),
-                        );
-                        result =
-                            builder.or(result.into(), placed.into(), None, Origin::synthetic());
-                    }
+                    let result = builder.bswap(v.into(), byte_size as u32, Origin::synthetic());
                     locals.set(destination_local, result);
                 }
             }
@@ -195,7 +152,6 @@ pub(super) fn translate_intrinsic<'tcx>(
         }
 
         // rotate_left / rotate_right: bitwise rotation.
-        // Synthesized as (x << n) | (x >> (bits - n)) with masked shift amounts.
         "rotate_left" | "rotate_right" => {
             if ir_args.len() >= 2 {
                 let x = ir_args[0];
@@ -204,27 +160,13 @@ pub(super) fn translate_intrinsic<'tcx>(
                     .first()
                     .and_then(|a| a.as_type())
                     .and_then(|t| type_size(tcx, t))
-                    .map(|sz| (sz * 8) as i64)
+                    .map(|sz| (sz * 8) as u32)
                     .unwrap_or(64);
-                let bits_const = builder.iconst(bits, Origin::synthetic());
-                let mask = builder.iconst(bits - 1, Origin::synthetic());
-                let masked_n =
-                    builder.and(n.into(), mask.into(), None, Origin::synthetic());
-                let complement =
-                    builder.sub(bits_const.into(), masked_n.into(), None, Origin::synthetic());
-                let masked_complement =
-                    builder.and(complement.into(), mask.into(), None, Origin::synthetic());
-                let (left_amt, right_amt) = if name == "rotate_left" {
-                    (masked_n, masked_complement)
+                let result = if name == "rotate_left" {
+                    builder.rotate_left(x.into(), n.into(), bits, Origin::synthetic())
                 } else {
-                    (masked_complement, masked_n)
+                    builder.rotate_right(x.into(), n.into(), bits, Origin::synthetic())
                 };
-                let left =
-                    builder.shl(x.into(), left_amt.into(), None, Origin::synthetic());
-                let right =
-                    builder.shr(x.into(), right_amt.into(), None, Origin::synthetic());
-                let result =
-                    builder.or(left.into(), right.into(), None, Origin::synthetic());
                 locals.set(destination_local, result);
             }
             true
@@ -277,9 +219,8 @@ pub(super) fn translate_intrinsic<'tcx>(
                                 locals.set(destination_local, len);
                             } else {
                                 let esz = builder.iconst(elem_sz as i64, Origin::synthetic());
-                                let result = builder.mul(
-                                    len.into(), esz.into(), None, Origin::synthetic(),
-                                );
+                                let result =
+                                    builder.mul(len.into(), esz.into(), None, Origin::synthetic());
                                 locals.set(destination_local, result);
                             }
                         } else {
@@ -370,18 +311,16 @@ pub(super) fn translate_intrinsic<'tcx>(
         // saturating_add<T>(a, b): add with saturation at max value.
         "saturating_add" => {
             if ir_args.len() >= 2 {
-                let a = ir_args[0];
-                let b = ir_args[1];
-                // result = a + b; if result wrapped (result < a), clamp to MAX.
-                let sum = builder.add(a.into(), b.into(), None, Origin::synthetic());
-                let overflowed =
-                    builder.icmp(ICmpOp::Lt, sum.into(), a.into(), Origin::synthetic());
-                let max_val = builder.iconst(-1i64, Origin::synthetic()); // all-ones = usize::MAX
-                let result = builder.select(
-                    overflowed.into(),
-                    max_val.into(),
-                    sum.into(),
-                    Type::Int,
+                let bits = substs
+                    .first()
+                    .and_then(|a| a.as_type())
+                    .and_then(|t| type_size(tcx, t))
+                    .map(|sz| (sz * 8) as u32)
+                    .unwrap_or(64);
+                let result = builder.saturating_add(
+                    ir_args[0].into(),
+                    ir_args[1].into(),
+                    bits,
                     Origin::synthetic(),
                 );
                 locals.set(destination_local, result);
@@ -392,16 +331,16 @@ pub(super) fn translate_intrinsic<'tcx>(
         // saturating_sub<T>(a, b): subtract with saturation at zero.
         "saturating_sub" => {
             if ir_args.len() >= 2 {
-                let a = ir_args[0];
-                let b = ir_args[1];
-                let diff = builder.sub(a.into(), b.into(), None, Origin::synthetic());
-                let underflowed = builder.icmp(ICmpOp::Gt, b.into(), a.into(), Origin::synthetic());
-                let zero = builder.iconst(0, Origin::synthetic());
-                let result = builder.select(
-                    underflowed.into(),
-                    zero.into(),
-                    diff.into(),
-                    Type::Int,
+                let bits = substs
+                    .first()
+                    .and_then(|a| a.as_type())
+                    .and_then(|t| type_size(tcx, t))
+                    .map(|sz| (sz * 8) as u32)
+                    .unwrap_or(64);
+                let result = builder.saturating_sub(
+                    ir_args[0].into(),
+                    ir_args[1].into(),
+                    bits,
                     Origin::synthetic(),
                 );
                 locals.set(destination_local, result);
@@ -781,12 +720,7 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
                     Origin::synthetic(),
                 );
                 let bool_off = builder.iconst(elem_size as i64, Origin::synthetic());
-                let bool_ptr = builder.ptradd(
-                    slot.into(),
-                    bool_off.into(),
-                    0,
-                    Origin::synthetic(),
-                );
+                let bool_ptr = builder.ptradd(slot.into(), bool_off.into(), 0, Origin::synthetic());
                 let mem3 = builder.store(
                     eq.into(),
                     bool_ptr.into(),
@@ -831,9 +765,7 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
         }
 
         // atomic_fence_*, atomic_singlethreadfence_* → no-op
-        _ if name.starts_with("atomic_fence")
-            || name.starts_with("atomic_singlethreadfence") =>
-        {
+        _ if name.starts_with("atomic_fence") || name.starts_with("atomic_singlethreadfence") => {
             Some(current_mem)
         }
 
@@ -890,7 +822,13 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
                     IrOperand::annotated(operand, Annotation::Unsigned(bits)),
                     Origin::synthetic(),
                 );
-                builder.select(gt.into(), old.into(), operand.into(), Type::Int, Origin::synthetic())
+                builder.select(
+                    gt.into(),
+                    old.into(),
+                    operand.into(),
+                    Type::Int,
+                    Origin::synthetic(),
+                )
             } else if name.starts_with("atomic_umin") {
                 let bits = (elem_size * 8) as u32;
                 let lt = builder.icmp(
@@ -899,7 +837,13 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
                     IrOperand::annotated(operand, Annotation::Unsigned(bits)),
                     Origin::synthetic(),
                 );
-                builder.select(lt.into(), old.into(), operand.into(), Type::Int, Origin::synthetic())
+                builder.select(
+                    lt.into(),
+                    old.into(),
+                    operand.into(),
+                    Type::Int,
+                    Origin::synthetic(),
+                )
             } else if name.starts_with("atomic_max") {
                 let bits = (elem_size * 8) as u32;
                 let gt = builder.icmp(
@@ -908,7 +852,13 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
                     IrOperand::annotated(operand, Annotation::Signed(bits)),
                     Origin::synthetic(),
                 );
-                builder.select(gt.into(), old.into(), operand.into(), Type::Int, Origin::synthetic())
+                builder.select(
+                    gt.into(),
+                    old.into(),
+                    operand.into(),
+                    Type::Int,
+                    Origin::synthetic(),
+                )
             } else {
                 // atomic_min
                 let bits = (elem_size * 8) as u32;
@@ -918,7 +868,13 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
                     IrOperand::annotated(operand, Annotation::Signed(bits)),
                     Origin::synthetic(),
                 );
-                builder.select(lt.into(), old.into(), operand.into(), Type::Int, Origin::synthetic())
+                builder.select(
+                    lt.into(),
+                    old.into(),
+                    operand.into(),
+                    Type::Int,
+                    Origin::synthetic(),
+                )
             };
 
             let new_mem = builder.store(
