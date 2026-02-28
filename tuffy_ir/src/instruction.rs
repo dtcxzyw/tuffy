@@ -202,6 +202,10 @@ pub enum Op {
     /// Produces two results: hi = a >> width, lo = a mod 2^width.
     /// width = 0 produces poison. Multi-result instruction.
     Split(Operand, u32),
+    /// Carry-less multiplication (polynomial multiplication over GF(2)).
+    /// Uses XOR instead of addition for partial product accumulation.
+    /// Negative inputs produce poison.
+    Clmul(Operand, Operand),
     /// Rotate left: rotate value left by amount in an n-bit field. n = 0 produces poison.
     RotateLeft(Operand, Operand, u32),
     /// Rotate right: rotate value right by amount in an n-bit field. n = 0 produces poison.

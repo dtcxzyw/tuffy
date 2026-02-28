@@ -543,6 +543,9 @@ fn fmt_inst(
                 ctx.fmt_operand(b)
             )
         }
+        Op::Clmul(a, b) => {
+            format!("{v} = clmul {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+        }
         Op::Split(a, width) => {
             format!("{multi_v} = split.{width} {}", ctx.fmt_operand(a))
         }

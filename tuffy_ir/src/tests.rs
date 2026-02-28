@@ -1603,3 +1603,36 @@ fn build_split() {
     let output = format!("{}", func.display(&st));
     assert!(output.contains("v2, v3 = split.64 v1"));
 }
+
+#[test]
+fn build_clmul() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("clmul_test");
+    let mut func = Function::new(
+        name,
+        vec![Type::Int, Type::Int],
+        vec![],
+        vec![],
+        Some(Type::Int),
+        None,
+    );
+    let mut b = Builder::new(&mut func);
+
+    let root = b.create_region(RegionKind::Function);
+    b.enter_region(root);
+    let bb = b.create_block();
+    b.switch_to_block(bb);
+
+    let mem0 = b.add_block_arg(bb, Type::Mem);
+    let a = b.param(0, Type::Int, None, Origin::synthetic());
+    let bv = b.param(1, Type::Int, None, Origin::synthetic());
+    let result = b.clmul(a.into(), bv.into(), Origin::synthetic());
+    b.ret(Some(result.into()), mem0.into(), Origin::synthetic());
+    b.exit_region();
+
+    assert!(matches!(func.instructions[2].op, Op::Clmul(_, _)));
+    assert_eq!(func.instructions[2].ty, Type::Int);
+
+    let output = format!("{}", func.display(&st));
+    assert!(output.contains("v3 = clmul v1, v2"));
+}

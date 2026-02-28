@@ -510,6 +510,11 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::Merge(a, b, width), Type::Int, None, origin, None)
     }
 
+    /// Carry-less multiplication (polynomial multiplication over GF(2)).
+    pub fn clmul(&mut self, a: Operand, b: Operand, origin: Origin) -> ValueRef {
+        self.push_inst(Op::Clmul(a, b), Type::Int, None, origin, None)
+    }
+
     /// Split: decompose `a` at bit position `width`. Returns (hi, lo).
     pub fn split(&mut self, a: Operand, width: u32, origin: Origin) -> (ValueRef, ValueRef) {
         let primary = self.push_inst(

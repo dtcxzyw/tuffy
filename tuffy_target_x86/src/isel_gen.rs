@@ -665,6 +665,10 @@ pub(super) fn try_select_generated(
             // TODO: lower bit_reverse to x86 instructions
             None
         }
+        Op::Clmul(..) => {
+            // TODO: lower clmul to x86 PCLMULQDQ instruction
+            None
+        }
         Op::RotateLeft(val, amt, _) => {
             let v = ctx.ensure_in_reg(val.value)?;
             let a = ctx.ensure_in_reg(amt.value)?;

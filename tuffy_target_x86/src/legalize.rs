@@ -705,6 +705,7 @@ fn copy_inst(
         }
         Op::Fence(ord, mem) => b.fence(*ord, remap_op(s, mem), o()),
         Op::Merge(a, b_op, width) => b.merge(remap_op(s, a), remap_op(s, b_op), *width, o()),
+        Op::Clmul(a, b_op) => b.clmul(remap_op(s, a), remap_op(s, b_op), o()),
         Op::Split(a, width) => {
             let (hi, lo) = b.split(remap_op(s, a), *width, o());
             s.vmap.set(old_vref, Mapped::One(hi));
