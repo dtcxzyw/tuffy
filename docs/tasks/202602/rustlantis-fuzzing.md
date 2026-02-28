@@ -50,19 +50,21 @@ Seeds 0–1000:
 
 ### Mismatches
 
-| Seed | LLVM output | Tuffy output | Category |
-|------|-------------|--------------|----------|
-| 721 | `hash: 7541581120933061747` | `timeout: the monitored command dumped core` | Runtime crash |
-| 792 | `hash: 5746564840755200983` | `hash: 3589671292757105802` | Wrong code |
-| 881 | `hash: 11960833139707412614` | `hash: 12179716529323217799` | Wrong code |
+All 3 mismatches fixed:
+
+| Seed | Root cause | Fix |
+|------|-----------|-----|
+| 792 | 2-byte bswap isel extracted wrong byte (shl 56 + sar 56 sign-extended low byte instead of extracting high byte) | Replace with and 0xFF00 + sar 8 |
+| 881 | Same bswap bug as seed 792 | Same fix |
+| 721 | Three u128 codegen bugs: (1) switch constants truncated to i64, (2) switch discriminant compared address instead of loaded value, (3) unary NOT applied to address instead of loaded value | Load u128 values from pointers; use BigInt for switch constants; pre-create blocks in legalization |
 
 ## Subtasks
 
-- Run initial fuzzing campaign (e.g. seeds 1..100) and triage results
-- Classify failures into compile crashes vs output mismatches
-- Minimize reproduction cases for each distinct bug
-- Fix identified codegen bugs in rustc_codegen_tuffy
-- Increase config complexity as pass rate improves
+- [x] Run initial fuzzing campaign (seeds 0..1000) and triage results
+- [x] Classify failures into compile crashes vs output mismatches
+- [x] Minimize reproduction cases for each distinct bug
+- [x] Fix identified codegen bugs in rustc_codegen_tuffy
+- [ ] Increase config complexity as pass rate improves
 
 ## Affected Modules
 
