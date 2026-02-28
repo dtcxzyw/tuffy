@@ -182,6 +182,9 @@ def evalFMul (a b : Float) : Float := a * b
 /-- Floating point division. -/
 def evalFDiv (a b : Float) : Float := a / b
 
+/-- Floating point remainder (IEEE 754). -/
+def evalFRem (a b : Float) : Float := a % b
+
 /-- Floating point negation. -/
 def evalFNeg (a : Float) : Float := -a
 

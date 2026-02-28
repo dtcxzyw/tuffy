@@ -325,6 +325,14 @@ fn fmt_inst(
                 ctx.fmt_operand(b)
             )
         }
+        Op::FRem(a, b, flags) => {
+            format!(
+                "{v} = frem{} {}, {}",
+                fmt_fp_rewrite_flags(flags),
+                ctx.fmt_operand(a),
+                ctx.fmt_operand(b)
+            )
+        }
         Op::FNeg(a) => format!("{v} = fneg {}", ctx.fmt_operand(a)),
         Op::FAbs(a) => format!("{v} = fabs {}", ctx.fmt_operand(a)),
         Op::CopySign(mag, sign) => {

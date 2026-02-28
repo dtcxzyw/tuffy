@@ -848,6 +848,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             | BinOp::Mul
                             | BinOp::MulUnchecked
                             | BinOp::Div
+                            | BinOp::Rem
                     ) {
                         let flags = FpRewriteFlags::default();
                         let l_f = self.builder.bitcast(
@@ -878,6 +879,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 Origin::synthetic(),
                             ),
                             BinOp::Mul | BinOp::MulUnchecked => self.builder.fmul(
+                                l_f.into(),
+                                r_f.into(),
+                                flags,
+                                fty,
+                                Origin::synthetic(),
+                            ),
+                            BinOp::Rem => self.builder.frem(
                                 l_f.into(),
                                 r_f.into(),
                                 flags,

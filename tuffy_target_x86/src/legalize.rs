@@ -639,6 +639,13 @@ fn copy_inst(
             inst.ty.clone(),
             o(),
         ),
+        Op::FRem(a, op_b, flags) => b.frem(
+            remap_op(s, a),
+            remap_op(s, op_b),
+            *flags,
+            inst.ty.clone(),
+            o(),
+        ),
         Op::FNeg(a) => b.fneg(remap_op(s, a), inst.ty.clone(), o()),
         Op::FAbs(a) => b.fabs(remap_op(s, a), inst.ty.clone(), o()),
         Op::CopySign(a, op_b) => {

@@ -407,6 +407,18 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::FDiv(a, b, flags), ty, None, origin, None)
     }
 
+    /// Floating point remainder.
+    pub fn frem(
+        &mut self,
+        a: Operand,
+        b: Operand,
+        flags: FpRewriteFlags,
+        ty: Type,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::FRem(a, b, flags), ty, None, origin, None)
+    }
+
     /// Copy sign: magnitude from first operand, sign from second.
     pub fn copysign(&mut self, mag: Operand, sign: Operand, ty: Type, origin: Origin) -> ValueRef {
         self.push_inst(Op::CopySign(mag, sign), ty, None, origin, None)

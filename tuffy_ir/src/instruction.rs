@@ -286,6 +286,8 @@ pub enum Op {
     FMul(Operand, Operand, FpRewriteFlags),
     /// Floating point division: fdiv %a, %b
     FDiv(Operand, Operand, FpRewriteFlags),
+    /// Floating point remainder: frem %a, %b
+    FRem(Operand, Operand, FpRewriteFlags),
     /// Floating point negation: fneg %a
     FNeg(Operand),
     /// Floating point absolute value: fabs %a

@@ -681,7 +681,11 @@ impl FuncVerifier<'_> {
     fn verify_instruction_final(&mut self, inst: &Instruction, loc: &Location) {
         match &inst.op {
             // -- Float binary --
-            Op::FAdd(a, b, _) | Op::FSub(a, b, _) | Op::FMul(a, b, _) | Op::FDiv(a, b, _) => {
+            Op::FAdd(a, b, _)
+            | Op::FSub(a, b, _)
+            | Op::FMul(a, b, _)
+            | Op::FDiv(a, b, _)
+            | Op::FRem(a, b, _) => {
                 self.check_operand(a, loc);
                 self.check_operand(b, loc);
                 self.expect_float(a, "float arith lhs", loc);
