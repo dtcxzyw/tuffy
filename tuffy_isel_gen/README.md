@@ -21,7 +21,7 @@ Deserializes the Lean export format into Rust types:
 - `IselRule` — a single rule: name, IR pattern, emitted instructions, and result kind.
 - `IrPattern` — what to match: `Binop`, `Unop`, or `Icmp`, each with operand patterns.
 - `OperandPat` — operand pattern with register name and annotation guard (`Any`, `Signed`, `Unsigned`).
-- `EmitInst` — x86 instruction to emit (e.g., `AddRR`, `SubRR`, `CmpRR`, `ShlRCL`).
+- `EmitInst` — target machine instruction to emit (defined per-target in the JSON input).
 - `ResultKind` — how the result is produced: `Reg`, `CmpFlags`, or `None`.
 
 ### `codegen.rs` — Rust Code Generation
