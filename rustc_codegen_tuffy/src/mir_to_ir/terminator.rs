@@ -3,6 +3,7 @@
 use rustc_middle::mir::{self, Operand, TerminatorKind};
 use rustc_middle::ty::{self, TypeVisitableExt};
 
+use num_bigint::BigInt;
 use tuffy_ir::instruction::{ICmpOp, Origin};
 use tuffy_ir::types::Type;
 
@@ -481,11 +482,25 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
         // If the discriminant is a pointer (e.g. nullable pointer optimization),
         // convert it to an integer so icmp gets Int operands.
+        // For large types (> 8 bytes, e.g. u128) translate_operand returns the
+        // address of the value — load it instead of converting the address.
         // Similarly, Bool discriminants need BoolToInt for icmp.
         if matches!(self.builder.value_type(discr_val), Some(Type::Ptr(_))) {
-            discr_val = self
-                .builder
-                .ptrtoaddr(discr_val.into(), Origin::synthetic());
+            if discr_bits > 64 {
+                let bytes = (discr_bits / 8) as u32;
+                discr_val = self.builder.load(
+                    discr_val.into(),
+                    bytes,
+                    Type::Int,
+                    self.current_mem.into(),
+                    None,
+                    Origin::synthetic(),
+                );
+            } else {
+                discr_val = self
+                    .builder
+                    .ptrtoaddr(discr_val.into(), Origin::synthetic());
+            }
         } else if matches!(self.builder.value_type(discr_val), Some(Type::Bool)) {
             discr_val = self
                 .builder
@@ -526,7 +541,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             } else {
                 test_val
             };
-            let const_val = self.builder.iconst(truncated as i64, Origin::synthetic());
+            let const_val = self
+                .builder
+                .iconst(BigInt::from(truncated), Origin::synthetic());
             let cmp = self.builder.icmp(
                 ICmpOp::Eq,
                 discr_val.into(),
@@ -552,7 +569,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 } else {
                     *test_val
                 };
-                let const_val = self.builder.iconst(truncated as i64, Origin::synthetic());
+                let const_val = self
+                    .builder
+                    .iconst(BigInt::from(truncated), Origin::synthetic());
                 let cmp = self.builder.icmp(
                     ICmpOp::Eq,
                     discr_val.into(),

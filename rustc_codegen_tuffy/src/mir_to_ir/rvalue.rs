@@ -1814,7 +1814,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 )
             }
             Rvalue::UnaryOp(mir::UnOp::Not, operand) => {
-                let v = self.translate_operand(operand)?;
+                let mut v = self.translate_operand(operand)?;
                 let mir_ty = match operand {
                     Operand::Copy(p) | Operand::Move(p) => {
                         let ty = p.ty(&self.mir.local_decls, self.tcx).ty;
@@ -1823,6 +1823,23 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     Operand::Constant(c) => Some(self.monomorphize(c.ty())),
                     _ => None,
                 };
+                // When translate_operand returns a pointer for large types
+                // (e.g. u128 tuple fields), load the value before operating.
+                if matches!(self.builder.value_type(v), Some(Type::Ptr(_))) {
+                    let size = mir_ty
+                        .and_then(|t| type_size(self.tcx, t))
+                        .unwrap_or(8) as u32;
+                    if size > 0 {
+                        v = self.builder.load(
+                            v.into(),
+                            size,
+                            Type::Int,
+                            self.current_mem.into(),
+                            None,
+                            Origin::synthetic(),
+                        );
+                    }
+                }
                 let is_bool = mir_ty.is_some_and(|t| t.is_bool());
                 if is_bool {
                     // Boolean NOT: XOR 1.
