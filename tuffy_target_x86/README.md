@@ -4,6 +4,12 @@ x86-64 backend implementation for the Tuffy compiler.
 
 This is the primary (and currently only) target backend. It handles instruction selection, register allocation integration, machine code encoding, and ELF object file emission.
 
+## Boundary Rule
+
+This crate must only contain x86-specific logic: x86 instruction definitions, x86 register definitions, x86 encoding, x86 legalization patterns, and x86 ABI conventions. Any target-agnostic functionality (backend traits, isel helpers, relocation types, compiled function representations, etc.) belongs in `tuffy_target`. Target dispatching and session management belongs in `tuffy_codegen`.
+
+When adding new functionality, ask: "Would an AArch64 backend need the same thing?" If yes, it belongs in `tuffy_target` or `tuffy_codegen`, not here.
+
 ## Pipeline
 
 ```
