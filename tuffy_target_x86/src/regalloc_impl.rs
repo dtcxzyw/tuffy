@@ -68,12 +68,16 @@ impl RegAllocInst for VInst {
             MInst::CmpRI { src, .. } => {
                 ops.push(use_op(*src));
             }
-            // shift by CL: dst is read-modify-write
-            MInst::ShlRCL { dst, .. } | MInst::ShrRCL { dst, .. } | MInst::SarRCL { dst, .. } => {
+            // shift/rotate by CL: dst is read-modify-write
+            MInst::ShlRCL { dst, .. }
+            | MInst::ShrRCL { dst, .. }
+            | MInst::SarRCL { dst, .. }
+            | MInst::RolRCL { dst, .. }
+            | MInst::RorRCL { dst, .. } => {
                 ops.push(usedef_op(*dst));
             }
-            // shift by immediate
-            MInst::ShlImm { dst, .. } | MInst::SarImm { dst, .. } => {
+            // shift by immediate / bswap in-place
+            MInst::ShlImm { dst, .. } | MInst::SarImm { dst, .. } | MInst::Bswap { dst, .. } => {
                 ops.push(usedef_op(*dst));
             }
             // and dst, imm

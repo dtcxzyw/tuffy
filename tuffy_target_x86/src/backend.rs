@@ -287,6 +287,18 @@ fn rewrite_inst(inst: &VInst, assignments: &[PReg]) -> PInst {
             dst: r(dst),
             src: r(src),
         },
+        MInst::Bswap { size, dst } => MInst::Bswap {
+            size: *size,
+            dst: r(dst),
+        },
+        MInst::RolRCL { size, dst } => MInst::RolRCL {
+            size: *size,
+            dst: r(dst),
+        },
+        MInst::RorRCL { size, dst } => MInst::RorRCL {
+            size: *size,
+            dst: r(dst),
+        },
         MInst::Ud2 => MInst::Ud2,
         MInst::FpBinOp { op, dst, lhs, rhs } => MInst::FpBinOp {
             op: *op,

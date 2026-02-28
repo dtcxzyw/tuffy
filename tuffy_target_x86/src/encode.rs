@@ -222,6 +222,15 @@ fn encode_inst(
         MInst::Tzcnt { dst, src } => {
             encode_tzcnt(*dst, *src, buf);
         }
+        MInst::Bswap { size, dst } => {
+            encode_bswap(*size, *dst, buf);
+        }
+        MInst::RolRCL { size, dst } => {
+            encode_shift_cl(0, *size, *dst, buf);
+        }
+        MInst::RorRCL { size, dst } => {
+            encode_shift_cl(1, *size, *dst, buf);
+        }
         MInst::FpBinOp { op, dst, lhs, rhs } => {
             encode_fp_binop(*op, *dst, *lhs, *rhs, buf);
         }
@@ -748,6 +757,19 @@ fn encode_tzcnt(dst: Gpr, src: Gpr, buf: &mut Vec<u8>) {
     buf.push(0x0f);
     buf.push(0xbc);
     buf.push(modrm(dst.encoding(), src.encoding()));
+}
+
+/// Encode BSWAP r32/r64 (0F C8+rd, REX.W for 64-bit).
+fn encode_bswap(size: OpSize, dst: Gpr, buf: &mut Vec<u8>) {
+    let w = matches!(size, OpSize::S64);
+    let b_bit = if dst.needs_rex() { 0x01 } else { 0 };
+    let w_bit = if w { 0x08 } else { 0 };
+    let rex_bits = w_bit | b_bit;
+    if rex_bits != 0 {
+        buf.push(0x40 | rex_bits);
+    }
+    buf.push(0x0f);
+    buf.push(0xc8 + dst.encoding());
 }
 
 /// Encode FpBinOp pseudo-instruction: SSE2 f64 binary op via red-zone.

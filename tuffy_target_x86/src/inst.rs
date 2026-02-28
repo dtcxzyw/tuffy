@@ -207,6 +207,12 @@ pub enum MInst<R: RegType> {
     Lzcnt { dst: R, src: R },
     /// tzcnt r64, r64 (count trailing zeros)
     Tzcnt { dst: R, src: R },
+    /// bswap r32/r64 (byte-swap in place)
+    Bswap { size: OpSize, dst: R },
+    /// rol dst, cl (rotate left by cl)
+    RolRCL { size: OpSize, dst: R },
+    /// ror dst, cl (rotate right by cl)
+    RorRCL { size: OpSize, dst: R },
     /// ud2 (undefined instruction trap)
     Ud2,
     /// Pseudo-instruction: SSE2 f64 binary operation via memory.
