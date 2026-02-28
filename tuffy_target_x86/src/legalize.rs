@@ -704,6 +704,14 @@ fn copy_inst(
             return;
         }
         Op::Fence(ord, mem) => b.fence(*ord, remap_op(s, mem), o()),
+        Op::Merge(a, b_op, width) => b.merge(remap_op(s, a), remap_op(s, b_op), *width, o()),
+        Op::Split(a, width) => {
+            let (hi, lo) = b.split(remap_op(s, a), *width, o());
+            s.vmap.set(old_vref, Mapped::One(hi));
+            let old_sec = ValueRef::inst_secondary_result(old_vref.index());
+            s.vmap.set(old_sec, Mapped::One(lo));
+            return;
+        }
     };
     s.vmap.set(old_vref, Mapped::One(v));
 }

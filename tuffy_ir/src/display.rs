@@ -536,6 +536,16 @@ fn fmt_inst(
         Op::BitReverse(val, bits) => {
             format!("{v} = bit_reverse.{bits} {}", ctx.fmt_operand(val))
         }
+        Op::Merge(a, b, width) => {
+            format!(
+                "{v} = merge.{width} {}, {}",
+                ctx.fmt_operand(a),
+                ctx.fmt_operand(b)
+            )
+        }
+        Op::Split(a, width) => {
+            format!("{multi_v} = split.{width} {}", ctx.fmt_operand(a))
+        }
         Op::RotateLeft(val, amt, bits) => {
             format!(
                 "{v} = rotate_left.{bits} {}, {}",

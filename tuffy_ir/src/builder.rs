@@ -505,6 +505,24 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::BitReverse(val, bits), Type::Int, None, origin, None)
     }
 
+    /// Merge: replace the low `width` bits of `a` with the low `width` bits of `b`.
+    pub fn merge(&mut self, a: Operand, b: Operand, width: u32, origin: Origin) -> ValueRef {
+        self.push_inst(Op::Merge(a, b, width), Type::Int, None, origin, None)
+    }
+
+    /// Split: decompose `a` at bit position `width`. Returns (hi, lo).
+    pub fn split(&mut self, a: Operand, width: u32, origin: Origin) -> (ValueRef, ValueRef) {
+        let primary = self.push_inst(
+            Op::Split(a, width),
+            Type::Int,
+            Some(Type::Int),
+            origin,
+            None,
+        );
+        let secondary = ValueRef::inst_secondary_result(primary.index());
+        (primary, secondary)
+    }
+
     /// Rotate left in an `bits`-bit field.
     pub fn rotate_left(
         &mut self,

@@ -1539,3 +1539,67 @@ fn memssa_display_store_load() {
          }"
     );
 }
+
+#[test]
+fn build_merge() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("merge_test");
+    let mut func = Function::new(
+        name,
+        vec![Type::Int, Type::Int],
+        vec![],
+        vec![],
+        Some(Type::Int),
+        None,
+    );
+    let mut b = Builder::new(&mut func);
+
+    let root = b.create_region(RegionKind::Function);
+    b.enter_region(root);
+    let bb = b.create_block();
+    b.switch_to_block(bb);
+
+    let mem0 = b.add_block_arg(bb, Type::Mem);
+    let a = b.param(0, Type::Int, None, Origin::synthetic());
+    let lo = b.param(1, Type::Int, None, Origin::synthetic());
+    let merged = b.merge(a.into(), lo.into(), 64, Origin::synthetic());
+    b.ret(Some(merged.into()), mem0.into(), Origin::synthetic());
+    b.exit_region();
+
+    assert!(matches!(func.instructions[2].op, Op::Merge(_, _, 64)));
+    assert_eq!(func.instructions[2].ty, Type::Int);
+
+    let output = format!("{}", func.display(&st));
+    assert!(output.contains("v3 = merge.64 v1, v2"));
+}
+
+#[test]
+fn build_split() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("split_test");
+    let mut func = Function::new(name, vec![Type::Int], vec![], vec![], Some(Type::Int), None);
+    let mut b = Builder::new(&mut func);
+
+    let root = b.create_region(RegionKind::Function);
+    b.enter_region(root);
+    let bb = b.create_block();
+    b.switch_to_block(bb);
+
+    let mem0 = b.add_block_arg(bb, Type::Mem);
+    let wide = b.param(0, Type::Int, None, Origin::synthetic());
+    let (hi, lo) = b.split(wide.into(), 64, Origin::synthetic());
+
+    // hi is primary result, lo is secondary
+    assert!(!hi.is_secondary_result());
+    assert!(lo.is_secondary_result());
+
+    b.ret(Some(hi.into()), mem0.into(), Origin::synthetic());
+    b.exit_region();
+
+    let inst = &func.instructions[1];
+    assert_eq!(inst.ty, Type::Int);
+    assert_eq!(inst.secondary_ty, Some(Type::Int));
+
+    let output = format!("{}", func.display(&st));
+    assert!(output.contains("v2, v3 = split.64 v1"));
+}

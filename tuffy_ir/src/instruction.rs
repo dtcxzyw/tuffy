@@ -195,6 +195,13 @@ pub enum Op {
     Bswap(Operand, u32),
     /// Bit-reverse: reverse bit order of the low n bits. n = 0 produces poison.
     BitReverse(Operand, u32),
+    /// Merge: replace the low `width` bits of `a` with the low `width` bits of `b`.
+    /// width = 0 produces poison.
+    Merge(Operand, Operand, u32),
+    /// Split: decompose `a` at bit position `width`.
+    /// Produces two results: hi = a >> width, lo = a mod 2^width.
+    /// width = 0 produces poison. Multi-result instruction.
+    Split(Operand, u32),
     /// Rotate left: rotate value left by amount in an n-bit field. n = 0 produces poison.
     RotateLeft(Operand, Operand, u32),
     /// Rotate right: rotate value right by amount in an n-bit field. n = 0 produces poison.
