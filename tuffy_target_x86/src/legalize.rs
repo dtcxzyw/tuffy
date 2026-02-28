@@ -278,10 +278,16 @@ fn walk_region(
     b: &mut Builder,
     old_region: tuffy_ir::value::RegionRef,
 ) {
+    // Phase 1: pre-create all blocks and their args so that forward
+    // block references (e.g. brif targets) can be resolved during
+    // instruction processing.
+    precreate_blocks(old, s, b, old_region);
+
+    // Phase 2: process instructions in each block.
     for child in &old.region(old_region).children {
         match child {
             CfgNode::Block(old_blk) => {
-                walk_block(old, s, b, *old_blk);
+                walk_block_insts(old, s, b, *old_blk);
             }
             CfgNode::Region(old_sub) => {
                 let new_sub = b.create_region(old.region(*old_sub).kind);
@@ -293,30 +299,46 @@ fn walk_region(
     }
 }
 
-fn walk_block(old: &Function, s: &mut State, b: &mut Builder, old_blk: BlockRef) {
-    let new_blk = b.create_block();
-    s.bmap.insert(old_blk.index(), new_blk);
+/// Pre-create all blocks (and their args) in a region so that `bmap`
+/// is fully populated before any instructions are processed.  This
+/// avoids panics on forward block references in `brif`/`br`.
+fn precreate_blocks(
+    old: &Function,
+    s: &mut State,
+    b: &mut Builder,
+    old_region: tuffy_ir::value::RegionRef,
+) {
+    for child in &old.region(old_region).children {
+        if let CfgNode::Block(old_blk) = child {
+            let new_blk = b.create_block();
+            s.bmap.insert(old_blk.index(), new_blk);
 
-    // Recreate block args, splitting 128-bit ones.
-    let old_bb = old.block(old_blk);
-    for i in 0..old_bb.arg_count {
-        let old_ba_idx = old_bb.arg_start + i;
-        let old_ba_ref = ValueRef::block_arg(old_ba_idx);
-        let ba_ty = old.block_args[old_ba_idx as usize].ty.clone();
+            // Recreate block args, splitting 128-bit ones.
+            let old_bb = old.block(*old_blk);
+            for i in 0..old_bb.arg_count {
+                let old_ba_idx = old_bb.arg_start + i;
+                let old_ba_ref = ValueRef::block_arg(old_ba_idx);
+                let ba_ty = old.block_args[old_ba_idx as usize].ty.clone();
 
-        if s.wide.contains(&old_ba_ref.raw()) {
-            let lo = b.add_block_arg(new_blk, Type::Int);
-            let hi = b.add_block_arg(new_blk, Type::Int);
-            s.vmap.set(old_ba_ref, Mapped::Pair(lo, hi));
-        } else {
-            let v = b.add_block_arg(new_blk, ba_ty);
-            s.vmap.set(old_ba_ref, Mapped::One(v));
+                if s.wide.contains(&old_ba_ref.raw()) {
+                    let lo = b.add_block_arg(new_blk, Type::Int);
+                    let hi = b.add_block_arg(new_blk, Type::Int);
+                    s.vmap.set(old_ba_ref, Mapped::Pair(lo, hi));
+                } else {
+                    let v = b.add_block_arg(new_blk, ba_ty);
+                    s.vmap.set(old_ba_ref, Mapped::One(v));
+                }
+            }
         }
+        // Regions are handled recursively in walk_region phase 2.
     }
+}
 
+/// Process instructions in a pre-created block.
+fn walk_block_insts(old: &Function, s: &mut State, b: &mut Builder, old_blk: BlockRef) {
+    let new_blk = s.bmap[&old_blk.index()];
     b.switch_to_block(new_blk);
 
-    // Process each instruction in the old block.
     for (old_vref, inst) in old.block_insts_with_values(old_blk) {
         legalize_inst(old, s, b, old_vref, inst);
     }
