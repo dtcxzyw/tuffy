@@ -1,8 +1,8 @@
 # Split mir_to_ir.rs into smaller modules
 
-- Status: Draft
+- Status: Completed
 - Created: 2026-02-27
-- Completed: N/A
+- Completed: 2026-02-28
 - Parent: N/A
 
 ## Description

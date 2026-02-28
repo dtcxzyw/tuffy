@@ -1,0 +1,688 @@
+//! Terminator translation for MIR → IR conversion.
+
+use rustc_middle::mir::{self, Operand, TerminatorKind};
+use rustc_middle::ty::{self, TypeVisitableExt};
+
+use tuffy_ir::instruction::{ICmpOp, Origin};
+use tuffy_ir::types::Type;
+
+use super::ctx::TranslationCtx;
+use super::types::*;
+
+impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
+    pub(super) fn translate_terminator(&mut self, term: &mir::Terminator<'tcx>) {
+        match &term.kind {
+            TerminatorKind::Return => {
+                let ret_local = mir::Local::from_usize(0);
+                let ret_mir_ty = self.monomorphize(self.mir.local_decls[ret_local].ty);
+
+                // sret path must be checked first: for coroutines/closures,
+                // translate_ty returns None but the ABI still uses sret.
+                if self.use_sret {
+                    // Large struct return: copy _0's data to the caller's sret pointer,
+                    // then return the sret pointer in RAX.
+                    let sret = self
+                        .sret_ptr
+                        .expect("sret_ptr must be set when use_sret is true");
+                    let src = self
+                        .locals
+                        .get(ret_local)
+                        .expect("return local _0 must be set");
+                    let size = type_size(self.tcx, ret_mir_ty).unwrap_or(8);
+
+                    // Word-by-word copy from local _0's stack slot to sret pointer.
+                    let num_words = size.div_ceil(8);
+                    for i in 0..num_words {
+                        let byte_off = i * 8;
+                        let chunk = std::cmp::min(8, size - byte_off) as u32;
+                        let load_addr = if byte_off == 0 {
+                            src
+                        } else {
+                            let off = self.builder.iconst(byte_off as i64, Origin::synthetic());
+                            self.builder
+                                .ptradd(src.into(), off.into(), 0, Origin::synthetic())
+                        };
+                        let word = self.builder.load(
+                            load_addr.into(),
+                            chunk,
+                            Type::Int,
+                            self.current_mem.into(),
+                            None,
+                            Origin::synthetic(),
+                        );
+                        let store_addr = if byte_off == 0 {
+                            sret
+                        } else {
+                            let off = self.builder.iconst(byte_off as i64, Origin::synthetic());
+                            self.builder
+                                .ptradd(sret.into(), off.into(), 0, Origin::synthetic())
+                        };
+                        self.current_mem = self.builder.store(
+                            word.into(),
+                            store_addr.into(),
+                            chunk,
+                            self.current_mem.into(),
+                            Origin::synthetic(),
+                        );
+                    }
+
+                    // Return the sret pointer in RAX (System V convention).
+                    self.builder.ret(
+                        Some(sret.into()),
+                        self.current_mem.into(),
+                        Origin::synthetic(),
+                    );
+                } else if matches!(translate_ty(ret_mir_ty), Some(Type::Unit) | None) {
+                    // Unit-returning or untranslatable return type: bare ret, no value.
+                    self.builder
+                        .ret(None, self.current_mem.into(), Origin::synthetic());
+                } else if type_size(self.tcx, ret_mir_ty) == Some(0) {
+                    // Zero-sized return type: return a dummy value to satisfy the
+                    // function signature (translate_ty maps ADTs to Int).
+                    let dummy = self.builder.iconst(0, Origin::synthetic());
+                    self.builder.ret(
+                        Some(dummy.into()),
+                        self.current_mem.into(),
+                        Origin::synthetic(),
+                    );
+                } else if self.stack_locals.is_stack(ret_local)
+                    && matches!(
+                        self.locals
+                            .get(ret_local)
+                            .and_then(|v| self.builder.value_type(v).cloned()),
+                        Some(Type::Ptr(_))
+                    )
+                {
+                    // Stack-allocated return (e.g., 16-byte struct built via Aggregate).
+                    // Load the actual data from the stack slot instead of returning
+                    // the slot address (which would be a dangling pointer).
+                    let slot = self
+                        .locals
+                        .get(ret_local)
+                        .expect("return local _0 must be set");
+                    let ret_ty = self.monomorphize(self.mir.local_decls[ret_local].ty);
+                    let size = type_size(self.tcx, ret_ty).unwrap_or(8);
+
+                    // Load the first word from the stack slot.
+                    // Use the actual type size (clamped to 8) so that sub-word
+                    // types (u8, u16, etc.) emit a correctly-sized load instead
+                    // of reading garbage bytes beyond the stored value.
+                    let load_size = size.min(8) as u32;
+                    let load_ty = translate_ty(ret_mir_ty).unwrap_or(Type::Int);
+                    let word0 = self.builder.load(
+                        slot.into(),
+                        load_size,
+                        load_ty,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
+                    );
+
+                    if size > 8 {
+                        // Second 8 bytes → secondary return register.
+                        let off = self.builder.iconst(8, Origin::synthetic());
+                        let addr1 =
+                            self.builder
+                                .ptradd(slot.into(), off.into(), 0, Origin::synthetic());
+                        let word1 = self.builder.load(
+                            addr1.into(),
+                            8,
+                            Type::Int,
+                            self.current_mem.into(),
+                            None,
+                            Origin::synthetic(),
+                        );
+                        let dummy = self.builder.iconst(0, Origin::synthetic());
+                        self.abi_metadata
+                            .mark_secondary_return_move(dummy.index(), word1.index());
+                    }
+
+                    // Coerce to match declared return type (e.g., Ptr for &T returns).
+                    let ret_ir_ty = translate_ty(ret_mir_ty);
+                    let coerced_word0 = match ret_ir_ty {
+                        Some(Type::Ptr(_)) => self.coerce_to_ptr(word0),
+                        _ => word0,
+                    };
+                    self.builder.ret(
+                        Some(coerced_word0.into()),
+                        self.current_mem.into(),
+                        Origin::synthetic(),
+                    );
+                } else {
+                    // Normal scalar return.
+                    let val = self.locals.values[ret_local.as_usize()];
+                    if let Some(v) = val {
+                        if let Some(fat_val) = self.fat_locals.get(ret_local) {
+                            let dummy = self.builder.iconst(0, Origin::synthetic());
+                            self.abi_metadata
+                                .mark_secondary_return_move(dummy.index(), fat_val.index());
+                        }
+                        // Coerce to match the declared return type.
+                        let ret_ir_ty = translate_ty(ret_mir_ty);
+                        let coerced = match (ret_ir_ty, self.builder.value_type(v).cloned()) {
+                            (Some(Type::Int), Some(Type::Ptr(_)))
+                                if self.builder.is_memory_address(v) =>
+                            {
+                                // v is a pointer to data (e.g. symbol_addr for an
+                                // indirect constant).  Load the actual value instead
+                                // of converting the address to an integer.
+                                let ret_size =
+                                    type_size(self.tcx, ret_mir_ty).unwrap_or(8).min(8) as u32;
+                                self.builder.load(
+                                    v.into(),
+                                    ret_size,
+                                    Type::Int,
+                                    self.current_mem.into(),
+                                    None,
+                                    Origin::synthetic(),
+                                )
+                            }
+                            (Some(Type::Int), _) => self.coerce_to_int(v),
+                            (Some(Type::Ptr(_)), _) => self.coerce_to_ptr(v),
+                            (Some(Type::Bool), Some(Type::Int)) => {
+                                self.builder.int_to_bool(v.into(), Origin::synthetic())
+                            }
+                            _ => v,
+                        };
+                        self.builder.ret(
+                            Some(coerced.into()),
+                            self.current_mem.into(),
+                            Origin::synthetic(),
+                        );
+                    } else {
+                        // Return local was never assigned — return a dummy
+                        // value.  This can happen in custom MIR where the
+                        // return place is left uninitialised (the value is
+                        // garbage but the function must still return).
+                        let dummy = self.builder.iconst(0, Origin::synthetic());
+                        self.builder.ret(
+                            Some(dummy.into()),
+                            self.current_mem.into(),
+                            Origin::synthetic(),
+                        );
+                    }
+                }
+            }
+            TerminatorKind::Goto { target } => {
+                let target_block = self.block_map.get(*target);
+                self.builder.br(
+                    target_block,
+                    vec![self.current_mem.into()],
+                    Origin::synthetic(),
+                );
+            }
+            TerminatorKind::SwitchInt { discr, targets } => {
+                self.translate_switch_int(discr, targets);
+            }
+            TerminatorKind::Assert {
+                cond,
+                expected,
+                target,
+                ..
+            } => {
+                // Assert: if cond != expected, trap. Otherwise branch to target.
+                let cond_val = self.translate_operand(cond);
+                let target_block = self.block_map.get(*target);
+                if let Some(cond_v) = cond_val {
+                    let cond_v = self.coerce_to_int(cond_v);
+                    let expected_val = self
+                        .builder
+                        .iconst(if *expected { 1 } else { 0 }, Origin::synthetic());
+                    let cmp = self.builder.icmp(
+                        ICmpOp::Eq,
+                        cond_v.into(),
+                        expected_val.into(),
+                        Origin::synthetic(),
+                    );
+                    // Create a trap block for the failure path.
+                    let trap_block = self.builder.create_block();
+                    let _trap_mem = self.builder.add_block_arg(trap_block, Type::Mem);
+                    self.builder.brif(
+                        cmp.into(),
+                        target_block,
+                        vec![self.current_mem.into()],
+                        trap_block,
+                        vec![self.current_mem.into()],
+                        Origin::synthetic(),
+                    );
+                    self.builder.switch_to_block(trap_block);
+                    self.builder.trap(Origin::synthetic());
+                } else {
+                    self.builder.br(
+                        target_block,
+                        vec![self.current_mem.into()],
+                        Origin::synthetic(),
+                    );
+                }
+            }
+            TerminatorKind::Unreachable => {
+                self.builder.unreachable(Origin::synthetic());
+            }
+            TerminatorKind::Drop { place, target, .. } => {
+                let drop_ty = place.ty(&self.mir.local_decls, self.tcx).ty;
+                let drop_ty = self.monomorphize(drop_ty);
+                let target_block = self.block_map.get(*target);
+
+                // Only emit drop glue when the type actually needs dropping.
+                if drop_ty.needs_drop(self.tcx, ty::TypingEnv::fully_monomorphized()) {
+                    // Trait object drops: dispatch through vtable[0] instead of
+                    // calling drop_in_place directly (which would recurse).
+                    if matches!(drop_ty.kind(), ty::Dynamic(..)) {
+                        // The place is `*local` where local is a fat pointer
+                        // (data ptr + vtable ptr). Get both components.
+                        let base_local = place.local;
+                        let data_ptr = self.locals.get(base_local);
+                        let vtable_ptr = self.fat_locals.get(base_local);
+                        if let (Some(data), Some(vtable)) = (data_ptr, vtable_ptr) {
+                            // Load drop function pointer from vtable[0].
+                            let drop_fn = self.builder.load(
+                                vtable.into(),
+                                8,
+                                Type::Ptr(0),
+                                self.current_mem.into(),
+                                None,
+                                Origin::synthetic(),
+                            );
+                            let (call_mem, _) = self.builder.call(
+                                drop_fn.into(),
+                                vec![data.into()],
+                                Type::Unit,
+                                self.current_mem.into(),
+                                None,
+                                Origin::synthetic(),
+                            );
+                            self.current_mem = call_mem;
+                        }
+                    } else {
+                        let drop_instance = ty::Instance::resolve_drop_in_place(self.tcx, drop_ty);
+                        self.referenced_instances.push(drop_instance);
+                        if !drop_instance.args.has_non_region_param() {
+                            let sym_name = self.tcx.symbol_name(drop_instance).name.to_string();
+                            let sym_id = self.symbols.intern(&sym_name);
+                            let callee = self.builder.symbol_addr(sym_id, Origin::synthetic());
+
+                            // Get a pointer to the place being dropped.
+                            let drop_ptr = if place.projection.is_empty() {
+                                if self.stack_locals.is_stack(place.local) {
+                                    self.locals.get(place.local)
+                                } else if let Some(v) = self.locals.get(place.local) {
+                                    // Non-stack local: the value IS the pointer
+                                    // (e.g. a Box or reference).  For types that
+                                    // need dropping and are stored as a register
+                                    // value, we need to spill to a stack slot so
+                                    // drop_in_place gets a valid &mut T.
+                                    let ty_size = type_size(self.tcx, drop_ty).unwrap_or(8);
+                                    if let Some(fat_val) = self.fat_locals.get(place.local) {
+                                        // Fat pointer (Box<dyn Trait>, &[T], etc.):
+                                        // spill both data ptr and metadata to a
+                                        // 16-byte stack slot so drop_in_place
+                                        // receives a valid &mut FatPtr.
+                                        let slot = self
+                                            .builder
+                                            .stack_slot(16, Origin::synthetic());
+                                        self.current_mem = self.builder.store(
+                                            v.into(),
+                                            slot.into(),
+                                            8,
+                                            self.current_mem.into(),
+                                            Origin::synthetic(),
+                                        );
+                                        let off8 =
+                                            self.builder.iconst(8, Origin::synthetic());
+                                        let hi = self.builder.ptradd(
+                                            slot.into(),
+                                            off8.into(),
+                                            0,
+                                            Origin::synthetic(),
+                                        );
+                                        self.current_mem = self.builder.store(
+                                            fat_val.into(),
+                                            hi.into(),
+                                            8,
+                                            self.current_mem.into(),
+                                            Origin::synthetic(),
+                                        );
+                                        Some(slot)
+                                    } else if ty_size > 8
+                                        || matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
+                                    {
+                                        Some(v)
+                                    } else {
+                                        let slot = self
+                                            .builder
+                                            .stack_slot(ty_size as u32, Origin::synthetic());
+                                        self.current_mem = self.builder.store(
+                                            v.into(),
+                                            slot.into(),
+                                            ty_size as u32,
+                                            self.current_mem.into(),
+                                            Origin::synthetic(),
+                                        );
+                                        Some(slot)
+                                    }
+                                } else {
+                                    // ZST with no stored value — use a
+                                    // dangling aligned pointer so
+                                    // drop_in_place is still called.
+                                    let align = self
+                                        .tcx
+                                        .layout_of(
+                                            ty::TypingEnv::fully_monomorphized()
+                                                .as_query_input(drop_ty),
+                                        )
+                                        .map(|l| l.align.abi.bytes())
+                                        .unwrap_or(1);
+                                    Some(self.builder.iconst(align as i64, Origin::synthetic()))
+                                }
+                            } else {
+                                self.translate_place_to_addr(place)
+                                    .map(|(a, _)| self.coerce_to_ptr(a))
+                            };
+
+                            if let Some(ptr) = drop_ptr {
+                                let (call_mem, _) = self.builder.call(
+                                    callee.into(),
+                                    vec![ptr.into()],
+                                    Type::Unit,
+                                    self.current_mem.into(),
+                                    None,
+                                    Origin::synthetic(),
+                                );
+                                self.current_mem = call_mem;
+                            }
+                        }
+                    }
+                }
+
+                self.builder.br(
+                    target_block,
+                    vec![self.current_mem.into()],
+                    Origin::synthetic(),
+                );
+            }
+            TerminatorKind::FalseEdge { real_target, .. } => {
+                let target_block = self.block_map.get(*real_target);
+                self.builder.br(
+                    target_block,
+                    vec![self.current_mem.into()],
+                    Origin::synthetic(),
+                );
+            }
+            TerminatorKind::FalseUnwind { real_target, .. } => {
+                let target_block = self.block_map.get(*real_target);
+                self.builder.br(
+                    target_block,
+                    vec![self.current_mem.into()],
+                    Origin::synthetic(),
+                );
+            }
+            TerminatorKind::Call {
+                func,
+                args,
+                destination,
+                target,
+                ..
+            } => {
+                self.translate_call(func, args, destination, target, term.source_info);
+            }
+            TerminatorKind::InlineAsm { targets, .. } => {
+                // Inline assembly is not supported — treat as a no-op and
+                // branch to the first target block (the normal destination).
+                // This is enough for identity functions like `black_box` that
+                // use asm only as an optimisation barrier.
+                if let Some(&target) = targets.first() {
+                    let target_block = self.block_map.get(target);
+                    self.builder.br(
+                        target_block,
+                        vec![self.current_mem.into()],
+                        Origin::synthetic(),
+                    );
+                } else {
+                    self.builder.unreachable(Origin::synthetic());
+                }
+            }
+            _ => {
+                // Unhandled terminator kind — emit unreachable so the block
+                // is never empty and the IR verifier stays happy.
+                self.builder.unreachable(Origin::synthetic());
+            }
+        }
+    }
+
+    pub(super) fn translate_switch_int(&mut self, discr: &Operand<'tcx>, targets: &mir::SwitchTargets) {
+        // Get the discriminant type's byte size so we can truncate switch
+        // target values to the correct bit width.  MIR stores switch values
+        // as u128, but the runtime discriminant is stored in a sized slot
+        // (e.g. 32-bit for i32) and zero-extended on load.
+        let discr_ty = match discr {
+            Operand::Copy(place) | Operand::Move(place) => {
+                Some(self.monomorphize(place.ty(&self.mir.local_decls, self.tcx).ty))
+            }
+            Operand::Constant(c) => Some(self.monomorphize(c.ty())),
+            _ => None,
+        };
+        let discr_bits = discr_ty
+            .and_then(|t| type_size(self.tcx, t))
+            .map(|sz| sz * 8)
+            .unwrap_or(64);
+
+        let mut discr_val = match self.translate_operand(discr) {
+            Some(v) => v,
+            None => {
+                // The discriminant local has no value yet (e.g. defined in a
+                // later MIR block that hasn't been translated).  Use zero as
+                // a conservative default — this is correct for the common
+                // case of `is_val_statically_known` (always false/0).
+                // TODO: process blocks in reverse post-order to avoid this.
+                self.builder.iconst(0, Origin::synthetic())
+            }
+        };
+
+        // i128/u128 discriminants: the value lives in a stack slot (pointer).
+        // We need to load both 64-bit halves and compare them separately.
+        let is_i128_discr = discr_bits == 128
+            && matches!(self.builder.value_type(discr_val), Some(Type::Ptr(_)));
+
+        if is_i128_discr {
+            // Handle i128/u128 SwitchInt with two-word comparison.
+            // For each target value, compare low word first, then high word
+            // using nested brif (avoids Bool AND issues).
+            let all_targets: Vec<_> = targets.iter().collect();
+            let otherwise = targets.otherwise();
+
+            // Load low and high 64-bit halves from the stack slot.
+            let lo = self.builder.load(
+                discr_val.into(), 8, Type::Int,
+                self.current_mem.into(), None, Origin::synthetic(),
+            );
+            let off8 = self.builder.iconst(8, Origin::synthetic());
+            let hi_addr = self.builder.ptradd(
+                discr_val.into(), off8.into(), 0, Origin::synthetic(),
+            );
+            let hi = self.builder.load(
+                hi_addr.into(), 8, Type::Int,
+                self.current_mem.into(), None, Origin::synthetic(),
+            );
+
+            let otherwise_block = self.block_map.get(otherwise);
+
+            if all_targets.is_empty() {
+                self.builder.br(
+                    otherwise_block,
+                    vec![self.current_mem.into()],
+                    Origin::synthetic(),
+                );
+            } else {
+                for (i, (test_val, target_bb)) in all_targets.iter().enumerate() {
+                    let target_lo = (*test_val & ((1u128 << 64) - 1)) as i64;
+                    let target_hi = (*test_val >> 64) as i64;
+                    let clo = self.builder.iconst(target_lo, Origin::synthetic());
+                    let chi = self.builder.iconst(target_hi, Origin::synthetic());
+
+                    // Compare low word first.
+                    let eq_lo = self.builder.icmp(
+                        ICmpOp::Eq, lo.into(), clo.into(), Origin::synthetic(),
+                    );
+
+                    // Create a block for the high-word check.
+                    let hi_check = self.builder.create_block();
+                    let hi_check_mem =
+                        self.builder.add_block_arg(hi_check, Type::Mem);
+
+                    // Determine the "miss" block: either the next comparison
+                    // or the otherwise block.
+                    let (miss_block, miss_mem) = if i == all_targets.len() - 1 {
+                        (otherwise_block, None)
+                    } else {
+                        let nb = self.builder.create_block();
+                        let nm = self.builder.add_block_arg(nb, Type::Mem);
+                        (nb, Some(nm))
+                    };
+
+                    // If lo doesn't match, skip to miss_block.
+                    self.builder.brif(
+                        eq_lo.into(),
+                        hi_check,
+                        vec![self.current_mem.into()],
+                        miss_block,
+                        vec![self.current_mem.into()],
+                        Origin::synthetic(),
+                    );
+
+                    // In the hi_check block, compare the high word.
+                    self.builder.switch_to_block(hi_check);
+                    self.current_mem = hi_check_mem;
+                    let eq_hi = self.builder.icmp(
+                        ICmpOp::Eq, hi.into(), chi.into(), Origin::synthetic(),
+                    );
+                    let then_block = self.block_map.get(*target_bb);
+                    self.builder.brif(
+                        eq_hi.into(),
+                        then_block,
+                        vec![self.current_mem.into()],
+                        miss_block,
+                        vec![self.current_mem.into()],
+                        Origin::synthetic(),
+                    );
+
+                    // Continue from the miss block for the next comparison.
+                    if let Some(nm) = miss_mem {
+                        self.builder.switch_to_block(miss_block);
+                        self.current_mem = nm;
+                    }
+                }
+            }
+            return;
+        }
+
+        // If the discriminant is a pointer (e.g. nullable pointer optimization),
+        // convert it to an integer so icmp gets Int operands.
+        // Similarly, Bool discriminants need BoolToInt for icmp.
+        if matches!(self.builder.value_type(discr_val), Some(Type::Ptr(_))) {
+            discr_val = self
+                .builder
+                .ptrtoaddr(discr_val.into(), Origin::synthetic());
+        } else if matches!(self.builder.value_type(discr_val), Some(Type::Bool)) {
+            discr_val = self
+                .builder
+                .bool_to_int(discr_val.into(), Origin::synthetic());
+        }
+
+        // Mask the discriminant to its type's bit width so that a sign-extended
+        // 64-bit register value matches the zero-extended switch target constants.
+        if discr_bits < 64 {
+            let mask_val = self
+                .builder
+                .iconst((1i64 << discr_bits) - 1, Origin::synthetic());
+            discr_val =
+                self.builder
+                    .and(discr_val.into(), mask_val.into(), None, Origin::synthetic());
+        }
+
+        let all_targets: Vec<_> = targets.iter().collect();
+        let otherwise = targets.otherwise();
+
+        if all_targets.is_empty() {
+            // No explicit value-target pairs — unconditionally jump to otherwise.
+            // This happens for single-variant enums where the discriminant check
+            // is optimised away.
+            let otherwise_block = self.block_map.get(otherwise);
+            self.builder.br(
+                otherwise_block,
+                vec![self.current_mem.into()],
+                Origin::synthetic(),
+            );
+        } else if all_targets.len() == 1 {
+            // Two-way branch: compare discriminant with the single value.
+            let (test_val, target_bb) = all_targets[0];
+            // Truncate u128 switch value to discriminant bit width so it
+            // matches the zero-extended runtime value loaded from a sized slot.
+            let truncated = if discr_bits < 128 {
+                test_val & ((1u128 << discr_bits) - 1)
+            } else {
+                test_val
+            };
+            let const_val = self.builder.iconst(truncated as i64, Origin::synthetic());
+            let cmp = self.builder.icmp(
+                ICmpOp::Eq,
+                discr_val.into(),
+                const_val.into(),
+                Origin::synthetic(),
+            );
+            let then_block = self.block_map.get(target_bb);
+            let else_block = self.block_map.get(otherwise);
+            self.builder.brif(
+                cmp.into(),
+                then_block,
+                vec![self.current_mem.into()],
+                else_block,
+                vec![self.current_mem.into()],
+                Origin::synthetic(),
+            );
+        } else {
+            // Multi-way: chain of brif comparisons with fallthrough blocks.
+            let otherwise_block = self.block_map.get(otherwise);
+            for (i, (test_val, target_bb)) in all_targets.iter().enumerate() {
+                let truncated = if discr_bits < 128 {
+                    *test_val & ((1u128 << discr_bits) - 1)
+                } else {
+                    *test_val
+                };
+                let const_val = self.builder.iconst(truncated as i64, Origin::synthetic());
+                let cmp = self.builder.icmp(
+                    ICmpOp::Eq,
+                    discr_val.into(),
+                    const_val.into(),
+                    Origin::synthetic(),
+                );
+                let then_block = self.block_map.get(*target_bb);
+
+                if i == all_targets.len() - 1 {
+                    // Last comparison: else goes to otherwise.
+                    self.builder.brif(
+                        cmp.into(),
+                        then_block,
+                        vec![self.current_mem.into()],
+                        otherwise_block,
+                        vec![self.current_mem.into()],
+                        Origin::synthetic(),
+                    );
+                } else {
+                    // Not last: else falls through to a new comparison block.
+                    let next_block = self.builder.create_block();
+                    let next_mem = self.builder.add_block_arg(next_block, Type::Mem);
+                    self.builder.brif(
+                        cmp.into(),
+                        then_block,
+                        vec![self.current_mem.into()],
+                        next_block,
+                        vec![self.current_mem.into()],
+                        Origin::synthetic(),
+                    );
+                    self.builder.switch_to_block(next_block);
+                    self.current_mem = next_mem;
+                }
+            }
+        }
+    }
+}
