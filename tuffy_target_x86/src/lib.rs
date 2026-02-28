@@ -6,6 +6,7 @@ pub mod encode;
 pub mod frame;
 pub mod inst;
 pub mod isel;
+pub mod legalize;
 pub mod reg;
 pub mod regalloc_impl;
 

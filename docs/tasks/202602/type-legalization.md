@@ -1,6 +1,6 @@
 # Add i128/u128 IR types and type legalization pass
 
-- Status: Draft
+- Status: In Progress
 - Created: 2026-02-28
 - Completed: N/A
 - Parent: N/A

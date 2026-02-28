@@ -17,6 +17,7 @@ use tuffy_target::isel::IselResult;
 
 use crate::inst::{MInst, OpSize, PInst, VInst};
 use crate::isel;
+use crate::legalize;
 use crate::reg::Gpr;
 
 /// Registers available for allocation.
@@ -486,6 +487,13 @@ impl Backend for X86Backend {
         symbols: &SymbolTable,
         metadata: &X86AbiMetadata,
     ) -> Option<CompiledFunction> {
+        // 0. Legalize i128 operations (no-op if none exist).
+        let legalized = legalize::legalize_i128(func, metadata);
+        let (func, metadata) = match &legalized {
+            Some((f, m)) => (f, m),
+            None => (func, metadata),
+        };
+
         // 1. Instruction selection → MInst<VReg>
         let isel_result = match isel::isel(
             func,
