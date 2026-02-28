@@ -67,6 +67,51 @@ def evalCountTrailingZeros (a : Int) : Value :=
   if a ≤ 0 then .poison
   else .int (ctz a.toNat)
 
+/-- Byte-swap an n-byte integer. n = 0 produces poison.
+    Reverses the byte order of the low n bytes (value mod 2^(8n)). -/
+def evalBswap (a : Int) (n : Nat) : Value :=
+  if n = 0 then .poison
+  else
+    let mask := (2 : Int) ^ (8 * n) - 1
+    let v := (a % ((2 : Int) ^ (8 * n))).toNat
+    let rec go (i : Nat) (acc : Nat) : Nat :=
+      if i >= n then acc
+      else go (i + 1) (acc + ((v >>> (i * 8)) % 256) <<< ((n - 1 - i) * 8))
+    .int (go 0 0 &&& mask.toNat)
+
+/-- Rotate left by `amt` positions in an n-bit field. n = 0 produces poison. -/
+def evalRotateLeft (a amt : Int) (n : Nat) : Value :=
+  if n = 0 then .poison
+  else
+    let mask := (2 : Int) ^ n - 1
+    let v := (a % ((2 : Int) ^ n)).toNat
+    let s := (amt % n).toNat
+    .int (((v <<< s) ||| (v >>> (n - s))) &&& mask.toNat)
+
+/-- Rotate right by `amt` positions in an n-bit field. n = 0 produces poison. -/
+def evalRotateRight (a amt : Int) (n : Nat) : Value :=
+  if n = 0 then .poison
+  else
+    let mask := (2 : Int) ^ n - 1
+    let v := (a % ((2 : Int) ^ n)).toNat
+    let s := (amt % n).toNat
+    .int (((v >>> s) ||| (v <<< (n - s))) &&& mask.toNat)
+
+/-- Unsigned saturating addition in n bits. n = 0 produces poison. -/
+def evalSaturatingAdd (a b : Int) (n : Nat) : Value :=
+  if n = 0 then .poison
+  else
+    let maxVal := (2 : Int) ^ n - 1
+    let sum := a + b
+    if sum > maxVal then .int maxVal else .int sum
+
+/-- Unsigned saturating subtraction in n bits. n = 0 produces poison. -/
+def evalSaturatingSub (a b : Int) (n : Nat) : Value :=
+  if n = 0 then .poison
+  else
+    let diff := a - b
+    if diff < 0 then .int 0 else .int diff
+
 /-- Left shift. Poison if shift amount is negative. -/
 def evalShl (a b : Int) : Value :=
   if b < 0 then .poison else .int (a <<< b.toNat)
