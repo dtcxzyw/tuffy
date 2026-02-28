@@ -320,15 +320,15 @@ fn gen_bswap(ctx: &mut super::IselCtx, vref: ValueRef, src: VReg, bytes: u32) ->
             dst: tmp,
             src,
         });
-        ctx.out.push(MInst::ShlImm {
+        ctx.out.push(MInst::AndRI {
             size: OpSize::S64,
             dst: tmp,
-            imm: 56,
+            imm: 0xFF00,
         });
         ctx.out.push(MInst::SarImm {
             size: OpSize::S64,
             dst: tmp,
-            imm: 56,
+            imm: 8,
         });
         ctx.out.push(MInst::OrRR {
             size: OpSize::S64,
