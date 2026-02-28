@@ -137,6 +137,29 @@ Population count: returns the number of set bits in the binary representation
 of `vA`. Produces `poison` if `vA` is negative.
 **Semantics**: `evalCountOnes(a) = if a < 0 then poison else popcount(a)`
 
+### `merge`
+
+```
+vN = merge.<width> vA, vB
+```
+
+Replace the low `width` bits of `vA` with the low `width` bits of `vB`, producing a
+single integer. Produces `poison` if `width` is 0.
+**Semantics**: `evalMerge(a, b, width) = if width = 0 then poison else (a with low width bits cleared) | (b AND (2^width - 1))`
+
+### `split`
+
+```
+vHi, vLo = split.<width> vA
+```
+
+Decompose `vA` at bit position `width`. Produces two results:
+- `vLo` = the low `width` bits of `vA` (zero-extended)
+- `vHi` = `vA` right-shifted by `width` bits
+
+Produces `poison` if `width` is 0. This is a multi-result instruction.
+**Semantics**: `evalSplitHi(a, width) = a >>> width`, `evalSplitLo(a, width) = a mod 2^width`
+
 ## Floating Point Arithmetic
 
 Floating point operations operate on values of `float` type (`bf16`, `f16`, `f32`, `f64`).
