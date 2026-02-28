@@ -518,9 +518,15 @@ fn select_inst(
             });
             ctx.regs.assign(vref, dst);
         }
-        Op::FNeg(_) | Op::FAbs(_) | Op::CopySign(..) => return None,
-        Op::LoadAtomic(..) | Op::StoreAtomic(..) => return None,
-        Op::AtomicRmw(..) | Op::AtomicCmpXchg(..) => return None,
+        Op::FNeg(_) | Op::FAbs(_) | Op::CopySign(..) => {
+            unimplemented!("x86 isel: floating-point op {:?}", op)
+        }
+        Op::LoadAtomic(..) | Op::StoreAtomic(..) => {
+            unimplemented!("x86 isel: atomic op {:?}", op)
+        }
+        Op::AtomicRmw(..) | Op::AtomicCmpXchg(..) => {
+            unimplemented!("x86 isel: atomic op {:?}", op)
+        }
 
         Op::SymbolAddr(sym_id) => {
             // Defer LeaSymbol emission — only emit when ensure_in_reg is called.
@@ -530,10 +536,12 @@ fn select_inst(
                 .insert(vref.index(), symbols.resolve(*sym_id).to_string());
         }
 
-        Op::Fence(..) | Op::Continue(_) | Op::RegionYield(_) => return None,
+        Op::Fence(..) | Op::Continue(_) | Op::RegionYield(_) => {
+            unimplemented!("x86 isel: op {:?}", op)
+        }
 
         // Ops handled by isel_gen::try_select_generated above.
-        _ => return None,
+        _ => unimplemented!("x86 isel: op {:?}", op),
     }
     Some(())
 }

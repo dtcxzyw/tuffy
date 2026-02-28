@@ -62,6 +62,10 @@ Manages prologue/epilogue generation, callee-saved register spilling, and stack 
 
 Implements `tuffy_target::Backend` for `X86Backend`. Orchestrates the full pipeline: legalize → isel → regalloc → encode → emit. Also generates allocator stubs and entry points.
 
+## Error Policy
+
+Unsupported IR operations in instruction selection must **not** be silently skipped (returning `None`). Use `unimplemented!()` with a descriptive message so the missing support is immediately visible. When an `unimplemented!()` is hit, the correct response is to add a concrete implementation for that operation — not to suppress the error.
+
 ## Dependencies
 
 - `tuffy_ir` — IR definitions
