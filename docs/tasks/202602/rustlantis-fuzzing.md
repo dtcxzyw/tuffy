@@ -1,6 +1,6 @@
 # Rustlantis Differential Fuzzing for rustc_codegen_tuffy
 
-- Status: Draft
+- Status: In Progress
 - Created: 2026-02-27
 - Completed: N/A
 - Parent: N/A
@@ -37,6 +37,24 @@ Hints:
 - Adjust `config.toml` to generate smaller inputs (fewer basic blocks, functions, args, etc.) when debugging — smaller programs are much easier to minimize and reason about. The shipped config already uses reduced values compared to upstream defaults.
 - Use `minimise.py` to reduce a reproducer: copy the failing program to `repro.rs` in the rustlantis directory, then run `python3 minimise.py`. It iteratively comments out or replaces MIR statements with `Return()`, keeping only lines needed to reproduce the bug. Output goes to `minimised.rs`.
 - Always minimize reproducers before reading them. Raw generated programs contain a lot of noise; minimised versions isolate the root cause much faster.
+
+## Results (2026-02-28)
+
+Seeds 0–1000:
+
+| Category | Count | % of total |
+|----------|------:|-----:|
+| Pass | 396 | 39.6 |
+| Crash (compile fail) | 602 | 60.2 |
+| Mismatch (wrong code) | 3 | 0.3 |
+
+### Mismatches
+
+| Seed | LLVM output | Tuffy output | Category |
+|------|-------------|--------------|----------|
+| 721 | `hash: 7541581120933061747` | `timeout: the monitored command dumped core` | Runtime crash |
+| 792 | `hash: 5746564840755200983` | `hash: 3589671292757105802` | Wrong code |
+| 881 | `hash: 11960833139707412614` | `hash: 12179716529323217799` | Wrong code |
 
 ## Subtasks
 
