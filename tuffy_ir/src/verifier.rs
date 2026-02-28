@@ -692,14 +692,13 @@ impl FuncVerifier<'_> {
             }
 
             // -- Symbol / Call --
-            Op::SymbolAddr(_) => {
-                if !matches!(inst.ty, Type::Ptr(_)) {
-                    self.result.error(
-                        loc.clone(),
-                        format!("symbol_addr result must be Ptr, got {:?}", inst.ty),
-                    );
-                }
+            Op::SymbolAddr(_) if !matches!(inst.ty, Type::Ptr(_)) => {
+                self.result.error(
+                    loc.clone(),
+                    format!("symbol_addr result must be Ptr, got {:?}", inst.ty),
+                );
             }
+            Op::SymbolAddr(_) => {}
             Op::Call(callee, args, mem) => {
                 self.check_operand(callee, loc);
                 self.check_operands(args, loc);
