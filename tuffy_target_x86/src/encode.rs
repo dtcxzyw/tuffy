@@ -1,6 +1,8 @@
-//! x86-64 machine code encoding.
+//! x86-64 machine code encoding using iced-x86.
 
 use std::collections::HashMap;
+
+use iced_x86::{Code, Encoder, Instruction, MemoryOperand, Register};
 
 use crate::inst::{CondCode, FpBinOpKind, MInst, OpSize, PInst};
 use crate::reg::Gpr;
@@ -14,133 +16,733 @@ struct JumpFixup {
     target_label: u32,
 }
 
+// ---------------------------------------------------------------------------
+// Register mapping
+// ---------------------------------------------------------------------------
+
+/// Map a Gpr + OpSize to the corresponding iced-x86 Register.
+fn gpr_to_iced(gpr: Gpr, size: OpSize) -> Register {
+    const R64: [Register; 16] = [
+        Register::RAX,
+        Register::RCX,
+        Register::RDX,
+        Register::RBX,
+        Register::RSP,
+        Register::RBP,
+        Register::RSI,
+        Register::RDI,
+        Register::R8,
+        Register::R9,
+        Register::R10,
+        Register::R11,
+        Register::R12,
+        Register::R13,
+        Register::R14,
+        Register::R15,
+    ];
+    const R32: [Register; 16] = [
+        Register::EAX,
+        Register::ECX,
+        Register::EDX,
+        Register::EBX,
+        Register::ESP,
+        Register::EBP,
+        Register::ESI,
+        Register::EDI,
+        Register::R8D,
+        Register::R9D,
+        Register::R10D,
+        Register::R11D,
+        Register::R12D,
+        Register::R13D,
+        Register::R14D,
+        Register::R15D,
+    ];
+    const R16: [Register; 16] = [
+        Register::AX,
+        Register::CX,
+        Register::DX,
+        Register::BX,
+        Register::SP,
+        Register::BP,
+        Register::SI,
+        Register::DI,
+        Register::R8W,
+        Register::R9W,
+        Register::R10W,
+        Register::R11W,
+        Register::R12W,
+        Register::R13W,
+        Register::R14W,
+        Register::R15W,
+    ];
+    const R8: [Register; 16] = [
+        Register::AL,
+        Register::CL,
+        Register::DL,
+        Register::BL,
+        Register::SPL,
+        Register::BPL,
+        Register::SIL,
+        Register::DIL,
+        Register::R8L,
+        Register::R9L,
+        Register::R10L,
+        Register::R11L,
+        Register::R12L,
+        Register::R13L,
+        Register::R14L,
+        Register::R15L,
+    ];
+    let idx = gpr as usize;
+    match size {
+        OpSize::S64 => R64[idx],
+        OpSize::S32 => R32[idx],
+        OpSize::S16 => R16[idx],
+        OpSize::S8 => R8[idx],
+    }
+}
+
+/// Shorthand: map Gpr to 64-bit iced register.
+fn gpr64(gpr: Gpr) -> Register {
+    gpr_to_iced(gpr, OpSize::S64)
+}
+
+/// Build a [base+disp] memory operand.
+fn mem(base: Gpr, offset: i32) -> MemoryOperand {
+    MemoryOperand::with_base_displ(gpr64(base), offset as i64)
+}
+
+// ---------------------------------------------------------------------------
+// Code selection helpers
+// ---------------------------------------------------------------------------
+
+/// Select the sized ADD r/m, r code.
+fn add_code(size: OpSize) -> Code {
+    match size {
+        OpSize::S64 => Code::Add_rm64_r64,
+        OpSize::S32 => Code::Add_rm32_r32,
+        OpSize::S16 => Code::Add_rm16_r16,
+        OpSize::S8 => Code::Add_rm8_r8,
+    }
+}
+
+fn sub_code(size: OpSize) -> Code {
+    match size {
+        OpSize::S64 => Code::Sub_rm64_r64,
+        OpSize::S32 => Code::Sub_rm32_r32,
+        OpSize::S16 => Code::Sub_rm16_r16,
+        OpSize::S8 => Code::Sub_rm8_r8,
+    }
+}
+
+fn or_code(size: OpSize) -> Code {
+    match size {
+        OpSize::S64 => Code::Or_rm64_r64,
+        OpSize::S32 => Code::Or_rm32_r32,
+        OpSize::S16 => Code::Or_rm16_r16,
+        OpSize::S8 => Code::Or_rm8_r8,
+    }
+}
+
+fn and_code(size: OpSize) -> Code {
+    match size {
+        OpSize::S64 => Code::And_rm64_r64,
+        OpSize::S32 => Code::And_rm32_r32,
+        OpSize::S16 => Code::And_rm16_r16,
+        OpSize::S8 => Code::And_rm8_r8,
+    }
+}
+
+fn xor_code(size: OpSize) -> Code {
+    match size {
+        OpSize::S64 => Code::Xor_rm64_r64,
+        OpSize::S32 => Code::Xor_rm32_r32,
+        OpSize::S16 => Code::Xor_rm16_r16,
+        OpSize::S8 => Code::Xor_rm8_r8,
+    }
+}
+
+fn cmp_rr_code(size: OpSize) -> Code {
+    match size {
+        OpSize::S64 => Code::Cmp_rm64_r64,
+        OpSize::S32 => Code::Cmp_rm32_r32,
+        OpSize::S16 => Code::Cmp_rm16_r16,
+        OpSize::S8 => Code::Cmp_rm8_r8,
+    }
+}
+
+fn test_rr_code(size: OpSize) -> Code {
+    match size {
+        OpSize::S64 => Code::Test_rm64_r64,
+        OpSize::S32 => Code::Test_rm32_r32,
+        OpSize::S16 => Code::Test_rm16_r16,
+        OpSize::S8 => Code::Test_rm8_r8,
+    }
+}
+
+fn mov_rr_code(size: OpSize) -> Code {
+    match size {
+        OpSize::S64 => Code::Mov_rm64_r64,
+        OpSize::S32 => Code::Mov_rm32_r32,
+        OpSize::S16 => Code::Mov_rm16_r16,
+        OpSize::S8 => Code::Mov_rm8_r8,
+    }
+}
+
+fn imul_rr_code(size: OpSize) -> Code {
+    match size {
+        OpSize::S64 => Code::Imul_r64_rm64,
+        OpSize::S32 => Code::Imul_r32_rm32,
+        OpSize::S16 => Code::Imul_r16_rm16,
+        OpSize::S8 => unreachable!("imul not supported for 8-bit"),
+    }
+}
+
+fn cmp_ri_code(size: OpSize) -> Code {
+    match size {
+        OpSize::S64 => Code::Cmp_rm64_imm32,
+        OpSize::S32 => Code::Cmp_rm32_imm32,
+        OpSize::S16 => Code::Cmp_rm16_imm16,
+        OpSize::S8 => Code::Cmp_rm8_imm8,
+    }
+}
+
+fn and_ri_code(size: OpSize) -> Code {
+    match size {
+        OpSize::S64 => Code::And_rm64_imm32,
+        OpSize::S32 => Code::And_rm32_imm32,
+        OpSize::S16 => Code::And_rm16_imm16,
+        OpSize::S8 => Code::And_rm8_imm8,
+    }
+}
+
+// --- Shift codes ---
+
+fn shl_cl_code(size: OpSize) -> Code {
+    match size {
+        OpSize::S64 => Code::Shl_rm64_CL,
+        OpSize::S32 => Code::Shl_rm32_CL,
+        OpSize::S16 => Code::Shl_rm16_CL,
+        OpSize::S8 => Code::Shl_rm8_CL,
+    }
+}
+
+fn shr_cl_code(size: OpSize) -> Code {
+    match size {
+        OpSize::S64 => Code::Shr_rm64_CL,
+        OpSize::S32 => Code::Shr_rm32_CL,
+        OpSize::S16 => Code::Shr_rm16_CL,
+        OpSize::S8 => Code::Shr_rm8_CL,
+    }
+}
+
+fn sar_cl_code(size: OpSize) -> Code {
+    match size {
+        OpSize::S64 => Code::Sar_rm64_CL,
+        OpSize::S32 => Code::Sar_rm32_CL,
+        OpSize::S16 => Code::Sar_rm16_CL,
+        OpSize::S8 => Code::Sar_rm8_CL,
+    }
+}
+
+fn rol_cl_code(size: OpSize) -> Code {
+    match size {
+        OpSize::S64 => Code::Rol_rm64_CL,
+        OpSize::S32 => Code::Rol_rm32_CL,
+        OpSize::S16 => Code::Rol_rm16_CL,
+        OpSize::S8 => Code::Rol_rm8_CL,
+    }
+}
+
+fn ror_cl_code(size: OpSize) -> Code {
+    match size {
+        OpSize::S64 => Code::Ror_rm64_CL,
+        OpSize::S32 => Code::Ror_rm32_CL,
+        OpSize::S16 => Code::Ror_rm16_CL,
+        OpSize::S8 => Code::Ror_rm8_CL,
+    }
+}
+
+fn shl_imm_code(size: OpSize) -> Code {
+    match size {
+        OpSize::S64 => Code::Shl_rm64_imm8,
+        OpSize::S32 => Code::Shl_rm32_imm8,
+        OpSize::S16 => Code::Shl_rm16_imm8,
+        OpSize::S8 => Code::Shl_rm8_imm8,
+    }
+}
+
+fn sar_imm_code(size: OpSize) -> Code {
+    match size {
+        OpSize::S64 => Code::Sar_rm64_imm8,
+        OpSize::S32 => Code::Sar_rm32_imm8,
+        OpSize::S16 => Code::Sar_rm16_imm8,
+        OpSize::S8 => Code::Sar_rm8_imm8,
+    }
+}
+
+// --- Branch / conditional codes ---
+
+fn jcc_code(cc: CondCode) -> Code {
+    match cc {
+        CondCode::E => Code::Je_rel32_64,
+        CondCode::Ne => Code::Jne_rel32_64,
+        CondCode::L => Code::Jl_rel32_64,
+        CondCode::Le => Code::Jle_rel32_64,
+        CondCode::G => Code::Jg_rel32_64,
+        CondCode::Ge => Code::Jge_rel32_64,
+        CondCode::B => Code::Jb_rel32_64,
+        CondCode::Be => Code::Jbe_rel32_64,
+        CondCode::A => Code::Ja_rel32_64,
+        CondCode::Ae => Code::Jae_rel32_64,
+    }
+}
+
+fn cmovcc_code(cc: CondCode, size: OpSize) -> Code {
+    match (cc, size) {
+        (CondCode::E, OpSize::S64) => Code::Cmove_r64_rm64,
+        (CondCode::E, OpSize::S32) => Code::Cmove_r32_rm32,
+        (CondCode::E, OpSize::S16) => Code::Cmove_r16_rm16,
+        (CondCode::Ne, OpSize::S64) => Code::Cmovne_r64_rm64,
+        (CondCode::Ne, OpSize::S32) => Code::Cmovne_r32_rm32,
+        (CondCode::Ne, OpSize::S16) => Code::Cmovne_r16_rm16,
+        (CondCode::L, OpSize::S64) => Code::Cmovl_r64_rm64,
+        (CondCode::L, OpSize::S32) => Code::Cmovl_r32_rm32,
+        (CondCode::L, OpSize::S16) => Code::Cmovl_r16_rm16,
+        (CondCode::Le, OpSize::S64) => Code::Cmovle_r64_rm64,
+        (CondCode::Le, OpSize::S32) => Code::Cmovle_r32_rm32,
+        (CondCode::Le, OpSize::S16) => Code::Cmovle_r16_rm16,
+        (CondCode::G, OpSize::S64) => Code::Cmovg_r64_rm64,
+        (CondCode::G, OpSize::S32) => Code::Cmovg_r32_rm32,
+        (CondCode::G, OpSize::S16) => Code::Cmovg_r16_rm16,
+        (CondCode::Ge, OpSize::S64) => Code::Cmovge_r64_rm64,
+        (CondCode::Ge, OpSize::S32) => Code::Cmovge_r32_rm32,
+        (CondCode::Ge, OpSize::S16) => Code::Cmovge_r16_rm16,
+        (CondCode::B, OpSize::S64) => Code::Cmovb_r64_rm64,
+        (CondCode::B, OpSize::S32) => Code::Cmovb_r32_rm32,
+        (CondCode::B, OpSize::S16) => Code::Cmovb_r16_rm16,
+        (CondCode::Be, OpSize::S64) => Code::Cmovbe_r64_rm64,
+        (CondCode::Be, OpSize::S32) => Code::Cmovbe_r32_rm32,
+        (CondCode::Be, OpSize::S16) => Code::Cmovbe_r16_rm16,
+        (CondCode::A, OpSize::S64) => Code::Cmova_r64_rm64,
+        (CondCode::A, OpSize::S32) => Code::Cmova_r32_rm32,
+        (CondCode::A, OpSize::S16) => Code::Cmova_r16_rm16,
+        (CondCode::Ae, OpSize::S64) => Code::Cmovae_r64_rm64,
+        (CondCode::Ae, OpSize::S32) => Code::Cmovae_r32_rm32,
+        (CondCode::Ae, OpSize::S16) => Code::Cmovae_r16_rm16,
+        (_, OpSize::S8) => unreachable!("cmovcc not supported for 8-bit"),
+    }
+}
+
+fn setcc_code(cc: CondCode) -> Code {
+    match cc {
+        CondCode::E => Code::Sete_rm8,
+        CondCode::Ne => Code::Setne_rm8,
+        CondCode::L => Code::Setl_rm8,
+        CondCode::Le => Code::Setle_rm8,
+        CondCode::G => Code::Setg_rm8,
+        CondCode::Ge => Code::Setge_rm8,
+        CondCode::B => Code::Setb_rm8,
+        CondCode::Be => Code::Setbe_rm8,
+        CondCode::A => Code::Seta_rm8,
+        CondCode::Ae => Code::Setae_rm8,
+    }
+}
+
+// --- Memory load/store codes ---
+
+fn mov_load_code(size: OpSize) -> Code {
+    match size {
+        OpSize::S64 => Code::Mov_r64_rm64,
+        OpSize::S32 => Code::Mov_r32_rm32,
+        OpSize::S16 => Code::Mov_r16_rm16,
+        OpSize::S8 => Code::Mov_r8_rm8,
+    }
+}
+
+fn mov_store_code(size: OpSize) -> Code {
+    match size {
+        OpSize::S64 => Code::Mov_rm64_r64,
+        OpSize::S32 => Code::Mov_rm32_r32,
+        OpSize::S16 => Code::Mov_rm16_r16,
+        OpSize::S8 => Code::Mov_rm8_r8,
+    }
+}
+
+fn mov_store_imm_code(size: OpSize) -> Code {
+    match size {
+        OpSize::S64 => Code::Mov_rm64_imm32,
+        OpSize::S32 => Code::Mov_rm32_imm32,
+        OpSize::S16 => Code::Mov_rm16_imm16,
+        OpSize::S8 => Code::Mov_rm8_imm8,
+    }
+}
+
+fn bswap_code(size: OpSize) -> Code {
+    match size {
+        OpSize::S64 => Code::Bswap_r64,
+        OpSize::S32 => Code::Bswap_r32,
+        _ => unreachable!("bswap only for 32/64-bit"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Encode context
+// ---------------------------------------------------------------------------
+
+struct EncodeContext {
+    encoder: Encoder,
+    pos: usize,
+    labels: HashMap<u32, usize>,
+    fixups: Vec<JumpFixup>,
+    relocations: Vec<Relocation>,
+}
+
+impl EncodeContext {
+    fn new() -> Self {
+        Self {
+            encoder: Encoder::new(64),
+            pos: 0,
+            labels: HashMap::new(),
+            fixups: Vec::new(),
+            relocations: Vec::new(),
+        }
+    }
+
+    /// Encode a single instruction, appending bytes to the internal buffer.
+    fn emit(&mut self, instr: Instruction) {
+        let len = self
+            .encoder
+            .encode(&instr, self.pos as u64)
+            .expect("iced-x86 encoding failed");
+        self.pos += len;
+    }
+
+    /// Encode a mov reg, reg (64-bit) — used by pseudo-instruction expansions.
+    fn emit_mov64(&mut self, dst: Gpr, src: Gpr) {
+        if dst != src {
+            self.emit(Instruction::with2(Code::Mov_rm64_r64, gpr64(dst), gpr64(src)).unwrap());
+        }
+    }
+
+    /// Encode a branch instruction with a dummy target, recording a fixup.
+    fn emit_branch(&mut self, code: Code, target_label: u32) {
+        let start = self.pos;
+        // Encode with target = 0; we'll patch the rel32 later.
+        self.emit(Instruction::with_branch(code, 0).unwrap());
+        let offsets = self.encoder.get_constant_offsets();
+        self.fixups.push(JumpFixup {
+            patch_offset: start + offsets.immediate_offset(),
+            target_label,
+        });
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
 /// Encode a sequence of machine instructions into bytes.
 ///
 /// Uses a two-pass approach: first pass emits code with placeholder jump
 /// offsets, second pass patches the actual relative displacements.
 /// External call relocations are returned separately for the ELF emitter.
 pub fn encode_function(insts: &[PInst]) -> EncodeResult {
-    let mut buf = Vec::new();
-    let mut labels: HashMap<u32, usize> = HashMap::new();
-    let mut fixups: Vec<JumpFixup> = Vec::new();
-    let mut relocations: Vec<Relocation> = Vec::new();
+    let mut ctx = EncodeContext::new();
 
     for inst in insts {
-        encode_inst(inst, &mut buf, &mut labels, &mut fixups, &mut relocations);
+        encode_inst(inst, &mut ctx);
     }
 
+    let mut buf = ctx.encoder.take_buffer();
+
     // Patch jump offsets.
-    for fixup in &fixups {
-        let target_addr = labels[&fixup.target_label];
-        // rel32 is relative to the end of the jump instruction (patch_offset + 4).
+    for fixup in &ctx.fixups {
+        let target_addr = ctx.labels[&fixup.target_label];
+        // rel32 is relative to the end of the displacement field (patch_offset + 4).
         let rel = target_addr as i32 - (fixup.patch_offset as i32 + 4);
-        let bytes = rel.to_le_bytes();
-        buf[fixup.patch_offset..fixup.patch_offset + 4].copy_from_slice(&bytes);
+        buf[fixup.patch_offset..fixup.patch_offset + 4].copy_from_slice(&rel.to_le_bytes());
     }
 
     EncodeResult {
         code: buf,
-        relocations,
+        relocations: ctx.relocations,
     }
 }
 
-fn encode_inst(
-    inst: &PInst,
-    buf: &mut Vec<u8>,
-    labels: &mut HashMap<u32, usize>,
-    fixups: &mut Vec<JumpFixup>,
-    relocations: &mut Vec<Relocation>,
-) {
+// ---------------------------------------------------------------------------
+// Per-instruction encoding
+// ---------------------------------------------------------------------------
+
+fn encode_inst(inst: &PInst, ctx: &mut EncodeContext) {
     match inst {
-        MInst::MovRR { size, dst, src } => encode_mov_rr(*size, *dst, *src, buf),
-        MInst::MovRI { size, dst, imm } => encode_mov_ri(*size, *dst, *imm, buf),
-        MInst::AddRR { size, dst, src } => encode_alu_rr(0x01, *size, *dst, *src, buf),
-        MInst::SubRR { size, dst, src } => encode_alu_rr(0x29, *size, *dst, *src, buf),
-        MInst::ImulRR { size, dst, src } => encode_imul_rr(*size, *dst, *src, buf),
-        MInst::Ret => buf.push(0xc3),
-        MInst::Ud2 => {
-            buf.push(0x0f);
-            buf.push(0x0b);
+        // --- Register-register ALU ---
+        MInst::MovRR { size, dst, src } => {
+            ctx.emit(
+                Instruction::with2(
+                    mov_rr_code(*size),
+                    gpr_to_iced(*dst, *size),
+                    gpr_to_iced(*src, *size),
+                )
+                .unwrap(),
+            );
         }
-        MInst::Label { id } => {
-            labels.insert(*id, buf.len());
+        MInst::AddRR { size, dst, src } => {
+            ctx.emit(
+                Instruction::with2(
+                    add_code(*size),
+                    gpr_to_iced(*dst, *size),
+                    gpr_to_iced(*src, *size),
+                )
+                .unwrap(),
+            );
         }
-        MInst::Jmp { target } => {
-            buf.push(0xe9);
-            fixups.push(JumpFixup {
-                patch_offset: buf.len(),
-                target_label: *target,
-            });
-            buf.extend_from_slice(&[0; 4]);
+        MInst::SubRR { size, dst, src } => {
+            ctx.emit(
+                Instruction::with2(
+                    sub_code(*size),
+                    gpr_to_iced(*dst, *size),
+                    gpr_to_iced(*src, *size),
+                )
+                .unwrap(),
+            );
         }
-        MInst::Jcc { cc, target } => {
-            buf.push(0x0f);
-            buf.push(0x80 + cc.encoding());
-            fixups.push(JumpFixup {
-                patch_offset: buf.len(),
-                target_label: *target,
-            });
-            buf.extend_from_slice(&[0; 4]);
+        MInst::ImulRR { size, dst, src } => {
+            ctx.emit(
+                Instruction::with2(
+                    imul_rr_code(*size),
+                    gpr_to_iced(*dst, *size),
+                    gpr_to_iced(*src, *size),
+                )
+                .unwrap(),
+            );
+        }
+        MInst::OrRR { size, dst, src } => {
+            ctx.emit(
+                Instruction::with2(
+                    or_code(*size),
+                    gpr_to_iced(*dst, *size),
+                    gpr_to_iced(*src, *size),
+                )
+                .unwrap(),
+            );
+        }
+        MInst::AndRR { size, dst, src } => {
+            ctx.emit(
+                Instruction::with2(
+                    and_code(*size),
+                    gpr_to_iced(*dst, *size),
+                    gpr_to_iced(*src, *size),
+                )
+                .unwrap(),
+            );
+        }
+        MInst::XorRR { size, dst, src } => {
+            ctx.emit(
+                Instruction::with2(
+                    xor_code(*size),
+                    gpr_to_iced(*dst, *size),
+                    gpr_to_iced(*src, *size),
+                )
+                .unwrap(),
+            );
         }
         MInst::CmpRR { size, src1, src2 } => {
-            emit_rex_and_opcode(*size, *src2, *src1, 0x39, buf);
-        }
-        MInst::CmpRI { size, src, imm } => {
-            encode_cmp_ri(*size, *src, *imm, buf);
+            ctx.emit(
+                Instruction::with2(
+                    cmp_rr_code(*size),
+                    gpr_to_iced(*src1, *size),
+                    gpr_to_iced(*src2, *size),
+                )
+                .unwrap(),
+            );
         }
         MInst::TestRR { size, src1, src2 } => {
-            emit_rex_and_opcode(*size, *src2, *src1, 0x85, buf);
+            ctx.emit(
+                Instruction::with2(
+                    test_rr_code(*size),
+                    gpr_to_iced(*src1, *size),
+                    gpr_to_iced(*src2, *size),
+                )
+                .unwrap(),
+            );
         }
+
+        // --- Register-immediate ---
+        MInst::MovRI { dst, imm, .. } => {
+            // Always use 32-bit form (zero-extends to 64 bits).
+            ctx.emit(
+                Instruction::with2(
+                    Code::Mov_r32_imm32,
+                    gpr_to_iced(*dst, OpSize::S32),
+                    *imm as u32,
+                )
+                .unwrap(),
+            );
+        }
+        MInst::MovRI64 { dst, imm } => {
+            ctx.emit(Instruction::with2(Code::Mov_r64_imm64, gpr64(*dst), *imm as u64).unwrap());
+        }
+        MInst::CmpRI { size, src, imm } => {
+            ctx.emit(
+                Instruction::with2(cmp_ri_code(*size), gpr_to_iced(*src, *size), *imm).unwrap(),
+            );
+        }
+        MInst::AndRI { size, dst, imm } => {
+            ctx.emit(
+                Instruction::with2(and_ri_code(*size), gpr_to_iced(*dst, *size), *imm as i32)
+                    .unwrap(),
+            );
+        }
+
+        // --- Shifts ---
+        MInst::ShlRCL { size, dst } => {
+            ctx.emit(
+                Instruction::with2(shl_cl_code(*size), gpr_to_iced(*dst, *size), Register::CL)
+                    .unwrap(),
+            );
+        }
+        MInst::ShrRCL { size, dst } => {
+            ctx.emit(
+                Instruction::with2(shr_cl_code(*size), gpr_to_iced(*dst, *size), Register::CL)
+                    .unwrap(),
+            );
+        }
+        MInst::SarRCL { size, dst } => {
+            ctx.emit(
+                Instruction::with2(sar_cl_code(*size), gpr_to_iced(*dst, *size), Register::CL)
+                    .unwrap(),
+            );
+        }
+        MInst::RolRCL { size, dst } => {
+            ctx.emit(
+                Instruction::with2(rol_cl_code(*size), gpr_to_iced(*dst, *size), Register::CL)
+                    .unwrap(),
+            );
+        }
+        MInst::RorRCL { size, dst } => {
+            ctx.emit(
+                Instruction::with2(ror_cl_code(*size), gpr_to_iced(*dst, *size), Register::CL)
+                    .unwrap(),
+            );
+        }
+        MInst::ShlImm { size, dst, imm } => {
+            ctx.emit(
+                Instruction::with2(shl_imm_code(*size), gpr_to_iced(*dst, *size), *imm as u32)
+                    .unwrap(),
+            );
+        }
+        MInst::SarImm { size, dst, imm } => {
+            ctx.emit(
+                Instruction::with2(sar_imm_code(*size), gpr_to_iced(*dst, *size), *imm as u32)
+                    .unwrap(),
+            );
+        }
+
+        // --- Control flow ---
+        MInst::Label { id } => {
+            ctx.labels.insert(*id, ctx.pos);
+        }
+        MInst::Jmp { target } => {
+            ctx.emit_branch(Code::Jmp_rel32_64, *target);
+        }
+        MInst::Jcc { cc, target } => {
+            ctx.emit_branch(jcc_code(*cc), *target);
+        }
+        MInst::Ret => {
+            ctx.emit(Instruction::with(Code::Retnq));
+        }
+        MInst::Ud2 => {
+            ctx.emit(Instruction::with(Code::Ud2));
+        }
+
+        // --- Calls ---
         MInst::CallSym { name, .. } => {
-            buf.push(0xe8);
-            relocations.push(Relocation {
-                offset: buf.len(),
+            let start = ctx.pos;
+            ctx.emit(Instruction::with_branch(Code::Call_rel32_64, 0).unwrap());
+            let offsets = ctx.encoder.get_constant_offsets();
+            ctx.relocations.push(Relocation {
+                offset: start + offsets.immediate_offset(),
                 symbol: name.clone(),
                 kind: RelocKind::Call,
             });
-            buf.extend_from_slice(&[0; 4]);
         }
         MInst::CallReg { callee, .. } => {
-            // FF /2 = call *%reg
-            if callee.needs_rex() {
-                buf.push(0x41); // REX.B
-            }
-            buf.push(0xff);
-            buf.push(0xd0 | callee.encoding());
+            ctx.emit(Instruction::with1(Code::Call_rm64, gpr64(*callee)).unwrap());
         }
+
+        // --- Stack ---
         MInst::Push { reg } => {
-            encode_push(*reg, buf);
+            ctx.emit(Instruction::with1(Code::Push_r64, gpr64(*reg)).unwrap());
         }
         MInst::Pop { reg } => {
-            encode_pop(*reg, buf);
+            ctx.emit(Instruction::with1(Code::Pop_r64, gpr64(*reg)).unwrap());
         }
         MInst::SubSPI { imm } => {
-            encode_rsp_imm(0xec, *imm, buf);
+            ctx.emit(Instruction::with2(Code::Sub_rm64_imm32, Register::RSP, *imm).unwrap());
         }
         MInst::AddSPI { imm } => {
-            encode_rsp_imm(0xc4, *imm, buf);
+            ctx.emit(Instruction::with2(Code::Add_rm64_imm32, Register::RSP, *imm).unwrap());
         }
+
+        // --- Memory load ---
         MInst::MovRM {
             size,
             dst,
             base,
             offset,
         } => {
-            encode_mov_rm(*size, *dst, *base, *offset, buf);
+            match size {
+                // Byte/word loads use zero-extending movzx to match original behavior.
+                OpSize::S8 => {
+                    ctx.emit(
+                        Instruction::with2(
+                            Code::Movzx_r32_rm8,
+                            gpr_to_iced(*dst, OpSize::S32),
+                            mem(*base, *offset),
+                        )
+                        .unwrap(),
+                    );
+                }
+                OpSize::S16 => {
+                    ctx.emit(
+                        Instruction::with2(
+                            Code::Movzx_r32_rm16,
+                            gpr_to_iced(*dst, OpSize::S32),
+                            mem(*base, *offset),
+                        )
+                        .unwrap(),
+                    );
+                }
+                _ => {
+                    ctx.emit(
+                        Instruction::with2(
+                            mov_load_code(*size),
+                            gpr_to_iced(*dst, *size),
+                            mem(*base, *offset),
+                        )
+                        .unwrap(),
+                    );
+                }
+            }
         }
+
+        // --- Memory store ---
         MInst::MovMR {
             size,
             base,
             offset,
             src,
         } => {
-            encode_mov_mr(*size, *base, *offset, *src, buf);
-        }
-        MInst::Lea { dst, base, offset } => {
-            encode_lea(*dst, *base, *offset, buf);
-        }
-        MInst::MovRI64 { dst, imm } => {
-            encode_mov_ri64(*dst, *imm, buf);
+            ctx.emit(
+                Instruction::with2(
+                    mov_store_code(*size),
+                    mem(*base, *offset),
+                    gpr_to_iced(*src, *size),
+                )
+                .unwrap(),
+            );
         }
         MInst::MovMI {
             size,
@@ -148,61 +750,128 @@ fn encode_inst(
             offset,
             imm,
         } => {
-            encode_mov_mi(*size, *base, *offset, *imm, buf);
+            ctx.emit(
+                Instruction::with2(mov_store_imm_code(*size), mem(*base, *offset), *imm).unwrap(),
+            );
+        }
+
+        // --- LEA ---
+        MInst::Lea { dst, base, offset } => {
+            ctx.emit(
+                Instruction::with2(Code::Lea_r64_m, gpr64(*dst), mem(*base, *offset)).unwrap(),
+            );
         }
         MInst::LeaSymbol { dst, symbol } => {
-            encode_lea_symbol(*dst, symbol, buf, relocations);
+            let start = ctx.pos;
+            // lea dst, [rip+0] — displacement patched by linker.
+            ctx.emit(
+                Instruction::with2(
+                    Code::Lea_r64_m,
+                    gpr64(*dst),
+                    MemoryOperand::with_base_displ(Register::RIP, 0),
+                )
+                .unwrap(),
+            );
+            let offsets = ctx.encoder.get_constant_offsets();
+            ctx.relocations.push(Relocation {
+                offset: start + offsets.displacement_offset(),
+                symbol: symbol.clone(),
+                kind: RelocKind::PcRel,
+            });
         }
-        MInst::OrRR { size, dst, src } => {
-            encode_alu_rr(0x09, *size, *dst, *src, buf);
-        }
-        MInst::AndRR { size, dst, src } => {
-            encode_alu_rr(0x21, *size, *dst, *src, buf);
-        }
-        MInst::XorRR { size, dst, src } => {
-            encode_alu_rr(0x31, *size, *dst, *src, buf);
-        }
-        MInst::ShlRCL { size, dst } => {
-            encode_shift_cl(4, *size, *dst, buf);
-        }
-        MInst::ShrRCL { size, dst } => {
-            encode_shift_cl(5, *size, *dst, buf);
-        }
-        MInst::SarRCL { size, dst } => {
-            encode_shift_cl(7, *size, *dst, buf);
-        }
-        MInst::ShlImm { size, dst, imm } => {
-            encode_shift_imm(4, *size, *dst, *imm, buf);
-        }
-        MInst::SarImm { size, dst, imm } => {
-            encode_shift_imm(7, *size, *dst, *imm, buf);
-        }
-        MInst::AndRI { size, dst, imm } => {
-            encode_alu_ri(4, *size, *dst, *imm as i32, buf);
-        }
+
+        // --- Conditional ---
         MInst::CMOVcc { size, cc, dst, src } => {
-            encode_cmovcc(*size, *cc, *dst, *src, buf);
+            ctx.emit(
+                Instruction::with2(
+                    cmovcc_code(*cc, *size),
+                    gpr_to_iced(*dst, *size),
+                    gpr_to_iced(*src, *size),
+                )
+                .unwrap(),
+            );
         }
         MInst::SetCC { cc, dst } => {
-            encode_setcc(*cc, *dst, buf);
+            ctx.emit(Instruction::with1(setcc_code(*cc), gpr_to_iced(*dst, OpSize::S8)).unwrap());
         }
+
+        // --- Extensions ---
         MInst::MovzxB { dst, src } => {
-            encode_movzx_b(*dst, *src, buf);
+            ctx.emit(
+                Instruction::with2(
+                    Code::Movzx_r64_rm8,
+                    gpr64(*dst),
+                    gpr_to_iced(*src, OpSize::S8),
+                )
+                .unwrap(),
+            );
         }
         MInst::MovzxW { dst, src } => {
-            encode_movzx_w(*dst, *src, buf);
+            ctx.emit(
+                Instruction::with2(
+                    Code::Movzx_r64_rm16,
+                    gpr64(*dst),
+                    gpr_to_iced(*src, OpSize::S16),
+                )
+                .unwrap(),
+            );
         }
         MInst::MovsxB { dst, src } => {
-            encode_movsx_b(*dst, *src, buf);
+            ctx.emit(
+                Instruction::with2(
+                    Code::Movsx_r64_rm8,
+                    gpr64(*dst),
+                    gpr_to_iced(*src, OpSize::S8),
+                )
+                .unwrap(),
+            );
         }
         MInst::MovsxW { dst, src } => {
-            encode_movsx_w(*dst, *src, buf);
+            ctx.emit(
+                Instruction::with2(
+                    Code::Movsx_r64_rm16,
+                    gpr64(*dst),
+                    gpr_to_iced(*src, OpSize::S16),
+                )
+                .unwrap(),
+            );
         }
         MInst::MovsxD { dst, src } => {
-            encode_movsxd(*dst, *src, buf);
+            ctx.emit(
+                Instruction::with2(
+                    Code::Movsxd_r64_rm32,
+                    gpr64(*dst),
+                    gpr_to_iced(*src, OpSize::S32),
+                )
+                .unwrap(),
+            );
         }
         MInst::Cqo => {
-            encode_cqo(buf);
+            ctx.emit(Instruction::with(Code::Cqo));
+        }
+
+        // --- Bit manipulation ---
+        MInst::Popcnt { dst, src } => {
+            ctx.emit(Instruction::with2(Code::Popcnt_r64_rm64, gpr64(*dst), gpr64(*src)).unwrap());
+        }
+        MInst::Lzcnt { dst, src } => {
+            ctx.emit(Instruction::with2(Code::Lzcnt_r64_rm64, gpr64(*dst), gpr64(*src)).unwrap());
+        }
+        MInst::Tzcnt { dst, src } => {
+            ctx.emit(Instruction::with2(Code::Tzcnt_r64_rm64, gpr64(*dst), gpr64(*src)).unwrap());
+        }
+        MInst::Bswap { size, dst } => {
+            ctx.emit(Instruction::with1(bswap_code(*size), gpr_to_iced(*dst, *size)).unwrap());
+        }
+
+        // --- Pseudo-instructions ---
+        MInst::MovRR2 {
+            dst1,
+            src1,
+            dst2,
+            src2,
+        } => {
+            encode_mov_rr2(ctx, *dst1, *src1, *dst2, *src2);
         }
         MInst::DivRem {
             dst,
@@ -211,708 +880,197 @@ fn encode_inst(
             signed,
             rem,
         } => {
-            encode_divrem(*dst, *lhs, *rhs, *signed, *rem, buf);
-        }
-        MInst::Popcnt { dst, src } => {
-            encode_popcnt(*dst, *src, buf);
-        }
-        MInst::Lzcnt { dst, src } => {
-            encode_lzcnt(*dst, *src, buf);
-        }
-        MInst::Tzcnt { dst, src } => {
-            encode_tzcnt(*dst, *src, buf);
-        }
-        MInst::Bswap { size, dst } => {
-            encode_bswap(*size, *dst, buf);
-        }
-        MInst::RolRCL { size, dst } => {
-            encode_shift_cl(0, *size, *dst, buf);
-        }
-        MInst::RorRCL { size, dst } => {
-            encode_shift_cl(1, *size, *dst, buf);
-        }
-        MInst::MovRR2 {
-            dst1,
-            src1,
-            dst2,
-            src2,
-        } => {
-            encode_mov_rr2(*dst1, *src1, *dst2, *src2, buf);
+            encode_divrem(ctx, *dst, *lhs, *rhs, *signed, *rem);
         }
         MInst::FpBinOp { op, dst, lhs, rhs } => {
-            encode_fp_binop(*op, *dst, *lhs, *rhs, buf);
+            encode_fp_binop(ctx, *op, *dst, *lhs, *rhs);
         }
         MInst::CvtFpToInt { dst, src, double } => {
-            encode_cvt_fp_to_int(*dst, *src, *double, buf);
+            encode_cvt_fp_to_int(ctx, *dst, *src, *double);
         }
         MInst::CvtIntToFp { dst, src, double } => {
-            encode_cvt_int_to_fp(*dst, *src, *double, buf);
+            encode_cvt_int_to_fp(ctx, *dst, *src, *double);
         }
         MInst::CvtFpToFp {
             dst,
             src,
             src_double,
         } => {
-            encode_cvt_fp_to_fp(*dst, *src, *src_double, buf);
+            encode_cvt_fp_to_fp(ctx, *dst, *src, *src_double);
         }
     }
 }
 
-/// Build REX prefix byte. Returns None if no REX needed.
-fn rex(w: bool, r: Gpr, b: Gpr) -> Option<u8> {
-    let w_bit = if w { 0x08 } else { 0 };
-    let r_bit = if r.needs_rex() { 0x04 } else { 0 };
-    let b_bit = if b.needs_rex() { 0x01 } else { 0 };
-    let bits = w_bit | r_bit | b_bit;
-    if bits != 0 { Some(0x40 | bits) } else { None }
-}
-
-/// Encode ModR/M byte: mod=11 (register-direct), reg, rm.
-fn modrm(reg: u8, rm: u8) -> u8 {
-    0b11_000_000 | (reg << 3) | rm
-}
-
-fn emit_rex_and_opcode(size: OpSize, reg: Gpr, rm: Gpr, opcode: u8, buf: &mut Vec<u8>) {
-    let w = matches!(size, OpSize::S64);
-    if let Some(r) = rex(w, reg, rm) {
-        buf.push(r);
-    }
-    buf.push(opcode);
-    buf.push(modrm(reg.encoding(), rm.encoding()));
-}
-
-fn encode_mov_rr(size: OpSize, dst: Gpr, src: Gpr, buf: &mut Vec<u8>) {
-    emit_rex_and_opcode(size, src, dst, 0x89, buf);
-}
+// ---------------------------------------------------------------------------
+// Pseudo-instruction expansions
+// ---------------------------------------------------------------------------
 
 /// Parallel copy of two register pairs, handling all ordering cases.
-fn encode_mov_rr2(dst1: Gpr, src1: Gpr, dst2: Gpr, src2: Gpr, buf: &mut Vec<u8>) {
+fn encode_mov_rr2(ctx: &mut EncodeContext, dst1: Gpr, src1: Gpr, dst2: Gpr, src2: Gpr) {
     let need1 = dst1 != src1;
     let need2 = dst2 != src2;
     if !need1 && !need2 {
-        // Both are no-ops.
         return;
     }
     if !need1 {
-        encode_mov_rr(OpSize::S64, dst2, src2, buf);
+        ctx.emit_mov64(dst2, src2);
         return;
     }
     if !need2 {
-        encode_mov_rr(OpSize::S64, dst1, src1, buf);
+        ctx.emit_mov64(dst1, src1);
         return;
     }
     if dst1 == src2 && dst2 == src1 {
         // Cross-assignment: use xchg to swap.
-        let w = true; // 64-bit
-        if let Some(r) = rex(w, dst1, dst2) {
-            buf.push(r);
-        }
-        buf.push(0x87);
-        buf.push(modrm(dst1.encoding(), dst2.encoding()));
+        ctx.emit(Instruction::with2(Code::Xchg_rm64_r64, gpr64(dst1), gpr64(dst2)).unwrap());
     } else if dst1 != src2 {
-        // Safe to write dst1 first — it doesn't clobber src2.
-        encode_mov_rr(OpSize::S64, dst1, src1, buf);
-        encode_mov_rr(OpSize::S64, dst2, src2, buf);
+        ctx.emit_mov64(dst1, src1);
+        ctx.emit_mov64(dst2, src2);
     } else {
         // dst1 == src2, so write dst2 first to preserve src2's value.
-        encode_mov_rr(OpSize::S64, dst2, src2, buf);
-        encode_mov_rr(OpSize::S64, dst1, src1, buf);
+        ctx.emit_mov64(dst2, src2);
+        ctx.emit_mov64(dst1, src1);
     }
 }
 
-fn encode_alu_rr(opcode: u8, size: OpSize, dst: Gpr, src: Gpr, buf: &mut Vec<u8>) {
-    emit_rex_and_opcode(size, src, dst, opcode, buf);
-}
-
-fn encode_mov_ri(size: OpSize, dst: Gpr, imm: i64, buf: &mut Vec<u8>) {
-    let w = matches!(size, OpSize::S64);
-    let r_bit = if dst.needs_rex() { 0x01 } else { 0 };
-    let w_bit = if w { 0x08 } else { 0 };
-    let rex_bits = w_bit | r_bit;
-    if rex_bits != 0 {
-        buf.push(0x40 | rex_bits);
-    }
-    buf.push(0xb8 + dst.encoding());
-    let bytes = (imm as u32).to_le_bytes();
-    buf.extend_from_slice(&bytes);
-}
-
-fn encode_imul_rr(size: OpSize, dst: Gpr, src: Gpr, buf: &mut Vec<u8>) {
-    let w = matches!(size, OpSize::S64);
-    if let Some(r) = rex(w, dst, src) {
-        buf.push(r);
-    }
-    buf.push(0x0f);
-    buf.push(0xaf);
-    buf.push(modrm(dst.encoding(), src.encoding()));
-}
-
-fn encode_cmp_ri(size: OpSize, src: Gpr, imm: i32, buf: &mut Vec<u8>) {
-    let w = matches!(size, OpSize::S64);
-    let b_bit = if src.needs_rex() { 0x01 } else { 0 };
-    let w_bit = if w { 0x08 } else { 0 };
-    let rex_bits = w_bit | b_bit;
-    if rex_bits != 0 {
-        buf.push(0x40 | rex_bits);
-    }
-    buf.push(0x81);
-    buf.push(modrm(7, src.encoding()));
-    buf.extend_from_slice(&imm.to_le_bytes());
-}
-
-fn encode_push(reg: Gpr, buf: &mut Vec<u8>) {
-    if reg.needs_rex() {
-        buf.push(0x41);
-    }
-    buf.push(0x50 + reg.encoding());
-}
-
-fn encode_pop(reg: Gpr, buf: &mut Vec<u8>) {
-    if reg.needs_rex() {
-        buf.push(0x41);
-    }
-    buf.push(0x58 + reg.encoding());
-}
-
-fn encode_rsp_imm(modrm_byte: u8, imm: i32, buf: &mut Vec<u8>) {
-    buf.push(0x48); // REX.W
-    buf.push(0x81);
-    buf.push(modrm_byte);
-    buf.extend_from_slice(&imm.to_le_bytes());
-}
-
-/// Encode ModR/M byte with [base+disp] addressing.
-/// Special-cases RSP (needs SIB byte) and RBP (always uses disp).
-fn modrm_mem(reg: u8, base: Gpr, offset: i32, buf: &mut Vec<u8>) {
-    if offset == 0 && base.encoding() != 5 && base != Gpr::R13 {
-        buf.push((reg << 3) | base.encoding());
-        if base == Gpr::Rsp || base == Gpr::R12 {
-            buf.push(0x24);
-        }
-    } else if (-128..=127).contains(&offset) {
-        buf.push(0x40 | (reg << 3) | base.encoding());
-        if base == Gpr::Rsp || base == Gpr::R12 {
-            buf.push(0x24);
-        }
-        buf.push(offset as u8);
-    } else {
-        buf.push(0x80 | (reg << 3) | base.encoding());
-        if base == Gpr::Rsp || base == Gpr::R12 {
-            buf.push(0x24);
-        }
-        buf.extend_from_slice(&offset.to_le_bytes());
-    }
-}
-
-fn rex_mem(w: bool, reg: Gpr, base: Gpr) -> Option<u8> {
-    let w_bit = if w { 0x08 } else { 0 };
-    let r_bit = if reg.needs_rex() { 0x04 } else { 0 };
-    let b_bit = if base.needs_rex() { 0x01 } else { 0 };
-    let bits = w_bit | r_bit | b_bit;
-    if bits != 0 { Some(0x40 | bits) } else { None }
-}
-
-fn encode_mov_rm(size: OpSize, dst: Gpr, base: Gpr, offset: i32, buf: &mut Vec<u8>) {
-    match size {
-        OpSize::S8 => {
-            // movzbl [mem], r32 — zero-extend byte to 32-bit (implicitly zeros upper 32).
-            // REX prefix needed if dst or base is r8-r15.
-            if let Some(r) = rex_mem(false, dst, base) {
-                buf.push(r);
-            }
-            buf.push(0x0f);
-            buf.push(0xb6);
-            modrm_mem(dst.encoding(), base, offset, buf);
-        }
-        OpSize::S16 => {
-            // movzwl [mem], r32 — zero-extend word to 32-bit.
-            if let Some(r) = rex_mem(false, dst, base) {
-                buf.push(r);
-            }
-            buf.push(0x0f);
-            buf.push(0xb7);
-            modrm_mem(dst.encoding(), base, offset, buf);
-        }
-        _ => {
-            let w = matches!(size, OpSize::S64);
-            if let Some(r) = rex_mem(w, dst, base) {
-                buf.push(r);
-            }
-            buf.push(0x8b);
-            modrm_mem(dst.encoding(), base, offset, buf);
-        }
-    }
-}
-
-fn encode_mov_mr(size: OpSize, base: Gpr, offset: i32, src: Gpr, buf: &mut Vec<u8>) {
-    match size {
-        OpSize::S8 => {
-            // mov [mem], r8 — byte store.
-            // Always emit REX when src encoding >= 4 to get SPL/BPL/SIL/DIL
-            // instead of AH/CH/DH/BH.
-            let need_rex = src.needs_rex() || base.needs_rex() || src.encoding() >= 4;
-            if need_rex {
-                let mut r = 0x40u8;
-                if src.needs_rex() {
-                    r |= 0x04;
-                }
-                if base.needs_rex() {
-                    r |= 0x01;
-                }
-                buf.push(r);
-            }
-            buf.push(0x88);
-            modrm_mem(src.encoding(), base, offset, buf);
-        }
-        OpSize::S16 => {
-            // 0x66 prefix for 16-bit operand size.
-            buf.push(0x66);
-            if let Some(r) = rex_mem(false, src, base) {
-                buf.push(r);
-            }
-            buf.push(0x89);
-            modrm_mem(src.encoding(), base, offset, buf);
-        }
-        _ => {
-            let w = matches!(size, OpSize::S64);
-            if let Some(r) = rex_mem(w, src, base) {
-                buf.push(r);
-            }
-            buf.push(0x89);
-            modrm_mem(src.encoding(), base, offset, buf);
-        }
-    }
-}
-
-fn encode_lea(dst: Gpr, base: Gpr, offset: i32, buf: &mut Vec<u8>) {
-    if let Some(r) = rex_mem(true, dst, base) {
-        buf.push(r);
-    } else {
-        buf.push(0x48);
-    }
-    buf.push(0x8d);
-    modrm_mem(dst.encoding(), base, offset, buf);
-}
-
-fn encode_mov_ri64(dst: Gpr, imm: i64, buf: &mut Vec<u8>) {
-    let b_bit = if dst.needs_rex() { 0x01 } else { 0 };
-    buf.push(0x48 | b_bit);
-    buf.push(0xb8 + dst.encoding());
-    buf.extend_from_slice(&imm.to_le_bytes());
-}
-
-fn encode_lea_symbol(dst: Gpr, symbol: &str, buf: &mut Vec<u8>, relocations: &mut Vec<Relocation>) {
-    let r_bit = if dst.needs_rex() { 0x04 } else { 0 };
-    buf.push(0x48 | r_bit);
-    buf.push(0x8d);
-    buf.push((dst.encoding() << 3) | 0x05);
-    relocations.push(Relocation {
-        offset: buf.len(),
-        symbol: symbol.to_string(),
-        kind: RelocKind::PcRel,
-    });
-    buf.extend_from_slice(&[0; 4]);
-}
-
-/// Encode a shift-by-CL instruction (SHL/SHR/SAR with reg field selecting the operation).
-fn encode_shift_cl(reg_field: u8, size: OpSize, dst: Gpr, buf: &mut Vec<u8>) {
-    let w = matches!(size, OpSize::S64);
-    let b_bit = if dst.needs_rex() { 0x01 } else { 0 };
-    let w_bit = if w { 0x08 } else { 0 };
-    let rex_bits = w_bit | b_bit;
-    if rex_bits != 0 {
-        buf.push(0x40 | rex_bits);
-    }
-    buf.push(0xd3);
-    buf.push(modrm(reg_field, dst.encoding()));
-}
-
-/// Encode a shift-by-immediate instruction (SHL/SAR r/m, imm8).
-/// Opcode C1 /reg_field ib (REX.W for 64-bit).
-fn encode_shift_imm(reg_field: u8, size: OpSize, dst: Gpr, imm: u8, buf: &mut Vec<u8>) {
-    let w = matches!(size, OpSize::S64);
-    let b_bit = if dst.needs_rex() { 0x01 } else { 0 };
-    let w_bit = if w { 0x08 } else { 0 };
-    let rex_bits = w_bit | b_bit;
-    if rex_bits != 0 {
-        buf.push(0x40 | rex_bits);
-    }
-    buf.push(0xc1);
-    buf.push(modrm(reg_field, dst.encoding()));
-    buf.push(imm);
-}
-
-/// Encode ALU r/m, imm32 (AND/OR/etc with immediate).
-/// Opcode 81 /reg_field id (REX.W for 64-bit).
-fn encode_alu_ri(reg_field: u8, size: OpSize, dst: Gpr, imm: i32, buf: &mut Vec<u8>) {
-    let w = matches!(size, OpSize::S64);
-    let b_bit = if dst.needs_rex() { 0x01 } else { 0 };
-    let w_bit = if w { 0x08 } else { 0 };
-    let rex_bits = w_bit | b_bit;
-    if rex_bits != 0 {
-        buf.push(0x40 | rex_bits);
-    }
-    buf.push(0x81);
-    buf.push(modrm(reg_field, dst.encoding()));
-    buf.extend_from_slice(&imm.to_le_bytes());
-}
-
-fn encode_mov_mi(size: OpSize, base: Gpr, offset: i32, imm: i32, buf: &mut Vec<u8>) {
-    match size {
-        OpSize::S8 => {
-            let b_bit = if base.needs_rex() { 0x01 } else { 0 };
-            if b_bit != 0 {
-                buf.push(0x40 | b_bit);
-            }
-            buf.push(0xc6);
-            modrm_mem(0, base, offset, buf);
-            buf.push(imm as u8);
-        }
-        OpSize::S16 => {
-            buf.push(0x66);
-            let b_bit = if base.needs_rex() { 0x01 } else { 0 };
-            if b_bit != 0 {
-                buf.push(0x40 | b_bit);
-            }
-            buf.push(0xc7);
-            modrm_mem(0, base, offset, buf);
-            buf.extend_from_slice(&(imm as i16).to_le_bytes());
-        }
-        _ => {
-            let w = matches!(size, OpSize::S64);
-            let b_bit = if base.needs_rex() { 0x01 } else { 0 };
-            let w_bit = if w { 0x08 } else { 0 };
-            let rex_bits = w_bit | b_bit;
-            if rex_bits != 0 {
-                buf.push(0x40 | rex_bits);
-            }
-            buf.push(0xc7);
-            modrm_mem(0, base, offset, buf);
-            buf.extend_from_slice(&imm.to_le_bytes());
-        }
-    }
-}
-
-/// Encode CMOVcc r64, r/m64 (0F 40+cc /r with REX.W).
-fn encode_cmovcc(size: OpSize, cc: CondCode, dst: Gpr, src: Gpr, buf: &mut Vec<u8>) {
-    let w = matches!(size, OpSize::S64);
-    if let Some(r) = rex(w, dst, src) {
-        buf.push(r);
-    }
-    buf.push(0x0f);
-    buf.push(0x40 + cc.encoding());
-    buf.push(modrm(dst.encoding(), src.encoding()));
-}
-
-/// Encode SETcc r/m8 (0F 90+cc /0). Uses REX prefix if dst needs it.
-/// A REX prefix is required for registers with encoding >= 4 (RSP, RBP,
-/// RSI, RDI) to access their low byte (SPL, BPL, SIL, DIL) instead of
-/// the legacy high-byte registers (AH, CH, DH, BH).
-fn encode_setcc(cc: CondCode, dst: Gpr, buf: &mut Vec<u8>) {
-    let b_bit = if dst.needs_rex() { 0x01 } else { 0 };
-    if b_bit != 0 || dst.encoding() >= 4 {
-        buf.push(0x40 | b_bit);
-    }
-    buf.push(0x0f);
-    buf.push(0x90 + cc.encoding());
-    buf.push(modrm(0, dst.encoding()));
-}
-
-/// Encode MOVZX r64, r8 (REX.W + 0F B6 /r).
-fn encode_movzx_b(dst: Gpr, src: Gpr, buf: &mut Vec<u8>) {
-    if let Some(r) = rex(true, dst, src) {
-        buf.push(r);
-    } else {
-        buf.push(0x48);
-    }
-    buf.push(0x0f);
-    buf.push(0xb6);
-    buf.push(modrm(dst.encoding(), src.encoding()));
-}
-
-/// Encode MOVZX r64, r16 (REX.W + 0F B7 /r).
-fn encode_movzx_w(dst: Gpr, src: Gpr, buf: &mut Vec<u8>) {
-    if let Some(r) = rex(true, dst, src) {
-        buf.push(r);
-    } else {
-        buf.push(0x48);
-    }
-    buf.push(0x0f);
-    buf.push(0xb7);
-    buf.push(modrm(dst.encoding(), src.encoding()));
-}
-
-/// Encode MOVSX r64, r8 (REX.W + 0F BE /r).
-fn encode_movsx_b(dst: Gpr, src: Gpr, buf: &mut Vec<u8>) {
-    if let Some(r) = rex(true, dst, src) {
-        buf.push(r);
-    } else {
-        buf.push(0x48);
-    }
-    buf.push(0x0f);
-    buf.push(0xbe);
-    buf.push(modrm(dst.encoding(), src.encoding()));
-}
-
-/// Encode MOVSX r64, r16 (REX.W + 0F BF /r).
-fn encode_movsx_w(dst: Gpr, src: Gpr, buf: &mut Vec<u8>) {
-    if let Some(r) = rex(true, dst, src) {
-        buf.push(r);
-    } else {
-        buf.push(0x48);
-    }
-    buf.push(0x0f);
-    buf.push(0xbf);
-    buf.push(modrm(dst.encoding(), src.encoding()));
-}
-
-/// Encode MOVSXD r64, r32 (REX.W + 63 /r).
-fn encode_movsxd(dst: Gpr, src: Gpr, buf: &mut Vec<u8>) {
-    if let Some(r) = rex(true, dst, src) {
-        buf.push(r);
-    } else {
-        buf.push(0x48);
-    }
-    buf.push(0x63);
-    buf.push(modrm(dst.encoding(), src.encoding()));
-}
-
-/// Encode CQO (REX.W + 99): sign-extend RAX into RDX:RAX.
-fn encode_cqo(buf: &mut Vec<u8>) {
-    buf.push(0x48);
-    buf.push(0x99);
-}
-
-/// Encode the DivRem pseudo-instruction expansion.
+/// DivRem pseudo-instruction expansion.
 ///
 /// Emits: mov rcx,rhs; mov rax,lhs; {xor edx,edx | cqo}; {div|idiv} rcx;
 ///        mov dst,{rax|rdx}
-///
-/// Care is taken to handle the case where lhs or rhs is already in one of
-/// the scratch registers (RAX, RCX).
-fn encode_divrem(dst: Gpr, lhs: Gpr, rhs: Gpr, signed: bool, rem: bool, buf: &mut Vec<u8>) {
+fn encode_divrem(ctx: &mut EncodeContext, dst: Gpr, lhs: Gpr, rhs: Gpr, signed: bool, rem: bool) {
     // Step 1: Get rhs into RCX and lhs into RAX without clobbering either.
     if rhs == Gpr::Rax && lhs == Gpr::Rcx {
         // Both are swapped — use xchg rax, rcx.
-        // REX.W + 87 /r  (xchg rcx, rax)
-        buf.push(0x48);
-        buf.push(0x87);
-        buf.push(modrm(Gpr::Rcx.encoding(), Gpr::Rax.encoding()));
+        ctx.emit(Instruction::with2(Code::Xchg_rm64_r64, Register::RCX, Register::RAX).unwrap());
     } else if rhs == Gpr::Rax {
         // rhs is in RAX — move it to RCX first, then move lhs to RAX.
-        encode_mov_rr(OpSize::S64, Gpr::Rcx, Gpr::Rax, buf);
-        if lhs != Gpr::Rax {
-            encode_mov_rr(OpSize::S64, Gpr::Rax, lhs, buf);
-        }
+        ctx.emit_mov64(Gpr::Rcx, Gpr::Rax);
+        ctx.emit_mov64(Gpr::Rax, lhs);
     } else {
         // Move lhs to RAX first (safe: rhs is not in RAX).
-        if lhs != Gpr::Rax {
-            encode_mov_rr(OpSize::S64, Gpr::Rax, lhs, buf);
-        }
-        if rhs != Gpr::Rcx {
-            encode_mov_rr(OpSize::S64, Gpr::Rcx, rhs, buf);
-        }
+        ctx.emit_mov64(Gpr::Rax, lhs);
+        ctx.emit_mov64(Gpr::Rcx, rhs);
     }
 
     // Step 2: Set up RDX (zero for unsigned, sign-extend for signed).
     if signed {
-        encode_cqo(buf);
+        ctx.emit(Instruction::with(Code::Cqo));
     } else {
-        // xor edx, edx (33 D2)
-        buf.push(0x33);
-        buf.push(modrm(Gpr::Rdx.encoding(), Gpr::Rdx.encoding()));
+        // xor edx, edx
+        ctx.emit(Instruction::with2(Code::Xor_rm32_r32, Register::EDX, Register::EDX).unwrap());
     }
 
     // Step 3: div/idiv rcx
-    if signed {
-        encode_idiv(OpSize::S64, Gpr::Rcx, buf);
+    let div_code = if signed {
+        Code::Idiv_rm64
     } else {
-        encode_div(OpSize::S64, Gpr::Rcx, buf);
-    }
+        Code::Div_rm64
+    };
+    ctx.emit(Instruction::with1(div_code, Register::RCX).unwrap());
 
     // Step 4: Move result to dst.
     let result_reg = if rem { Gpr::Rdx } else { Gpr::Rax };
-    if dst != result_reg {
-        encode_mov_rr(OpSize::S64, dst, result_reg, buf);
-    }
+    ctx.emit_mov64(dst, result_reg);
 }
 
-/// Encode IDIV r/m (REX.W + F7 /7): signed divide RDX:RAX by src.
-fn encode_idiv(size: OpSize, src: Gpr, buf: &mut Vec<u8>) {
-    let w = matches!(size, OpSize::S64);
-    let b_bit = if src.needs_rex() { 0x01 } else { 0 };
-    let w_bit = if w { 0x08 } else { 0 };
-    let rex_bits = w_bit | b_bit;
-    if rex_bits != 0 {
-        buf.push(0x40 | rex_bits);
-    }
-    buf.push(0xf7);
-    buf.push(modrm(7, src.encoding()));
-}
-
-/// Encode DIV r/m (REX.W + F7 /6): unsigned divide RDX:RAX by src.
-fn encode_div(size: OpSize, src: Gpr, buf: &mut Vec<u8>) {
-    let w = matches!(size, OpSize::S64);
-    let b_bit = if src.needs_rex() { 0x01 } else { 0 };
-    let w_bit = if w { 0x08 } else { 0 };
-    let rex_bits = w_bit | b_bit;
-    if rex_bits != 0 {
-        buf.push(0x40 | rex_bits);
-    }
-    buf.push(0xf7);
-    buf.push(modrm(6, src.encoding()));
-}
-
-/// Encode POPCNT r64, r64 (F3 REX.W 0F B8 /r).
-fn encode_popcnt(dst: Gpr, src: Gpr, buf: &mut Vec<u8>) {
-    buf.push(0xf3);
-    if let Some(r) = rex(true, dst, src) {
-        buf.push(r);
-    } else {
-        buf.push(0x48);
-    }
-    buf.push(0x0f);
-    buf.push(0xb8);
-    buf.push(modrm(dst.encoding(), src.encoding()));
-}
-
-/// Encode LZCNT r64, r64 (F3 REX.W 0F BD /r).
-fn encode_lzcnt(dst: Gpr, src: Gpr, buf: &mut Vec<u8>) {
-    buf.push(0xf3);
-    if let Some(r) = rex(true, dst, src) {
-        buf.push(r);
-    } else {
-        buf.push(0x48);
-    }
-    buf.push(0x0f);
-    buf.push(0xbd);
-    buf.push(modrm(dst.encoding(), src.encoding()));
-}
-
-/// Encode TZCNT r64, r64 (F3 REX.W 0F BC /r).
-fn encode_tzcnt(dst: Gpr, src: Gpr, buf: &mut Vec<u8>) {
-    buf.push(0xf3);
-    if let Some(r) = rex(true, dst, src) {
-        buf.push(r);
-    } else {
-        buf.push(0x48);
-    }
-    buf.push(0x0f);
-    buf.push(0xbc);
-    buf.push(modrm(dst.encoding(), src.encoding()));
-}
-
-/// Encode BSWAP r32/r64 (0F C8+rd, REX.W for 64-bit).
-fn encode_bswap(size: OpSize, dst: Gpr, buf: &mut Vec<u8>) {
-    let w = matches!(size, OpSize::S64);
-    let b_bit = if dst.needs_rex() { 0x01 } else { 0 };
-    let w_bit = if w { 0x08 } else { 0 };
-    let rex_bits = w_bit | b_bit;
-    if rex_bits != 0 {
-        buf.push(0x40 | rex_bits);
-    }
-    buf.push(0x0f);
-    buf.push(0xc8 + dst.encoding());
-}
-
-/// Encode FpBinOp pseudo-instruction: SSE2 f64 binary op via red-zone.
+/// FpBinOp pseudo-instruction: SSE2 f64 binary op via red-zone.
 ///
-/// Sequence: mov [rsp-8],lhs; mov [rsp-16],rhs;
-///           movsd xmm0,[rsp-8]; opsd xmm0,[rsp-16];
-///           movsd [rsp-8],xmm0; mov dst,[rsp-8]
-fn encode_fp_binop(op: FpBinOpKind, dst: Gpr, lhs: Gpr, rhs: Gpr, buf: &mut Vec<u8>) {
+/// mov [rsp-8],lhs; mov [rsp-16],rhs; movsd xmm0,[rsp-8];
+/// opsd xmm0,[rsp-16]; movsd [rsp-8],xmm0; mov dst,[rsp-8]
+fn encode_fp_binop(ctx: &mut EncodeContext, op: FpBinOpKind, dst: Gpr, lhs: Gpr, rhs: Gpr) {
+    let rsp_m8 = MemoryOperand::with_base_displ(Register::RSP, -8);
+    let rsp_m16 = MemoryOperand::with_base_displ(Register::RSP, -16);
+
     // 1. mov [rsp-8], lhs
-    encode_mov_mr(OpSize::S64, Gpr::Rsp, -8, lhs, buf);
+    ctx.emit(Instruction::with2(Code::Mov_rm64_r64, rsp_m8, gpr64(lhs)).unwrap());
     // 2. mov [rsp-16], rhs
-    encode_mov_mr(OpSize::S64, Gpr::Rsp, -16, rhs, buf);
-    // 3. movsd xmm0, [rsp-8]  →  F2 0F 10 44 24 F8
-    buf.extend_from_slice(&[0xf2, 0x0f, 0x10, 0x44, 0x24, 0xf8]);
+    ctx.emit(Instruction::with2(Code::Mov_rm64_r64, rsp_m16, gpr64(rhs)).unwrap());
+    // 3. movsd xmm0, [rsp-8]
+    ctx.emit(Instruction::with2(Code::Movsd_xmm_xmmm64, Register::XMM0, rsp_m8).unwrap());
     // 4. opsd xmm0, [rsp-16]
-    let op_byte = match op {
-        FpBinOpKind::Add => 0x58,
-        FpBinOpKind::Sub => 0x5c,
-        FpBinOpKind::Mul => 0x59,
-        FpBinOpKind::Div => 0x5e,
+    let op_code = match op {
+        FpBinOpKind::Add => Code::Addsd_xmm_xmmm64,
+        FpBinOpKind::Sub => Code::Subsd_xmm_xmmm64,
+        FpBinOpKind::Mul => Code::Mulsd_xmm_xmmm64,
+        FpBinOpKind::Div => Code::Divsd_xmm_xmmm64,
     };
-    buf.extend_from_slice(&[0xf2, 0x0f, op_byte, 0x44, 0x24, 0xf0]);
-    // 5. movsd [rsp-8], xmm0  →  F2 0F 11 44 24 F8
-    buf.extend_from_slice(&[0xf2, 0x0f, 0x11, 0x44, 0x24, 0xf8]);
+    ctx.emit(Instruction::with2(op_code, Register::XMM0, rsp_m16).unwrap());
+    // 5. movsd [rsp-8], xmm0
+    ctx.emit(Instruction::with2(Code::Movsd_xmmm64_xmm, rsp_m8, Register::XMM0).unwrap());
     // 6. mov dst, [rsp-8]
-    encode_mov_rm(OpSize::S64, dst, Gpr::Rsp, -8, buf);
+    ctx.emit(Instruction::with2(Code::Mov_r64_rm64, gpr64(dst), rsp_m8).unwrap());
 }
 
-/// Encode CvtFpToInt pseudo-instruction: float (GPR bits) → signed integer via red-zone.
-///
-/// Sequence: mov [rsp-8], src; cvttsd2si/cvttss2si dst, [rsp-8]
-fn encode_cvt_fp_to_int(dst: Gpr, src: Gpr, double: bool, buf: &mut Vec<u8>) {
-    // 1. mov [rsp-8], src  (store float bits)
-    encode_mov_mr(OpSize::S64, Gpr::Rsp, -8, src, buf);
-    // 2. cvttsd2si/cvttss2si dst, [rsp-8]
-    //    F2/F3 REX.W 0F 2C modrm_mem(dst, rsp, -8)
-    let prefix = if double { 0xf2 } else { 0xf3 };
-    buf.push(prefix);
-    // REX.W=1, REX.R if dst needs it, REX.B=0 (base is RSP, no REX.B needed)
-    let rex_byte = 0x48 | if dst.needs_rex() { 0x04 } else { 0 };
-    buf.push(rex_byte);
-    buf.extend_from_slice(&[0x0f, 0x2c]);
-    modrm_mem(dst.encoding(), Gpr::Rsp, -8, buf);
-}
-
-/// Encode CvtIntToFp pseudo-instruction: signed integer → float (GPR bits) via red-zone.
-///
-/// Sequence: cvtsi2sd/cvtsi2ss xmm0, src; movsd/movss [rsp-8], xmm0; mov dst, [rsp-8]
-fn encode_cvt_int_to_fp(dst: Gpr, src: Gpr, double: bool, buf: &mut Vec<u8>) {
-    let prefix = if double { 0xf2 } else { 0xf3 };
-    // 1. cvtsi2sd/cvtsi2ss xmm0, src_gpr
-    //    F2/F3 REX.W 0F 2A ModRM(xmm0, src)
-    buf.push(prefix);
-    let rex_byte = 0x48 | if src.needs_rex() { 0x01 } else { 0 };
-    buf.push(rex_byte);
-    buf.extend_from_slice(&[0x0f, 0x2a]);
-    buf.push(0xc0 | src.encoding()); // ModRM: mod=11, reg=000(xmm0), rm=src
-    // 2. movsd/movss [rsp-8], xmm0
-    if double {
-        // movsd [rsp-8], xmm0 → F2 0F 11 44 24 F8
-        buf.extend_from_slice(&[0xf2, 0x0f, 0x11, 0x44, 0x24, 0xf8]);
-    } else {
-        // movss [rsp-8], xmm0 → F3 0F 11 44 24 F8
-        buf.extend_from_slice(&[0xf3, 0x0f, 0x11, 0x44, 0x24, 0xf8]);
-    }
-    // 3. mov dst, [rsp-8]
-    if double {
-        encode_mov_rm(OpSize::S64, dst, Gpr::Rsp, -8, buf);
-    } else {
-        // 32-bit load zero-extends to 64 bits
-        encode_mov_rm(OpSize::S32, dst, Gpr::Rsp, -8, buf);
-    }
-}
-
-/// Encode CvtFpToFp pseudo-instruction: float format conversion (f32↔f64) via red-zone.
-///
-/// src_double=true  (f64→f32): movsd xmm0,[rsp-8]; cvtsd2ss xmm0,xmm0; movss [rsp-8],xmm0
-/// src_double=false (f32→f64): movss xmm0,[rsp-8]; cvtss2sd xmm0,xmm0; movsd [rsp-8],xmm0
-fn encode_cvt_fp_to_fp(dst: Gpr, src: Gpr, src_double: bool, buf: &mut Vec<u8>) {
+/// CvtFpToInt: float (GPR bits) → signed integer via red-zone.
+fn encode_cvt_fp_to_int(ctx: &mut EncodeContext, dst: Gpr, src: Gpr, double: bool) {
+    let rsp_m8 = MemoryOperand::with_base_displ(Register::RSP, -8);
     // 1. mov [rsp-8], src
-    encode_mov_mr(OpSize::S64, Gpr::Rsp, -8, src, buf);
+    ctx.emit(Instruction::with2(Code::Mov_rm64_r64, rsp_m8, gpr64(src)).unwrap());
+    // 2. cvttsd2si/cvttss2si dst, [rsp-8]
+    let code = if double {
+        Code::Cvttsd2si_r64_xmmm64
+    } else {
+        Code::Cvttss2si_r64_xmmm32
+    };
+    ctx.emit(Instruction::with2(code, gpr64(dst), rsp_m8).unwrap());
+}
+
+/// CvtIntToFp: signed integer → float (GPR bits) via red-zone.
+fn encode_cvt_int_to_fp(ctx: &mut EncodeContext, dst: Gpr, src: Gpr, double: bool) {
+    let rsp_m8 = MemoryOperand::with_base_displ(Register::RSP, -8);
+    // 1. cvtsi2sd/cvtsi2ss xmm0, src
+    let cvt_code = if double {
+        Code::Cvtsi2sd_xmm_rm64
+    } else {
+        Code::Cvtsi2ss_xmm_rm64
+    };
+    ctx.emit(Instruction::with2(cvt_code, Register::XMM0, gpr64(src)).unwrap());
+    // 2. movsd/movss [rsp-8], xmm0
+    let store_code = if double {
+        Code::Movsd_xmmm64_xmm
+    } else {
+        Code::Movss_xmmm32_xmm
+    };
+    ctx.emit(Instruction::with2(store_code, rsp_m8, Register::XMM0).unwrap());
+    // 3. mov dst, [rsp-8]
+    let load_code = if double {
+        Code::Mov_r64_rm64
+    } else {
+        Code::Mov_r32_rm32
+    };
+    let dst_reg = if double {
+        gpr64(dst)
+    } else {
+        gpr_to_iced(dst, OpSize::S32)
+    };
+    ctx.emit(Instruction::with2(load_code, dst_reg, rsp_m8).unwrap());
+}
+
+/// CvtFpToFp: float format conversion (f32↔f64) via red-zone.
+fn encode_cvt_fp_to_fp(ctx: &mut EncodeContext, dst: Gpr, src: Gpr, src_double: bool) {
+    let rsp_m8 = MemoryOperand::with_base_displ(Register::RSP, -8);
+    // 1. mov [rsp-8], src
+    ctx.emit(Instruction::with2(Code::Mov_rm64_r64, rsp_m8, gpr64(src)).unwrap());
+
     if src_double {
         // f64 → f32 (narrowing)
-        // 2. movsd xmm0, [rsp-8]
-        buf.extend_from_slice(&[0xf2, 0x0f, 0x10, 0x44, 0x24, 0xf8]);
-        // 3. cvtsd2ss xmm0, xmm0
-        buf.extend_from_slice(&[0xf2, 0x0f, 0x5a, 0xc0]);
-        // 4. movss [rsp-8], xmm0
-        buf.extend_from_slice(&[0xf3, 0x0f, 0x11, 0x44, 0x24, 0xf8]);
-        // 5. 32-bit load (zero-extends)
-        encode_mov_rm(OpSize::S32, dst, Gpr::Rsp, -8, buf);
+        ctx.emit(Instruction::with2(Code::Movsd_xmm_xmmm64, Register::XMM0, rsp_m8).unwrap());
+        ctx.emit(
+            Instruction::with2(Code::Cvtsd2ss_xmm_xmmm64, Register::XMM0, Register::XMM0).unwrap(),
+        );
+        ctx.emit(Instruction::with2(Code::Movss_xmmm32_xmm, rsp_m8, Register::XMM0).unwrap());
+        // 32-bit load (zero-extends)
+        ctx.emit(
+            Instruction::with2(Code::Mov_r32_rm32, gpr_to_iced(dst, OpSize::S32), rsp_m8).unwrap(),
+        );
     } else {
         // f32 → f64 (widening)
-        // 2. movss xmm0, [rsp-8]
-        buf.extend_from_slice(&[0xf3, 0x0f, 0x10, 0x44, 0x24, 0xf8]);
-        // 3. cvtss2sd xmm0, xmm0
-        buf.extend_from_slice(&[0xf3, 0x0f, 0x5a, 0xc0]);
-        // 4. movsd [rsp-8], xmm0
-        buf.extend_from_slice(&[0xf2, 0x0f, 0x11, 0x44, 0x24, 0xf8]);
-        // 5. 64-bit load
-        encode_mov_rm(OpSize::S64, dst, Gpr::Rsp, -8, buf);
+        ctx.emit(Instruction::with2(Code::Movss_xmm_xmmm32, Register::XMM0, rsp_m8).unwrap());
+        ctx.emit(
+            Instruction::with2(Code::Cvtss2sd_xmm_xmmm32, Register::XMM0, Register::XMM0).unwrap(),
+        );
+        ctx.emit(Instruction::with2(Code::Movsd_xmmm64_xmm, rsp_m8, Register::XMM0).unwrap());
+        // 64-bit load
+        ctx.emit(Instruction::with2(Code::Mov_r64_rm64, gpr64(dst), rsp_m8).unwrap());
     }
 }

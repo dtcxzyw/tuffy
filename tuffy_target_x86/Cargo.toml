@@ -8,6 +8,7 @@ license.workspace = true
 tuffy_ir = { path = "../tuffy_ir" }
 tuffy_regalloc = { path = "../tuffy_regalloc" }
 tuffy_target = { path = "../tuffy_target" }
+iced-x86 = { version = "1", default-features = false, features = ["std", "encoder"] }
 object = { version = "0.36", features = ["write"] }
 num-bigint = "0.4"
 num-traits = "0.2"
