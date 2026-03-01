@@ -1,8 +1,8 @@
 # Refactor translate_operand to return Type::Int for i128/u128
 
-- Status: Draft
+- Status: Completed
 - Created: 2026-02-28
-- Completed: N/A
+- Completed: 2026-03-01
 - Parent: N/A
 
 ## Description
