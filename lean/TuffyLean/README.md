@@ -21,8 +21,20 @@ TuffyLean/
 │           └── Basic.lean
 │
 └── Export/              # Serialization and interop
-    └── Json.lean        # JSON export for Lean↔Rust data exchange
+    └── Json.lean        # Target-agnostic JSON export entrypoint
 ```
+
+## Isel Export Conventions
+
+- `TuffyLean/Export/Json.lean` must remain target-agnostic and only dispatch to target-local exporters.
+- All target-specific isel JSON encoding (rules, metadata maps, imports, instruction field encoding) must live under `TuffyLean/Target/<target>/Export.lean`.
+- Use explicit target selection when exporting isel JSON:
+
+```bash
+lake env lean --run TuffyLean/Export/Json.lean --target x86
+```
+
+- Do not rely on implicit defaults in automation scripts.
 
 ## Key Distinction: Rewrites vs Prototyping
 
