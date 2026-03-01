@@ -1,8 +1,8 @@
 # Refactor tuffy_isel_gen to be target-independent
 
-- Status: Draft
+- Status: Completed
 - Created: 2026-02-28
-- Completed: N/A
+- Completed: 2026-03-01
 - Parent: N/A
 
 ## Description
