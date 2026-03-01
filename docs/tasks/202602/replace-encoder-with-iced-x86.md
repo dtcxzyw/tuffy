@@ -1,8 +1,8 @@
 # Replace custom x86 encoder with iced-x86
 
-- Status: Draft
+- Status: Completed
 - Created: 2026-02-28
-- Completed: N/A
+- Completed: 2026-02-28
 - Parent: N/A
 
 ## Description
