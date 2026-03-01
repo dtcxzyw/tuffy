@@ -92,6 +92,8 @@ cd lean && lake clean    # Clean build artifacts
 
 Lean 4 is managed via elan (toolchain manager). The Lean project is under `lean/` with Mathlib dependency.
 
+`lean/TuffyLean/README.md` defines module-level conventions for the Lean codebase (directory roles and isel export conventions). Treat it as the canonical guide when modifying files under `lean/TuffyLean/`.
+
 ## Documentation
 
 - `docs/tasks/` — task tracking documents
