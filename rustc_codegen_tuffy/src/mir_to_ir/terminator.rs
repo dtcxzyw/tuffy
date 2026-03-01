@@ -480,25 +480,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
         // If the discriminant is a pointer (e.g. nullable pointer optimization),
         // convert it to an integer so icmp gets Int operands.
-        // For large types (> 8 bytes, e.g. u128) translate_operand returns the
-        // address of the value — load it instead of converting the address.
-        // Similarly, Bool discriminants need BoolToInt for icmp.
+        // Bool discriminants need BoolToInt for icmp.
         if matches!(self.builder.value_type(discr_val), Some(Type::Ptr(_))) {
-            if discr_bits > 64 {
-                let bytes = (discr_bits / 8) as u32;
-                discr_val = self.builder.load(
-                    discr_val.into(),
-                    bytes,
-                    Type::Int,
-                    self.current_mem.into(),
-                    None,
-                    Origin::synthetic(),
-                );
-            } else {
-                discr_val = self
-                    .builder
-                    .ptrtoaddr(discr_val.into(), Origin::synthetic());
-            }
+            discr_val = self
+                .builder
+                .ptrtoaddr(discr_val.into(), Origin::synthetic());
         } else if matches!(self.builder.value_type(discr_val), Some(Type::Bool)) {
             discr_val = self
                 .builder

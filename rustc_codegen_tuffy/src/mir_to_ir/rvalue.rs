@@ -947,37 +947,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
                 // Coerce pointer operands to integers — needed for both
                 // arithmetic/bitwise ops and comparisons.
-                // For i128/u128 operands, translate_operand returns a stack
-                // slot address (Ptr).  Load the actual value instead of
-                // converting the address to an integer.
-                let mut l_raw = l_raw;
-                let mut r_raw = r_raw;
-                if is_i128_or_u128(lhs_mir_ty) {
-                    let bytes = type_size(self.tcx, lhs_mir_ty).unwrap_or(16) as u32;
-                    if matches!(self.builder.value_type(l_raw), Some(Type::Ptr(_))) {
-                        l_raw = self.builder.load(
-                            l_raw.into(),
-                            bytes,
-                            Type::Int,
-                            self.current_mem.into(),
-                            None,
-                            Origin::synthetic(),
-                        );
-                    }
-                }
-                if is_i128_or_u128(rhs_mir_ty) {
-                    let bytes = type_size(self.tcx, rhs_mir_ty).unwrap_or(16) as u32;
-                    if matches!(self.builder.value_type(r_raw), Some(Type::Ptr(_))) {
-                        r_raw = self.builder.load(
-                            r_raw.into(),
-                            bytes,
-                            Type::Int,
-                            self.current_mem.into(),
-                            None,
-                            Origin::synthetic(),
-                        );
-                    }
-                }
                 let l = self.coerce_to_int(l_raw);
                 let r = self.coerce_to_int(r_raw);
                 let l_op = IrOperand {
@@ -2076,16 +2045,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let ty = self.monomorphize(self.mir.local_decls[place.local].ty);
                         let size = type_size(self.tcx, ty).unwrap_or(8);
                         let slot_size = self.builder.stack_slot_size(slot);
-                        if size <= 8
+                        let should_load_stack_int = matches!(translate_ty(ty), Some(Type::Int))
                             && matches!(self.builder.value_type(slot), Some(Type::Ptr(_)))
-                            && slot_size.is_some()
-                            && slot_size.unwrap() <= 8
-                        {
-                            let ir_ty = translate_ty(ty).unwrap_or(Type::Int);
+                            && ((size <= 8 && slot_size.is_some_and(|sz| sz <= 8))
+                                || (size == 16 && is_i128_or_u128(ty) && slot_size == Some(16)));
+                        if should_load_stack_int {
                             let loaded = self.builder.load(
                                 slot.into(),
                                 size as u32,
-                                ir_ty,
+                                Type::Int,
                                 self.current_mem.into(),
                                 None,
                                 Origin::synthetic(),

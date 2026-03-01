@@ -98,22 +98,8 @@ pub(super) fn translate_intrinsic<'tcx>(
                 if byte_size <= 1 {
                     locals.set(destination_local, v);
                 } else {
-                    // For large types (e.g. u128), translate_operand returns
-                    // a stack slot pointer.  Load the value before bswap.
-                    let val = if matches!(builder.value_type(v), Some(Type::Ptr(_))) {
-                        builder.load(
-                            v.into(),
-                            byte_size as u32,
-                            Type::Int,
-                            current_mem.into(),
-                            None,
-                            Origin::synthetic(),
-                        )
-                    } else {
-                        v
-                    };
                     let result =
-                        builder.bswap(val.into(), byte_size as u32, Origin::synthetic());
+                        builder.bswap(v.into(), byte_size as u32, Origin::synthetic());
                     locals.set(destination_local, result);
                 }
             }
@@ -132,23 +118,8 @@ pub(super) fn translate_intrinsic<'tcx>(
                 if bit_size <= 1 {
                     locals.set(destination_local, v);
                 } else {
-                    // For large types (e.g. u128), translate_operand returns
-                    // a stack slot pointer. Load the value before bit_reverse.
-                    let val = if matches!(builder.value_type(v), Some(Type::Ptr(_))) {
-                        let byte_size = (bit_size / 8) as u32;
-                        builder.load(
-                            v.into(),
-                            byte_size,
-                            Type::Int,
-                            current_mem.into(),
-                            None,
-                            Origin::synthetic(),
-                        )
-                    } else {
-                        v
-                    };
                     let result =
-                        builder.bit_reverse(val.into(), bit_size, Origin::synthetic());
+                        builder.bit_reverse(v.into(), bit_size, Origin::synthetic());
                     locals.set(destination_local, result);
                 }
             }
