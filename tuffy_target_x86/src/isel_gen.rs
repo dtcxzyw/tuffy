@@ -124,33 +124,13 @@ fn gen_shl(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Op
     Some(())
 }
 
-fn gen_shr_signed(
-    ctx: &mut super::IselCtx,
-    vref: ValueRef,
-    lhs: VReg,
-    rhs: VReg,
-    bits: u32,
-) -> Option<()> {
+fn gen_shr_signed(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::MovRR {
         size: OpSize::S64,
         dst: v0,
         src: lhs,
     });
-    // Sign-extend from `bits` to 64 before arithmetic shift.
-    if bits < 64 {
-        let pad = (64 - bits) as u8;
-        ctx.out.push(MInst::ShlImm {
-            size: OpSize::S64,
-            dst: v0,
-            imm: pad,
-        });
-        ctx.out.push(MInst::SarImm {
-            size: OpSize::S64,
-            dst: v0,
-            imm: pad,
-        });
-    }
     let v1 = ctx.alloc.alloc_fixed(Gpr::Rcx.to_preg());
     ctx.out.push(MInst::MovRR {
         size: OpSize::S64,
@@ -295,169 +275,6 @@ fn gen_count_trailing_zeros(ctx: &mut super::IselCtx, vref: ValueRef, src: VReg)
     Some(())
 }
 
-fn gen_bswap(ctx: &mut super::IselCtx, vref: ValueRef, src: VReg, bytes: u32) -> Option<()> {
-    let v0 = ctx.alloc.alloc();
-    if bytes == 2 {
-        // 2-byte bswap via shift/mask: ((v & 0xFF) << 8) | ((v >> 8) & 0xFF)
-        let tmp = ctx.alloc.alloc();
-        ctx.out.push(MInst::MovRR {
-            size: OpSize::S64,
-            dst: v0,
-            src,
-        });
-        ctx.out.push(MInst::AndRI {
-            size: OpSize::S64,
-            dst: v0,
-            imm: 0xFF,
-        });
-        ctx.out.push(MInst::ShlImm {
-            size: OpSize::S64,
-            dst: v0,
-            imm: 8,
-        });
-        ctx.out.push(MInst::MovRR {
-            size: OpSize::S64,
-            dst: tmp,
-            src,
-        });
-        ctx.out.push(MInst::AndRI {
-            size: OpSize::S64,
-            dst: tmp,
-            imm: 0xFF00,
-        });
-        ctx.out.push(MInst::SarImm {
-            size: OpSize::S64,
-            dst: tmp,
-            imm: 8,
-        });
-        ctx.out.push(MInst::OrRR {
-            size: OpSize::S64,
-            dst: v0,
-            src: tmp,
-        });
-    } else {
-        // 4-byte or 8-byte: use native BSWAP instruction
-        ctx.out.push(MInst::MovRR {
-            size: OpSize::S64,
-            dst: v0,
-            src,
-        });
-        let size = if bytes >= 8 { OpSize::S64 } else { OpSize::S32 };
-        ctx.out.push(MInst::Bswap { size, dst: v0 });
-    }
-    ctx.regs.assign(vref, v0);
-    Some(())
-}
-
-fn gen_rotate_left(ctx: &mut super::IselCtx, vref: ValueRef, val: VReg, amt: VReg) -> Option<()> {
-    let v0 = ctx.alloc.alloc();
-    ctx.out.push(MInst::MovRR {
-        size: OpSize::S64,
-        dst: v0,
-        src: val,
-    });
-    let v1 = ctx.alloc.alloc_fixed(Gpr::Rcx.to_preg());
-    ctx.out.push(MInst::MovRR {
-        size: OpSize::S64,
-        dst: v1,
-        src: amt,
-    });
-    ctx.out.push(MInst::RolRCL {
-        size: OpSize::S64,
-        dst: v0,
-    });
-    ctx.regs.assign(vref, v0);
-    Some(())
-}
-
-fn gen_rotate_right(ctx: &mut super::IselCtx, vref: ValueRef, val: VReg, amt: VReg) -> Option<()> {
-    let v0 = ctx.alloc.alloc();
-    ctx.out.push(MInst::MovRR {
-        size: OpSize::S64,
-        dst: v0,
-        src: val,
-    });
-    let v1 = ctx.alloc.alloc_fixed(Gpr::Rcx.to_preg());
-    ctx.out.push(MInst::MovRR {
-        size: OpSize::S64,
-        dst: v1,
-        src: amt,
-    });
-    ctx.out.push(MInst::RorRCL {
-        size: OpSize::S64,
-        dst: v0,
-    });
-    ctx.regs.assign(vref, v0);
-    Some(())
-}
-
-fn gen_saturating_add(
-    ctx: &mut super::IselCtx,
-    vref: ValueRef,
-    lhs: VReg,
-    rhs: VReg,
-) -> Option<()> {
-    // add lhs, rhs; if carry, result = all-ones (max unsigned)
-    let v0 = ctx.alloc.alloc();
-    ctx.out.push(MInst::MovRR {
-        size: OpSize::S64,
-        dst: v0,
-        src: lhs,
-    });
-    ctx.out.push(MInst::AddRR {
-        size: OpSize::S64,
-        dst: v0,
-        src: rhs,
-    });
-    let max_val = ctx.alloc.alloc();
-    ctx.out.push(MInst::MovRI64 {
-        dst: max_val,
-        imm: -1i64,
-    });
-    ctx.out.push(MInst::CMOVcc {
-        size: OpSize::S64,
-        cc: CondCode::B,
-        dst: v0,
-        src: max_val,
-    });
-    ctx.regs.assign(vref, v0);
-    Some(())
-}
-
-fn gen_saturating_sub(
-    ctx: &mut super::IselCtx,
-    vref: ValueRef,
-    lhs: VReg,
-    rhs: VReg,
-) -> Option<()> {
-    // sub lhs, rhs; if borrow (carry), result = 0
-    let v0 = ctx.alloc.alloc();
-    ctx.out.push(MInst::MovRR {
-        size: OpSize::S64,
-        dst: v0,
-        src: lhs,
-    });
-    ctx.out.push(MInst::SubRR {
-        size: OpSize::S64,
-        dst: v0,
-        src: rhs,
-    });
-    let zero = ctx.alloc.alloc();
-    ctx.out.push(MInst::MovRI {
-        size: OpSize::S64,
-        dst: zero,
-        imm: 0,
-    });
-    ctx.out.push(MInst::CMOVcc {
-        size: OpSize::S64,
-        cc: CondCode::B,
-        dst: v0,
-        src: zero,
-    });
-    ctx.regs.assign(vref, v0);
-    Some(())
-}
-
 fn gen_icmp(
     ctx: &mut super::IselCtx,
     vref: ValueRef,
@@ -466,78 +283,10 @@ fn gen_icmp(
     cmp_op: ICmpOp,
     lhs_ann: Option<Annotation>,
 ) -> Option<()> {
-    // For sub-word annotations, normalize operands so that a zero-extended
-    // load (e.g. load.1 → 0x00000000000000FF) and a full-width iconst
-    // (e.g. iconst -1 → 0xFFFFFFFFFFFFFFFF) compare correctly.
-    let (cmp_lhs, cmp_rhs) = match lhs_ann {
-        Some(Annotation::Signed(n)) if n < 64 => {
-            let shift = (64 - n) as u8;
-            let l = ctx.alloc.alloc();
-            ctx.out.push(MInst::MovRR {
-                size: OpSize::S64,
-                dst: l,
-                src: lhs,
-            });
-            ctx.out.push(MInst::ShlImm {
-                size: OpSize::S64,
-                dst: l,
-                imm: shift,
-            });
-            ctx.out.push(MInst::SarImm {
-                size: OpSize::S64,
-                dst: l,
-                imm: shift,
-            });
-            let r = ctx.alloc.alloc();
-            ctx.out.push(MInst::MovRR {
-                size: OpSize::S64,
-                dst: r,
-                src: rhs,
-            });
-            ctx.out.push(MInst::ShlImm {
-                size: OpSize::S64,
-                dst: r,
-                imm: shift,
-            });
-            ctx.out.push(MInst::SarImm {
-                size: OpSize::S64,
-                dst: r,
-                imm: shift,
-            });
-            (l, r)
-        }
-        Some(Annotation::Unsigned(n)) if n < 64 => {
-            let mask = (1i64 << n) - 1;
-            let l = ctx.alloc.alloc();
-            ctx.out.push(MInst::MovRR {
-                size: OpSize::S64,
-                dst: l,
-                src: lhs,
-            });
-            ctx.out.push(MInst::AndRI {
-                size: OpSize::S64,
-                dst: l,
-                imm: mask,
-            });
-            let r = ctx.alloc.alloc();
-            ctx.out.push(MInst::MovRR {
-                size: OpSize::S64,
-                dst: r,
-                src: rhs,
-            });
-            ctx.out.push(MInst::AndRI {
-                size: OpSize::S64,
-                dst: r,
-                imm: mask,
-            });
-            (l, r)
-        }
-        _ => (lhs, rhs),
-    };
     ctx.out.push(MInst::CmpRR {
         size: OpSize::S64,
-        src1: cmp_lhs,
-        src2: cmp_rhs,
+        src1: lhs,
+        src2: rhs,
     });
     let cc = super::icmp_to_cc(cmp_op, lhs_ann);
     ctx.cmps.set(vref, cc);
@@ -622,7 +371,7 @@ pub(super) fn try_select_generated(
             let l = ctx.ensure_in_reg(lhs.value)?;
             let r = ctx.ensure_in_reg(rhs.value)?;
             match lhs.annotation {
-                Some(Annotation::Signed(n)) => gen_shr_signed(ctx, vref, l, r, n),
+                Some(Annotation::Signed(_)) => gen_shr_signed(ctx, vref, l, r),
                 Some(Annotation::Unsigned(_)) => gen_shr_unsigned(ctx, vref, l, r),
                 _ => gen_shr_unsigned(ctx, vref, l, r),
             }
@@ -656,38 +405,6 @@ pub(super) fn try_select_generated(
         Op::CountTrailingZeros(val) => {
             let s = ctx.ensure_in_reg(val.value)?;
             gen_count_trailing_zeros(ctx, vref, s)
-        }
-        Op::Bswap(val, bytes) => {
-            let s = ctx.ensure_in_reg(val.value)?;
-            gen_bswap(ctx, vref, s, *bytes)
-        }
-        Op::BitReverse(..) => {
-            // TODO: lower bit_reverse to x86 instructions
-            None
-        }
-        Op::Clmul(..) => {
-            // TODO: lower clmul to x86 PCLMULQDQ instruction
-            None
-        }
-        Op::RotateLeft(val, amt, _) => {
-            let v = ctx.ensure_in_reg(val.value)?;
-            let a = ctx.ensure_in_reg(amt.value)?;
-            gen_rotate_left(ctx, vref, v, a)
-        }
-        Op::RotateRight(val, amt, _) => {
-            let v = ctx.ensure_in_reg(val.value)?;
-            let a = ctx.ensure_in_reg(amt.value)?;
-            gen_rotate_right(ctx, vref, v, a)
-        }
-        Op::SaturatingAdd(lhs, rhs, _) => {
-            let l = ctx.ensure_in_reg(lhs.value)?;
-            let r = ctx.ensure_in_reg(rhs.value)?;
-            gen_saturating_add(ctx, vref, l, r)
-        }
-        Op::SaturatingSub(lhs, rhs, _) => {
-            let l = ctx.ensure_in_reg(lhs.value)?;
-            let r = ctx.ensure_in_reg(rhs.value)?;
-            gen_saturating_sub(ctx, vref, l, r)
         }
         Op::PtrAdd(ptr, offset) => {
             let p = ctx.ensure_in_reg(ptr.value)?;
