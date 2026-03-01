@@ -4,6 +4,8 @@
 //! backend based on the target triple and delegates all code generation
 //! calls through enum dispatch.
 
+mod legalize;
+
 use tuffy_ir::function::Function;
 use tuffy_ir::module::SymbolTable;
 use tuffy_target::backend::{AbiMetadata, Backend};
@@ -53,6 +55,8 @@ impl CodegenSession {
     }
 
     /// Compile a single IR function to machine code.
+    ///
+    /// Runs wide-integer legalization before dispatching to the backend.
     pub fn compile_function(
         &self,
         func: &Function,
@@ -61,7 +65,12 @@ impl CodegenSession {
     ) -> Option<CompiledFunction> {
         match (&self.inner, metadata) {
             (CodegenInner::X86(backend), AbiMetadataBox::X86(meta)) => {
-                backend.compile_function(func, symbols, meta)
+                let legalized = legalize::legalize_wide_integers(func, meta);
+                let (func_ref, meta_ref) = match &legalized {
+                    Some((f, m)) => (f, m),
+                    None => (func, meta),
+                };
+                backend.compile_function(func_ref, symbols, meta_ref)
             }
         }
     }

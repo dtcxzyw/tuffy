@@ -336,6 +336,8 @@ dependencies = [
 name = "tuffy_codegen"
 version = "0.1.0"
 dependencies = [
+ "num-bigint",
+ "num-traits",
  "tuffy_ir",
  "tuffy_target",
  "tuffy_target_x86",

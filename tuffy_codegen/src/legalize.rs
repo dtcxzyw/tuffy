@@ -1,8 +1,8 @@
-//! i128/u128 type legalization pass.
+//! Wide-integer type legalization pass.
 //!
 //! Splits 128-bit integer operations into pairs of 64-bit operations
-//! before instruction selection. Runs as the first stage of the x86
-//! backend pipeline.
+//! before instruction selection. Target-independent: parameterized over
+//! the backend's ABI metadata type.
 
 use std::collections::{HashMap, HashSet};
 
@@ -16,8 +16,6 @@ use tuffy_ir::types::{Annotation, Type};
 use tuffy_ir::value::{BlockRef, ValueRef};
 
 use tuffy_target::backend::AbiMetadata;
-
-use crate::backend::X86AbiMetadata;
 
 // ---------------------------------------------------------------------------
 // Value mapping
@@ -108,12 +106,24 @@ fn has_128bit_values(func: &Function) -> bool {
 // Public entry point
 // ---------------------------------------------------------------------------
 
-pub fn legalize_i128(
+/// Legalize wide (128-bit) integer operations into pairs of 64-bit ops.
+///
+/// Returns `None` if the function has no 128-bit values and no wide-return
+/// calls, meaning no legalization is needed.
+pub fn legalize_wide_integers<M: AbiMetadata + Clone>(
     func: &Function,
-    metadata: &X86AbiMetadata,
-) -> Option<(Function, X86AbiMetadata)> {
-    if !has_128bit_values(func) && metadata.wide_return_calls.is_empty() {
-        return None;
+    metadata: &M,
+) -> Option<(Function, M)> {
+    if !has_128bit_values(func) {
+        // No 128-bit IR values; check if any calls return wide values.
+        let has_wide_calls = func
+            .instructions
+            .iter()
+            .enumerate()
+            .any(|(i, _)| metadata.is_wide_return_call(i as u32));
+        if !has_wide_calls {
+            return None;
+        }
     }
     let (out, state) = build_new_func(func, metadata);
     Some(run_legalize(func, out, state))
@@ -123,12 +133,12 @@ pub fn legalize_i128(
 // State (separate from Function so Builder can borrow Function independently)
 // ---------------------------------------------------------------------------
 
-struct State {
-    meta: X86AbiMetadata,
+struct State<M> {
+    meta: M,
     /// Original ABI metadata from before legalization, used to transfer
     /// non-128-bit secondary return info (e.g. 16-byte struct returns in
     /// RAX+RDX) that would otherwise be lost when instruction indices change.
-    old_meta: X86AbiMetadata,
+    old_meta: M,
     vmap: VMap,
     bmap: HashMap<u32, BlockRef>,
     /// Old param index → (new_lo_index, Option<new_hi_index>).
@@ -144,7 +154,7 @@ fn o() -> Origin {
     Origin::synthetic()
 }
 
-fn build_new_func(old: &Function, old_meta: &X86AbiMetadata) -> (Function, State) {
+fn build_new_func<M: AbiMetadata + Clone>(old: &Function, old_meta: &M) -> (Function, State<M>) {
     let mut params = Vec::new();
     let mut param_anns = Vec::new();
     let mut param_names = Vec::new();
@@ -182,7 +192,7 @@ fn build_new_func(old: &Function, old_meta: &X86AbiMetadata) -> (Function, State
     let wide = collect_wide_values(old, old_meta);
     let out = Function::new(old.name, params, param_anns, param_names, ret_ty, ret_ann);
     let state = State {
-        meta: X86AbiMetadata::default(),
+        meta: M::default(),
         old_meta: old_meta.clone(),
         vmap: VMap::new(),
         bmap: HashMap::new(),
@@ -197,7 +207,7 @@ fn build_new_func(old: &Function, old_meta: &X86AbiMetadata) -> (Function, State
 // Pre-scan: identify 128-bit values in the old function
 // ---------------------------------------------------------------------------
 
-fn collect_wide_values(old: &Function, meta: &X86AbiMetadata) -> HashSet<u32> {
+fn collect_wide_values<M: AbiMetadata>(old: &Function, meta: &M) -> HashSet<u32> {
     let mut wide = HashSet::new();
 
     // Mark instructions that produce 128-bit results.
@@ -210,7 +220,7 @@ fn collect_wide_values(old: &Function, meta: &X86AbiMetadata) -> HashSet<u32> {
         // Calls returning i128/u128 are marked in ABI metadata (the call
         // instruction itself has no result_annotation because its primary
         // result type is Mem).
-        if meta.wide_return_calls.contains(&(i as u32)) {
+        if meta.is_wide_return_call(i as u32) {
             let sec = ValueRef::inst_secondary_result(i as u32);
             wide.insert(sec.raw());
         }
@@ -268,7 +278,7 @@ fn collect_wide_values(old: &Function, meta: &X86AbiMetadata) -> HashSet<u32> {
     wide
 }
 
-fn is_wide(s: &State, v: ValueRef) -> bool {
+fn is_wide<M>(s: &State<M>, v: ValueRef) -> bool {
     s.wide.contains(&v.raw())
 }
 
@@ -276,7 +286,11 @@ fn is_wide(s: &State, v: ValueRef) -> bool {
 // Main legalization loop
 // ---------------------------------------------------------------------------
 
-fn run_legalize(old: &Function, mut out: Function, mut s: State) -> (Function, X86AbiMetadata) {
+fn run_legalize<M: AbiMetadata + Clone>(
+    old: &Function,
+    mut out: Function,
+    mut s: State<M>,
+) -> (Function, M) {
     {
         let mut b = Builder::new(&mut out);
         let old_root = old.root_region;
@@ -288,18 +302,14 @@ fn run_legalize(old: &Function, mut out: Function, mut s: State) -> (Function, X
     (out, s.meta)
 }
 
-fn walk_region(
+fn walk_region<M: AbiMetadata + Clone>(
     old: &Function,
-    s: &mut State,
+    s: &mut State<M>,
     b: &mut Builder,
     old_region: tuffy_ir::value::RegionRef,
 ) {
-    // Phase 1: pre-create all blocks and their args so that forward
-    // block references (e.g. brif targets) can be resolved during
-    // instruction processing.
     precreate_blocks(old, s, b, old_region);
 
-    // Phase 2: process instructions in each block.
     for child in &old.region(old_region).children {
         match child {
             CfgNode::Block(old_blk) => {
@@ -315,12 +325,9 @@ fn walk_region(
     }
 }
 
-/// Pre-create all blocks (and their args) in a region so that `bmap`
-/// is fully populated before any instructions are processed.  This
-/// avoids panics on forward block references in `brif`/`br`.
-fn precreate_blocks(
+fn precreate_blocks<M>(
     old: &Function,
-    s: &mut State,
+    s: &mut State<M>,
     b: &mut Builder,
     old_region: tuffy_ir::value::RegionRef,
 ) {
@@ -329,7 +336,6 @@ fn precreate_blocks(
             let new_blk = b.create_block();
             s.bmap.insert(old_blk.index(), new_blk);
 
-            // Recreate block args, splitting 128-bit ones.
             let old_bb = old.block(*old_blk);
             for i in 0..old_bb.arg_count {
                 let old_ba_idx = old_bb.arg_start + i;
@@ -346,12 +352,15 @@ fn precreate_blocks(
                 }
             }
         }
-        // Regions are handled recursively in walk_region phase 2.
     }
 }
 
-/// Process instructions in a pre-created block.
-fn walk_block_insts(old: &Function, s: &mut State, b: &mut Builder, old_blk: BlockRef) {
+fn walk_block_insts<M: AbiMetadata + Clone>(
+    old: &Function,
+    s: &mut State<M>,
+    b: &mut Builder,
+    old_blk: BlockRef,
+) {
     let new_blk = s.bmap[&old_blk.index()];
     b.switch_to_block(new_blk);
 
@@ -365,9 +374,9 @@ fn walk_block_insts(old: &Function, s: &mut State, b: &mut Builder, old_blk: Blo
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_lines)]
-fn legalize_inst(
+fn legalize_inst<M: AbiMetadata + Clone>(
     old: &Function,
-    s: &mut State,
+    s: &mut State<M>,
     b: &mut Builder,
     old_vref: ValueRef,
     inst: &tuffy_ir::instruction::Instruction,
@@ -470,13 +479,11 @@ fn legalize_inst(
             s.vmap.set(old_vref, Mapped::One(v));
         }
         Op::Bitcast(val) if is_wide(s, val.value) => {
-            // Truncate to lo half for bitcast from 128-bit.
             let lo = s.vmap.one(val.value);
             let v = b.bitcast(Operand::new(lo), inst.ty.clone(), ann.cloned(), o());
             s.vmap.set(old_vref, Mapped::One(v));
         }
         Op::Store(val, ptr, bytes, mem) if is_wide(s, val.value) => {
-            // Store both halves of a 128-bit value to the target address.
             let (lo, hi) = s.vmap.pair(val.value);
             let p = remap_op(s, ptr);
             let m = remap_op(s, mem);
@@ -506,17 +513,17 @@ fn legalize_inst(
 // Copy non-128-bit instruction with remapped operands
 // ---------------------------------------------------------------------------
 
-fn remap_op(s: &State, op: &Operand) -> Operand {
+fn remap_op<M>(s: &State<M>, op: &Operand) -> Operand {
     s.vmap.remap_op(op)
 }
 
-fn new_block(s: &State, old: BlockRef) -> BlockRef {
+fn new_block<M>(s: &State<M>, old: BlockRef) -> BlockRef {
     s.bmap[&old.index()]
 }
 
 #[allow(clippy::too_many_lines)]
-fn copy_inst(
-    s: &mut State,
+fn copy_inst<M: AbiMetadata + Clone>(
+    s: &mut State<M>,
     b: &mut Builder,
     old_vref: ValueRef,
     inst: &tuffy_ir::instruction::Instruction,
@@ -606,11 +613,9 @@ fn copy_inst(
         }
         Op::Unreachable => b.unreachable(o()),
         Op::Trap => b.trap(o()),
-        // Branches/calls handled by dedicated leg_* functions; should not reach here.
         Op::Br(..) | Op::BrIf(..) | Op::Call(..) | Op::Continue(..) | Op::RegionYield(..) => {
             unreachable!("branch/call should be handled by dedicated leg_* function")
         }
-        // Floating point: pass through with remapped operands.
         Op::FAdd(a, op_b, flags) => b.fadd(
             remap_op(s, a),
             remap_op(s, op_b),
@@ -651,7 +656,6 @@ fn copy_inst(
         Op::CopySign(a, op_b) => {
             b.copysign(remap_op(s, a), remap_op(s, op_b), inst.ty.clone(), o())
         }
-        // Atomics: pass through.
         Op::LoadAtomic(ptr, ord, mem) => {
             let (primary, secondary) = b.load_atomic(
                 remap_op(s, ptr),
@@ -731,7 +735,7 @@ enum BitwiseKind {
 // 128-bit parameter
 // ---------------------------------------------------------------------------
 
-fn leg_param(s: &mut State, b: &mut Builder, old_vref: ValueRef, lo_idx: u32, hi_idx: u32) {
+fn leg_param<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, lo_idx: u32, hi_idx: u32) {
     let ann64 = Some(Annotation::Unsigned(64));
     let lo = b.param(lo_idx, Type::Int, ann64, o());
     let hi = b.param(hi_idx, Type::Int, ann64, o());
@@ -742,7 +746,7 @@ fn leg_param(s: &mut State, b: &mut Builder, old_vref: ValueRef, lo_idx: u32, hi
 // Wide constant (> 64 bits)
 // ---------------------------------------------------------------------------
 
-fn leg_wide_const(s: &mut State, b: &mut Builder, old_vref: ValueRef, val: &BigInt) {
+fn leg_wide_const<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, val: &BigInt) {
     let mask64: BigInt = (BigInt::from(1u128 << 64)) - 1;
     let lo_big = val & &mask64;
     let hi_big: BigInt = val >> 64;
@@ -756,7 +760,7 @@ fn leg_wide_const(s: &mut State, b: &mut Builder, old_vref: ValueRef, val: &BigI
 //              hi = add(a_hi, b_hi), hi = add(hi, zext(carry))
 // ---------------------------------------------------------------------------
 
-fn leg_add(s: &mut State, b: &mut Builder, old_vref: ValueRef, a: &Operand, op_b: &Operand) {
+fn leg_add<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, a: &Operand, op_b: &Operand) {
     let ann64 = Some(Annotation::Unsigned(64));
     let (a_lo, a_hi) = s.vmap.pair(a.value);
     let (b_lo, b_hi) = s.vmap.pair(op_b.value);
@@ -767,7 +771,6 @@ fn leg_add(s: &mut State, b: &mut Builder, old_vref: ValueRef, a: &Operand, op_b
         ann64,
         o(),
     );
-    // carry = lo < a_lo (unsigned)
     let carry = b.icmp(
         ICmpOp::Lt,
         Operand::annotated(lo, Annotation::Unsigned(64)),
@@ -794,7 +797,7 @@ fn leg_add(s: &mut State, b: &mut Builder, old_vref: ValueRef, a: &Operand, op_b
 // 128-bit sub
 // ---------------------------------------------------------------------------
 
-fn leg_sub(s: &mut State, b: &mut Builder, old_vref: ValueRef, a: &Operand, op_b: &Operand) {
+fn leg_sub<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, a: &Operand, op_b: &Operand) {
     let ann64 = Some(Annotation::Unsigned(64));
     let (a_lo, a_hi) = s.vmap.pair(a.value);
     let (b_lo, b_hi) = s.vmap.pair(op_b.value);
@@ -832,7 +835,7 @@ fn leg_sub(s: &mut State, b: &mut Builder, old_vref: ValueRef, a: &Operand, op_b
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_lines)]
-fn leg_mul(s: &mut State, b: &mut Builder, old_vref: ValueRef, a: &Operand, op_b: &Operand) {
+fn leg_mul<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, a: &Operand, op_b: &Operand) {
     let ann64 = Some(Annotation::Unsigned(64));
     let (a_lo, a_hi) = s.vmap.pair(a.value);
     let (b_lo, b_hi) = s.vmap.pair(op_b.value);
@@ -840,7 +843,6 @@ fn leg_mul(s: &mut State, b: &mut Builder, old_vref: ValueRef, a: &Operand, op_b
     let c32 = b.iconst(32i64, o());
     let mask32 = b.iconst(0xFFFF_FFFFi64, o());
 
-    // Split a_lo into 32-bit halves.
     let a0 = b.and(
         Operand::annotated(a_lo, Annotation::Unsigned(64)),
         Operand::new(mask32),
@@ -866,14 +868,11 @@ fn leg_mul(s: &mut State, b: &mut Builder, old_vref: ValueRef, a: &Operand, op_b
         o(),
     );
 
-    // Partial products (each fits in 64 bits).
     let p0 = b.mul(Operand::new(a0), Operand::new(b0), ann64, o());
     let p1 = b.mul(Operand::new(a0), Operand::new(b1), ann64, o());
     let p2 = b.mul(Operand::new(a1), Operand::new(b0), ann64, o());
     let p3 = b.mul(Operand::new(a1), Operand::new(b1), ann64, o());
 
-    // Accumulate middle column: mid = (p0 >> 32) + p1 + p2
-    // This sum can overflow 64 bits, so we track carries.
     let p0_hi = b.shr(
         Operand::annotated(p0, Annotation::Unsigned(64)),
         Operand::new(c32),
@@ -903,12 +902,10 @@ fn leg_mul(s: &mut State, b: &mut Builder, old_vref: ValueRef, a: &Operand, op_b
         o(),
     );
 
-    // lo = (mid << 32) | (p0 & 0xFFFFFFFF)
     let mid_shifted = b.shl(Operand::new(mid), Operand::new(c32), ann64, o());
     let p0_lo = b.and(Operand::new(p0), Operand::new(mask32), ann64, o());
     let lo = b.or(Operand::new(mid_shifted), Operand::new(p0_lo), ann64, o());
 
-    // hi = (mid >> 32) + (total_carry << 32) + p3 + a_lo*b_hi + a_hi*b_lo
     let mid_hi = b.shr(
         Operand::annotated(mid, Annotation::Unsigned(64)),
         Operand::new(c32),
@@ -935,8 +932,8 @@ fn leg_mul(s: &mut State, b: &mut Builder, old_vref: ValueRef, a: &Operand, op_b
 // 128-bit bitwise (and/or/xor): independent on each half
 // ---------------------------------------------------------------------------
 
-fn leg_bitwise(
-    s: &mut State,
+fn leg_bitwise<M>(
+    s: &mut State<M>,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
@@ -964,13 +961,11 @@ fn leg_bitwise(
 }
 
 // ---------------------------------------------------------------------------
-// 128-bit left shift: if amt >= 64 → (0, a_lo << (amt-64))
-//                     else → (a_lo << amt, (a_hi << amt) | (a_lo >> (64-amt)))
-// We use select to pick between the two cases.
+// 128-bit left shift
 // ---------------------------------------------------------------------------
 
-fn leg_shl(
-    s: &mut State,
+fn leg_shl<M>(
+    s: &mut State<M>,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
@@ -984,7 +979,6 @@ fn leg_shl(
     let c0 = b.iconst(0i64, o());
     let c64 = b.iconst(64i64, o());
 
-    // Small shift path: amt < 64
     let lo_small = b.shl(Operand::new(a_lo), Operand::new(amt), ann64, o());
     let hi_shifted = b.shl(Operand::new(a_hi), Operand::new(amt), ann64, o());
     let comp = b.sub(Operand::new(c64), Operand::new(amt), ann64, o());
@@ -994,9 +988,6 @@ fn leg_shl(
         ann64,
         o(),
     );
-    // When amt=0, comp=64 and x86 masks 64-bit shifts mod 64, so
-    // `a_lo >> 64` becomes `a_lo >> 0 = a_lo` instead of 0.
-    // Zero out the spill when amt=0.
     let is_nonzero = b.icmp(
         ICmpOp::Ne,
         Operand::annotated(amt, Annotation::Unsigned(64)),
@@ -1017,12 +1008,9 @@ fn leg_shl(
         o(),
     );
 
-    // Large shift path: amt >= 64
     let amt_minus_64 = b.sub(Operand::new(amt), Operand::new(c64), ann64, o());
     let hi_large = b.shl(Operand::new(a_lo), Operand::new(amt_minus_64), ann64, o());
 
-    // Emit is_large immediately before the selects so no arithmetic
-    // instructions clobber FLAGS between the icmp and CMOVcc.
     let is_large = b.icmp(
         ICmpOp::Ge,
         Operand::annotated(amt, Annotation::Unsigned(64)),
@@ -1030,7 +1018,6 @@ fn leg_shl(
         o(),
     );
 
-    // Select between paths.
     let lo = b.select(
         Operand::new(is_large),
         Operand::new(c0),
@@ -1053,8 +1040,8 @@ fn leg_shl(
 // 128-bit right shift (logical or arithmetic based on annotation)
 // ---------------------------------------------------------------------------
 
-fn leg_shr(
-    s: &mut State,
+fn leg_shr<M>(
+    s: &mut State<M>,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
@@ -1069,14 +1056,12 @@ fn leg_shr(
     let c0 = b.iconst(0i64, o());
     let c64 = b.iconst(64i64, o());
 
-    // For the hi half, use signed or unsigned shift.
     let hi_ann = if signed {
         Annotation::Signed(64)
     } else {
         Annotation::Unsigned(64)
     };
 
-    // Small shift path: amt < 64
     let hi_small = b.shr(
         Operand::annotated(a_hi, hi_ann),
         Operand::new(amt),
@@ -1091,9 +1076,6 @@ fn leg_shr(
     );
     let comp = b.sub(Operand::new(c64), Operand::new(amt), ann64, o());
     let hi_spill = b.shl(Operand::new(a_hi), Operand::new(comp), ann64, o());
-    // When amt=0, comp=64 and x86 masks 64-bit shifts mod 64, so
-    // `a_hi << 64` becomes `a_hi << 0 = a_hi` instead of 0.
-    // Zero out the spill when amt=0.
     let is_nonzero = b.icmp(
         ICmpOp::Ne,
         Operand::annotated(amt, Annotation::Unsigned(64)),
@@ -1114,7 +1096,6 @@ fn leg_shr(
         o(),
     );
 
-    // Large shift path: amt >= 64
     let amt_minus_64 = b.sub(Operand::new(amt), Operand::new(c64), ann64, o());
     let lo_large = b.shr(
         Operand::annotated(a_hi, hi_ann),
@@ -1122,7 +1103,6 @@ fn leg_shr(
         None,
         o(),
     );
-    // hi_large = 0 for unsigned, sign-fill for signed
     let hi_large = if signed {
         let c63 = b.iconst(63i64, o());
         b.shr(
@@ -1135,8 +1115,6 @@ fn leg_shr(
         c0
     };
 
-    // Emit is_large immediately before the selects so no arithmetic
-    // instructions clobber FLAGS between the icmp and CMOVcc.
     let is_large = b.icmp(
         ICmpOp::Ge,
         Operand::annotated(amt, Annotation::Unsigned(64)),
@@ -1164,12 +1142,10 @@ fn leg_shr(
 
 // ---------------------------------------------------------------------------
 // 128-bit integer comparison
-// Compare hi halves first; if equal, compare lo halves (unsigned).
-// For signed comparisons, hi uses signed compare, lo always unsigned.
 // ---------------------------------------------------------------------------
 
-fn leg_icmp(
-    s: &mut State,
+fn leg_icmp<M>(
+    s: &mut State<M>,
     b: &mut Builder,
     old_vref: ValueRef,
     cmp_op: ICmpOp,
@@ -1191,7 +1167,6 @@ fn leg_icmp(
         ICmpOp::Eq => {
             let hi_eq = b.icmp(ICmpOp::Eq, Operand::new(a_hi), Operand::new(b_hi), o());
             let lo_eq = b.icmp(ICmpOp::Eq, Operand::new(a_lo), Operand::new(b_lo), o());
-            // Convert to int, AND, convert back to bool.
             let hi_int = b.bool_to_int(Operand::new(hi_eq), o());
             let lo_int = b.bool_to_int(Operand::new(lo_eq), o());
             let both = b.and(Operand::new(hi_int), Operand::new(lo_int), None, o());
@@ -1206,7 +1181,6 @@ fn leg_icmp(
             b.int_to_bool(Operand::new(either), o())
         }
         ICmpOp::Lt | ICmpOp::Le | ICmpOp::Gt | ICmpOp::Ge => {
-            // hi_cmp = a_hi <cmp> b_hi (signed or unsigned)
             let hi_cmp = b.icmp(
                 cmp_op,
                 Operand::annotated(a_hi, hi_ann),
@@ -1214,14 +1188,12 @@ fn leg_icmp(
                 o(),
             );
             let hi_eq = b.icmp(ICmpOp::Eq, Operand::new(a_hi), Operand::new(b_hi), o());
-            // lo_cmp always unsigned
             let lo_cmp = b.icmp(
                 cmp_op,
                 Operand::annotated(a_lo, lo_ann),
                 Operand::annotated(b_lo, lo_ann),
                 o(),
             );
-            // result = hi_eq ? lo_cmp : hi_cmp
             b.select(
                 Operand::new(hi_eq),
                 Operand::new(lo_cmp),
@@ -1238,7 +1210,13 @@ fn leg_icmp(
 // 128-bit load: two 8-byte loads at offset 0 and 8
 // ---------------------------------------------------------------------------
 
-fn leg_load_128(s: &mut State, b: &mut Builder, old_vref: ValueRef, ptr: &Operand, mem: &Operand) {
+fn leg_load_128<M>(
+    s: &mut State<M>,
+    b: &mut Builder,
+    old_vref: ValueRef,
+    ptr: &Operand,
+    mem: &Operand,
+) {
     let ann64 = Some(Annotation::Unsigned(64));
     let p = s.vmap.one(ptr.value);
     let m = s.vmap.one(mem.value);
@@ -1254,8 +1232,6 @@ fn leg_load_128(s: &mut State, b: &mut Builder, old_vref: ValueRef, ptr: &Operan
         ann64,
         o(),
     );
-    // The second load's mem output is the final mem token; map the primary
-    // result (which was the 16-byte load's mem output) to hi's mem.
     s.vmap.set(old_vref, Mapped::Pair(lo, hi));
 }
 
@@ -1263,8 +1239,8 @@ fn leg_load_128(s: &mut State, b: &mut Builder, old_vref: ValueRef, ptr: &Operan
 // 128-bit store: two 8-byte stores at offset 0 and 8
 // ---------------------------------------------------------------------------
 
-fn leg_store_128(
-    s: &mut State,
+fn leg_store_128<M>(
+    s: &mut State<M>,
     b: &mut Builder,
     old_vref: ValueRef,
     val: &Operand,
@@ -1292,7 +1268,7 @@ fn leg_store_128(
 // Sign-extend to 128: lo = original, hi = arithmetic right shift by 63
 // ---------------------------------------------------------------------------
 
-fn leg_sext_128(s: &mut State, b: &mut Builder, old_vref: ValueRef, val: &Operand) {
+fn leg_sext_128<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, val: &Operand) {
     let lo = s.vmap.one(val.value);
     let c63 = b.iconst(63i64, o());
     let hi = b.shr(
@@ -1308,7 +1284,7 @@ fn leg_sext_128(s: &mut State, b: &mut Builder, old_vref: ValueRef, val: &Operan
 // Zero-extend to 128: lo = original, hi = 0
 // ---------------------------------------------------------------------------
 
-fn leg_zext_128(s: &mut State, b: &mut Builder, old_vref: ValueRef, val: &Operand) {
+fn leg_zext_128<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, val: &Operand) {
     let lo = s.vmap.one(val.value);
     let hi = b.iconst(0i64, o());
     s.vmap.set(old_vref, Mapped::Pair(lo, hi));
@@ -1318,7 +1294,7 @@ fn leg_zext_128(s: &mut State, b: &mut Builder, old_vref: ValueRef, val: &Operan
 // 128-bit bswap: bswap each half, then swap the halves
 // ---------------------------------------------------------------------------
 
-fn leg_bswap_128(s: &mut State, b: &mut Builder, old_vref: ValueRef, val: &Operand) {
+fn leg_bswap_128<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, val: &Operand) {
     let (v_lo, v_hi) = s.vmap.pair(val.value);
     let new_lo = b.bswap(Operand::new(v_hi), 8, o());
     let new_hi = b.bswap(Operand::new(v_lo), 8, o());
@@ -1329,8 +1305,8 @@ fn leg_bswap_128(s: &mut State, b: &mut Builder, old_vref: ValueRef, val: &Opera
 // 128-bit select: select on each half independently
 // ---------------------------------------------------------------------------
 
-fn leg_select_128(
-    s: &mut State,
+fn leg_select_128<M>(
+    s: &mut State<M>,
     b: &mut Builder,
     old_vref: ValueRef,
     cond: &Operand,
@@ -1361,7 +1337,7 @@ fn leg_select_128(
 // 128-bit bool_to_int: lo = bool_to_int(val), hi = 0
 // ---------------------------------------------------------------------------
 
-fn leg_bool_to_int_128(s: &mut State, b: &mut Builder, old_vref: ValueRef, val: &Operand) {
+fn leg_bool_to_int_128<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, val: &Operand) {
     let v = s.vmap.one(val.value);
     let lo = b.bool_to_int(Operand::new(v), o());
     let hi = b.iconst(0i64, o());
@@ -1372,8 +1348,8 @@ fn leg_bool_to_int_128(s: &mut State, b: &mut Builder, old_vref: ValueRef, val: 
 // 128-bit return: lo → RAX (normal return), hi → RDX (via metadata)
 // ---------------------------------------------------------------------------
 
-fn leg_ret(
-    s: &mut State,
+fn leg_ret<M: AbiMetadata>(
+    s: &mut State<M>,
     b: &mut Builder,
     old_vref: ValueRef,
     val: &Option<Operand>,
@@ -1381,8 +1357,6 @@ fn leg_ret(
 ) {
     let m = s.vmap.one(mem.value);
     if let Some(rv) = val {
-        // If the return value is wide (Pair mapping), split into (lo, hi).
-        // Otherwise the value fits in 64 bits — use it as lo with hi = 0.
         let (lo, hi) = if is_wide(s, rv.value) {
             s.vmap.pair(rv.value)
         } else {
@@ -1390,20 +1364,13 @@ fn leg_ret(
             let hi = b.iconst(0i64, o());
             (lo, hi)
         };
-        // Emit a move for the hi half; record it in metadata so isel
-        // knows to place it in RDX.
-        let hi_idx = b.iconst(0i64, o()); // placeholder; we overwrite below
+        let hi_idx = b.iconst(0i64, o());
         let _ = hi_idx;
-        // Actually: emit the ret with lo as the return value.
-        // The hi half needs to be communicated via ABI metadata.
-        // We emit a dummy instruction that isel will recognize as
-        // "move hi into RDX before ret".
         let ret_inst = b.ret(
             Some(Operand::annotated(lo, Annotation::Unsigned(64))),
             Operand::new(m),
             o(),
         );
-        // Record that this ret's hi value needs to go to RDX.
         let ret_idx = ret_inst.index();
         s.meta.mark_secondary_return_move(ret_idx, hi.index());
         s.vmap.set(old_vref, Mapped::One(ret_inst));
@@ -1418,9 +1385,9 @@ fn leg_ret(
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
-fn leg_call(
+fn leg_call<M: AbiMetadata + Clone>(
     _old: &Function,
-    s: &mut State,
+    s: &mut State<M>,
     b: &mut Builder,
     old_vref: ValueRef,
     inst: &tuffy_ir::instruction::Instruction,
@@ -1439,8 +1406,6 @@ fn leg_call(
             new_args.push(Operand::annotated(lo, Annotation::Unsigned(64)));
             new_args.push(Operand::annotated(hi, Annotation::Unsigned(64)));
         } else if is_128(arg.annotation.as_ref()) {
-            // The value fits in 64 bits (e.g. a small u128 constant) but
-            // the callee expects a 128-bit parameter.  Split into (lo, hi=0).
             let lo = remap_op(s, arg);
             let hi = b.iconst(0i64, o());
             new_args.push(Operand::annotated(lo.value, Annotation::Unsigned(64)));
@@ -1450,8 +1415,8 @@ fn leg_call(
         }
     }
 
-    let wide_ret = is_128(inst.result_annotation.as_ref())
-        || s.old_meta.wide_return_calls.contains(&old_vref.index());
+    let wide_ret =
+        is_128(inst.result_annotation.as_ref()) || s.old_meta.is_wide_return_call(old_vref.index());
     let ret_ty = if wide_ret {
         Type::Int
     } else {
@@ -1469,13 +1434,9 @@ fn leg_call(
 
     if wide_ret {
         if let Some(data) = data_out {
-            // The call returns lo in RAX (data). We need to capture RDX for hi.
             let call_idx = mem_out.index();
             s.meta.mark_call_secondary_return(call_idx);
 
-            // Emit a placeholder instruction that isel will recognize as
-            // "capture RDX after call". We use an iconst(0) as placeholder
-            // and record it in metadata.
             let hi_capture = b.iconst(0i64, o());
             let hi_idx = hi_capture.index();
             s.meta.mark_secondary_return_capture(hi_idx, call_idx);
@@ -1489,30 +1450,19 @@ fn leg_call(
         let old_sec = ValueRef::inst_secondary_result(old_vref.index());
         s.vmap.set(old_sec, Mapped::One(data));
 
-        // Transfer secondary return (RDX) metadata for non-wide calls.
-        // When legalization runs on a function that has i128 values, calls
-        // to functions returning 16-byte structs (e.g. fmt::Arguments) also
-        // get new instruction indices.  Without transferring the metadata,
-        // isel won't know to capture RDX after the call.
         let old_call_idx = old_vref.index();
-        if s.old_meta.call_has_ret2.contains(&old_call_idx) {
+        if s.old_meta.has_secondary_return(old_call_idx) {
             let new_call_idx = mem_out.index();
             s.meta.mark_call_secondary_return(new_call_idx);
 
-            // Create a new RDX capture placeholder (same pattern as codegen).
             let rdx_capture = b.iconst(0i64, o());
             s.meta
                 .mark_secondary_return_capture(rdx_capture.index(), new_call_idx);
 
-            // Find the old RDX capture instruction for this call and record
-            // the mapping so legalize_inst can remap uses of it.
-            for (&old_cap_idx, &old_target_call) in &s.old_meta.rdx_captures {
-                if old_target_call == old_call_idx {
-                    let old_cap_vref = ValueRef::inst_result(old_cap_idx);
-                    s.vmap.set(old_cap_vref, Mapped::One(rdx_capture));
-                    s.rdx_capture_remap.insert(old_cap_idx, rdx_capture);
-                    break;
-                }
+            if let Some(old_cap_idx) = s.old_meta.find_capture_for_call(old_call_idx) {
+                let old_cap_vref = ValueRef::inst_result(old_cap_idx);
+                s.vmap.set(old_cap_vref, Mapped::One(rdx_capture));
+                s.rdx_capture_remap.insert(old_cap_idx, rdx_capture);
             }
         }
     }
@@ -1522,7 +1472,7 @@ fn leg_call(
 // Branch argument remapping: split 128-bit args into lo/hi pairs
 // ---------------------------------------------------------------------------
 
-fn remap_branch_args(s: &State, args: &[Operand]) -> Vec<Operand> {
+fn remap_branch_args<M>(s: &State<M>, args: &[Operand]) -> Vec<Operand> {
     let mut out = Vec::new();
     for arg in args {
         if is_wide(s, arg.value) {
@@ -1540,7 +1490,13 @@ fn remap_branch_args(s: &State, args: &[Operand]) -> Vec<Operand> {
 // Unconditional branch
 // ---------------------------------------------------------------------------
 
-fn leg_br(s: &mut State, b: &mut Builder, old_vref: ValueRef, target: BlockRef, args: &[Operand]) {
+fn leg_br<M>(
+    s: &mut State<M>,
+    b: &mut Builder,
+    old_vref: ValueRef,
+    target: BlockRef,
+    args: &[Operand],
+) {
     let new_target = new_block(s, target);
     let new_args = remap_branch_args(s, args);
     let v = b.br(new_target, new_args, o());
@@ -1552,8 +1508,8 @@ fn leg_br(s: &mut State, b: &mut Builder, old_vref: ValueRef, target: BlockRef, 
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
-fn leg_brif(
-    s: &mut State,
+fn leg_brif<M>(
+    s: &mut State<M>,
     b: &mut Builder,
     old_vref: ValueRef,
     cond: &Operand,
@@ -1572,10 +1528,10 @@ fn leg_brif(
 }
 
 // ---------------------------------------------------------------------------
-// Continue (loop backedge)
+// Continue (loop back-edge)
 // ---------------------------------------------------------------------------
 
-fn leg_continue(s: &mut State, b: &mut Builder, old_vref: ValueRef, args: &[Operand]) {
+fn leg_continue<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, args: &[Operand]) {
     let new_args = remap_branch_args(s, args);
     let v = b.continue_(new_args, o());
     s.vmap.set(old_vref, Mapped::One(v));
@@ -1585,7 +1541,7 @@ fn leg_continue(s: &mut State, b: &mut Builder, old_vref: ValueRef, args: &[Oper
 // Region yield
 // ---------------------------------------------------------------------------
 
-fn leg_region_yield(s: &mut State, b: &mut Builder, old_vref: ValueRef, args: &[Operand]) {
+fn leg_region_yield<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, args: &[Operand]) {
     let new_args = remap_branch_args(s, args);
     let v = b.region_yield(new_args, o());
     s.vmap.set(old_vref, Mapped::One(v));

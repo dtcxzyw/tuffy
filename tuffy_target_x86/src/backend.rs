@@ -17,7 +17,6 @@ use tuffy_target::isel::IselResult;
 
 use crate::inst::{MInst, OpSize, PInst, VInst};
 use crate::isel;
-use crate::legalize;
 use crate::reg::Gpr;
 
 /// Registers available for allocation.
@@ -83,6 +82,21 @@ impl AbiMetadata for X86AbiMetadata {
 
     fn mark_wide_return_call(&mut self, call_idx: u32) {
         self.wide_return_calls.insert(call_idx);
+    }
+
+    fn is_wide_return_call(&self, call_idx: u32) -> bool {
+        self.wide_return_calls.contains(&call_idx)
+    }
+
+    fn has_secondary_return(&self, call_idx: u32) -> bool {
+        self.call_has_ret2.contains(&call_idx)
+    }
+
+    fn find_capture_for_call(&self, call_idx: u32) -> Option<u32> {
+        self.rdx_captures
+            .iter()
+            .find(|&(_, &target)| target == call_idx)
+            .map(|(&cap_idx, _)| cap_idx)
     }
 }
 
@@ -505,13 +519,6 @@ impl Backend for X86Backend {
         symbols: &SymbolTable,
         metadata: &X86AbiMetadata,
     ) -> Option<CompiledFunction> {
-        // 0. Legalize i128 operations (no-op if none exist).
-        let legalized = legalize::legalize_i128(func, metadata);
-        let (func, metadata) = match &legalized {
-            Some((f, m)) => (f, m),
-            None => (func, metadata),
-        };
-
         // 1. Instruction selection → MInst<VReg>
         let isel_result = match isel::isel(
             func,

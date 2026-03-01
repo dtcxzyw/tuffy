@@ -27,6 +27,16 @@ pub trait AbiMetadata: Default {
     /// Mark a call instruction as returning an i128/u128 value that needs
     /// legalization into a lo/hi register pair.
     fn mark_wide_return_call(&mut self, call_idx: u32);
+
+    /// Check whether a call instruction returns a wide (i128/u128) value.
+    fn is_wide_return_call(&self, call_idx: u32) -> bool;
+
+    /// Check whether a call instruction produces a secondary return value.
+    fn has_secondary_return(&self, call_idx: u32) -> bool;
+
+    /// Find the capture instruction index associated with a given call index,
+    /// if one exists. Returns the old capture instruction index.
+    fn find_capture_for_call(&self, call_idx: u32) -> Option<u32>;
 }
 
 /// Allocator stub definition: a pair of (export_name, target_name).
