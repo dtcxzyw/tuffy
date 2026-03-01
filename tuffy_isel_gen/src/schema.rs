@@ -1,6 +1,29 @@
 //! JSON schema types matching the Lean export format.
 
+use std::collections::HashMap;
+
 use serde::Deserialize;
+
+#[derive(Debug, Deserialize)]
+pub struct IselSpec {
+    pub format_version: u32,
+    pub target: String,
+    pub metadata: IselMetadata,
+    pub rules: Vec<IselRule>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct IselMetadata {
+    pub imports: Vec<String>,
+    pub maps: IselMaps,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct IselMaps {
+    pub fixed_regs: HashMap<String, String>,
+    pub size: HashMap<String, String>,
+    pub cc: HashMap<String, String>,
+}
 
 #[derive(Debug, Deserialize)]
 pub struct IselRule {
@@ -69,76 +92,29 @@ pub enum RegRefKind {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(tag = "inst")]
-pub enum EmitInst {
-    MovRR {
-        size: String,
-        dst: RegRef,
-        src: RegRef,
+pub struct EmitInst {
+    pub rust_ctor: String,
+    pub fields: Vec<EmitField>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum EmitField {
+    Reg {
+        name: String,
+        #[serde(rename = "ref")]
+        reg_ref: RegRef,
     },
-    AddRR {
-        size: String,
-        dst: RegRef,
-        src: RegRef,
+    Size {
+        name: String,
+        value: String,
     },
-    SubRR {
-        size: String,
-        dst: RegRef,
-        src: RegRef,
+    Cc {
+        name: String,
+        value: String,
     },
-    ImulRR {
-        size: String,
-        dst: RegRef,
-        src: RegRef,
-    },
-    OrRR {
-        size: String,
-        dst: RegRef,
-        src: RegRef,
-    },
-    AndRR {
-        size: String,
-        dst: RegRef,
-        src: RegRef,
-    },
-    XorRR {
-        size: String,
-        dst: RegRef,
-        src: RegRef,
-    },
-    ShlRCL {
-        size: String,
-        dst: RegRef,
-    },
-    ShrRCL {
-        size: String,
-        dst: RegRef,
-    },
-    SarRCL {
-        size: String,
-        dst: RegRef,
-    },
-    CmpRR {
-        size: String,
-        src1: RegRef,
-        src2: RegRef,
-    },
-    CMOVcc {
-        size: String,
-        cc: String,
-        dst: RegRef,
-        src: RegRef,
-    },
-    Popcnt {
-        dst: RegRef,
-        src: RegRef,
-    },
-    Lzcnt {
-        dst: RegRef,
-        src: RegRef,
-    },
-    Tzcnt {
-        dst: RegRef,
-        src: RegRef,
+    Literal {
+        name: String,
+        value: String,
     },
 }

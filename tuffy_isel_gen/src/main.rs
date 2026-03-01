@@ -19,17 +19,19 @@ fn main() {
     let json_str = fs::read_to_string(&input_path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", input_path.display()));
 
-    let rules: Vec<schema::IselRule> =
+    let spec: schema::IselSpec =
         serde_json::from_str(&json_str).unwrap_or_else(|e| panic!("failed to parse JSON: {e}"));
 
-    let rust_src = codegen::generate(&rules);
+    let rust_src = codegen::generate(&spec);
 
     fs::write(&output_path, &rust_src)
         .unwrap_or_else(|e| panic!("failed to write {}: {e}", output_path.display()));
 
     eprintln!(
-        "Generated {} rules -> {}",
-        rules.len(),
+        "Generated {} rules for target {} (format v{}) -> {}",
+        spec.rules.len(),
+        spec.target,
+        spec.format_version,
         output_path.display()
     );
 }
