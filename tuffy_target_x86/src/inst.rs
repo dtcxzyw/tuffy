@@ -231,6 +231,7 @@ pub enum MInst<R: RegType> {
         dst: R,
         lhs: R,
         rhs: R,
+        double: bool,
     },
     /// Pseudo-instruction: convert float (in GPR as bit pattern) to signed integer.
     ///
@@ -248,6 +249,18 @@ pub enum MInst<R: RegType> {
         src: R,
         /// true if source is f64 (narrowing to f32), false if source is f32 (widening to f64).
         src_double: bool,
+    },
+    /// Pseudo-instruction: SSE2 float comparison via red-zone.
+    ///
+    /// Moves lhs/rhs GPRs through stack memory into xmm0/xmm1,
+    /// performs ucomisd/ucomiss, and uses setcc to produce a bool result in dst.
+    FpCmp {
+        dst: R,
+        lhs: R,
+        rhs: R,
+        /// FCmpOp discriminant (see tuffy_ir::instruction::FCmpOp).
+        kind: u8,
+        double: bool,
     },
 }
 

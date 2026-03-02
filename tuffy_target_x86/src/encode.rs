@@ -882,8 +882,14 @@ fn encode_inst(inst: &PInst, ctx: &mut EncodeContext) {
         } => {
             encode_divrem(ctx, *dst, *lhs, *rhs, *signed, *rem);
         }
-        MInst::FpBinOp { op, dst, lhs, rhs } => {
-            encode_fp_binop(ctx, *op, *dst, *lhs, *rhs);
+        MInst::FpBinOp {
+            op,
+            dst,
+            lhs,
+            rhs,
+            double,
+        } => {
+            encode_fp_binop(ctx, *op, *dst, *lhs, *rhs, *double);
         }
         MInst::CvtFpToInt { dst, src, double } => {
             encode_cvt_fp_to_int(ctx, *dst, *src, *double);
@@ -897,6 +903,15 @@ fn encode_inst(inst: &PInst, ctx: &mut EncodeContext) {
             src_double,
         } => {
             encode_cvt_fp_to_fp(ctx, *dst, *src, *src_double);
+        }
+        MInst::FpCmp {
+            dst,
+            lhs,
+            rhs,
+            kind,
+            double,
+        } => {
+            encode_fp_cmp(ctx, *dst, *lhs, *rhs, *kind, *double);
         }
     }
 }
@@ -977,28 +992,100 @@ fn encode_divrem(ctx: &mut EncodeContext, dst: Gpr, lhs: Gpr, rhs: Gpr, signed: 
 ///
 /// mov [rsp-8],lhs; mov [rsp-16],rhs; movsd xmm0,[rsp-8];
 /// opsd xmm0,[rsp-16]; movsd [rsp-8],xmm0; mov dst,[rsp-8]
-fn encode_fp_binop(ctx: &mut EncodeContext, op: FpBinOpKind, dst: Gpr, lhs: Gpr, rhs: Gpr) {
+fn encode_fp_binop(
+    ctx: &mut EncodeContext,
+    op: FpBinOpKind,
+    dst: Gpr,
+    lhs: Gpr,
+    rhs: Gpr,
+    double: bool,
+) {
     let rsp_m8 = MemoryOperand::with_base_displ(Register::RSP, -8);
     let rsp_m16 = MemoryOperand::with_base_displ(Register::RSP, -16);
 
-    // 1. mov [rsp-8], lhs
-    ctx.emit(Instruction::with2(Code::Mov_rm64_r64, rsp_m8, gpr64(lhs)).unwrap());
-    // 2. mov [rsp-16], rhs
-    ctx.emit(Instruction::with2(Code::Mov_rm64_r64, rsp_m16, gpr64(rhs)).unwrap());
-    // 3. movsd xmm0, [rsp-8]
-    ctx.emit(Instruction::with2(Code::Movsd_xmm_xmmm64, Register::XMM0, rsp_m8).unwrap());
-    // 4. opsd xmm0, [rsp-16]
+    let (mov_store, mov_load_xmm, mov_store_xmm) = if double {
+        (
+            Code::Mov_rm64_r64,
+            Code::Movsd_xmm_xmmm64,
+            Code::Movsd_xmmm64_xmm,
+        )
+    } else {
+        (
+            Code::Mov_rm32_r32,
+            Code::Movss_xmm_xmmm32,
+            Code::Movss_xmmm32_xmm,
+        )
+    };
+
+    // 1. store lhs/rhs to red-zone
+    ctx.emit(
+        Instruction::with2(
+            mov_store,
+            rsp_m8,
+            if double {
+                gpr64(lhs)
+            } else {
+                gpr_to_iced(lhs, OpSize::S32)
+            },
+        )
+        .unwrap(),
+    );
+    ctx.emit(
+        Instruction::with2(
+            mov_store,
+            rsp_m16,
+            if double {
+                gpr64(rhs)
+            } else {
+                gpr_to_iced(rhs, OpSize::S32)
+            },
+        )
+        .unwrap(),
+    );
+    // 2. load into xmm0
+    ctx.emit(Instruction::with2(mov_load_xmm, Register::XMM0, rsp_m8).unwrap());
+    // 3. op xmm0, [rsp-16]
     let op_code = match op {
-        FpBinOpKind::Add => Code::Addsd_xmm_xmmm64,
-        FpBinOpKind::Sub => Code::Subsd_xmm_xmmm64,
-        FpBinOpKind::Mul => Code::Mulsd_xmm_xmmm64,
-        FpBinOpKind::Div => Code::Divsd_xmm_xmmm64,
+        FpBinOpKind::Add => {
+            if double {
+                Code::Addsd_xmm_xmmm64
+            } else {
+                Code::Addss_xmm_xmmm32
+            }
+        }
+        FpBinOpKind::Sub => {
+            if double {
+                Code::Subsd_xmm_xmmm64
+            } else {
+                Code::Subss_xmm_xmmm32
+            }
+        }
+        FpBinOpKind::Mul => {
+            if double {
+                Code::Mulsd_xmm_xmmm64
+            } else {
+                Code::Mulss_xmm_xmmm32
+            }
+        }
+        FpBinOpKind::Div => {
+            if double {
+                Code::Divsd_xmm_xmmm64
+            } else {
+                Code::Divss_xmm_xmmm32
+            }
+        }
     };
     ctx.emit(Instruction::with2(op_code, Register::XMM0, rsp_m16).unwrap());
-    // 5. movsd [rsp-8], xmm0
-    ctx.emit(Instruction::with2(Code::Movsd_xmmm64_xmm, rsp_m8, Register::XMM0).unwrap());
-    // 6. mov dst, [rsp-8]
-    ctx.emit(Instruction::with2(Code::Mov_r64_rm64, gpr64(dst), rsp_m8).unwrap());
+    // 4. store result back
+    ctx.emit(Instruction::with2(mov_store_xmm, rsp_m8, Register::XMM0).unwrap());
+    // 5. load result into dst GPR
+    if double {
+        ctx.emit(Instruction::with2(Code::Mov_r64_rm64, gpr64(dst), rsp_m8).unwrap());
+    } else {
+        ctx.emit(
+            Instruction::with2(Code::Mov_r32_rm32, gpr_to_iced(dst, OpSize::S32), rsp_m8).unwrap(),
+        );
+    }
 }
 
 /// CvtFpToInt: float (GPR bits) → signed integer via red-zone.
@@ -1072,5 +1159,122 @@ fn encode_cvt_fp_to_fp(ctx: &mut EncodeContext, dst: Gpr, src: Gpr, src_double: 
         ctx.emit(Instruction::with2(Code::Movsd_xmmm64_xmm, rsp_m8, Register::XMM0).unwrap());
         // 64-bit load
         ctx.emit(Instruction::with2(Code::Mov_r64_rm64, gpr64(dst), rsp_m8).unwrap());
+    }
+}
+
+/// FpCmp: float comparison via red-zone + ucomisd, result as 0/1 in dst GPR.
+///
+/// kind values match tuffy_ir::instruction::FCmpOp discriminants:
+///   1=OEq, 2=OGt, 3=OGe, 4=OLt, 5=OLe, 6=ONe, 7=Ord, 8=Uno
+fn encode_fp_cmp(ctx: &mut EncodeContext, dst: Gpr, lhs: Gpr, rhs: Gpr, kind: u8, double: bool) {
+    let rsp_m8 = MemoryOperand::with_base_displ(Register::RSP, -8);
+    let rsp_m16 = MemoryOperand::with_base_displ(Register::RSP, -16);
+    let dst8 = gpr_to_iced(dst, OpSize::S8);
+    let dst32 = gpr_to_iced(dst, OpSize::S32);
+
+    let (mov_store, mov_load_xmm, ucomi) = if double {
+        (
+            Code::Mov_rm64_r64,
+            Code::Movsd_xmm_xmmm64,
+            Code::Ucomisd_xmm_xmmm64,
+        )
+    } else {
+        (
+            Code::Mov_rm32_r32,
+            Code::Movss_xmm_xmmm32,
+            Code::Ucomiss_xmm_xmmm32,
+        )
+    };
+
+    // Move operands to XMM via red-zone
+    ctx.emit(
+        Instruction::with2(
+            mov_store,
+            rsp_m8,
+            if double {
+                gpr64(lhs)
+            } else {
+                gpr_to_iced(lhs, OpSize::S32)
+            },
+        )
+        .unwrap(),
+    );
+    ctx.emit(
+        Instruction::with2(
+            mov_store,
+            rsp_m16,
+            if double {
+                gpr64(rhs)
+            } else {
+                gpr_to_iced(rhs, OpSize::S32)
+            },
+        )
+        .unwrap(),
+    );
+    ctx.emit(Instruction::with2(mov_load_xmm, Register::XMM0, rsp_m8).unwrap());
+    ctx.emit(Instruction::with2(mov_load_xmm, Register::XMM1, rsp_m16).unwrap());
+    // ucomisd/ucomiss xmm0, xmm1
+    ctx.emit(Instruction::with2(ucomi, Register::XMM0, Register::XMM1).unwrap());
+
+    // Flags after ucomisd xmm0, xmm1:
+    //   a > b:  ZF=0 PF=0 CF=0
+    //   a < b:  ZF=0 PF=0 CF=1
+    //   a == b: ZF=1 PF=0 CF=0
+    //   NaN:    ZF=1 PF=1 CF=1
+    match kind {
+        2 => {
+            // OGt: CF=0 AND ZF=0 → seta
+            ctx.emit(Instruction::with1(Code::Seta_rm8, dst8).unwrap());
+            ctx.emit(Instruction::with2(Code::Movzx_r32_rm8, dst32, dst8).unwrap());
+        }
+        3 => {
+            // OGe: CF=0 → setae
+            ctx.emit(Instruction::with1(Code::Setae_rm8, dst8).unwrap());
+            ctx.emit(Instruction::with2(Code::Movzx_r32_rm8, dst32, dst8).unwrap());
+        }
+        6 => {
+            // ONe: ZF=0 → setne
+            ctx.emit(Instruction::with1(Code::Setne_rm8, dst8).unwrap());
+            ctx.emit(Instruction::with2(Code::Movzx_r32_rm8, dst32, dst8).unwrap());
+        }
+        7 => {
+            // Ord: PF=0 → setnp
+            ctx.emit(Instruction::with1(Code::Setnp_rm8, dst8).unwrap());
+            ctx.emit(Instruction::with2(Code::Movzx_r32_rm8, dst32, dst8).unwrap());
+        }
+        8 => {
+            // Uno: PF=1 → setp
+            ctx.emit(Instruction::with1(Code::Setp_rm8, dst8).unwrap());
+            ctx.emit(Instruction::with2(Code::Movzx_r32_rm8, dst32, dst8).unwrap());
+        }
+        _ => {
+            // OEq(1), OLt(4), OLe(5): need two setcc + AND
+            let tmp = gpr_to_iced(Gpr::Rcx, OpSize::S8);
+            let _tmp32 = gpr_to_iced(Gpr::Rcx, OpSize::S32);
+            match kind {
+                1 => {
+                    // OEq: ZF=1 AND PF=0
+                    ctx.emit(Instruction::with1(Code::Sete_rm8, dst8).unwrap());
+                    ctx.emit(Instruction::with1(Code::Setnp_rm8, tmp).unwrap());
+                }
+                4 => {
+                    // OLt: CF=1 AND PF=0
+                    ctx.emit(Instruction::with1(Code::Setb_rm8, dst8).unwrap());
+                    ctx.emit(Instruction::with1(Code::Setnp_rm8, tmp).unwrap());
+                }
+                5 => {
+                    // OLe: (CF=1 OR ZF=1) AND PF=0
+                    ctx.emit(Instruction::with1(Code::Setbe_rm8, dst8).unwrap());
+                    ctx.emit(Instruction::with1(Code::Setnp_rm8, tmp).unwrap());
+                }
+                _ => {
+                    // Fallback: return 0
+                    ctx.emit(Instruction::with2(Code::Xor_r32_rm32, dst32, dst32).unwrap());
+                    return;
+                }
+            }
+            ctx.emit(Instruction::with2(Code::And_r8_rm8, dst8, tmp).unwrap());
+            ctx.emit(Instruction::with2(Code::Movzx_r32_rm8, dst32, dst8).unwrap());
+        }
     }
 }

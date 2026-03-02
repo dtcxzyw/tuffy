@@ -142,7 +142,7 @@ impl RegAllocInst for VInst {
                 ops.push(use_op(*lhs));
                 ops.push(use_op(*rhs));
             }
-            MInst::FpBinOp { dst, lhs, rhs, .. } => {
+            MInst::FpBinOp { dst, lhs, rhs, .. } | MInst::FpCmp { dst, lhs, rhs, .. } => {
                 ops.push(def_op(*dst));
                 ops.push(use_op(*lhs));
                 ops.push(use_op(*rhs));

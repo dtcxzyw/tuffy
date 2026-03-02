@@ -503,59 +503,234 @@ fn select_inst(
         Op::FAdd(lhs, rhs, _) => {
             let l = ctx.ensure_in_reg(lhs.value)?;
             let r = ctx.ensure_in_reg(rhs.value)?;
+            let double = !matches!(
+                func.instructions.get(lhs.value.index() as usize),
+                Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
+            );
             let dst = ctx.alloc.alloc();
             ctx.out.push(MInst::FpBinOp {
                 op: FpBinOpKind::Add,
                 dst,
                 lhs: l,
                 rhs: r,
+                double,
             });
             ctx.regs.assign(vref, dst);
         }
         Op::FSub(lhs, rhs, _) => {
             let l = ctx.ensure_in_reg(lhs.value)?;
             let r = ctx.ensure_in_reg(rhs.value)?;
+            let double = !matches!(
+                func.instructions.get(lhs.value.index() as usize),
+                Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
+            );
             let dst = ctx.alloc.alloc();
             ctx.out.push(MInst::FpBinOp {
                 op: FpBinOpKind::Sub,
                 dst,
                 lhs: l,
                 rhs: r,
+                double,
             });
             ctx.regs.assign(vref, dst);
         }
         Op::FMul(lhs, rhs, _) => {
             let l = ctx.ensure_in_reg(lhs.value)?;
             let r = ctx.ensure_in_reg(rhs.value)?;
+            let double = !matches!(
+                func.instructions.get(lhs.value.index() as usize),
+                Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
+            );
             let dst = ctx.alloc.alloc();
             ctx.out.push(MInst::FpBinOp {
                 op: FpBinOpKind::Mul,
                 dst,
                 lhs: l,
                 rhs: r,
+                double,
             });
             ctx.regs.assign(vref, dst);
         }
         Op::FDiv(lhs, rhs, _) => {
             let l = ctx.ensure_in_reg(lhs.value)?;
             let r = ctx.ensure_in_reg(rhs.value)?;
+            let double = !matches!(
+                func.instructions.get(lhs.value.index() as usize),
+                Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
+            );
             let dst = ctx.alloc.alloc();
             ctx.out.push(MInst::FpBinOp {
                 op: FpBinOpKind::Div,
                 dst,
                 lhs: l,
                 rhs: r,
+                double,
             });
             ctx.regs.assign(vref, dst);
         }
-        Op::FNeg(_) | Op::FAbs(_) | Op::CopySign(..) => {
-            unimplemented!("x86 isel: floating-point op {:?}", op)
+        Op::FCmp(kind, lhs, rhs) => {
+            let l = ctx.ensure_in_reg(lhs.value)?;
+            let r = ctx.ensure_in_reg(rhs.value)?;
+            let double = !matches!(
+                func.instructions.get(lhs.value.index() as usize),
+                Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
+            );
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::FpCmp {
+                dst,
+                lhs: l,
+                rhs: r,
+                kind: *kind as u8,
+                double,
+            });
+            ctx.regs.assign(vref, dst);
         }
-        Op::LoadAtomic(..) | Op::StoreAtomic(..) => {
-            unimplemented!("x86 isel: atomic op {:?}", op)
+        Op::FNeg(val) => {
+            let src = ctx.ensure_in_reg(val.value)?;
+            let dst = ctx.alloc.alloc();
+            // Determine f32 vs f64 from source type
+            let is_f32 = matches!(
+                func.instructions.get(val.value.index() as usize),
+                Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
+            );
+            let sign_mask: i64 = if is_f32 {
+                0x80000000_u32 as i64
+            } else {
+                i64::MIN // 0x8000000000000000
+            };
+            let mask_reg = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRI64 {
+                dst: mask_reg,
+                imm: sign_mask,
+            });
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst,
+                src,
+            });
+            ctx.out.push(MInst::XorRR {
+                size: OpSize::S64,
+                dst,
+                src: mask_reg,
+            });
+            ctx.regs.assign(vref, dst);
+        }
+        Op::FAbs(val) => {
+            let src = ctx.ensure_in_reg(val.value)?;
+            let dst = ctx.alloc.alloc();
+            let is_f32 = matches!(
+                func.instructions.get(val.value.index() as usize),
+                Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
+            );
+            let clear_mask: i64 = if is_f32 {
+                0x7FFFFFFF_i64
+            } else {
+                i64::MAX // 0x7FFFFFFFFFFFFFFF
+            };
+            let mask_reg = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRI64 {
+                dst: mask_reg,
+                imm: clear_mask,
+            });
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst,
+                src,
+            });
+            ctx.out.push(MInst::AndRR {
+                size: OpSize::S64,
+                dst,
+                src: mask_reg,
+            });
+            ctx.regs.assign(vref, dst);
+        }
+        Op::CopySign(mag, sign) => {
+            let mag_r = ctx.ensure_in_reg(mag.value)?;
+            let sign_r = ctx.ensure_in_reg(sign.value)?;
+            let dst = ctx.alloc.alloc();
+            let is_f32 = matches!(
+                func.instructions.get(mag.value.index() as usize),
+                Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
+            );
+            let sign_mask: i64 = if is_f32 {
+                0x80000000_u32 as i64
+            } else {
+                i64::MIN
+            };
+            let clear_mask: i64 = if is_f32 { 0x7FFFFFFF_i64 } else { i64::MAX };
+            // dst = (mag & clear_mask) | (sign & sign_mask)
+            let m1 = ctx.alloc.alloc();
+            let m2 = ctx.alloc.alloc();
+            let mask1 = ctx.alloc.alloc();
+            let mask2 = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRI64 {
+                dst: mask1,
+                imm: clear_mask,
+            });
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst: m1,
+                src: mag_r,
+            });
+            ctx.out.push(MInst::AndRR {
+                size: OpSize::S64,
+                dst: m1,
+                src: mask1,
+            });
+            ctx.out.push(MInst::MovRI64 {
+                dst: mask2,
+                imm: sign_mask,
+            });
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst: m2,
+                src: sign_r,
+            });
+            ctx.out.push(MInst::AndRR {
+                size: OpSize::S64,
+                dst: m2,
+                src: mask2,
+            });
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst,
+                src: m1,
+            });
+            ctx.out.push(MInst::OrRR {
+                size: OpSize::S64,
+                dst,
+                src: m2,
+            });
+            ctx.regs.assign(vref, dst);
+        }
+        Op::LoadAtomic(addr, _ty, _ordering) => {
+            // Fallback: treat as regular load (x86 has strong memory model).
+            let base = ctx.ensure_in_reg(addr.value)?;
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRM {
+                size: OpSize::S64,
+                dst,
+                base,
+                offset: 0,
+            });
+            ctx.regs.assign(vref, dst);
+            // Secondary result (data) uses the same vreg — handled by
+            // ensure_in_reg for secondary refs.
+        }
+        Op::StoreAtomic(val, addr, _ordering, _mem) => {
+            // Fallback: treat as regular store.
+            let src = ctx.ensure_in_reg(val.value)?;
+            let base = ctx.ensure_in_reg(addr.value)?;
+            ctx.out.push(MInst::MovMR {
+                size: OpSize::S64,
+                base,
+                offset: 0,
+                src,
+            });
         }
         Op::AtomicRmw(..) | Op::AtomicCmpXchg(..) => {
-            unimplemented!("x86 isel: atomic op {:?}", op)
+            // Not yet implemented — graceful fallback.
+            return None;
         }
 
         Op::Bswap(val, byte_count) => {
@@ -870,12 +1045,15 @@ fn select_inst(
                 .insert(vref.index(), symbols.resolve(*sym_id).to_string());
         }
 
-        Op::Fence(..) | Op::Continue(_) | Op::RegionYield(_) => {
-            unimplemented!("x86 isel: op {:?}", op)
+        Op::Fence(..) => {
+            // Memory fence — no-op on x86 (strong memory model).
+        }
+        Op::Continue(_) | Op::RegionYield(_) => {
+            return None;
         }
 
         // Ops handled by isel_gen::try_select_generated above.
-        _ => unimplemented!("x86 isel: op {:?}", op),
+        _ => return None,
     }
     Some(())
 }

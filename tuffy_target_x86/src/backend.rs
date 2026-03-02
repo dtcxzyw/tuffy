@@ -345,11 +345,18 @@ fn rewrite_inst(inst: &VInst, assignments: &[PReg]) -> PInst {
             src2: r(src2),
         },
         MInst::Ud2 => MInst::Ud2,
-        MInst::FpBinOp { op, dst, lhs, rhs } => MInst::FpBinOp {
+        MInst::FpBinOp {
+            op,
+            dst,
+            lhs,
+            rhs,
+            double,
+        } => MInst::FpBinOp {
             op: *op,
             dst: r(dst),
             lhs: r(lhs),
             rhs: r(rhs),
+            double: *double,
         },
         MInst::CvtFpToInt { dst, src, double } => MInst::CvtFpToInt {
             dst: r(dst),
@@ -369,6 +376,19 @@ fn rewrite_inst(inst: &VInst, assignments: &[PReg]) -> PInst {
             dst: r(dst),
             src: r(src),
             src_double: *src_double,
+        },
+        MInst::FpCmp {
+            dst,
+            lhs,
+            rhs,
+            kind,
+            double,
+        } => MInst::FpCmp {
+            dst: r(dst),
+            lhs: r(lhs),
+            rhs: r(rhs),
+            kind: *kind,
+            double: *double,
         },
     }
 }
