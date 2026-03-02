@@ -17,63 +17,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let ret_local = mir::Local::from_usize(0);
                 let ret_mir_ty = self.monomorphize(self.mir.local_decls[ret_local].ty);
 
-                // sret path must be checked first: for coroutines/closures,
-                // translate_ty returns None but the ABI still uses sret.
-                if self.use_sret {
-                    // Large struct return: copy _0's data to the caller's sret pointer,
-                    // then return the sret pointer in RAX.
-                    let sret = self
-                        .sret_ptr
-                        .expect("sret_ptr must be set when use_sret is true");
-                    let src = self
-                        .locals
-                        .get(ret_local)
-                        .expect("return local _0 must be set");
-                    let size = type_size(self.tcx, ret_mir_ty).unwrap_or(8);
-
-                    // Word-by-word copy from local _0's stack slot to sret pointer.
-                    let num_words = size.div_ceil(8);
-                    for i in 0..num_words {
-                        let byte_off = i * 8;
-                        let chunk = std::cmp::min(8, size - byte_off) as u32;
-                        let load_addr = if byte_off == 0 {
-                            src
-                        } else {
-                            let off = self.builder.iconst(byte_off as i64, Origin::synthetic());
-                            self.builder
-                                .ptradd(src.into(), off.into(), 0, Origin::synthetic())
-                        };
-                        let word = self.builder.load(
-                            load_addr.into(),
-                            chunk,
-                            Type::Int,
-                            self.current_mem.into(),
-                            None,
-                            Origin::synthetic(),
-                        );
-                        let store_addr = if byte_off == 0 {
-                            sret
-                        } else {
-                            let off = self.builder.iconst(byte_off as i64, Origin::synthetic());
-                            self.builder
-                                .ptradd(sret.into(), off.into(), 0, Origin::synthetic())
-                        };
-                        self.current_mem = self.builder.store(
-                            word.into(),
-                            store_addr.into(),
-                            chunk,
-                            self.current_mem.into(),
-                            Origin::synthetic(),
-                        );
-                    }
-
-                    // Return the sret pointer in RAX (System V convention).
-                    self.builder.ret(
-                        Some(sret.into()),
-                        self.current_mem.into(),
-                        Origin::synthetic(),
-                    );
-                } else if matches!(translate_ty(ret_mir_ty), Some(Type::Unit) | None) {
+                if matches!(translate_ty(ret_mir_ty), Some(Type::Unit) | None) {
                     // Unit-returning or untranslatable return type: bare ret, no value.
                     self.builder
                         .ret(None, self.current_mem.into(), Origin::synthetic());
@@ -120,22 +64,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     );
 
                     if size > 8 {
-                        // Second 8 bytes → secondary return register.
-                        let off = self.builder.iconst(8, Origin::synthetic());
-                        let addr1 =
-                            self.builder
-                                .ptradd(slot.into(), off.into(), 0, Origin::synthetic());
-                        let word1 = self.builder.load(
-                            addr1.into(),
-                            8,
-                            Type::Int,
-                            self.current_mem.into(),
-                            None,
-                            Origin::synthetic(),
-                        );
-                        let dummy = self.builder.iconst(0, Origin::synthetic());
-                        self.abi_metadata
-                            .mark_secondary_return_move(dummy.index(), word1.index());
+                        // Second 8 bytes will be handled by backend ABI lowering.
+                        // MIR→IR just loads the primary return value.
                     }
 
                     // Coerce to match declared return type (e.g., Ptr for &T returns).
@@ -153,11 +83,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // Normal scalar return.
                     let val = self.locals.values[ret_local.as_usize()];
                     if let Some(v) = val {
-                        if let Some(fat_val) = self.fat_locals.get(ret_local) {
-                            let dummy = self.builder.iconst(0, Origin::synthetic());
-                            self.abi_metadata
-                                .mark_secondary_return_move(dummy.index(), fat_val.index());
-                        }
                         // Coerce to match the declared return type.
                         let ret_ir_ty = translate_ty(ret_mir_ty);
                         let coerced = match (ret_ir_ty, self.builder.value_type(v).cloned()) {

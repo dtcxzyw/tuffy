@@ -91,6 +91,36 @@ fn bytes_to_opsize(bytes: u32) -> OpSize {
 /// System V AMD64 ABI: first 6 integer args in rdi, rsi, rdx, rcx, r8, r9.
 const ARG_REGS: [Gpr; 6] = [Gpr::Rdi, Gpr::Rsi, Gpr::Rdx, Gpr::Rcx, Gpr::R8, Gpr::R9];
 
+#[derive(Clone, Copy)]
+struct CallAbiPlan {
+    has_primary_return: bool,
+    has_secondary_return: bool,
+}
+
+fn has_wide_scalar_annotation(func: &Function, inst_idx: u32) -> bool {
+    matches!(
+        func.inst(inst_idx).result_annotation,
+        Some(Annotation::Signed(128) | Annotation::Unsigned(128))
+    )
+}
+
+fn classify_call_abi(
+    func: &Function,
+    call_vref: ValueRef,
+    call_has_ret2: &HashSet<u32>,
+) -> CallAbiPlan {
+    let call_idx = call_vref.index();
+    let inst = func.inst(call_idx);
+    let wide_scalar_call = has_wide_scalar_annotation(func, call_idx);
+    CallAbiPlan {
+        // In tuffy IR, call data is encoded in the call's secondary result.
+        has_primary_return: inst.secondary_ty.is_some(),
+        // Secondary return (RDX) may be provided either by legacy metadata
+        // or by wide scalar annotations on the call result.
+        has_secondary_return: call_has_ret2.contains(&call_idx) || wide_scalar_call,
+    }
+}
+
 /// Perform instruction selection on a tuffy IR function.
 ///
 /// Emits `MInst<VReg>` with constraint metadata. Prologue/epilogue
@@ -703,13 +733,9 @@ fn select_call(
         });
     }
 
-    // The primary result of a call is the mem token (no register needed).
-    // If the call returns a value, it's the secondary result — assign rax to it.
-    // We emit an explicit MovRR from the rax-fixed vreg to an unconstrained
-    // vreg so the return value doesn't conflict with other rax-constrained
-    // vregs (e.g. the Ret handler also allocates a fixed rax vreg).
-    let inst = func.inst(vref.index());
-    let ret_vreg = if inst.secondary_ty.is_some() {
+    // Classify call ABI behavior in one place, then lower according to the plan.
+    let abi = classify_call_abi(func, vref, call_has_ret2);
+    let ret_vreg = if abi.has_primary_return {
         let rax = ctx.alloc.alloc_fixed(Gpr::Rax.to_preg());
         Some(rax)
     } else {
@@ -717,8 +743,7 @@ fn select_call(
     };
 
     // If this call has a secondary return (RDX), allocate a fixed RDX vreg.
-    let has_ret2 = call_has_ret2.contains(&vref.index());
-    let ret2_vreg = if has_ret2 {
+    let ret2_vreg = if abi.has_secondary_return {
         let rdx = ctx.alloc.alloc_fixed(Gpr::Rdx.to_preg());
         Some(rdx)
     } else {

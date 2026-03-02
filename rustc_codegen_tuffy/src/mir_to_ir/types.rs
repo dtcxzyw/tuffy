@@ -128,49 +128,6 @@ pub(super) fn type_align<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> Option<u6
     Some(layout.align.abi.bytes())
 }
 
-/// Check if a type needs indirect return (sret) per System V AMD64 ABI.
-/// Types larger than 16 bytes are returned via a hidden pointer parameter.
-pub(super) fn needs_indirect_return<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> bool {
-    if ty.is_unit() || ty.is_never() {
-        return false;
-    }
-    let size = match type_size(tcx, ty) {
-        Some(s) => s,
-        None => return false,
-    };
-    if size <= 8 {
-        return false;
-    }
-    // ScalarPair types (fat pointers, two-scalar structs) are returned in
-    // two registers (rax + rdx).  All other aggregates > 8 bytes use sret.
-    //
-    // Exception: when either scalar is a float, the SysV ABI returns them
-    // in XMM registers which tuffy cannot handle.  Force sret for those.
-    let typing_env = ty::TypingEnv::fully_monomorphized();
-    if let Ok(layout) = tcx.layout_of(typing_env.as_query_input(ty)) {
-        match layout.backend_repr {
-            rustc_abi::BackendRepr::ScalarPair(a, b) => {
-                use rustc_abi::Primitive;
-                let has_float = matches!(a.primitive(), Primitive::Float(..))
-                    || matches!(b.primitive(), Primitive::Float(..));
-                // ScalarPair is only register-returnable when the total
-                // size fits in two 8-byte GPRs (≤ 16 bytes).  Pairs
-                // containing i128/u128 exceed this and need sret.
-                has_float || size > 16
-            }
-            rustc_abi::BackendRepr::Scalar(s) => {
-                use rustc_abi::Primitive;
-                // i128/u128 (16 bytes) are returned in rax+rdx, no sret.
-                // Floats > 8 bytes would need XMM — force sret for those.
-                matches!(s.primitive(), Primitive::Float(..)) || size > 16
-            }
-            _ => true,
-        }
-    } else {
-        size > 16
-    }
-}
-
 /// Check if a type is a signed integer type.
 pub(super) fn is_signed_int(ty: ty::Ty<'_>) -> bool {
     matches!(ty.kind(), ty::Int(_))
@@ -201,23 +158,5 @@ pub(super) fn is_fat_ptr<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> bool {
             matches!(tail.kind(), ty::Str | ty::Slice(..) | ty::Dynamic(..))
         }
         _ => false,
-    }
-}
-
-/// Return the IR type for the metadata word of a fat pointer.
-/// - &dyn Trait → Ptr (vtable pointer)
-/// - &str / &[T] → Int (length)
-pub(super) fn fat_ptr_meta_type<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> Type {
-    match ty.kind() {
-        ty::Ref(_, inner, _) | ty::RawPtr(inner, _) => {
-            let typing_env = ty::TypingEnv::fully_monomorphized();
-            let tail = tcx.struct_tail_for_codegen(*inner, typing_env);
-            if matches!(tail.kind(), ty::Dynamic(..)) {
-                Type::Ptr(0)
-            } else {
-                Type::Int
-            }
-        }
-        _ => Type::Int,
     }
 }

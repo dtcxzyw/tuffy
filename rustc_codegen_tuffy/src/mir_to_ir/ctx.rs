@@ -141,8 +141,6 @@ pub(super) struct TranslationCtx<'a, 'tcx> {
     pub(super) block_mem_args: Vec<ValueRef>,
     pub(super) abi_metadata: AbiMetadataBox,
     pub(super) instance: Instance<'tcx>,
-    pub(super) sret_ptr: Option<ValueRef>,
-    pub(super) use_sret: bool,
     /// Current memory token for MemSSA threading.
     pub(super) current_mem: ValueRef,
     /// Metadata extracted from Cast-to-fat-pointer assignments
@@ -229,27 +227,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     }
 
     pub(super) fn translate_params(&mut self) {
-        let mut abi_idx: u32 = 0;
-
-        // If the function returns a large struct, the caller passes a hidden
-        // pointer as the first argument (sret). We consume it here and use it
-        // as the storage for local _0.
-        if self.use_sret {
-            let ret_ty = self.monomorphize(self.mir.local_decls[mir::Local::from_usize(0)].ty);
-            let size = type_size(self.tcx, ret_ty).unwrap_or(8);
-            let hidden = self
-                .builder
-                .param(abi_idx, Type::Ptr(0), None, Origin::synthetic());
-            abi_idx += 1;
-
-            // Allocate a local stack slot for _0 so MIR stores go somewhere real.
-            let slot = self.builder.stack_slot(size as u32, Origin::synthetic());
-            self.locals.set(mir::Local::from_usize(0), slot);
-            self.stack_locals.mark(mir::Local::from_usize(0));
-
-            // Remember the caller-provided sret pointer for the Return terminator.
-            self.sret_ptr = Some(hidden);
-        }
+        let mut param_idx: u32 = 0;
 
         for i in 0..self.mir.arg_count {
             let local = mir::Local::from_usize(i + 1);
@@ -257,8 +235,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             let ir_ty = translate_ty(ty);
 
             // Skip zero-sized (Unit) and untranslatable params — they don't
-            // occupy an ABI slot. Assign a dummy iconst 0 so downstream MIR
-            // references to this local don't crash.
+            // occupy a runtime slot. Assign a dummy value so downstream MIR
+            // references to this local remain valid.
             match ir_ty {
                 Some(Type::Unit) | None => {
                     let dummy = self.builder.iconst(0, Origin::synthetic());
@@ -268,81 +246,21 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 _ => {}
             }
 
-            // System V AMD64 ABI struct parameter passing:
-            // - > 16 bytes: passed by hidden pointer
-            // - 9-16 bytes: passed in TWO registers
-            // - <= 8 bytes: passed in one register
-            let param_size = type_size(self.tcx, ty).unwrap_or(0);
-            // Skip zero-sized ADTs (e.g. Global allocator) — they
-            // don't occupy an ABI slot.
-            if param_size == 0 {
+            // Zero-sized ADTs also do not occupy a runtime slot.
+            if type_size(self.tcx, ty).unwrap_or(0) == 0 {
                 let dummy = self.builder.iconst(0, Origin::synthetic());
                 self.locals.set(local, dummy);
                 continue;
             }
-            let large_struct = param_size > 16 && matches!(ir_ty, Some(Type::Int));
-            let two_reg_struct = param_size > 8
-                && param_size <= 16
-                && matches!(ir_ty, Some(Type::Int))
-                && !is_i128_or_u128(ty);
-            let (abi_ty, abi_ann) = if large_struct {
-                (Type::Ptr(0), None)
-            } else {
-                (ir_ty.unwrap(), translate_annotation(ty))
-            };
-            let val = self
-                .builder
-                .param(abi_idx, abi_ty, abi_ann, Origin::synthetic());
-            if large_struct {
-                // The param is a pointer to caller-allocated memory.
-                // Mark as stack-allocated so translate_place_to_addr uses
-                // the pointer directly as the base address.
-                self.locals.set(local, val);
-                self.stack_locals.mark(local);
-            } else if two_reg_struct {
-                // Two-register struct (9-16 bytes): capture both ABI
-                // registers and reconstruct into a stack slot.
-                let slot = self
-                    .builder
-                    .stack_slot(param_size as u32, Origin::synthetic());
-                self.current_mem = self.builder.store(
-                    val.into(),
-                    slot.into(),
-                    8,
-                    self.current_mem.into(),
-                    Origin::synthetic(),
-                );
-                abi_idx += 1;
-                let val2 = self
-                    .builder
-                    .param(abi_idx, Type::Int, None, Origin::synthetic());
-                let off = self.builder.iconst(8, Origin::synthetic());
-                let addr1 = self
-                    .builder
-                    .ptradd(slot.into(), off.into(), 0, Origin::synthetic());
-                self.current_mem = self.builder.store(
-                    val2.into(),
-                    addr1.into(),
-                    8,
-                    self.current_mem.into(),
-                    Origin::synthetic(),
-                );
-                self.locals.set(local, slot);
-                self.stack_locals.mark(local);
-            } else {
-                self.locals.set(local, val);
-            }
-            abi_idx += 1;
 
-            // Fat pointer types (&str, &[T]) occupy two ABI registers (ptr + metadata).
-            if is_fat_ptr(self.tcx, ty) {
-                let meta_ty = fat_ptr_meta_type(self.tcx, ty);
-                let meta_val = self
-                    .builder
-                    .param(abi_idx, meta_ty, None, Origin::synthetic());
-                self.fat_locals.set(local, meta_val);
-                abi_idx += 1;
-            }
+            let val = self.builder.param(
+                param_idx,
+                ir_ty.expect("checked above"),
+                translate_annotation(ty),
+                Origin::synthetic(),
+            );
+            self.locals.set(local, val);
+            param_idx += 1;
         }
     }
 }

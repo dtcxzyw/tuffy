@@ -83,24 +83,8 @@ pub fn translate_function<'tcx>(
     let mut param_anns = Vec::new();
 
     let ret_mir_ty = monomorphize(mir.local_decls[mir::RETURN_PLACE].ty);
-    // Detect whether this function returns a large struct via sret.
-    // Must be computed before building params so the hidden sret pointer
-    // is included in the parameter list.
-    let use_sret = needs_indirect_return(tcx, ret_mir_ty);
-    let _ret_size = type_size(tcx, ret_mir_ty);
-
-    // When using sret, the ABI return value is the sret pointer (Ptr),
-    // not the logical Rust return type.
-    let ret_ty = if use_sret {
-        Some(Type::Ptr(0))
-    } else {
-        translate_ty(ret_mir_ty).filter(|t| !matches!(t, Type::Unit))
-    };
-    let ret_ann = if use_sret {
-        None
-    } else {
-        translate_annotation(ret_mir_ty)
-    };
+    let ret_ty = translate_ty(ret_mir_ty).filter(|t| !matches!(t, Type::Unit));
+    let ret_ann = translate_annotation(ret_mir_ty);
 
     let mut symbols = SymbolTable::new();
     let func_sym = symbols.intern(&name);
@@ -109,57 +93,16 @@ pub fn translate_function<'tcx>(
     let all_names = extract_param_names(mir, &mut symbols);
     let mut param_names = Vec::new();
 
-    // If sret, the first ABI parameter is a hidden pointer for the return value.
-    if use_sret {
-        params.push(Type::Ptr(0));
-        param_anns.push(None);
-        param_names.push(None);
-    }
-
     for i in 0..mir.arg_count {
         let local = mir::Local::from_usize(i + 1);
         let ty = monomorphize(mir.local_decls[local].ty);
         match translate_ty(ty) {
             Some(Type::Unit) | None => continue,
             Some(ir_ty) => {
-                // System V AMD64 ABI struct parameter passing:
-                // - > 16 bytes: passed by hidden pointer
-                // - 9-16 bytes: passed in TWO registers
-                // - <= 8 bytes: passed in one register
-                let param_size = type_size(tcx, ty).unwrap_or(0);
-                // Skip zero-sized ADTs (e.g. Global allocator) — they
-                // don't occupy an ABI slot.
-                if param_size == 0 {
-                    continue;
-                }
-                let is_int_ty = matches!(ir_ty, Type::Int);
-                if param_size > 16 && is_int_ty {
-                    params.push(Type::Ptr(0));
-                    param_anns.push(None);
-                } else {
-                    params.push(ir_ty);
-                    param_anns.push(translate_annotation(ty));
-                }
+                // Keep MIR→IR parameters semantic; target ABI lowering happens in backend/codegen.
+                params.push(ir_ty);
+                param_anns.push(translate_annotation(ty));
                 param_names.push(all_names.get(i).copied().flatten());
-                // Two-register structs (9-16 bytes) occupy two ABI slots.
-                // i128/u128 are handled as single values with 128-bit
-                // annotations; the backend legalization pass splits them.
-                if param_size > 8
-                    && param_size <= 16
-                    && is_int_ty
-                    && !is_fat_ptr(tcx, ty)
-                    && !is_i128_or_u128(ty)
-                {
-                    params.push(Type::Int);
-                    param_anns.push(None);
-                    param_names.push(None);
-                }
-                // Fat pointers (&str, &[T], &Path, etc.) occupy two ABI slots.
-                if is_fat_ptr(tcx, ty) {
-                    params.push(fat_ptr_meta_type(tcx, ty));
-                    param_anns.push(None);
-                    param_names.push(None);
-                }
             }
         }
     }
@@ -201,8 +144,6 @@ pub fn translate_function<'tcx>(
         block_mem_args,
         abi_metadata,
         instance,
-        sret_ptr: None,
-        use_sret,
         current_mem: initial_mem,
         cast_fat_meta: FatLocalMap::new(),
         referenced_instances: Vec::new(),
@@ -489,7 +430,7 @@ pub fn translate_function<'tcx>(
 
     // Pre-allocate a stack slot for the return place (_0) when it is a
     // multi-word type (9-16 bytes, e.g. &str, &[T]).
-    if !use_sret {
+    {
         let ret_local = mir::Local::from_usize(0);
         let ret_ty = monomorphize(mir.local_decls[ret_local].ty);
         let ret_size = type_size(tcx, ret_ty).unwrap_or(0);

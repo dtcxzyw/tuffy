@@ -275,6 +275,64 @@ fn isel_zext_nonstandard_unsigned_is_noop() {
     assert!(!has_and, "zext :u13 should NOT emit AND mask");
 }
 
+#[test]
+fn isel_call_uses_rdx_for_wide_annotation() {
+    let (func, symbols) = build_annotated_wide_call_func();
+    let no_rdx_captures = HashMap::new();
+    let no_rdx_moves = HashMap::new();
+    let no_ret2 = HashSet::new();
+    let result = isel::isel(&func, &symbols, &no_rdx_captures, &no_rdx_moves, &no_ret2)
+        .expect("isel should succeed for wide-annotated call");
+
+    let saw_call_with_ret2 = result.insts.iter().any(|inst| {
+        matches!(
+            inst,
+            crate::inst::MInst::CallSym {
+                name,
+                ret: Some(_),
+                ret2: Some(_)
+            } if name == "callee_wide"
+        )
+    });
+    assert!(
+        saw_call_with_ret2,
+        "wide-annotated call should reserve both RAX and RDX"
+    );
+}
+
+fn build_annotated_wide_call_func() -> (Function, SymbolTable) {
+    let mut st = SymbolTable::new();
+    let caller = st.intern("caller_wide");
+    let callee = st.intern("callee_wide");
+
+    let mut func = Function::new(caller, vec![], vec![], vec![], Some(Type::Int), None);
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+
+    let entry = builder.create_block();
+    builder.switch_to_block(entry);
+
+    let mem0 = builder.add_block_arg(entry, Type::Mem);
+    let callee_addr = builder.symbol_addr(callee, Origin::synthetic());
+    let (call_mem, call_data) = builder.call(
+        callee_addr.into(),
+        vec![],
+        Type::Int,
+        mem0.into(),
+        Some(Annotation::Unsigned(128)),
+        Origin::synthetic(),
+    );
+    let call_data = call_data.expect("non-void call should produce data result");
+
+    builder.ret(Some(call_data.into()), call_mem.into(), Origin::synthetic());
+
+    builder.exit_region();
+
+    (func, st)
+}
+
 /// Build: fn name(a: int :ann) -> int { sext/zext a to 64 }
 fn build_extend_func(name: &str, ann: Annotation, is_sext: bool) -> (Function, SymbolTable) {
     let s64 = Some(Annotation::Signed(64));

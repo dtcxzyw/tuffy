@@ -67,6 +67,18 @@ pub struct X86AbiMetadata {
     pub wide_return_calls: HashSet<u32>,
 }
 
+impl X86AbiMetadata {
+    /// Return the call set that needs RDX secondary-return handling.
+    ///
+    /// This keeps compatibility with existing metadata producers while
+    /// allowing wider call classification inputs to be merged centrally.
+    fn call_secondary_return_set(&self) -> HashSet<u32> {
+        let mut out = self.call_has_ret2.clone();
+        out.extend(self.wide_return_calls.iter().copied());
+        out
+    }
+}
+
 impl AbiMetadata for X86AbiMetadata {
     fn mark_secondary_return_capture(&mut self, inst_idx: u32, call_idx: u32) {
         self.rdx_captures.insert(inst_idx, call_idx);
@@ -520,12 +532,13 @@ impl Backend for X86Backend {
         metadata: &X86AbiMetadata,
     ) -> Option<CompiledFunction> {
         // 1. Instruction selection → MInst<VReg>
+        let call_secondary_return = metadata.call_secondary_return_set();
         let isel_result = match isel::isel(
             func,
             symbols,
             &metadata.rdx_captures,
             &metadata.rdx_moves,
-            &metadata.call_has_ret2,
+            &call_secondary_return,
         ) {
             Some(r) => r,
             None => {
