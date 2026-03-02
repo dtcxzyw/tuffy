@@ -1,8 +1,8 @@
 # Refactor Struct Parameter Handling in mir_to_ir
 
-- Status: Pending
+- Status: Completed
 - Created: 2026-03-02
-- Completed: N/A
+- Completed: 2026-03-02
 - Parent: N/A
 
 ## Description
