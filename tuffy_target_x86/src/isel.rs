@@ -486,6 +486,10 @@ fn select_inst(
             ctx.regs.assign(vref, src);
         }
 
+        Op::ExtractValue(..) | Op::InsertValue(..) => {
+            return None; // Unimplemented: should be legalized before isel
+        }
+
         Op::Sext(val, _target_bits) => {
             select_sext(ctx, vref, val)?;
         }

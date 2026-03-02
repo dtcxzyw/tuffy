@@ -318,6 +318,14 @@ pub enum Op {
     /// Integer to pointer (no valid provenance).
     IntToPtr(Operand),
 
+    // -- Aggregate operations --
+    /// Extract value from struct/array at indices path.
+    /// ExtractValue(agg, indices) -> element_type
+    ExtractValue(Operand, Vec<u32>),
+    /// Insert value into struct/array at indices path.
+    /// InsertValue(agg, val, indices) -> struct/array_type
+    InsertValue(Operand, Operand, Vec<u32>),
+
     // -- Terminators (by convention, placed last in a basic block) --
     /// Return value from function. Second is mem token output.
     Ret(Option<Operand>, Operand),

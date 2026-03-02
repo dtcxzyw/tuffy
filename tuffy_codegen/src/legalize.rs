@@ -611,6 +611,9 @@ fn copy_inst<M: AbiMetadata + Clone>(
         Op::PtrToInt(a) => b.ptrtoint(remap_op(s, a), o()),
         Op::PtrToAddr(a) => b.ptrtoaddr(remap_op(s, a), o()),
         Op::IntToPtr(a) => b.inttoptr(remap_op(s, a), 0, o()),
+        Op::ExtractValue(..) | Op::InsertValue(..) => {
+            unimplemented!("aggregate operations must be legalized before codegen");
+        }
         Op::Ret(val, mem) => {
             let rv = val.as_ref().map(|v| remap_op(s, v));
             b.ret(rv, remap_op(s, mem), o())

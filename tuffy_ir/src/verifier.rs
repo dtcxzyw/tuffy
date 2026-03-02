@@ -782,6 +782,77 @@ impl FuncVerifier<'_> {
                 }
             }
 
+            // -- Aggregate operations --
+            Op::ExtractValue(agg, indices) => {
+                self.check_operand(agg, loc);
+                match self.value_type(agg.value) {
+                    Some(Type::Struct(fields)) if let Some(&idx) = indices.first() => {
+                        if idx as usize >= fields.len() {
+                            self.result.error(
+                                loc.clone(),
+                                format!(
+                                    "extractvalue index {} out of bounds for struct with {} fields",
+                                    idx,
+                                    fields.len()
+                                ),
+                            );
+                        }
+                    }
+                    Some(Type::Struct(_)) => {}
+                    Some(Type::Array(_, count)) if let Some(&idx) = indices.first() => {
+                        if idx >= *count {
+                            self.result.error(
+                                loc.clone(),
+                                format!(
+                                    "extractvalue index {} out of bounds for array of size {}",
+                                    idx, count
+                                ),
+                            );
+                        }
+                    }
+                    Some(Type::Array(..)) => {}
+                    _ => {
+                        self.result
+                            .error(loc.clone(), "extractvalue requires struct or array operand");
+                    }
+                }
+            }
+            Op::InsertValue(agg, val, indices) => {
+                self.check_operand(agg, loc);
+                self.check_operand(val, loc);
+                match self.value_type(agg.value) {
+                    Some(Type::Struct(fields)) if let Some(&idx) = indices.first() => {
+                        if idx as usize >= fields.len() {
+                            self.result.error(
+                                loc.clone(),
+                                format!(
+                                    "insertvalue index {} out of bounds for struct with {} fields",
+                                    idx,
+                                    fields.len()
+                                ),
+                            );
+                        }
+                    }
+                    Some(Type::Struct(_)) => {}
+                    Some(Type::Array(_, count)) if let Some(&idx) = indices.first() => {
+                        if idx >= *count {
+                            self.result.error(
+                                loc.clone(),
+                                format!(
+                                    "insertvalue index {} out of bounds for array of size {}",
+                                    idx, count
+                                ),
+                            );
+                        }
+                    }
+                    Some(Type::Array(..)) => {}
+                    _ => {
+                        self.result
+                            .error(loc.clone(), "insertvalue requires struct or array operand");
+                    }
+                }
+            }
+
             // -- Symbol / Call --
             Op::SymbolAddr(_) if !matches!(inst.ty, Type::Ptr(_)) => {
                 self.result.error(

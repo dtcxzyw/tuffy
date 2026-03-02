@@ -1637,3 +1637,149 @@ fn build_clmul() {
     let output = format!("{}", func.display(&st));
     assert!(output.contains("v3 = clmul v1, v2"));
 }
+
+#[test]
+fn test_struct_type_display() {
+    let struct_ty = Type::Struct(vec![Type::Int, Type::Bool, Type::Byte(4)]);
+    let display = format!("{:?}", struct_ty);
+    assert!(display.contains("Struct"));
+}
+
+#[test]
+fn test_array_type_display() {
+    let array_ty = Type::Array(Box::new(Type::Int), 10);
+    let display = format!("{:?}", array_ty);
+    assert!(display.contains("Array"));
+}
+
+#[test]
+fn test_extractvalue_basic() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("extract_test");
+    let struct_ty = Type::Struct(vec![Type::Int, Type::Bool]);
+    let mut func = Function::new(
+        name,
+        vec![struct_ty.clone()],
+        vec![],
+        vec![],
+        Some(Type::Int),
+        None,
+    );
+    let mut b = Builder::new(&mut func);
+
+    let root = b.create_region(RegionKind::Function);
+    b.enter_region(root);
+    let bb = b.create_block();
+    b.switch_to_block(bb);
+
+    let mem0 = b.add_block_arg(bb, Type::Mem);
+    let s = b.param(0, struct_ty, None, Origin::synthetic());
+    let field0 = b.extract_value(s.into(), vec![0], Type::Int, None, Origin::synthetic());
+    b.ret(Some(field0.into()), mem0.into(), Origin::synthetic());
+    b.exit_region();
+
+    assert_eq!(func.instructions.len(), 3);
+    assert!(matches!(func.instructions[1].op, Op::ExtractValue(_, _)));
+    assert_eq!(func.instructions[1].ty, Type::Int);
+
+    let output = format!("{}", func.display(&st));
+    assert!(output.contains("extractvalue"));
+}
+
+#[test]
+fn test_insertvalue_basic() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("insert_test");
+    let struct_ty = Type::Struct(vec![Type::Int, Type::Bool]);
+    let mut func = Function::new(
+        name,
+        vec![struct_ty.clone(), Type::Int],
+        vec![],
+        vec![],
+        Some(struct_ty.clone()),
+        None,
+    );
+    let mut b = Builder::new(&mut func);
+
+    let root = b.create_region(RegionKind::Function);
+    b.enter_region(root);
+    let bb = b.create_block();
+    b.switch_to_block(bb);
+
+    let mem0 = b.add_block_arg(bb, Type::Mem);
+    let s = b.param(0, struct_ty.clone(), None, Origin::synthetic());
+    let val = b.param(1, Type::Int, None, Origin::synthetic());
+    let result = b.insert_value(s.into(), val.into(), vec![0], None, Origin::synthetic());
+    b.ret(Some(result.into()), mem0.into(), Origin::synthetic());
+    b.exit_region();
+
+    assert_eq!(func.instructions.len(), 4);
+    assert!(matches!(func.instructions[2].op, Op::InsertValue(_, _, _)));
+    assert_eq!(func.instructions[2].ty, struct_ty);
+
+    let output = format!("{}", func.display(&st));
+    assert!(output.contains("insertvalue"));
+}
+
+#[test]
+fn test_extractvalue_array() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("extract_array_test");
+    let array_ty = Type::Array(Box::new(Type::Int), 5);
+    let mut func = Function::new(
+        name,
+        vec![array_ty.clone()],
+        vec![],
+        vec![],
+        Some(Type::Int),
+        None,
+    );
+    let mut b = Builder::new(&mut func);
+
+    let root = b.create_region(RegionKind::Function);
+    b.enter_region(root);
+    let bb = b.create_block();
+    b.switch_to_block(bb);
+
+    let mem0 = b.add_block_arg(bb, Type::Mem);
+    let arr = b.param(0, array_ty, None, Origin::synthetic());
+    let elem = b.extract_value(arr.into(), vec![2], Type::Int, None, Origin::synthetic());
+    b.ret(Some(elem.into()), mem0.into(), Origin::synthetic());
+    b.exit_region();
+
+    assert_eq!(func.instructions.len(), 3);
+    assert!(matches!(func.instructions[1].op, Op::ExtractValue(_, _)));
+    assert_eq!(func.instructions[1].ty, Type::Int);
+}
+
+#[test]
+fn test_insertvalue_array() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("insert_array_test");
+    let array_ty = Type::Array(Box::new(Type::Int), 5);
+    let mut func = Function::new(
+        name,
+        vec![array_ty.clone(), Type::Int],
+        vec![],
+        vec![],
+        Some(array_ty.clone()),
+        None,
+    );
+    let mut b = Builder::new(&mut func);
+
+    let root = b.create_region(RegionKind::Function);
+    b.enter_region(root);
+    let bb = b.create_block();
+    b.switch_to_block(bb);
+
+    let mem0 = b.add_block_arg(bb, Type::Mem);
+    let arr = b.param(0, array_ty.clone(), None, Origin::synthetic());
+    let val = b.param(1, Type::Int, None, Origin::synthetic());
+    let result = b.insert_value(arr.into(), val.into(), vec![3], None, Origin::synthetic());
+    b.ret(Some(result.into()), mem0.into(), Origin::synthetic());
+    b.exit_region();
+
+    assert_eq!(func.instructions.len(), 4);
+    assert!(matches!(func.instructions[2].op, Op::InsertValue(_, _, _)));
+    assert_eq!(func.instructions[2].ty, array_ty);
+}

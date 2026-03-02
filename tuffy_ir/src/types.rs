@@ -64,6 +64,10 @@ pub enum Type {
     Vec(VectorType),
     /// Abstract memory state token for MemSSA.
     Mem,
+    /// Struct type with field types.
+    Struct(Vec<Type>),
+    /// Array type with element type and count.
+    Array(Box<Type>, u32),
 }
 
 /// Bitmask of excluded IEEE 754 floating-point value classes.

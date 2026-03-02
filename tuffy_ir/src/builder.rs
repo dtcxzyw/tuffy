@@ -841,6 +841,40 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::IntToPtr(val), Type::Ptr(addr_space), None, origin, None)
     }
 
+    // ── Aggregate operations ──
+
+    /// Extract value from struct/array at indices path.
+    pub fn extract_value(
+        &mut self,
+        agg: Operand,
+        indices: Vec<u32>,
+        result_ty: Type,
+        ann: Option<Annotation>,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::ExtractValue(agg, indices), result_ty, None, origin, ann)
+    }
+
+    /// Insert value into struct/array at indices path.
+    pub fn insert_value(
+        &mut self,
+        agg: Operand,
+        val: Operand,
+        indices: Vec<u32>,
+        ann: Option<Annotation>,
+        origin: Origin,
+    ) -> ValueRef {
+        // Result type is same as agg type
+        let agg_ty = self.value_type(agg.value).cloned().unwrap_or(Type::Unit);
+        self.push_inst(
+            Op::InsertValue(agg, val, indices),
+            agg_ty,
+            None,
+            origin,
+            ann,
+        )
+    }
+
     // ── Terminators ──
 
     /// Return from function. Takes mem token output.

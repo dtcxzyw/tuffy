@@ -115,6 +115,13 @@ fn fmt_type(ty: &Type) -> String {
             VectorType::Scalable(bw) => format!("vec<vscale x {bw}>"),
         },
         Type::Mem => "mem".to_string(),
+        Type::Struct(fields) => {
+            let field_strs = fields.iter().map(fmt_type).collect::<Vec<_>>().join(", ");
+            format!("struct{{{field_strs}}}")
+        }
+        Type::Array(elem_ty, count) => {
+            format!("[{}; {count}]", fmt_type(elem_ty))
+        }
     }
 }
 
@@ -490,6 +497,31 @@ fn fmt_inst(
         Op::PtrToInt(ptr) => format!("{v} = ptrtoint {}", ctx.fmt_operand(ptr)),
         Op::PtrToAddr(ptr) => format!("{v} = ptrtoaddr {}", ctx.fmt_operand(ptr)),
         Op::IntToPtr(val) => format!("{v} = inttoptr {}", ctx.fmt_operand(val)),
+        Op::ExtractValue(agg, indices) => {
+            let indices_str = indices
+                .iter()
+                .map(|i| i.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "{v} = extractvalue {}, [{}]",
+                ctx.fmt_operand(agg),
+                indices_str
+            )
+        }
+        Op::InsertValue(agg, val, indices) => {
+            let indices_str = indices
+                .iter()
+                .map(|i| i.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "{v} = insertvalue {}, {}, [{}]",
+                ctx.fmt_operand(agg),
+                ctx.fmt_operand(val),
+                indices_str
+            )
+        }
         Op::Ret(val, mem) => match val {
             Some(o) => format!("ret {}, {}", ctx.fmt_operand(o), ctx.fmt_operand(mem)),
             None => format!("ret {}", ctx.fmt_operand(mem)),
