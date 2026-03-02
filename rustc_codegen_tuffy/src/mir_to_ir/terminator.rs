@@ -28,7 +28,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let ret_local = mir::Local::from_usize(0);
                 let ret_mir_ty = self.monomorphize(self.mir.local_decls[ret_local].ty);
 
-                if matches!(translate_ty(ret_mir_ty), Some(Type::Unit) | None) {
+                if matches!(translate_ty(self.tcx, ret_mir_ty), Some(Type::Unit) | None) {
                     // Unit-returning or untranslatable return type: bare ret, no value.
                     self.builder
                         .ret(None, self.current_mem.into(), Origin::synthetic());
@@ -64,7 +64,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // types (u8, u16, etc.) emit a correctly-sized load instead
                     // of reading garbage bytes beyond the stored value.
                     let load_size = size.min(8) as u32;
-                    let load_ty = translate_ty(ret_mir_ty).unwrap_or(Type::Int);
+                    let load_ty = translate_ty(self.tcx, ret_mir_ty).unwrap_or(Type::Int);
                     let word0 = self.builder.load(
                         slot.into(),
                         load_size,
@@ -75,7 +75,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     );
 
                     // Coerce to match declared return type (e.g., Ptr for &T returns).
-                    let ret_ir_ty = translate_ty(ret_mir_ty);
+                    let ret_ir_ty = translate_ty(self.tcx, ret_mir_ty);
                     let coerced_word0 = match ret_ir_ty {
                         Some(Type::Ptr(_)) => self.coerce_to_ptr(word0),
                         _ => word0,
@@ -118,7 +118,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let val = self.locals.values[ret_local.as_usize()];
                     if let Some(v) = val {
                         // Coerce to match the declared return type.
-                        let ret_ir_ty = translate_ty(ret_mir_ty);
+                        let ret_ir_ty = translate_ty(self.tcx, ret_mir_ty);
                         let coerced = match (ret_ir_ty, self.builder.value_type(v).cloned()) {
                             (Some(Type::Int), Some(Type::Ptr(_)))
                                 if self.builder.is_memory_address(v) =>

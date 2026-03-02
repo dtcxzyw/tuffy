@@ -91,7 +91,7 @@ pub fn translate_function<'tcx>(
     let (ret_ty, ret_ann) = if needs_sret {
         (Some(Type::Ptr(0)), None)
     } else {
-        let ty = translate_ty(ret_mir_ty).filter(|t| !matches!(t, Type::Unit));
+        let ty = translate_ty(tcx, ret_mir_ty).filter(|t| !matches!(t, Type::Unit));
         (ty, translate_annotation(ret_mir_ty))
     };
 
@@ -112,7 +112,7 @@ pub fn translate_function<'tcx>(
     for i in 0..mir.arg_count {
         let local = mir::Local::from_usize(i + 1);
         let ty = monomorphize(mir.local_decls[local].ty);
-        match translate_ty(ty) {
+        match translate_ty(tcx, ty) {
             Some(Type::Unit) | None => continue,
             Some(ir_ty) => {
                 // Keep MIR→IR parameters semantic; target ABI lowering happens in backend/codegen.

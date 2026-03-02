@@ -683,7 +683,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 Operand::Constant(c) => self.monomorphize(c.ty()),
                 _ => self.monomorphize(self.mir.local_decls[mir::Local::from_usize(0)].ty),
             };
-            if matches!(translate_ty(arg_ty), Some(Type::Unit) | None) {
+            if matches!(translate_ty(self.tcx, arg_ty), Some(Type::Unit) | None) {
                 continue;
             }
             // Skip zero-sized ADTs (e.g. Global allocator) — they
@@ -725,7 +725,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 .ptradd(base.into(), off.into(), 0, Origin::synthetic())
                         };
                         if fsz <= 8 {
-                            let fty = translate_ty(ft).unwrap_or(Type::Int);
+                            let fty = translate_ty(self.tcx, ft).unwrap_or(Type::Int);
                             let val = self.builder.load(
                                 addr.into(),
                                 fsz as u32,
@@ -939,7 +939,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         } else {
             self.builder.iconst(0, Origin::synthetic())
         };
-        let call_ret_ty = translate_ty(dest_ty).unwrap_or(Type::Unit);
+        let call_ret_ty = translate_ty(self.tcx, dest_ty).unwrap_or(Type::Unit);
         let call_ret_ann = if is_i128_or_u128(dest_ty) {
             translate_annotation(dest_ty)
         } else {

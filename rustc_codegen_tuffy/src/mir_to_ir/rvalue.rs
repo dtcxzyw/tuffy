@@ -333,7 +333,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         if bytes > 8 {
             return Some(addr);
         }
-        let ty = translate_ty(projected_ty).unwrap_or(Type::Int);
+        let ty = translate_ty(self.tcx, projected_ty).unwrap_or(Type::Int);
         let data = self.builder.load(
             addr.into(),
             bytes,
@@ -1464,7 +1464,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 let src_ty = self.monomorphize(self.mir.local_decls[src.local].ty);
                                 let src_size = type_size(self.tcx, src_ty).unwrap_or(0);
                                 if src_size > 8 {
-                                    let ir_ty = translate_ty(target_ty_mono).unwrap_or(Type::Int);
+                                    let ir_ty = translate_ty(self.tcx, target_ty_mono).unwrap_or(Type::Int);
                                     let data = self.builder.load(
                                         val.into(),
                                         target_size as u32,
@@ -2072,7 +2072,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let ty = self.monomorphize(self.mir.local_decls[place.local].ty);
                         let size = type_size(self.tcx, ty).unwrap_or(8);
                         let slot_size = self.builder.stack_slot_size(slot);
-                        let ir_ty = translate_ty(ty);
+                        let ir_ty = translate_ty(self.tcx, ty);
                         let is_slot_ptr = matches!(self.builder.value_type(slot), Some(Type::Ptr(_)));
                         let should_load_stack_int = matches!(ir_ty, Some(Type::Int))
                             && is_slot_ptr
@@ -2106,7 +2106,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     {
                         let ty = self.monomorphize(self.mir.local_decls[place.local].ty);
                         let size = type_size(self.tcx, ty).unwrap_or(8);
-                        if size <= 8 && matches!(translate_ty(ty), Some(Type::Int)) {
+                        if size <= 8 && matches!(translate_ty(self.tcx, ty), Some(Type::Int)) {
                             let loaded = self.builder.load(
                                 v.into(),
                                 size as u32,

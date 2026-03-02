@@ -237,7 +237,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         for i in 0..self.mir.arg_count {
             let local = mir::Local::from_usize(i + 1);
             let ty = self.monomorphize(self.mir.local_decls[local].ty);
-            let ir_ty = translate_ty(ty);
+            let ir_ty = translate_ty(self.tcx, ty);
 
             // Skip zero-sized (Unit) and untranslatable params — they don't
             // occupy a runtime slot. Assign a dummy value so downstream MIR
