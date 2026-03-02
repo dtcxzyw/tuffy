@@ -3,6 +3,8 @@
 - Status: In Progress
 - Created: 2026-02-27
 - Completed: N/A
+
+
 - Parent: N/A
 
 ## Description
@@ -75,7 +77,22 @@ All 3 mismatches fixed:
 | 881 | Same bswap bug as seed 792 | Same fix |
 | 721 | Three u128 codegen bugs: (1) switch constants truncated to i64, (2) switch discriminant compared address instead of loaded value, (3) unary NOT applied to address instead of loaded value | Load u128 values from pointers; use BigInt for switch constants; pre-create blocks in legalization |
 
-## Subtasks
+### Run 3 (after 1-tuple spreading fix)
+
+Seeds 0–10:
+
+| Category | Count | % of total |
+|----------|------:|-----:|
+| Pass | 11 | 100.0 |
+| Crash | 0 | 0.0 |
+| Mismatch | 0 | 0.0 |
+
+Seed 3 was previously crashing at runtime due to a codegen bug in 1-tuple argument
+spreading (see fix below). After the fix, all 11 seeds pass.
+
+| Seed | Root cause | Fix |
+|------|-----------|-----|
+| 3 | 1-tuple spread skipped: `FnOnce::call_once` passes args as `(&T,)` 1-tuple; codegen skipped spreading for 1-tuples, passing the stack address (`&&T`) instead of loading and passing the value (`&T`) | Change spreading threshold from `>= 2` to `>= 1` non-ZST fields in `call.rs` |
 
 - [x] Run initial fuzzing campaign (seeds 0..1000) and triage results
 - [x] Classify failures into compile crashes vs output mismatches

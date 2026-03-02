@@ -694,16 +694,17 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
             // Tuple spreading for closure calls through Fn/FnMut/FnOnce:
             // the caller passes args as a single tuple but the closure
-            // body expects individual parameters.  Only spread tuples
-            // with 2+ non-ZST fields — 1-tuples have identical layout
-            // to the inner type and don't need spreading.
+            // body expects individual parameters.  Spread all tuples
+            // with at least 1 non-ZST field — even 1-tuples need
+            // spreading when the tuple lives on the stack (otherwise the
+            // stack address would be passed instead of the loaded value).
             if needs_tuple_spread
                 && let ty::Tuple(fields) = arg_ty.kind()
                 && fields
                     .iter()
                     .filter(|f| type_size(self.tcx, *f).unwrap_or(0) > 0)
                     .count()
-                    >= 2
+                    >= 1
                 && let Operand::Copy(place) | Operand::Move(place) = &arg.node
                 && let Some(base) = self.locals.get(place.local)
                 && matches!(self.builder.value_type(base), Some(Type::Ptr(_)))
