@@ -1,8 +1,8 @@
 # Move legalization pass from tuffy_target_x86 to tuffy_codegen
 
-- Status: Draft
+- Status: Completed
 - Created: 2026-02-28
-- Completed: N/A
+- Completed: 2026-03-02
 - Parent: N/A
 
 ## Description
