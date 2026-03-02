@@ -365,7 +365,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 }
             }
             _ => {
-                unimplemented!("MIR terminator: {:?}", term.kind);
+                // For any unhandled terminator (including Resume, Yield, etc.),
+                // treat as unreachable since we don't support exception handling
+                // or async/generator constructs yet.
+                self.builder.unreachable(Origin::synthetic());
             }
         }
     }
