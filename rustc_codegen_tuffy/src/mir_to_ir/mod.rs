@@ -119,6 +119,14 @@ pub fn translate_function<'tcx>(
                 params.push(ir_ty);
                 param_anns.push(translate_annotation(ty));
                 param_names.push(all_names.get(i).copied().flatten());
+                // Fat pointer types (&str, &[T], &dyn Trait) are passed
+                // as two register-sized values: data pointer + metadata
+                // (length or vtable pointer).  Add a second Int param.
+                if is_fat_ptr(tcx, ty) {
+                    params.push(Type::Int);
+                    param_anns.push(None);
+                    param_names.push(None);
+                }
             }
         }
     }

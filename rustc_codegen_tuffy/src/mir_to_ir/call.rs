@@ -777,9 +777,25 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // are represented as Ptr values; load both halves so the
                 // callee receives them in two registers (rdi+rsi, etc.).
                 let arg_size = type_size(self.tcx, arg_ty).unwrap_or(0);
+                // Fat pointer values from constants (symbol_addr to
+                // string data) or non-stack locals (the data pointer
+                // itself) are NOT addresses of [ptr, len] pairs.
+                // They must not be decomposed by word-by-word loads;
+                // the fat component is pushed separately below.
+                let is_fat_value_not_slot =
+                    is_fat_ptr(self.tcx, arg_ty)
+                        && match &arg.node {
+                            Operand::Constant(_) => true,
+                            Operand::Copy(p) | Operand::Move(p) => {
+                                p.projection.is_empty()
+                                    && !self.stack_locals.is_stack(p.local)
+                            }
+                            _ => false,
+                        };
                 let is_struct_arg = arg_size > 8
                     && arg_size <= 16
                     && !is_i128_or_u128(arg_ty)
+                    && !is_fat_value_not_slot
                     && matches!(self.builder.value_type(v), Some(Type::Ptr(_)));
                 let decomposed = if is_struct_arg {
                     let w0 = self.builder.load(

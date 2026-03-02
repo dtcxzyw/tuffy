@@ -258,14 +258,35 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 continue;
             }
 
-            let val = self.builder.param(
-                param_idx,
-                ir_ty.expect("checked above"),
-                translate_annotation(ty),
-                Origin::synthetic(),
-            );
-            self.locals.set(local, val);
-            param_idx += 1;
+            if is_fat_ptr(self.tcx, ty) {
+                // Fat pointer params (&str, &[T], &dyn Trait) occupy two
+                // register-sized slots: data pointer + metadata.
+                let data_ptr = self.builder.param(
+                    param_idx,
+                    ir_ty.expect("checked above"),
+                    None,
+                    Origin::synthetic(),
+                );
+                param_idx += 1;
+                let metadata = self.builder.param(
+                    param_idx,
+                    Type::Int,
+                    None,
+                    Origin::synthetic(),
+                );
+                param_idx += 1;
+                self.locals.set(local, data_ptr);
+                self.fat_locals.set(local, metadata);
+            } else {
+                let val = self.builder.param(
+                    param_idx,
+                    ir_ty.expect("checked above"),
+                    translate_annotation(ty),
+                    Origin::synthetic(),
+                );
+                self.locals.set(local, val);
+                param_idx += 1;
+            }
         }
     }
 }
