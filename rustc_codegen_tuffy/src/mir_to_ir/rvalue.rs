@@ -1104,7 +1104,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         self.builder
                             .shr(l_op, masked_op, res_ann, Origin::synthetic())
                     }
-                    BinOp::Div if is_i128_or_u128(lhs_mir_ty) => {
+                    BinOp::Div
+                        if matches!(lhs_mir_ty.kind(), ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)) =>
+                    {
                         let signed = matches!(lhs_mir_ty.kind(), ty::Int(_));
                         let name = if signed { "__divti3" } else { "__udivti3" };
                         let sym_id = self.symbols.intern(name);
@@ -1121,7 +1123,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         self.abi_metadata.mark_wide_return_call(call_mem.index());
                         call_data.unwrap_or(call_mem)
                     }
-                    BinOp::Rem if is_i128_or_u128(lhs_mir_ty) => {
+                    BinOp::Rem
+                        if matches!(lhs_mir_ty.kind(), ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)) =>
+                    {
                         let signed = matches!(lhs_mir_ty.kind(), ty::Int(_));
                         let name = if signed { "__modti3" } else { "__umodti3" };
                         let sym_id = self.symbols.intern(name);
@@ -2069,7 +2073,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let should_load_stack_int = matches!(ir_ty, Some(Type::Int))
                             && is_slot_ptr
                             && ((size <= 8 && slot_size.is_some_and(|sz| sz <= 8))
-                                || (size == 16 && is_i128_or_u128(ty) && slot_size == Some(16)));
+                                || (size == 16
+                                    && matches!(
+                                        ty.kind(),
+                                        ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
+                                    )
+                                    && slot_size == Some(16)));
                         let should_load_stack_ptr = matches!(ir_ty, Some(Type::Ptr(_)))
                             && is_slot_ptr
                             && size <= 8

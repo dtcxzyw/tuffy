@@ -143,6 +143,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             (Some(Type::Bool), Some(Type::Int)) => {
                                 self.builder.int_to_bool(v.into(), Origin::synthetic())
                             }
+                            (Some(Type::Float(ft)), Some(Type::Int)) => {
+                                // Float value was carried as Int bits — reinterpret.
+                                self.builder.bitcast(v.into(), Type::Float(ft), None, Origin::synthetic())
+                            }
                             _ => v,
                         };
                         self.builder.ret(

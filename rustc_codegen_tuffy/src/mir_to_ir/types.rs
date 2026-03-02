@@ -1,19 +1,42 @@
 //! Type translation utilities for MIR → IR conversion.
 
+use rustc_abi::BackendRepr;
 use rustc_middle::mir::{self, Operand};
 use rustc_middle::ty::{self, TyCtxt};
 
-use tuffy_ir::types::{Annotation, Type};
+use tuffy_ir::types::{Annotation, FloatType, Type};
 
-/// Returns true if the type is i128 or u128.
-pub(super) fn is_i128_or_u128(ty: ty::Ty<'_>) -> bool {
-    matches!(
-        ty.kind(),
-        ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
-    )
+/// Coarse-grained ABI representation of a Rust type, mirroring BackendRepr.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ReprKind {
+    /// Zero-sized type — no data to pass or return.
+    Zst,
+    /// Single register (int, float, pointer, i128/u128).
+    Scalar,
+    /// Two registers (fat pointer: data ptr + length/vtable).
+    ScalarPair,
+    /// Passed via memory pointer (large structs, arrays, etc.).
+    Memory,
 }
 
-pub(super) fn translate_ty<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> Option<Type> {
+
+pub(super) fn repr_kind<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> ReprKind {
+    let typing_env = ty::TypingEnv::fully_monomorphized();
+    let Ok(layout) = tcx.layout_of(typing_env.as_query_input(ty)) else {
+        return ReprKind::Memory;
+    };
+    if layout.is_zst() {
+        return ReprKind::Zst;
+    }
+    match layout.backend_repr {
+        BackendRepr::Scalar(_) => ReprKind::Scalar,
+        BackendRepr::ScalarPair(_, _) => ReprKind::ScalarPair,
+        _ => ReprKind::Memory,
+    }
+}
+
+
+pub(super) fn translate_ty<'tcx>(_tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> Option<Type> {
     match ty.kind() {
         ty::Bool => Some(Type::Bool),
         ty::Int(ty::IntTy::I8) | ty::Uint(ty::UintTy::U8) => Some(Type::Int),
@@ -29,16 +52,11 @@ pub(super) fn translate_ty<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> Option<
         ty::Tuple(fields) if fields.is_empty() => Some(Type::Unit),
         ty::FnDef(..) => Some(Type::Int),
         ty::Never => Some(Type::Int),
-        ty::Float(..) => Some(Type::Int),
-        ty::Adt(..) | ty::Tuple(..) => {
-            // Try to construct Struct type for aggregates
-            if let Some(field_types) = struct_field_types(tcx, ty) {
-                if !field_types.is_empty() {
-                    return Some(Type::Struct(field_types));
-                }
-            }
-            Some(Type::Int)
-        }
+        ty::Float(ty::FloatTy::F16) => Some(Type::Float(FloatType::F16)),
+        ty::Float(ty::FloatTy::F32) => Some(Type::Float(FloatType::F32)),
+        ty::Float(ty::FloatTy::F64) => Some(Type::Float(FloatType::F64)),
+        ty::Float(ty::FloatTy::F128) => Some(Type::Int), // f128 not yet supported
+        ty::Adt(..) | ty::Tuple(..) => Some(Type::Int),
         ty::Array(..) | ty::Slice(..) | ty::Str => Some(Type::Int),
         // Closure / coroutine-closure structs that capture variables are
         // laid out like regular structs — treat them as Int so they are
@@ -168,80 +186,4 @@ pub(super) fn is_fat_ptr<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> bool {
         }
         _ => false,
     }
-}
-
-/// Compute field types for a struct/tuple, including padding fields.
-/// Returns Vec<Type> where padding is represented as Type::Byte(N).
-/// Returns None if the type is not a struct/tuple or layout computation fails.
-pub(super) fn struct_field_types<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    ty: ty::Ty<'tcx>,
-) -> Option<Vec<Type>> {
-    let typing_env = ty::TypingEnv::fully_monomorphized();
-    let layout = tcx.layout_of(typing_env.as_query_input(ty)).ok()?;
-
-    let field_count = layout.fields.count();
-    if field_count == 0 {
-        return Some(Vec::new());
-    }
-
-    let mut result = Vec::new();
-    let mut current_offset = 0u64;
-
-    for field_idx in 0..field_count {
-        let field_offset = layout.fields.offset(field_idx).bytes();
-
-        // Insert padding if there's a gap
-        if field_offset > current_offset {
-            let padding_size = (field_offset - current_offset) as u32;
-            result.push(Type::Byte(padding_size));
-            current_offset = field_offset;
-        }
-
-        // Get the field type from the MIR
-        let field_ty = match ty.kind() {
-            ty::Adt(def, args) => {
-                // Only decompose single-variant ADTs (structs/single-variant enums).
-                // Multi-variant enums have layout fields (e.g. discriminant) that
-                // don't correspond to variant fields.
-                if def.variants().len() != 1 {
-                    return None;
-                }
-                let variant = &def.variants()[rustc_abi::VariantIdx::from_u32(0)];
-                if field_idx >= variant.fields.len() {
-                    return None;
-                }
-                variant.fields[rustc_abi::FieldIdx::from_usize(field_idx)]
-                    .ty(tcx, args)
-            }
-            ty::Tuple(fields) => {
-                if field_idx < fields.len() {
-                    fields[field_idx]
-                } else {
-                    return None;
-                }
-            }
-            _ => return None,
-        };
-
-        // Translate the field type
-        if let Some(ir_ty) = translate_ty(tcx, field_ty) {
-            result.push(ir_ty);
-            // Update offset to after this field
-            if let Ok(field_layout) = tcx.layout_of(typing_env.as_query_input(field_ty)) {
-                current_offset = field_offset + field_layout.size.bytes();
-            }
-        } else {
-            return None;
-        }
-    }
-
-    // Add trailing padding if needed
-    let total_size = layout.size.bytes();
-    if current_offset < total_size {
-        let trailing_padding = (total_size - current_offset) as u32;
-        result.push(Type::Byte(trailing_padding));
-    }
-
-    Some(result)
 }

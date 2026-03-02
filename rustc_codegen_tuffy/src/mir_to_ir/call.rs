@@ -795,7 +795,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         };
                 let is_struct_arg = arg_size > 8
                     && arg_size <= 16
-                    && !is_i128_or_u128(arg_ty)
+                    && !matches!(repr_kind(self.tcx, arg_ty), ReprKind::Scalar)
                     && !is_fat_value_not_slot
                     && matches!(self.builder.value_type(v), Some(Type::Ptr(_)));
                 let decomposed = if is_struct_arg {
@@ -833,7 +833,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // Annotate i128/u128 arguments so the legalization
                     // pass knows to split them into (lo, hi) even when
                     // the value fits in 64 bits (e.g. small constants).
-                    if is_i128_or_u128(arg_ty) {
+                    if matches!(arg_ty.kind(), ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)) {
                         let ann = translate_annotation(arg_ty).unwrap_or(Annotation::Unsigned(128));
                         ir_args.push(IrOperand::annotated(v, ann));
                     } else {
@@ -957,7 +957,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             self.builder.iconst(0, Origin::synthetic())
         };
         let call_ret_ty = translate_ty(self.tcx, dest_ty).unwrap_or(Type::Unit);
-        let call_ret_ann = if is_i128_or_u128(dest_ty) {
+        let call_ret_ann = if matches!(dest_ty.kind(), ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)) {
             translate_annotation(dest_ty)
         } else {
             None
@@ -996,7 +996,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // slot as the destination local.
             self.locals.set(destination.local, slot);
             self.stack_locals.mark(destination.local);
-        } else if dest_size.unwrap_or(0) > 8 && !is_i128_or_u128(dest_ty) {
+        } else if dest_size.unwrap_or(0) > 8 && !matches!(repr_kind(self.tcx, dest_ty), ReprKind::Scalar) {
             // Two-register return (9-16 bytes): RAX has the first 8 bytes,
             // RDX has the remaining bytes.  Capture both and store to a
             // stack slot.
