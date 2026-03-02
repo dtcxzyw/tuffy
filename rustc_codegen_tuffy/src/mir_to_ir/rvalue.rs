@@ -1104,44 +1104,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         self.builder
                             .shr(l_op, masked_op, res_ann, Origin::synthetic())
                     }
-                    BinOp::Div
-                        if matches!(lhs_mir_ty.kind(), ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)) =>
-                    {
-                        let signed = matches!(lhs_mir_ty.kind(), ty::Int(_));
-                        let name = if signed { "__divti3" } else { "__udivti3" };
-                        let sym_id = self.symbols.intern(name);
-                        let callee = self.builder.symbol_addr(sym_id, Origin::synthetic());
-                        let (call_mem, call_data) = self.builder.call(
-                            callee.into(),
-                            vec![l_op, r_op],
-                            Type::Int,
-                            self.current_mem.into(),
-                            None,
-                            Origin::synthetic(),
-                        );
-                        self.current_mem = call_mem;
-                        self.abi_metadata.mark_wide_return_call(call_mem.index());
-                        call_data.unwrap_or(call_mem)
-                    }
-                    BinOp::Rem
-                        if matches!(lhs_mir_ty.kind(), ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)) =>
-                    {
-                        let signed = matches!(lhs_mir_ty.kind(), ty::Int(_));
-                        let name = if signed { "__modti3" } else { "__umodti3" };
-                        let sym_id = self.symbols.intern(name);
-                        let callee = self.builder.symbol_addr(sym_id, Origin::synthetic());
-                        let (call_mem, call_data) = self.builder.call(
-                            callee.into(),
-                            vec![l_op, r_op],
-                            Type::Int,
-                            self.current_mem.into(),
-                            None,
-                            Origin::synthetic(),
-                        );
-                        self.current_mem = call_mem;
-                        self.abi_metadata.mark_wide_return_call(call_mem.index());
-                        call_data.unwrap_or(call_mem)
-                    }
                     BinOp::Div => self.builder.div(l_op, r_op, res_ann, Origin::synthetic()),
                     BinOp::Rem => self.builder.rem(l_op, r_op, res_ann, Origin::synthetic()),
                     BinOp::Offset => {

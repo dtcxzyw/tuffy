@@ -98,7 +98,7 @@ impl CodegenBackend for TuffyCodegenBackend {
                     compiled_symbols.insert(tcx.symbol_name(*instance).name.to_string());
                     let result_opt =
                         mir_to_ir::translate_function(tcx, *instance, &session, &mut data_counter);
-                    if let Some(result) = result_opt {
+                    if let Some(mut result) = result_opt {
                         pending_instances.extend(result.referenced_instances.iter().copied());
                         if dump_ir {
                             for (sym_id, data, _relocs) in &result.static_data {
@@ -161,7 +161,7 @@ impl CodegenBackend for TuffyCodegenBackend {
 
                             if let Some(mut cf) = session.compile_function(
                                 &result.func,
-                                &result.symbols,
+                                &mut result.symbols,
                                 &result.abi_metadata,
                             ) {
                                 use rustc_hir::attrs::Linkage;
@@ -323,7 +323,7 @@ impl CodegenBackend for TuffyCodegenBackend {
                 break;
             }
             for inst in batch {
-                let result = match mir_to_ir::translate_function(
+                let mut result = match mir_to_ir::translate_function(
                     tcx,
                     inst,
                     &session,
@@ -383,7 +383,7 @@ impl CodegenBackend for TuffyCodegenBackend {
                     });
                 }
                 if let Some(mut cf) =
-                    session.compile_function(&result.func, &result.symbols, &result.abi_metadata)
+                    session.compile_function(&result.func, &mut result.symbols, &result.abi_metadata)
                 {
                     cf.weak = true;
                     inline_funcs.push(cf);

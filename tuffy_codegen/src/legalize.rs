@@ -13,6 +13,7 @@ use num_traits::{ToPrimitive, Zero};
 use tuffy_ir::builder::Builder;
 use tuffy_ir::function::{CfgNode, Function};
 use tuffy_ir::instruction::{ICmpOp, Op, Operand, Origin};
+use tuffy_ir::module::SymbolTable;
 use tuffy_ir::types::{Annotation, Type};
 use tuffy_ir::value::{BlockRef, ValueRef};
 
@@ -197,12 +198,13 @@ pub fn legalize<M: AbiMetadata + Clone>(
     func: &Function,
     metadata: &M,
     legality: &impl LegalityInfo,
+    symbols: &mut SymbolTable,
 ) -> Option<(Function, M)> {
     if !has_wide_values(func, metadata, legality) {
         return None;
     }
     let (out, state) = build_new_func(func, metadata, legality);
-    Some(run_legalize(func, out, state))
+    Some(run_legalize(func, out, state, symbols))
 }
 
 // ---------------------------------------------------------------------------
@@ -224,6 +226,10 @@ struct State<M> {
     /// Old RDX-capture instruction index → new ValueRef created in leg_call.
     /// Used to avoid re-creating the capture in copy_inst.
     rdx_capture_remap: HashMap<u32, ValueRef>,
+    /// The most recent mem-producing old ValueRef in the current block.
+    /// Used to thread the mem token when expanding a 128-bit Div/Rem into a
+    /// libcall (which requires a mem operand that the pure Div/Rem lacks).
+    current_old_mem: Option<ValueRef>,
 }
 
 fn o() -> Origin {
@@ -279,6 +285,7 @@ fn build_new_func<M: AbiMetadata + Clone>(
         param_map,
         wide,
         rdx_capture_remap: HashMap::new(),
+        current_old_mem: None,
     };
     (out, state)
 }
@@ -376,13 +383,14 @@ fn run_legalize<M: AbiMetadata + Clone>(
     old: &Function,
     mut out: Function,
     mut s: State<M>,
+    symbols: &mut SymbolTable,
 ) -> (Function, M) {
     {
         let mut b = Builder::new(&mut out);
         let old_root = old.root_region;
         let new_root = b.create_region(old.region(old_root).kind);
         b.enter_region(new_root);
-        walk_region(old, &mut s, &mut b, old_root);
+        walk_region(old, &mut s, &mut b, old_root, symbols);
         b.exit_region();
     }
     (out, s.meta)
@@ -393,18 +401,19 @@ fn walk_region<M: AbiMetadata + Clone>(
     s: &mut State<M>,
     b: &mut Builder,
     old_region: tuffy_ir::value::RegionRef,
+    symbols: &mut SymbolTable,
 ) {
     precreate_blocks(old, s, b, old_region);
 
     for child in &old.region(old_region).children {
         match child {
             CfgNode::Block(old_blk) => {
-                walk_block_insts(old, s, b, *old_blk);
+                walk_block_insts(old, s, b, *old_blk, symbols);
             }
             CfgNode::Region(old_sub) => {
                 let new_sub = b.create_region(old.region(*old_sub).kind);
                 b.enter_region(new_sub);
-                walk_region(old, s, b, *old_sub);
+                walk_region(old, s, b, *old_sub, symbols);
                 b.exit_region();
             }
         }
@@ -446,12 +455,28 @@ fn walk_block_insts<M: AbiMetadata + Clone>(
     s: &mut State<M>,
     b: &mut Builder,
     old_blk: BlockRef,
+    symbols: &mut SymbolTable,
 ) {
     let new_blk = s.bmap[&old_blk.index()];
     b.switch_to_block(new_blk);
 
+    // Initialize current_old_mem from this block's Mem-typed argument, if any.
+    let old_bb = old.block(old_blk);
+    for i in 0..old_bb.arg_count {
+        let old_ba_idx = old_bb.arg_start + i;
+        if old.block_args[old_ba_idx as usize].ty == Type::Mem {
+            s.current_old_mem = Some(ValueRef::block_arg(old_ba_idx));
+            break;
+        }
+    }
+
     for (old_vref, inst) in old.block_insts_with_values(old_blk) {
-        legalize_inst(old, s, b, old_vref, inst);
+        legalize_inst(old, s, b, old_vref, inst, symbols);
+        // Keep current_old_mem up to date so that leg_div_rem_128 can
+        // inject calls into the correct position in the mem chain.
+        if inst.ty == Type::Mem {
+            s.current_old_mem = Some(old_vref);
+        }
     }
 }
 
@@ -466,6 +491,7 @@ fn legalize_inst<M: AbiMetadata + Clone>(
     b: &mut Builder,
     old_vref: ValueRef,
     inst: &tuffy_ir::instruction::Instruction,
+    symbols: &mut SymbolTable,
 ) {
     let ann = inst.result_annotation.as_ref();
     let wide_result = is_128(ann);
@@ -493,6 +519,12 @@ fn legalize_inst<M: AbiMetadata + Clone>(
         }
         Op::Mul(a, op_b) if wide_result => {
             leg_mul(s, b, old_vref, a, op_b);
+        }
+        Op::Div(a, op_b) if wide_result => {
+            leg_div_rem_128(s, b, old_vref, a, op_b, ann, true, symbols);
+        }
+        Op::Rem(a, op_b) if wide_result => {
+            leg_div_rem_128(s, b, old_vref, a, op_b, ann, false, symbols);
         }
         Op::And(a, op_b) if wide_result => {
             leg_bitwise(s, b, old_vref, a, op_b, BitwiseKind::And);
@@ -1450,6 +1482,76 @@ fn leg_bool_to_int_128<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef,
     let lo = b.bool_to_int(Operand::new(v), o());
     let hi = b.iconst(0i64, o());
     s.vmap.set(old_vref, Mapped::Pair(lo, hi));
+}
+
+// ---------------------------------------------------------------------------
+// 128-bit integer Div/Rem: lower to compiler-rt libcall
+//   signed div:   __divti3(a_lo, a_hi, b_lo, b_hi) → (lo, hi)
+//   unsigned div: __udivti3(...)
+//   signed rem:   __modti3(...)
+//   unsigned rem: __umodti3(...)
+// ---------------------------------------------------------------------------
+
+#[allow(clippy::too_many_arguments)]
+fn leg_div_rem_128<M: AbiMetadata + Clone>(
+    s: &mut State<M>,
+    b: &mut Builder,
+    old_vref: ValueRef,
+    a: &Operand,
+    op_b: &Operand,
+    ann: Option<&Annotation>,
+    is_div: bool,
+    symbols: &mut SymbolTable,
+) {
+    let signed = is_signed_128(ann);
+    let name = match (is_div, signed) {
+        (true, true) => "__divti3",
+        (true, false) => "__udivti3",
+        (false, true) => "__modti3",
+        (false, false) => "__umodti3",
+    };
+    let sym_id = symbols.intern(name);
+    let callee = b.symbol_addr(sym_id, o());
+
+    let (a_lo, a_hi) = s.vmap.pair(a.value);
+    let (b_lo, b_hi) = s.vmap.pair(op_b.value);
+    let ann64 = Annotation::Unsigned(64);
+    let args = vec![
+        Operand::annotated(a_lo, ann64),
+        Operand::annotated(a_hi, ann64),
+        Operand::annotated(b_lo, ann64),
+        Operand::annotated(b_hi, ann64),
+    ];
+
+    // Inject the call into the mem chain using the most recent mem token.
+    let old_mem = s
+        .current_old_mem
+        .expect("128-bit div/rem requires a mem token in scope");
+    let new_mem = s.vmap.one(old_mem);
+    let (call_mem, data) = b.call(
+        Operand::new(callee),
+        args,
+        Type::Int,
+        Operand::new(new_mem),
+        Some(Annotation::Unsigned(64)),
+        o(),
+    );
+    let data = data.unwrap();
+
+    // Redirect all subsequent users of old_mem to call_mem so that later
+    // stores/calls pick up the updated mem without rewriting their operands.
+    s.vmap.set(old_mem, Mapped::One(call_mem));
+
+    // Record the secondary-register return so the register allocator knows
+    // that the hi half arrives in RDX.
+    let call_idx = call_mem.index();
+    s.meta.mark_call_secondary_return(call_idx);
+    let hi_capture = b.iconst(0i64, o());
+    s.meta
+        .mark_secondary_return_capture(hi_capture.index(), call_idx);
+
+    // Map the old wide Div/Rem result to (lo, hi).
+    s.vmap.set(old_vref, Mapped::Pair(data, hi_capture));
 }
 
 // ---------------------------------------------------------------------------

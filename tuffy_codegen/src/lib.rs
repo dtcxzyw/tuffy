@@ -62,13 +62,13 @@ impl CodegenSession {
     pub fn compile_function(
         &self,
         func: &Function,
-        symbols: &SymbolTable,
+        symbols: &mut SymbolTable,
         metadata: &AbiMetadataBox,
     ) -> Option<CompiledFunction> {
         match (&self.inner, metadata) {
             (CodegenInner::X86(backend), AbiMetadataBox::X86(meta)) => {
                 let legality = X86LegalityInfo;
-                let legalized = legalize::legalize(func, meta, &legality);
+                let legalized = legalize::legalize(func, meta, &legality, symbols);
                 let (func_ref, meta_ref) = match &legalized {
                     Some((f, m)) => (f, m),
                     None => (func, meta),
