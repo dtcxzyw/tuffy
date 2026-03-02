@@ -56,7 +56,11 @@ The downstream crates (`tuffy_ir`, `tuffy_opt`, `tuffy_target`, `tuffy_target_x8
 
 ## Error Policy
 
-Unsupported MIR constructs (rvalue kinds, statement kinds, terminator kinds, intrinsics, place projections) must **not** be silently skipped. Use `unimplemented!()` with a descriptive message so the missing support is immediately visible. When an `unimplemented!()` is hit, the correct response is to add a concrete implementation for that construct — not to suppress the error.
+Unsupported MIR constructs (rvalue kinds, statement kinds, terminator kinds, intrinsics, place projections) must **not** be silently skipped or marked as unreachable. Instead:
+
+- Use `trap()` to emit a runtime trap instruction for unsupported terminators and unhandled cases (e.g., `InlineAsm` without targets, `Resume`, `Yield`, etc.)
+- Use `unimplemented!()` with a descriptive message for unsupported operations that should never occur in valid MIR
+- When an error is hit, the correct response is to add a concrete implementation for that construct — not to suppress the error
 
 ## Dependencies
 

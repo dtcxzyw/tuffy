@@ -396,14 +396,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         Origin::synthetic(),
                     );
                 } else {
-                    self.builder.unreachable(Origin::synthetic());
+                    self.builder.trap(Origin::synthetic());
                 }
             }
             _ => {
                 // For any unhandled terminator (including Resume, Yield, etc.),
-                // treat as unreachable since we don't support exception handling
+                // treat as a trap since we don't support exception handling
                 // or async/generator constructs yet.
-                self.builder.unreachable(Origin::synthetic());
+                self.builder.trap(Origin::synthetic());
             }
         }
     }
