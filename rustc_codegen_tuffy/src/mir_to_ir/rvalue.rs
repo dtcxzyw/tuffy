@@ -2034,13 +2034,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let is_slot_ptr = matches!(self.builder.value_type(slot), Some(Type::Ptr(_)));
                         let should_load_stack_int = matches!(ir_ty, Some(Type::Int))
                             && is_slot_ptr
-                            && ((size <= 8 && slot_size.is_some_and(|sz| sz <= 8))
-                                || (size == 16
-                                    && matches!(
-                                        ty.kind(),
-                                        ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
-                                    )
-                                    && slot_size == Some(16)));
+                            && slot_size.is_some_and(|sz| u64::from(sz) >= size);
                         let should_load_stack_ptr = matches!(ir_ty, Some(Type::Ptr(_)))
                             && is_slot_ptr
                             && size <= 8
