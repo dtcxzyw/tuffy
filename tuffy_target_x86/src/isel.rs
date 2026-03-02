@@ -147,13 +147,14 @@ pub fn isel(
     };
 
     let root = &func.regions[func.root_region.index() as usize];
+    let mut _isel_failed = false;
     for child in &root.children {
         if let CfgNode::Block(block_ref) = child {
             ctx.out.push(MInst::Label {
                 id: block_ref.index(),
             });
             for (vref, inst) in func.block_insts_with_values(*block_ref) {
-                select_inst(
+                if select_inst(
                     &mut ctx,
                     vref,
                     &inst.op,
@@ -162,7 +163,43 @@ pub fn isel(
                     rdx_captures,
                     rdx_moves,
                     call_has_ret2,
-                )?;
+                )
+                .is_none()
+                {
+                    if !_isel_failed {
+                        _isel_failed = true;
+                        // Dump all instructions with their block_insts_with_values vrefs
+                        eprintln!(
+                            "=== ISel failure dump for {} ===",
+                            symbols.resolve(func.name)
+                        );
+                        for child2 in &root.children {
+                            if let CfgNode::Block(br2) = child2 {
+                                let bb2 = func.block(*br2);
+                                eprintln!(
+                                    "  block {} (inst_start={}, inst_count={}):",
+                                    br2.index(),
+                                    bb2.inst_start,
+                                    bb2.inst_count
+                                );
+                                for (v2, i2) in func.block_insts_with_values(*br2) {
+                                    eprintln!(
+                                        "    vref={} (index={}) op={:?}",
+                                        v2.index(),
+                                        v2.index(),
+                                        i2.op
+                                    );
+                                }
+                            }
+                        }
+                        eprintln!("  Raw instruction array (first 60):");
+                        for (i, inst) in func.instructions.iter().enumerate().take(60) {
+                            eprintln!("    [{}] {:?}", i, inst.op);
+                        }
+                    }
+                    eprintln!("warning: isel failed on vref={:?} op {:?}", vref, inst.op);
+                    return None;
+                }
             }
         }
     }
@@ -713,7 +750,8 @@ fn select_inst(
                 base,
                 offset: 0,
             });
-            ctx.regs.assign(vref, dst);
+            let data_vref = ValueRef::inst_secondary_result(vref.index());
+            ctx.regs.assign(data_vref, dst);
             // Secondary result (data) uses the same vreg — handled by
             // ensure_in_reg for secondary refs.
         }
@@ -1172,7 +1210,19 @@ fn select_call(
     // values already placed there by earlier fixed-register moves.
     let mut arg_vregs = Vec::new();
     for arg in args.iter() {
-        let src = ctx.ensure_in_reg(arg.value)?;
+        let src = match ctx.ensure_in_reg(arg.value) {
+            Some(v) => v,
+            None => {
+                eprintln!(
+                    "  select_call: ensure_in_reg failed for arg {:?} (is_block_arg={}, is_secondary={}, index={})",
+                    arg.value,
+                    arg.value.is_block_arg(),
+                    arg.value.is_secondary_result(),
+                    arg.value.index()
+                );
+                return None;
+            }
+        };
         arg_vregs.push(src);
     }
 

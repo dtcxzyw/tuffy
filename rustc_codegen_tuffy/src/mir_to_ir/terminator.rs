@@ -65,7 +65,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // of reading garbage bytes beyond the stored value.
                     let load_size = size.min(8) as u32;
                     let load_ty = translate_ty(ret_mir_ty).unwrap_or(Type::Int);
-                    let (mem_out, word0) = self.builder.load(
+                    let word0 = self.builder.load(
                         slot.into(),
                         load_size,
                         load_ty,
@@ -73,12 +73,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         None,
                         Origin::synthetic(),
                     );
-                    self.current_mem = mem_out;
-
-                    if size > 8 {
-                        // Second 8 bytes will be handled by backend ABI lowering.
-                        // MIR→IR just loads the primary return value.
-                    }
 
                     // Coerce to match declared return type (e.g., Ptr for &T returns).
                     let ret_ir_ty = translate_ty(ret_mir_ty);
@@ -86,11 +80,39 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         Some(Type::Ptr(_)) => self.coerce_to_ptr(word0),
                         _ => word0,
                     };
-                    self.builder.ret(
-                        Some(coerced_word0.into()),
-                        self.current_mem.into(),
-                        Origin::synthetic(),
-                    );
+
+                    if size > 8 {
+                        // Two-register return (9-16 bytes): load second word
+                        // and mark it for RDX via ABI metadata.
+                        let off8 = self.builder.iconst(8, Origin::synthetic());
+                        let hi_addr = self.builder.ptradd(
+                            slot.into(),
+                            off8.into(),
+                            0,
+                            Origin::synthetic(),
+                        );
+                        let word1 = self.builder.load(
+                            hi_addr.into(),
+                            8,
+                            Type::Int,
+                            self.current_mem.into(),
+                            None,
+                            Origin::synthetic(),
+                        );
+                        let ret_inst = self.builder.ret(
+                            Some(coerced_word0.into()),
+                            self.current_mem.into(),
+                            Origin::synthetic(),
+                        );
+                        self.abi_metadata
+                            .mark_secondary_return_move(ret_inst.index(), word1.index());
+                    } else {
+                        self.builder.ret(
+                            Some(coerced_word0.into()),
+                            self.current_mem.into(),
+                            Origin::synthetic(),
+                        );
+                    }
                 } else {
                     // Normal scalar return.
                     let val = self.locals.values[ret_local.as_usize()];
@@ -106,7 +128,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 // of converting the address to an integer.
                                 let ret_size =
                                     type_size(self.tcx, ret_mir_ty).unwrap_or(8).min(8) as u32;
-                                let (mem_out, loaded) = self.builder.load(
+                                let loaded = self.builder.load(
                                     v.into(),
                                     ret_size,
                                     Type::Int,
@@ -114,7 +136,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     None,
                                     Origin::synthetic(),
                                 );
-                                self.current_mem = mem_out;
                                 loaded
                             }
                             (Some(Type::Int), _) => self.coerce_to_int(v),
@@ -215,7 +236,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let vtable_ptr = self.fat_locals.get(base_local);
                         if let (Some(data), Some(vtable)) = (data_ptr, vtable_ptr) {
                             // Load drop function pointer from vtable[0].
-                            let (mem_out, drop_fn) = self.builder.load(
+                            let drop_fn = self.builder.load(
                                 vtable.into(),
                                 8,
                                 Type::Ptr(0),
@@ -223,7 +244,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 None,
                                 Origin::synthetic(),
                             );
-                            self.current_mem = mem_out;
                             let (call_mem, _) = self.builder.call(
                                 drop_fn.into(),
                                 vec![data.into()],

@@ -254,7 +254,7 @@ pub(super) fn translate_const<'tcx>(
                 // pointer (first 8 bytes); the length component is extracted
                 // separately by extract_fat_component.
                 if matches!(ty.kind(), ty::Ref(..) | ty::RawPtr(..)) {
-                    let (mem_out, loaded) = builder.load(
+                    let loaded = builder.load(
                         base.into(),
                         8,
                         Type::Ptr(0),
@@ -262,7 +262,6 @@ pub(super) fn translate_const<'tcx>(
                         None,
                         Origin::synthetic(),
                     );
-                    *current_mem = mem_out;
                     Some(loaded)
                 } else {
                     Some(base)

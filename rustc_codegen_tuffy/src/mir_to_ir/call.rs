@@ -369,7 +369,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         Origin::synthetic(),
                                     )
                                 };
-                                let (mem_out, word) = self.builder.load(
+                                let word = self.builder.load(
                                     src_addr.into(),
                                     chunk,
                                     Type::Int,
@@ -377,7 +377,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     None,
                                     Origin::synthetic(),
                                 );
-                                self.current_mem = mem_out;
                                 let dst_addr = if offset == 0 {
                                     slot
                                 } else {
@@ -547,7 +546,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 0,
                                 Origin::synthetic(),
                             );
-                            let (mem_out, vtable) = self.builder.load(
+                            let vtable = self.builder.load(
                                 vtable_addr.into(),
                                 8,
                                 Type::Ptr(0),
@@ -555,7 +554,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 None,
                                 Origin::synthetic(),
                             );
-                            self.current_mem = mem_out;
                             Some(vtable)
                         } else {
                             None
@@ -573,7 +571,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 0,
                                 Origin::synthetic(),
                             );
-                            let (mem_out, vtable) = self.builder.load(
+                            let vtable = self.builder.load(
                                 vtable_addr.into(),
                                 8,
                                 Type::Ptr(0),
@@ -581,7 +579,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 None,
                                 Origin::synthetic(),
                             );
-                            self.current_mem = mem_out;
                             Some(vtable)
                         } else {
                             None
@@ -601,7 +598,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let fn_addr =
                     self.builder
                         .ptradd(vtable.into(), off_val.into(), 0, Origin::synthetic());
-                let (mem_out, fn_ptr) = self.builder.load(
+                let fn_ptr = self.builder.load(
                     fn_addr.into(),
                     8,
                     Type::Int,
@@ -609,7 +606,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     None,
                     Origin::synthetic(),
                 );
-                self.current_mem = mem_out;
                 Some(fn_ptr)
             } else {
                 None
@@ -730,7 +726,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         };
                         if fsz <= 8 {
                             let fty = translate_ty(ft).unwrap_or(Type::Int);
-                            let (mem_out, val) = self.builder.load(
+                            let val = self.builder.load(
                                 addr.into(),
                                 fsz as u32,
                                 fty,
@@ -738,11 +734,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 None,
                                 Origin::synthetic(),
                             );
-                            self.current_mem = mem_out;
                             ir_args.push(val.into());
                         } else if fsz <= 16 {
                             // Decompose 9-16 byte fields into two words.
-                            let (mem_out, w0) = self.builder.load(
+                            let w0 = self.builder.load(
                                 addr.into(),
                                 8,
                                 Type::Int,
@@ -750,7 +745,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 None,
                                 Origin::synthetic(),
                             );
-                            self.current_mem = mem_out;
                             ir_args.push(w0.into());
                             let off8 = self.builder.iconst(8, Origin::synthetic());
                             let a1 = self.builder.ptradd(
@@ -759,7 +753,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 0,
                                 Origin::synthetic(),
                             );
-                            let (mem_out, w1) = self.builder.load(
+                            let w1 = self.builder.load(
                                 a1.into(),
                                 8,
                                 Type::Int,
@@ -767,7 +761,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 None,
                                 Origin::synthetic(),
                             );
-                            self.current_mem = mem_out;
                             ir_args.push(w1.into());
                         } else {
                             // >16 byte fields: pass pointer.
@@ -779,95 +772,121 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             }
 
             if let Some(v) = self.translate_operand(&arg.node) {
-                // ABI-specific argument physical decomposition is deferred to backend lowering.
-                let decomposed = false;
+                // Decompose 9-16 byte struct arguments into two register-
+                // sized words for the SysV ABI.  Stack-allocated structs
+                // are represented as Ptr values; load both halves so the
+                // callee receives them in two registers (rdi+rsi, etc.).
+                let arg_size = type_size(self.tcx, arg_ty).unwrap_or(0);
+                let is_struct_arg = arg_size > 8
+                    && arg_size <= 16
+                    && !is_i128_or_u128(arg_ty)
+                    && matches!(self.builder.value_type(v), Some(Type::Ptr(_)));
+                let decomposed = if is_struct_arg {
+                    let w0 = self.builder.load(
+                        v.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
+                    );
+                    ir_args.push(w0.into());
+                    let off8 = self.builder.iconst(8, Origin::synthetic());
+                    let hi_addr = self.builder.ptradd(
+                        v.into(),
+                        off8.into(),
+                        0,
+                        Origin::synthetic(),
+                    );
+                    let w1 = self.builder.load(
+                        hi_addr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
+                    );
+                    ir_args.push(w1.into());
+                    true
+                } else {
+                    false
+                };
 
                 if !decomposed {
-                    // Check if this is a constant struct (9-16 bytes) that
-                    // needs to be decomposed into two register-sized words
-                    // for the SysV ABI.  translate_const returns a
-                    // symbol_addr for Indirect constants, but the callee
-                    // expects the struct fields in separate registers.
-                    let const_decomposed = false;
-
-                    if const_decomposed {
-                        // Already pushed both words — skip normal arg handling.
+                    // Annotate i128/u128 arguments so the legalization
+                    // pass knows to split them into (lo, hi) even when
+                    // the value fits in 64 bits (e.g. small constants).
+                    if is_i128_or_u128(arg_ty) {
+                        let ann = translate_annotation(arg_ty).unwrap_or(Annotation::Unsigned(128));
+                        ir_args.push(IrOperand::annotated(v, ann));
                     } else {
-                        // Annotate i128/u128 arguments so the legalization
-                        // pass knows to split them into (lo, hi) even when
-                        // the value fits in 64 bits (e.g. small constants).
-                        if is_i128_or_u128(arg_ty) {
-                            let ann = translate_annotation(arg_ty).unwrap_or(Annotation::Unsigned(128));
-                            ir_args.push(IrOperand::annotated(v, ann));
-                        } else {
-                            ir_args.push(v.into());
+                        ir_args.push(v.into());
+                    }
+                    // If this arg is a Copy/Move of a fat local, also pass the high part.
+                    // Exception: for virtual dispatch, skip the vtable pointer on the
+                    // first argument (self) — the actual method only takes the data ptr.
+                    let skip_fat = is_virtual && ir_args.len() == 1;
+                    if !skip_fat
+                        && let Operand::Copy(place) | Operand::Move(place) = &arg.node
+                        && let Some(fat_v) = self.fat_locals.get(place.local)
+                    {
+                        // Only push the fat component when the local's
+                        // type is actually a fat pointer.  Aggregates
+                        // (structs) with 2+ fields also set fat_locals
+                        // but their second field is not ABI metadata.
+                        let local_ty = self.monomorphize(self.mir.local_decls[place.local].ty);
+                        let needs_fat = is_fat_ptr(self.tcx, local_ty)
+                            || (local_ty.is_box()
+                                && local_ty.boxed_ty().is_some_and(|bt| {
+                                    matches!(
+                                        bt.kind(),
+                                        ty::Str | ty::Slice(..) | ty::Dynamic(..)
+                                    )
+                                }));
+                        if needs_fat {
+                            ir_args.push(fat_v.into());
                         }
-                        // If this arg is a Copy/Move of a fat local, also pass the high part.
-                        // Exception: for virtual dispatch, skip the vtable pointer on the
-                        // first argument (self) — the actual method only takes the data ptr.
-                        let skip_fat = is_virtual && ir_args.len() == 1;
-                        if !skip_fat
-                            && let Operand::Copy(place) | Operand::Move(place) = &arg.node
-                            && let Some(fat_v) = self.fat_locals.get(place.local)
-                        {
-                            // Only push the fat component when the local's
-                            // type is actually a fat pointer.  Aggregates
-                            // (structs) with 2+ fields also set fat_locals
-                            // but their second field is not ABI metadata.
-                            let local_ty = self.monomorphize(self.mir.local_decls[place.local].ty);
-                            let needs_fat = is_fat_ptr(self.tcx, local_ty)
-                                || (local_ty.is_box()
-                                    && local_ty.boxed_ty().is_some_and(|bt| {
-                                        matches!(
-                                            bt.kind(),
-                                            ty::Str | ty::Slice(..) | ty::Dynamic(..)
-                                        )
-                                    }));
-                            if needs_fat {
-                                ir_args.push(fat_v.into());
+                    }
+                    // If this arg is a constant fat pointer, pass the length.
+                    // Resolve Unevaluated constants first.
+                    if let Operand::Constant(c) = &arg.node {
+                        let mono_const = self.tcx.instantiate_and_normalize_erasing_regions(
+                            self.instance.args,
+                            ty::TypingEnv::fully_monomorphized(),
+                            ty::EarlyBinder::bind(c.const_),
+                        );
+                        let const_ty = mono_const.ty();
+                        let resolved = match mono_const {
+                            mir::Const::Val(v, _) => Some(v),
+                            _ => {
+                                let typing_env = ty::TypingEnv::fully_monomorphized();
+                                mono_const.eval(self.tcx, typing_env, c.span).ok()
                             }
-                        }
-                        // If this arg is a constant fat pointer, pass the length.
-                        // Resolve Unevaluated constants first.
-                        if let Operand::Constant(c) = &arg.node {
-                            let mono_const = self.tcx.instantiate_and_normalize_erasing_regions(
-                                self.instance.args,
-                                ty::TypingEnv::fully_monomorphized(),
-                                ty::EarlyBinder::bind(c.const_),
-                            );
-                            let const_ty = mono_const.ty();
-                            let resolved = match mono_const {
-                                mir::Const::Val(v, _) => Some(v),
-                                _ => {
-                                    let typing_env = ty::TypingEnv::fully_monomorphized();
-                                    mono_const.eval(self.tcx, typing_env, c.span).ok()
-                                }
-                            };
-                            if let Some(mir::ConstValue::Slice { meta, .. }) = resolved {
-                                let len_val = self.builder.iconst(meta as i64, Origin::synthetic());
-                                ir_args.push(len_val.into());
-                            } else if let Some(mir::ConstValue::Indirect { alloc_id, offset }) =
-                                resolved
-                                && is_fat_ptr(self.tcx, const_ty)
+                        };
+                        if let Some(mir::ConstValue::Slice { meta, .. }) = resolved {
+                            let len_val = self.builder.iconst(meta as i64, Origin::synthetic());
+                            ir_args.push(len_val.into());
+                        } else if let Some(mir::ConstValue::Indirect { alloc_id, offset }) =
+                            resolved
+                            && is_fat_ptr(self.tcx, const_ty)
+                        {
+                            let alloc = self.tcx.global_alloc(alloc_id);
+                            if let rustc_middle::mir::interpret::GlobalAlloc::Memory(
+                                mem_alloc,
+                            ) = alloc
                             {
-                                let alloc = self.tcx.global_alloc(alloc_id);
-                                if let rustc_middle::mir::interpret::GlobalAlloc::Memory(
-                                    mem_alloc,
-                                ) = alloc
-                                {
-                                    let inner = mem_alloc.inner();
-                                    let byte_offset = offset.bytes() as usize + 8;
-                                    let len_bytes = inner
-                                        .inspect_with_uninit_and_ptr_outside_interpreter(
-                                            byte_offset..byte_offset + 8,
-                                        );
-                                    let len = u64::from_le_bytes(
-                                        len_bytes.try_into().unwrap_or([0u8; 8]),
+                                let inner = mem_alloc.inner();
+                                let byte_offset = offset.bytes() as usize + 8;
+                                let len_bytes = inner
+                                    .inspect_with_uninit_and_ptr_outside_interpreter(
+                                        byte_offset..byte_offset + 8,
                                     );
-                                    let len_val =
-                                        self.builder.iconst(len as i64, Origin::synthetic());
-                                    ir_args.push(len_val.into());
-                                }
+                                let len = u64::from_le_bytes(
+                                    len_bytes.try_into().unwrap_or([0u8; 8]),
+                                );
+                                let len_val =
+                                    self.builder.iconst(len as i64, Origin::synthetic());
+                                ir_args.push(len_val.into());
                             }
                         }
                     }
@@ -887,7 +906,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let arg_ty = self.builder.value_type(ir_args[self_idx].value);
                 if matches!(arg_ty, Some(Type::Ptr(_))) {
                     let old_self = ir_args[self_idx].clone();
-                    let (mem_out, derefed) = self.builder.load(
+                    let derefed = self.builder.load(
                         old_self,
                         8,
                         Type::Ptr(0),
@@ -895,7 +914,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         None,
                         Origin::synthetic(),
                     );
-                    self.current_mem = mem_out;
                     ir_args[self_idx] = derefed.into();
                 }
             }
@@ -962,9 +980,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             self.locals.set(destination.local, slot);
             self.stack_locals.mark(destination.local);
         } else if dest_size.unwrap_or(0) > 8 && !is_i128_or_u128(dest_ty) {
-            // Two-register return (9-16 bytes): backend will handle RDX capture
-            // and stack reconstruction based on call result type and size.
-            // For now, just store the primary return value.
+            // Two-register return (9-16 bytes): RAX has the first 8 bytes,
+            // RDX has the remaining bytes.  Capture both and store to a
+            // stack slot.
             let size = dest_size.unwrap();
             let slot = if let Some(existing) = self.locals.get(destination.local) {
                 if self.stack_locals.is_stack(destination.local) {
@@ -975,9 +993,29 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             } else {
                 self.builder.stack_slot(size as u32, Origin::synthetic())
             };
+            // Store RAX (primary return) at offset 0.
             self.current_mem = self.builder.store(
                 call_vref.into(),
                 slot.into(),
+                8,
+                self.current_mem.into(),
+                Origin::synthetic(),
+            );
+            // Mark the call as having a secondary return in RDX and
+            // capture it via a placeholder instruction.
+            let call_idx = call_mem.index();
+            self.abi_metadata.mark_call_secondary_return(call_idx);
+            let rdx_capture = self.builder.iconst(0, Origin::synthetic());
+            self.abi_metadata
+                .mark_secondary_return_capture(rdx_capture.index(), call_idx);
+            // Store RDX (secondary return) at offset 8.
+            let off8 = self.builder.iconst(8, Origin::synthetic());
+            let hi_addr =
+                self.builder
+                    .ptradd(slot.into(), off8.into(), 0, Origin::synthetic());
+            self.current_mem = self.builder.store(
+                rdx_capture.into(),
+                hi_addr.into(),
                 8,
                 self.current_mem.into(),
                 Origin::synthetic(),

@@ -82,7 +82,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         self.builder
                             .ptradd(addr.into(), off.into(), 0, Origin::synthetic())
                     };
-                    let (mem_out, word) = self.builder.load(
+                    let word = self.builder.load(
                         src.into(),
                         chunk,
                         Type::Int,
@@ -90,7 +90,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         None,
                         Origin::synthetic(),
                     );
-                    self.current_mem = mem_out;
                     let dst = if byte_off == 0 {
                         slot
                     } else {
@@ -132,7 +131,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         && self.stack_locals.is_stack(place.local)
                         && matches!(self.builder.value_type(addr), Some(Type::Ptr(_)))
                     {
-                        let (mem_out, loaded) = self.builder.load(
+                        let loaded = self.builder.load(
                             addr.into(),
                             8,
                             Type::Ptr(0),
@@ -140,7 +139,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             None,
                             Origin::synthetic(),
                         );
-                        self.current_mem = mem_out;
                         addr = loaded;
                     }
                     // The current value is a pointer; it IS the pointee address.
@@ -176,7 +174,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     if self.stack_locals.is_stack(local)
                         && matches!(self.builder.value_type(idx_val), Some(Type::Ptr(_)))
                     {
-                        let (mem_out, loaded) = self.builder.load(
+                        let loaded = self.builder.load(
                             idx_val.into(),
                             8,
                             Type::Int,
@@ -184,7 +182,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             None,
                             Origin::synthetic(),
                         );
-                        self.current_mem = mem_out;
                         idx_val = loaded;
                     }
                     let elem_size = type_size(
@@ -321,7 +318,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         // pointer value.  The second word (vtable/length) is handled
         // separately by the fat component extraction in translate_rvalue.
         if bytes > 8 && is_fat_ptr(self.tcx, projected_ty) {
-            let (mem_out, data) = self.builder.load(
+            let data = self.builder.load(
                 addr.into(),
                 8,
                 Type::Ptr(0),
@@ -329,7 +326,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 None,
                 Origin::synthetic(),
             );
-            self.current_mem = mem_out;
             return Some(data);
         }
         // For other types > 8 bytes, return the address directly so the
@@ -338,7 +334,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             return Some(addr);
         }
         let ty = translate_ty(projected_ty).unwrap_or(Type::Int);
-        let (mem_out, data) = self.builder.load(
+        let data = self.builder.load(
             addr.into(),
             bytes,
             ty,
@@ -346,7 +342,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             None,
             Origin::synthetic(),
         );
-        self.current_mem = mem_out;
         Some(data)
     }
 
@@ -419,7 +414,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 } else {
                     base_addr
                 };
-                let (mem_out, tag_val) = self.builder.load(
+                let tag_val = self.builder.load(
                     tag_addr.into(),
                     tag_size,
                     Type::Int,
@@ -427,7 +422,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     None,
                     Origin::synthetic(),
                 );
-                self.current_mem = mem_out;
 
                 match tag_encoding {
                     rustc_abi::TagEncoding::Direct => Some(tag_val),
@@ -569,7 +563,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let meta_addr =
                             self.builder
                                 .ptradd(addr.into(), off8.into(), 0, Origin::synthetic());
-                        let (mem_out, meta) = self.builder.load(
+                        let meta = self.builder.load(
                             meta_addr.into(),
                             8,
                             Type::Int,
@@ -577,7 +571,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             None,
                             Origin::synthetic(),
                         );
-                        self.current_mem = mem_out;
                         return Some(meta);
                     }
                 }
@@ -1447,7 +1440,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             if src_size > 8 && !is_fat_ptr(self.tcx, src_ty) {
                                 // val is an address; load the data pointer.
                                 let ptr_val = self.coerce_to_ptr(val);
-                                let (mem_out, data) = self.builder.load(
+                                let data = self.builder.load(
                                     ptr_val.into(),
                                     8,
                                     Type::Ptr(0),
@@ -1455,7 +1448,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     None,
                                     Origin::synthetic(),
                                 );
-                                self.current_mem = mem_out;
                                 return Some(data);
                             }
                         }
@@ -1473,7 +1465,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 let src_size = type_size(self.tcx, src_ty).unwrap_or(0);
                                 if src_size > 8 {
                                     let ir_ty = translate_ty(target_ty_mono).unwrap_or(Type::Int);
-                                    let (mem_out, data) = self.builder.load(
+                                    let data = self.builder.load(
                                         val.into(),
                                         target_size as u32,
                                         ir_ty,
@@ -1481,7 +1473,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         None,
                                         Origin::synthetic(),
                                     );
-                                    self.current_mem = mem_out;
                                     return Some(data);
                                 }
                             }
@@ -1780,7 +1771,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 self.builder
                                     .ptradd(val.into(), off.into(), 0, Origin::synthetic())
                             };
-                            let (mem_out, word) = self.builder.load(
+                            let word = self.builder.load(
                                 src.into(),
                                 word_size,
                                 Type::Int,
@@ -1788,7 +1779,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 None,
                                 Origin::synthetic(),
                             );
-                            self.current_mem = mem_out;
                             let dst = if byte_off == 0 {
                                 dst_addr
                             } else {
@@ -1813,7 +1803,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         && bytes <= 8
                         && self.builder.stack_slot_size(val).is_some()
                     {
-                        let (mem_out, loaded) = self.builder.load(
+                        let loaded = self.builder.load(
                             val.into(),
                             bytes,
                             Type::Int,
@@ -1821,7 +1811,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             None,
                             Origin::synthetic(),
                         );
-                        self.current_mem = mem_out;
                         self.current_mem = self.builder.store(
                             loaded.into(),
                             dst_addr.into(),
@@ -1877,7 +1866,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let len_addr =
                         self.builder
                             .ptradd(slot.into(), off8.into(), 0, Origin::synthetic());
-                    let (mem_out, data) = self.builder.load(
+                    let data = self.builder.load(
                         len_addr.into(),
                         8,
                         Type::Int,
@@ -1885,7 +1874,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         None,
                         Origin::synthetic(),
                     );
-                    self.current_mem = mem_out;
                     return Some(data);
                 }
                 // 3. Projected place (e.g. _s.field): compute the fat
@@ -1898,7 +1886,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let len_addr =
                         self.builder
                             .ptradd(addr.into(), off8.into(), 0, Origin::synthetic());
-                    let (mem_out, data) = self.builder.load(
+                    let data = self.builder.load(
                         len_addr.into(),
                         8,
                         Type::Int,
@@ -1906,7 +1894,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         None,
                         Origin::synthetic(),
                     );
-                    self.current_mem = mem_out;
                     return Some(data);
                 }
                 None
@@ -1916,15 +1903,33 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             }
             Rvalue::UnaryOp(mir::UnOp::Neg, operand) => {
                 let v = self.translate_operand(operand)?;
-                let neg_ann = match operand {
+                let op_ty = match operand {
                     Operand::Copy(p) | Operand::Move(p) => {
-                        let ty = p.ty(&self.mir.local_decls, self.tcx).ty;
-                        translate_annotation(self.monomorphize(ty))
+                        Some(self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty))
                     }
-                    Operand::Constant(c) => translate_annotation(self.monomorphize(c.ty())),
+                    Operand::Constant(c) => Some(self.monomorphize(c.ty())),
                     _ => None,
                 };
-                // Coerce Bool/Ptr to Int; reject unsupported types (floats → Unit).
+                // Float negation: XOR the sign bit in the integer bit pattern.
+                if let Some(ty) = op_ty {
+                    if ty.is_floating_point() {
+                        let v = self.coerce_to_int(v);
+                        let sign_mask = if type_size(self.tcx, ty) == Some(4) {
+                            0x80000000_u32 as i64
+                        } else {
+                            i64::MIN // 0x8000000000000000
+                        };
+                        let mask = self.builder.iconst(sign_mask, Origin::synthetic());
+                        return Some(self.builder.xor(
+                            v.into(),
+                            mask.into(),
+                            None,
+                            Origin::synthetic(),
+                        ));
+                    }
+                }
+                let neg_ann = op_ty.and_then(translate_annotation);
+                // Coerce Bool/Ptr to Int for integer negation.
                 let v = self.coerce_to_int(v);
                 if !matches!(self.builder.value_type(v), Some(Type::Int)) {
                     return Some(self.builder.iconst(0, Origin::synthetic()));
@@ -1953,7 +1958,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         .and_then(|t| type_size(self.tcx, t))
                         .unwrap_or(8) as u32;
                     if size > 0 {
-                        let (mem_out, loaded) = self.builder.load(
+                        let loaded = self.builder.load(
                             v.into(),
                             size,
                             Type::Int,
@@ -1961,7 +1966,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             not_ann,
                             Origin::synthetic(),
                         );
-                        self.current_mem = mem_out;
                         v = loaded;
                     }
                 }
@@ -2068,20 +2072,26 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let ty = self.monomorphize(self.mir.local_decls[place.local].ty);
                         let size = type_size(self.tcx, ty).unwrap_or(8);
                         let slot_size = self.builder.stack_slot_size(slot);
-                        let should_load_stack_int = matches!(translate_ty(ty), Some(Type::Int))
-                            && matches!(self.builder.value_type(slot), Some(Type::Ptr(_)))
+                        let ir_ty = translate_ty(ty);
+                        let is_slot_ptr = matches!(self.builder.value_type(slot), Some(Type::Ptr(_)));
+                        let should_load_stack_int = matches!(ir_ty, Some(Type::Int))
+                            && is_slot_ptr
                             && ((size <= 8 && slot_size.is_some_and(|sz| sz <= 8))
                                 || (size == 16 && is_i128_or_u128(ty) && slot_size == Some(16)));
-                        if should_load_stack_int {
-                            let (mem_out, loaded) = self.builder.load(
+                        let should_load_stack_ptr = matches!(ir_ty, Some(Type::Ptr(_)))
+                            && is_slot_ptr
+                            && size <= 8
+                            && slot_size.is_some_and(|sz| sz <= 8);
+                        if should_load_stack_int || should_load_stack_ptr {
+                            let load_ty = if should_load_stack_ptr { Type::Ptr(0) } else { Type::Int };
+                            let loaded = self.builder.load(
                                 slot.into(),
                                 size as u32,
-                                Type::Int,
+                                load_ty,
                                 self.current_mem.into(),
                                 None,
                                 Origin::synthetic(),
                             );
-                            self.current_mem = mem_out;
                             return Some(loaded);
                         }
                     }
@@ -2097,7 +2107,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let ty = self.monomorphize(self.mir.local_decls[place.local].ty);
                         let size = type_size(self.tcx, ty).unwrap_or(8);
                         if size <= 8 && matches!(translate_ty(ty), Some(Type::Int)) {
-                            let (mem_out, loaded) = self.builder.load(
+                            let loaded = self.builder.load(
                                 v.into(),
                                 size as u32,
                                 Type::Int,
@@ -2105,7 +2115,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 None,
                                 Origin::synthetic(),
                             );
-                            self.current_mem = mem_out;
                             return Some(loaded);
                         }
                     }

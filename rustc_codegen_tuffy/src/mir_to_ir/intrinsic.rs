@@ -610,7 +610,7 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
                         builder.ptradd(y.into(), o.into(), 0, Origin::synthetic()),
                     )
                 };
-                let (mem1, vx) = builder.load(
+                let vx = builder.load(
                     xa.into(),
                     chunk,
                     Type::Int,
@@ -618,15 +618,15 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
                     None,
                     Origin::synthetic(),
                 );
-                let (mem2, vy) = builder.load(
+                let vy = builder.load(
                     ya.into(),
                     chunk,
                     Type::Int,
-                    mem1.into(),
+                    mem.into(),
                     None,
                     Origin::synthetic(),
                 );
-                mem = builder.store(vy.into(), xa.into(), chunk, mem2.into(), Origin::synthetic());
+                mem = builder.store(vy.into(), xa.into(), chunk, mem.into(), Origin::synthetic());
                 mem = builder.store(vx.into(), ya.into(), chunk, mem.into(), Origin::synthetic());
             }
             Some(mem)
@@ -643,7 +643,7 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
             }
             let ptr = ir_args[0];
             let size = elem_size as u32;
-            let (mem_out, val) = builder.load(
+            let val = builder.load(
                 ptr.into(),
                 size,
                 Type::Int,
@@ -652,7 +652,7 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
                 Origin::synthetic(),
             );
             locals.set(destination_local, val);
-            Some(mem_out)
+            Some(current_mem)
         }
 
         // atomic_store_relaxed, atomic_store_release, atomic_store_seqcst
@@ -684,7 +684,7 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
             let size = elem_size as u32;
 
             // Load current value.
-            let (mem_out, old) = builder.load(
+            let old = builder.load(
                 ptr.into(),
                 size,
                 Type::Int,
@@ -692,7 +692,7 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
                 None,
                 Origin::synthetic(),
             );
-            let mut mem = mem_out;
+            let mem = current_mem;
 
             // Compare old == expected.
             let eq = builder.icmp(
@@ -753,7 +753,7 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
             let ptr = ir_args[0];
             let new_val = ir_args[1];
             let size = elem_size as u32;
-            let (mem_out, old) = builder.load(
+            let old = builder.load(
                 ptr.into(),
                 size,
                 Type::Int,
@@ -765,7 +765,7 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
                 new_val.into(),
                 ptr.into(),
                 size,
-                mem_out.into(),
+                current_mem.into(),
                 Origin::synthetic(),
             );
             locals.set(destination_local, old);
@@ -798,7 +798,7 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
             let operand = ir_args[1];
             let size = elem_size as u32;
 
-            let (mem_out, old) = builder.load(
+            let old = builder.load(
                 ptr.into(),
                 size,
                 Type::Int,
@@ -806,7 +806,7 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
                 None,
                 Origin::synthetic(),
             );
-            let mut mem = mem_out;
+            let mem = current_mem;
 
             // Compute new value based on the operation.
             let new_val = if name.starts_with("atomic_and") {

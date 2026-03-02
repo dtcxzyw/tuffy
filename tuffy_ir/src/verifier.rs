@@ -303,8 +303,11 @@ impl FuncVerifier<'_> {
         let loc = self.inst_loc(bi, ii);
 
         // Check result-side annotation validity.
+        // For multi-result instructions (Call), the annotation applies
+        // to the secondary result, not the primary (which is Mem).
         if let Some(ref ann) = inst.result_annotation {
-            self.check_annotation(ann, &inst.ty, "result annotation", &loc);
+            let check_ty = inst.secondary_ty.as_ref().unwrap_or(&inst.ty);
+            self.check_annotation(ann, check_ty, "result annotation", &loc);
         }
 
         match &inst.op {
@@ -539,6 +542,18 @@ impl FuncVerifier<'_> {
                 self.check_operand(mem, loc);
                 self.expect_ptr(ptr, "load ptr", loc);
                 self.expect_mem(mem, "load mem", loc);
+                if inst.ty == Type::Mem {
+                    self.result.error(
+                        loc.clone(),
+                        "load result must be a data type, not Mem".to_string(),
+                    );
+                }
+                if inst.secondary_ty.is_some() {
+                    self.result.error(
+                        loc.clone(),
+                        "load must not have a secondary result (it is a MemoryUse, not a MemoryDef)".to_string(),
+                    );
+                }
             }
             Op::Store(val, ptr, _bytes, mem) => {
                 self.check_operand(val, loc);

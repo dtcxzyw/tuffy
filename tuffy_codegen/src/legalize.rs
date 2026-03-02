@@ -572,7 +572,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
         Op::BoolToInt(a) => b.bool_to_int(remap_op(s, a), o()),
         Op::IntToBool(a) => b.int_to_bool(remap_op(s, a), o()),
         Op::Load(ptr, bytes, mem) => {
-            let (mem_out, data) = b.load(
+            let data = b.load(
                 remap_op(s, ptr),
                 *bytes,
                 inst.ty.clone(),
@@ -580,8 +580,8 @@ fn copy_inst<M: AbiMetadata + Clone>(
                 ann,
                 o(),
             );
-            s.vmap.set(mem.value, Mapped::One(mem_out));
-            data
+            s.vmap.set(old_vref, Mapped::One(data));
+            return;
         }
         Op::Store(val, ptr, bytes, mem) => b.store(
             remap_op(s, val),
@@ -1225,18 +1225,17 @@ fn leg_load_128<M>(
     let p = s.vmap.one(ptr.value);
     let m = s.vmap.one(mem.value);
 
-    let (mem1, lo) = b.load(Operand::new(p), 8, Type::Int, Operand::new(m), ann64, o());
+    let lo = b.load(Operand::new(p), 8, Type::Int, Operand::new(m), ann64, o());
     let c8 = b.iconst(8i64, o());
     let p_hi = b.ptradd(Operand::new(p), Operand::new(c8), 0, o());
-    let (mem2, hi) = b.load(
+    let hi = b.load(
         Operand::new(p_hi),
         8,
         Type::Int,
-        Operand::new(mem1),
+        Operand::new(m),
         ann64,
         o(),
     );
-    s.vmap.set(mem.value, Mapped::One(mem2));
     s.vmap.set(old_vref, Mapped::Pair(lo, hi));
 }
 

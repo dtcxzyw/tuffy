@@ -587,6 +587,7 @@ impl<'a> Builder<'a> {
     // ── Memory ──
 
     /// Load from pointer. `bytes` is the access width in bytes. Takes mem token input.
+    /// Load is a MemoryUse — it does not produce a new mem token.
     pub fn load(
         &mut self,
         ptr: Operand,
@@ -595,10 +596,8 @@ impl<'a> Builder<'a> {
         mem: Operand,
         ann: Option<Annotation>,
         origin: Origin,
-    ) -> (ValueRef, ValueRef) {
-        let primary = self.push_inst(Op::Load(ptr, bytes, mem), Type::Mem, Some(ty), origin, ann);
-        let secondary = ValueRef::inst_secondary_result(primary.index());
-        (primary, secondary)
+    ) -> ValueRef {
+        self.push_inst(Op::Load(ptr, bytes, mem), ty, None, origin, ann)
     }
 
     /// Store value to pointer. `bytes` is the access width. Takes mem token, returns mem token.
