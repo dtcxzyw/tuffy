@@ -11,6 +11,7 @@ use tuffy_ir::module::SymbolTable;
 use tuffy_target::backend::{AbiMetadata, Backend};
 use tuffy_target::types::{CompiledFunction, StaticData};
 use tuffy_target_x86::backend::{X86AbiMetadata, X86Backend};
+use tuffy_target_x86::legality::X86LegalityInfo;
 
 /// Target-agnostic code generation session.
 ///
@@ -56,7 +57,8 @@ impl CodegenSession {
 
     /// Compile a single IR function to machine code.
     ///
-    /// Runs wide-integer legalization before dispatching to the backend.
+    /// Runs legalization according to the target's legality rules before
+    /// dispatching to the backend.
     pub fn compile_function(
         &self,
         func: &Function,
@@ -65,7 +67,8 @@ impl CodegenSession {
     ) -> Option<CompiledFunction> {
         match (&self.inner, metadata) {
             (CodegenInner::X86(backend), AbiMetadataBox::X86(meta)) => {
-                let legalized = legalize::legalize_wide_integers(func, meta);
+                let legality = X86LegalityInfo;
+                let legalized = legalize::legalize(func, meta, &legality);
                 let (func_ref, meta_ref) = match &legalized {
                     Some((f, m)) => (f, m),
                     None => (func, meta),

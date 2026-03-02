@@ -2,5 +2,6 @@
 
 pub mod backend;
 pub mod isel;
+pub mod legality;
 pub mod reloc;
 pub mod types;

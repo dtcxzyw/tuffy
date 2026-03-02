@@ -1,8 +1,9 @@
 //! Wide-integer type legalization pass.
 //!
-//! Splits 128-bit integer operations into pairs of 64-bit operations
-//! before instruction selection. Target-independent: parameterized over
-//! the backend's ABI metadata type.
+//! Splits integer operations wider than the target's native register width
+//! into pairs of narrower operations before instruction selection.
+//! Target-independent: parameterized over the backend's ABI metadata type
+//! and target legality information.
 
 use std::collections::{HashMap, HashSet};
 
@@ -16,6 +17,7 @@ use tuffy_ir::types::{Annotation, Type};
 use tuffy_ir::value::{BlockRef, ValueRef};
 
 use tuffy_target::backend::AbiMetadata;
+use tuffy_target::legality::LegalityInfo;
 
 // ---------------------------------------------------------------------------
 // Value mapping
@@ -63,6 +65,20 @@ impl VMap {
 // Detection
 // ---------------------------------------------------------------------------
 
+fn annotation_width(ann: Option<&Annotation>) -> Option<u32> {
+    match ann {
+        Some(Annotation::Signed(w)) | Some(Annotation::Unsigned(w)) => Some(*w),
+        None => None,
+    }
+}
+
+fn is_wide_width(width: Option<u32>, legality: &impl LegalityInfo) -> bool {
+    match width {
+        Some(w) => w > legality.max_int_width(),
+        None => false,
+    }
+}
+
 fn is_128(ann: Option<&Annotation>) -> bool {
     matches!(
         ann,
@@ -78,6 +94,68 @@ fn needs_wide_const(v: &BigInt) -> bool {
     !v.is_zero() && v.to_i64().is_none() && v.to_u64().is_none()
 }
 
+fn has_wide_values<M: AbiMetadata>(
+    func: &Function,
+    metadata: &M,
+    legality: &impl LegalityInfo,
+) -> bool {
+    // Check for wide parameters
+    for ann in &func.param_annotations {
+        if is_wide_width(annotation_width(ann.as_ref()), legality) {
+            return true;
+        }
+    }
+
+    // Check for wide return type
+    if is_wide_width(annotation_width(func.ret_annotation.as_ref()), legality) {
+        return true;
+    }
+
+    // Check for wide instructions
+    for inst in &func.instructions {
+        if is_wide_width(annotation_width(inst.result_annotation.as_ref()), legality) {
+            return true;
+        }
+
+        // Check if operation needs legalization
+        if legality.needs_legalization(&inst.op, annotation_width(inst.result_annotation.as_ref()))
+        {
+            return true;
+        }
+
+        match &inst.op {
+            Op::Load(_, bytes, _) if *bytes > legality.max_int_width() / 8 => return true,
+            Op::Store(_, _, bytes, _) if *bytes > legality.max_int_width() / 8 => return true,
+            Op::Sext(_, bits) | Op::Zext(_, bits) if *bits > legality.max_int_width() => {
+                return true;
+            }
+            Op::Bswap(_, bytes) if *bytes > legality.max_int_width() / 8 => return true,
+            Op::RotateLeft(_, _, bits) | Op::RotateRight(_, _, bits)
+                if *bits > legality.max_int_width() =>
+            {
+                return true;
+            }
+            Op::SaturatingAdd(_, _, bits) | Op::SaturatingSub(_, _, bits)
+                if *bits > legality.max_int_width() =>
+            {
+                return true;
+            }
+            Op::Const(v) if needs_wide_const(v) => return true,
+            _ => {}
+        }
+    }
+
+    // Check for wide-return calls
+    for (i, _) in func.instructions.iter().enumerate() {
+        if metadata.is_wide_return_call(i as u32) {
+            return true;
+        }
+    }
+
+    false
+}
+
+#[allow(dead_code)]
 fn has_128bit_values(func: &Function) -> bool {
     if func.param_annotations.iter().any(|a| is_128(a.as_ref())) {
         return true;
@@ -106,26 +184,24 @@ fn has_128bit_values(func: &Function) -> bool {
 // Public entry point
 // ---------------------------------------------------------------------------
 
-/// Legalize wide (128-bit) integer operations into pairs of 64-bit ops.
+/// Legalize operations according to target legality rules.
 ///
-/// Returns `None` if the function has no 128-bit values and no wide-return
-/// calls, meaning no legalization is needed.
-pub fn legalize_wide_integers<M: AbiMetadata + Clone>(
+/// Iterates to a fixpoint:
+/// 1. Walk all instructions
+/// 2. Query LegalityInfo for each operation
+/// 3. Apply rewrite rules (split, expand, libcall)
+/// 4. Repeat until all instructions are legal
+///
+/// Returns `None` if no legalization is needed.
+pub fn legalize<M: AbiMetadata + Clone>(
     func: &Function,
     metadata: &M,
+    legality: &impl LegalityInfo,
 ) -> Option<(Function, M)> {
-    if !has_128bit_values(func) {
-        // No 128-bit IR values; check if any calls return wide values.
-        let has_wide_calls = func
-            .instructions
-            .iter()
-            .enumerate()
-            .any(|(i, _)| metadata.is_wide_return_call(i as u32));
-        if !has_wide_calls {
-            return None;
-        }
+    if !has_wide_values(func, metadata, legality) {
+        return None;
     }
-    let (out, state) = build_new_func(func, metadata);
+    let (out, state) = build_new_func(func, metadata, legality);
     Some(run_legalize(func, out, state))
 }
 
@@ -154,7 +230,11 @@ fn o() -> Origin {
     Origin::synthetic()
 }
 
-fn build_new_func<M: AbiMetadata + Clone>(old: &Function, old_meta: &M) -> (Function, State<M>) {
+fn build_new_func<M: AbiMetadata + Clone>(
+    old: &Function,
+    old_meta: &M,
+    legality: &impl LegalityInfo,
+) -> (Function, State<M>) {
     let mut params = Vec::new();
     let mut param_anns = Vec::new();
     let mut param_names = Vec::new();
@@ -163,14 +243,14 @@ fn build_new_func<M: AbiMetadata + Clone>(old: &Function, old_meta: &M) -> (Func
     for (i, ty) in old.params.iter().enumerate() {
         let ann = old.param_annotations.get(i).and_then(|a| a.as_ref());
         let name = old.param_names.get(i).and_then(|n| *n);
-        if is_128(ann) {
+        if is_wide_width(annotation_width(ann), legality) {
             let lo_idx = params.len() as u32;
             params.push(Type::Int);
-            param_anns.push(Some(Annotation::Unsigned(64)));
+            param_anns.push(Some(Annotation::Unsigned(legality.max_int_width())));
             param_names.push(name);
             let hi_idx = params.len() as u32;
             params.push(Type::Int);
-            param_anns.push(Some(Annotation::Unsigned(64)));
+            param_anns.push(Some(Annotation::Unsigned(legality.max_int_width())));
             param_names.push(None);
             param_map.push((lo_idx, Some(hi_idx)));
         } else {
@@ -183,13 +263,13 @@ fn build_new_func<M: AbiMetadata + Clone>(old: &Function, old_meta: &M) -> (Func
     }
 
     let ret_ty = old.ret_ty.clone();
-    let ret_ann = if is_128(old.ret_annotation.as_ref()) {
-        Some(Annotation::Unsigned(64))
+    let ret_ann = if is_wide_width(annotation_width(old.ret_annotation.as_ref()), legality) {
+        Some(Annotation::Unsigned(legality.max_int_width()))
     } else {
         old.ret_annotation
     };
 
-    let wide = collect_wide_values(old, old_meta);
+    let wide = collect_wide_values(old, old_meta, legality);
     let out = Function::new(old.name, params, param_anns, param_names, ret_ty, ret_ann);
     let state = State {
         meta: M::default(),
@@ -207,19 +287,21 @@ fn build_new_func<M: AbiMetadata + Clone>(old: &Function, old_meta: &M) -> (Func
 // Pre-scan: identify 128-bit values in the old function
 // ---------------------------------------------------------------------------
 
-fn collect_wide_values<M: AbiMetadata>(old: &Function, meta: &M) -> HashSet<u32> {
+fn collect_wide_values<M: AbiMetadata>(
+    old: &Function,
+    meta: &M,
+    legality: &impl LegalityInfo,
+) -> HashSet<u32> {
     let mut wide = HashSet::new();
 
-    // Mark instructions that produce 128-bit results.
+    // Mark instructions that produce wide results.
     for (i, inst) in old.instructions.iter().enumerate() {
         let vref = ValueRef::inst_result(i as u32);
-        if is_128(inst.result_annotation.as_ref()) {
+        if is_wide_width(annotation_width(inst.result_annotation.as_ref()), legality) {
             wide.insert(vref.raw());
             continue;
         }
-        // Calls returning i128/u128 are marked in ABI metadata (the call
-        // instruction itself has no result_annotation because its primary
-        // result type is Mem).
+        // Calls returning wide values are marked in ABI metadata
         if meta.is_wide_return_call(i as u32) {
             let sec = ValueRef::inst_secondary_result(i as u32);
             wide.insert(sec.raw());
@@ -228,19 +310,23 @@ fn collect_wide_values<M: AbiMetadata>(old: &Function, meta: &M) -> HashSet<u32>
             Op::Const(v) if needs_wide_const(v) => {
                 wide.insert(vref.raw());
             }
-            Op::Load(_, 16, _) => {
+            Op::Load(_, bytes, _) if *bytes > legality.max_int_width() / 8 => {
                 wide.insert(vref.raw());
             }
-            Op::Sext(_, 128) | Op::Zext(_, 128) => {
+            Op::Sext(_, bits) | Op::Zext(_, bits) if *bits > legality.max_int_width() => {
                 wide.insert(vref.raw());
             }
-            Op::Bswap(_, 16) => {
+            Op::Bswap(_, bytes) if *bytes > legality.max_int_width() / 8 => {
                 wide.insert(vref.raw());
             }
-            Op::RotateLeft(_, _, 128) | Op::RotateRight(_, _, 128) => {
+            Op::RotateLeft(_, _, bits) | Op::RotateRight(_, _, bits)
+                if *bits > legality.max_int_width() =>
+            {
                 wide.insert(vref.raw());
             }
-            Op::SaturatingAdd(_, _, 128) | Op::SaturatingSub(_, _, 128) => {
+            Op::SaturatingAdd(_, _, bits) | Op::SaturatingSub(_, _, bits)
+                if *bits > legality.max_int_width() =>
+            {
                 wide.insert(vref.raw());
             }
             _ => {}
