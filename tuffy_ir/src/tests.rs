@@ -1184,7 +1184,7 @@ fn verify_detects_load_non_ptr() {
     let mem0 = b.add_block_arg(bb, Type::Mem);
     let a = b.param(0, Type::Int, None, Origin::synthetic());
     // Load from Int instead of Ptr — should be flagged.
-    let v = b.load(
+    let (mem_out, v) = b.load(
         a.into(),
         4,
         Type::Int,
@@ -1192,7 +1192,7 @@ fn verify_detects_load_non_ptr() {
         None,
         Origin::synthetic(),
     );
-    b.ret(Some(v.into()), mem0.into(), Origin::synthetic());
+    b.ret(Some(v.into()), mem_out.into(), Origin::synthetic());
     b.exit_region();
 
     let result = verify_function(&func, &st);
@@ -1371,8 +1371,8 @@ fn memssa_store_load_threading() {
     let ptr = b.param(1, Type::Ptr(0), None, Origin::synthetic());
     // store produces mem1
     let mem1 = b.store(val.into(), ptr.into(), 4, mem0.into(), Origin::synthetic());
-    // load consumes mem1
-    let loaded = b.load(
+    // load consumes mem1, produces (mem_out, data)
+    let (mem_out, loaded) = b.load(
         ptr.into(),
         4,
         Type::Int,
@@ -1380,14 +1380,15 @@ fn memssa_store_load_threading() {
         None,
         Origin::synthetic(),
     );
-    // ret carries mem1 (store was the last memory def)
-    b.ret(Some(loaded.into()), mem1.into(), Origin::synthetic());
+    // ret carries mem_out (load's output memory)
+    b.ret(Some(loaded.into()), mem_out.into(), Origin::synthetic());
     b.exit_region();
 
     // Verify store result is Mem
     assert_eq!(func.instructions[2].ty, Type::Mem);
-    // Verify load result is Int (not Mem)
-    assert_eq!(func.instructions[3].ty, Type::Int);
+    // Verify load primary result is Mem, secondary is Int
+    assert_eq!(func.instructions[3].ty, Type::Mem);
+    assert_eq!(func.instructions[3].secondary_ty, Some(Type::Int));
 
     let result = verify_function(&func, &st);
     assert!(result.is_ok(), "expected no errors: {result}");
@@ -1476,7 +1477,7 @@ fn memssa_block_arg_phi() {
     // bb3: mem phi via block arg
     let mem_phi = b.add_block_arg(bb3, Type::Mem);
     b.switch_to_block(bb3);
-    let loaded = b.load(
+    let (mem_out, loaded) = b.load(
         ptr.into(),
         4,
         Type::Int,
@@ -1484,7 +1485,7 @@ fn memssa_block_arg_phi() {
         None,
         Origin::synthetic(),
     );
-    b.ret(Some(loaded.into()), mem_phi.into(), Origin::synthetic());
+    b.ret(Some(loaded.into()), mem_out.into(), Origin::synthetic());
 
     b.exit_region();
 
@@ -1515,7 +1516,7 @@ fn memssa_display_store_load() {
     let val = b.param(0, Type::Int, None, Origin::synthetic());
     let ptr = b.param(1, Type::Ptr(0), None, Origin::synthetic());
     let mem1 = b.store(val.into(), ptr.into(), 4, mem0.into(), Origin::synthetic());
-    let loaded = b.load(
+    let (mem_out, loaded) = b.load(
         ptr.into(),
         4,
         Type::Int,
@@ -1523,7 +1524,7 @@ fn memssa_display_store_load() {
         None,
         Origin::synthetic(),
     );
-    b.ret(Some(loaded.into()), mem1.into(), Origin::synthetic());
+    b.ret(Some(loaded.into()), mem_out.into(), Origin::synthetic());
     b.exit_region();
 
     let output = format!("{}", func.display(&st));
@@ -1535,7 +1536,7 @@ fn memssa_display_store_load() {
          \x20\x20\x20\x20v2 = param 1\n\
          \x20\x20\x20\x20v3 = store.4 v1, v2, v0\n\
          \x20\x20\x20\x20v4 = load.4 v2, v3\n\
-         \x20\x20\x20\x20ret v4, v3\n\
+         \x20\x20\x20\x20ret v5, v4\n\
          }"
     );
 }

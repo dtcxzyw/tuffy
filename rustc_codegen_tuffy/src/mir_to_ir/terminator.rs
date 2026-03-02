@@ -14,6 +14,17 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     pub(super) fn translate_terminator(&mut self, term: &mir::Terminator<'tcx>) {
         match &term.kind {
             TerminatorKind::Return => {
+                // SRET: the return data was written directly through the SRET
+                // pointer. Just return the pointer itself (goes in RAX).
+                if let Some(sret) = self.sret_ptr {
+                    self.builder.ret(
+                        Some(sret.into()),
+                        self.current_mem.into(),
+                        Origin::synthetic(),
+                    );
+                    return;
+                }
+
                 let ret_local = mir::Local::from_usize(0);
                 let ret_mir_ty = self.monomorphize(self.mir.local_decls[ret_local].ty);
 
@@ -54,7 +65,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // of reading garbage bytes beyond the stored value.
                     let load_size = size.min(8) as u32;
                     let load_ty = translate_ty(ret_mir_ty).unwrap_or(Type::Int);
-                    let word0 = self.builder.load(
+                    let (mem_out, word0) = self.builder.load(
                         slot.into(),
                         load_size,
                         load_ty,
@@ -62,6 +73,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         None,
                         Origin::synthetic(),
                     );
+                    self.current_mem = mem_out;
 
                     if size > 8 {
                         // Second 8 bytes will be handled by backend ABI lowering.
@@ -94,14 +106,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 // of converting the address to an integer.
                                 let ret_size =
                                     type_size(self.tcx, ret_mir_ty).unwrap_or(8).min(8) as u32;
-                                self.builder.load(
+                                let (mem_out, loaded) = self.builder.load(
                                     v.into(),
                                     ret_size,
                                     Type::Int,
                                     self.current_mem.into(),
                                     None,
                                     Origin::synthetic(),
-                                )
+                                );
+                                self.current_mem = mem_out;
+                                loaded
                             }
                             (Some(Type::Int), _) => self.coerce_to_int(v),
                             (Some(Type::Ptr(_)), _) => self.coerce_to_ptr(v),
@@ -201,7 +215,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let vtable_ptr = self.fat_locals.get(base_local);
                         if let (Some(data), Some(vtable)) = (data_ptr, vtable_ptr) {
                             // Load drop function pointer from vtable[0].
-                            let drop_fn = self.builder.load(
+                            let (mem_out, drop_fn) = self.builder.load(
                                 vtable.into(),
                                 8,
                                 Type::Ptr(0),
@@ -209,6 +223,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 None,
                                 Origin::synthetic(),
                             );
+                            self.current_mem = mem_out;
                             let (call_mem, _) = self.builder.call(
                                 drop_fn.into(),
                                 vec![data.into()],

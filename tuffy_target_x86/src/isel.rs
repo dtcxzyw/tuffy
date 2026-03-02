@@ -558,6 +558,310 @@ fn select_inst(
             unimplemented!("x86 isel: atomic op {:?}", op)
         }
 
+        Op::Bswap(val, byte_count) => {
+            let s = ctx.ensure_in_reg(val.value)?;
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst,
+                src: s,
+            });
+            let size = if *byte_count >= 8 {
+                OpSize::S64
+            } else {
+                OpSize::S32
+            };
+            ctx.out.push(MInst::Bswap { size, dst });
+            if *byte_count == 2 {
+                // bswap r32 puts result in high 16 bits of 32-bit reg; shift right
+                let cl = ctx.alloc.alloc_fixed(Gpr::Rcx.to_preg());
+                ctx.out.push(MInst::MovRI {
+                    size: OpSize::S32,
+                    dst: cl,
+                    imm: 16,
+                });
+                ctx.out.push(MInst::ShrRCL {
+                    size: OpSize::S64,
+                    dst,
+                });
+            }
+            ctx.regs.assign(vref, dst);
+        }
+
+        Op::RotateLeft(val, amt, _) => {
+            let v = ctx.ensure_in_reg(val.value)?;
+            let a = ctx.ensure_in_reg(amt.value)?;
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst,
+                src: v,
+            });
+            let cl = ctx.alloc.alloc_fixed(Gpr::Rcx.to_preg());
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst: cl,
+                src: a,
+            });
+            ctx.out.push(MInst::RolRCL {
+                size: OpSize::S64,
+                dst,
+            });
+            ctx.regs.assign(vref, dst);
+        }
+
+        Op::RotateRight(val, amt, _) => {
+            let v = ctx.ensure_in_reg(val.value)?;
+            let a = ctx.ensure_in_reg(amt.value)?;
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst,
+                src: v,
+            });
+            let cl = ctx.alloc.alloc_fixed(Gpr::Rcx.to_preg());
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst: cl,
+                src: a,
+            });
+            ctx.out.push(MInst::RorRCL {
+                size: OpSize::S64,
+                dst,
+            });
+            ctx.regs.assign(vref, dst);
+        }
+
+        Op::BitReverse(val, bits) => {
+            // Byte-swap + reverse bits within each byte via shift-mask sequence
+            let s = ctx.ensure_in_reg(val.value)?;
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst,
+                src: s,
+            });
+            let bc = *bits / 8;
+            if bc >= 4 {
+                let sz = if bc >= 8 { OpSize::S64 } else { OpSize::S32 };
+                ctx.out.push(MInst::Bswap { size: sz, dst });
+            }
+            // Reverse bits within each byte: 3 rounds of swap-adjacent-groups
+            for (mask, shift) in [
+                (0x5555555555555555u64, 1u8),
+                (0x3333333333333333u64, 2u8),
+                (0x0F0F0F0F0F0F0F0Fu64, 4u8),
+            ] {
+                // t1 = (dst >> shift) & mask
+                let t1 = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst: t1,
+                    src: dst,
+                });
+                let cl = ctx.alloc.alloc_fixed(Gpr::Rcx.to_preg());
+                ctx.out.push(MInst::MovRI {
+                    size: OpSize::S32,
+                    dst: cl,
+                    imm: shift as i64,
+                });
+                ctx.out.push(MInst::ShrRCL {
+                    size: OpSize::S64,
+                    dst: t1,
+                });
+                let m = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRI64 {
+                    dst: m,
+                    imm: mask as i64,
+                });
+                ctx.out.push(MInst::AndRR {
+                    size: OpSize::S64,
+                    dst: t1,
+                    src: m,
+                });
+                // t2 = (dst & mask) << shift
+                let t2 = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst: t2,
+                    src: dst,
+                });
+                let m2 = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRI64 {
+                    dst: m2,
+                    imm: mask as i64,
+                });
+                ctx.out.push(MInst::AndRR {
+                    size: OpSize::S64,
+                    dst: t2,
+                    src: m2,
+                });
+                ctx.out.push(MInst::ShlImm {
+                    size: OpSize::S64,
+                    dst: t2,
+                    imm: shift,
+                });
+                // dst = t1 | t2
+                ctx.out.push(MInst::OrRR {
+                    size: OpSize::S64,
+                    dst: t1,
+                    src: t2,
+                });
+                ctx.out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst,
+                    src: t1,
+                });
+            }
+            if *bits < 64 {
+                let cl = ctx.alloc.alloc_fixed(Gpr::Rcx.to_preg());
+                ctx.out.push(MInst::MovRI {
+                    size: OpSize::S32,
+                    dst: cl,
+                    imm: (64 - *bits) as i64,
+                });
+                ctx.out.push(MInst::ShrRCL {
+                    size: OpSize::S64,
+                    dst,
+                });
+            }
+            ctx.regs.assign(vref, dst);
+        }
+
+        Op::SaturatingAdd(lhs, rhs, bits) => {
+            let l = ctx.ensure_in_reg(lhs.value)?;
+            let r = ctx.ensure_in_reg(rhs.value)?;
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst,
+                src: l,
+            });
+            ctx.out.push(MInst::AddRR {
+                size: OpSize::S64,
+                dst,
+                src: r,
+            });
+            if *bits < 64 {
+                let max_val = (1u64 << bits) - 1;
+                ctx.out.push(MInst::AndRI {
+                    size: OpSize::S64,
+                    dst,
+                    imm: max_val as i64,
+                });
+                // Check overflow: if result < lhs (masked), saturate
+                let lm = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst: lm,
+                    src: l,
+                });
+                ctx.out.push(MInst::AndRI {
+                    size: OpSize::S64,
+                    dst: lm,
+                    imm: max_val as i64,
+                });
+                ctx.out.push(MInst::CmpRR {
+                    size: OpSize::S64,
+                    src1: dst,
+                    src2: lm,
+                });
+                let sat = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRI64 {
+                    dst: sat,
+                    imm: max_val as i64,
+                });
+                ctx.out.push(MInst::CMOVcc {
+                    size: OpSize::S64,
+                    cc: CondCode::B,
+                    dst,
+                    src: sat,
+                });
+            } else {
+                ctx.out.push(MInst::CmpRR {
+                    size: OpSize::S64,
+                    src1: dst,
+                    src2: l,
+                });
+                let sat = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRI64 {
+                    dst: sat,
+                    imm: -1i64,
+                });
+                ctx.out.push(MInst::CMOVcc {
+                    size: OpSize::S64,
+                    cc: CondCode::B,
+                    dst,
+                    src: sat,
+                });
+            }
+            ctx.regs.assign(vref, dst);
+        }
+
+        Op::SaturatingSub(lhs, rhs, bits) => {
+            let l = ctx.ensure_in_reg(lhs.value)?;
+            let r = ctx.ensure_in_reg(rhs.value)?;
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst,
+                src: l,
+            });
+            if *bits < 64 {
+                let max_val = (1u64 << bits) - 1;
+                ctx.out.push(MInst::AndRI {
+                    size: OpSize::S64,
+                    dst,
+                    imm: max_val as i64,
+                });
+                let rm = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst: rm,
+                    src: r,
+                });
+                ctx.out.push(MInst::AndRI {
+                    size: OpSize::S64,
+                    dst: rm,
+                    imm: max_val as i64,
+                });
+                ctx.out.push(MInst::CmpRR {
+                    size: OpSize::S64,
+                    src1: dst,
+                    src2: rm,
+                });
+                ctx.out.push(MInst::SubRR {
+                    size: OpSize::S64,
+                    dst,
+                    src: rm,
+                });
+            } else {
+                ctx.out.push(MInst::CmpRR {
+                    size: OpSize::S64,
+                    src1: dst,
+                    src2: r,
+                });
+                ctx.out.push(MInst::SubRR {
+                    size: OpSize::S64,
+                    dst,
+                    src: r,
+                });
+            }
+            let zero = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRI {
+                size: OpSize::S32,
+                dst: zero,
+                imm: 0,
+            });
+            ctx.out.push(MInst::CMOVcc {
+                size: OpSize::S64,
+                cc: CondCode::B,
+                dst,
+                src: zero,
+            });
+            ctx.regs.assign(vref, dst);
+        }
+
         Op::SymbolAddr(sym_id) => {
             // Defer LeaSymbol emission — only emit when ensure_in_reg is called.
             // This avoids dead code when the symbol is only used as a direct call callee
@@ -694,6 +998,19 @@ fn select_call(
         arg_vregs.push(src);
     }
 
+    // Phase 1b: handle SRET (structure return) by passing a hidden pointer
+    // as the first argument (RDI) when the call's result is stored in a
+    // stack slot (i.e., a large struct). The stack slot address is obtained
+    // by ensuring the call result is in a register, which for stack slots
+    // produces a LEA of the slot address.
+    if ctx.stack.get(vref).is_some() {
+        // The call returns a struct via a hidden pointer argument.
+        // Ensure we have the address of the return slot.
+        let ret_addr = ctx.ensure_in_reg(vref)?;
+        // Insert as the first argument.
+        arg_vregs.insert(0, ret_addr);
+    }
+
     // Phase 2: push stack arguments (args beyond the 6 register slots).
     // System V AMD64 ABI: args 7+ go on the stack, pushed right-to-left.
     // RSP must be 16-byte aligned before the call instruction.
@@ -735,7 +1052,12 @@ fn select_call(
 
     // Classify call ABI behavior in one place, then lower according to the plan.
     let abi = classify_call_abi(func, vref, call_has_ret2);
-    let ret_vreg = if abi.has_primary_return {
+    // Detect SRET: if the call's primary result is allocated to a stack slot
+    // (i.e., a large struct), the hidden pointer argument has already been
+    // inserted as the first argument and the callee does not return a value
+    // in RAX. In this case we suppress the primary return handling.
+    let is_sret = ctx.stack.get(vref).is_some();
+    let ret_vreg = if abi.has_primary_return && !is_sret {
         let rax = ctx.alloc.alloc_fixed(Gpr::Rax.to_preg());
         Some(rax)
     } else {

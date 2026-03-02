@@ -83,8 +83,17 @@ pub fn translate_function<'tcx>(
     let mut param_anns = Vec::new();
 
     let ret_mir_ty = monomorphize(mir.local_decls[mir::RETURN_PLACE].ty);
-    let ret_ty = translate_ty(ret_mir_ty).filter(|t| !matches!(t, Type::Unit));
-    let ret_ann = translate_annotation(ret_mir_ty);
+    let ret_size = type_size(tcx, ret_mir_ty).unwrap_or(0);
+    let needs_sret = ret_size > 16;
+
+    // For SRET functions, the return type becomes Ptr (the SRET pointer is
+    // returned in RAX per SysV ABI). Otherwise, use the semantic return type.
+    let (ret_ty, ret_ann) = if needs_sret {
+        (Some(Type::Ptr(0)), None)
+    } else {
+        let ty = translate_ty(ret_mir_ty).filter(|t| !matches!(t, Type::Unit));
+        (ty, translate_annotation(ret_mir_ty))
+    };
 
     let mut symbols = SymbolTable::new();
     let func_sym = symbols.intern(&name);
@@ -92,6 +101,13 @@ pub fn translate_function<'tcx>(
     // Build all-args name map first, then filter to match params.
     let all_names = extract_param_names(mir, &mut symbols);
     let mut param_names = Vec::new();
+
+    // For SRET, prepend a hidden Ptr parameter (the return slot pointer).
+    if needs_sret {
+        params.push(Type::Ptr(0));
+        param_anns.push(None);
+        param_names.push(None);
+    }
 
     for i in 0..mir.arg_count {
         let local = mir::Local::from_usize(i + 1);
@@ -148,9 +164,18 @@ pub fn translate_function<'tcx>(
         cast_fat_meta: FatLocalMap::new(),
         referenced_instances: Vec::new(),
         data_counter,
+        sret_ptr: None,
     };
 
     // Emit params into the entry block.
+    if needs_sret {
+        // Param 0 is the hidden SRET pointer. Capture it and assign to _0.
+        let sret = ctx.builder.param(0, Type::Ptr(0), None, Origin::synthetic());
+        ctx.sret_ptr = Some(sret);
+        let ret_local = mir::Local::from_usize(0);
+        ctx.locals.set(ret_local, sret);
+        ctx.stack_locals.mark(ret_local);
+    }
     ctx.translate_params();
 
     // Pre-scan: find scalar locals assigned in more than one basic block.

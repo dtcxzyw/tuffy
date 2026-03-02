@@ -152,6 +152,9 @@ pub(super) struct TranslationCtx<'a, 'tcx> {
     pub(super) referenced_instances: Vec<Instance<'tcx>>,
     /// Counter for generating unique static data symbol names within a CGU.
     pub(super) data_counter: &'a mut u64,
+    /// SRET pointer for functions returning large structs (>16 bytes).
+    /// When set, param indices are shifted by 1 (param 0 = hidden SRET ptr).
+    pub(super) sret_ptr: Option<ValueRef>,
 }
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
@@ -227,7 +230,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     }
 
     pub(super) fn translate_params(&mut self) {
-        let mut param_idx: u32 = 0;
+        // When SRET is active, param 0 is the hidden return pointer.
+        // Real MIR params start at index 1.
+        let mut param_idx: u32 = if self.sret_ptr.is_some() { 1 } else { 0 };
 
         for i in 0..self.mir.arg_count {
             let local = mir::Local::from_usize(i + 1);

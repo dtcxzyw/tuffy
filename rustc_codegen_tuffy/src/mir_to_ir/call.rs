@@ -369,7 +369,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         Origin::synthetic(),
                                     )
                                 };
-                                let word = self.builder.load(
+                                let (mem_out, word) = self.builder.load(
                                     src_addr.into(),
                                     chunk,
                                     Type::Int,
@@ -377,6 +377,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     None,
                                     Origin::synthetic(),
                                 );
+                                self.current_mem = mem_out;
                                 let dst_addr = if offset == 0 {
                                     slot
                                 } else {
@@ -546,7 +547,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 0,
                                 Origin::synthetic(),
                             );
-                            let vtable = self.builder.load(
+                            let (mem_out, vtable) = self.builder.load(
                                 vtable_addr.into(),
                                 8,
                                 Type::Ptr(0),
@@ -554,6 +555,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 None,
                                 Origin::synthetic(),
                             );
+                            self.current_mem = mem_out;
                             Some(vtable)
                         } else {
                             None
@@ -571,7 +573,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 0,
                                 Origin::synthetic(),
                             );
-                            let vtable = self.builder.load(
+                            let (mem_out, vtable) = self.builder.load(
                                 vtable_addr.into(),
                                 8,
                                 Type::Ptr(0),
@@ -579,6 +581,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 None,
                                 Origin::synthetic(),
                             );
+                            self.current_mem = mem_out;
                             Some(vtable)
                         } else {
                             None
@@ -598,7 +601,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let fn_addr =
                     self.builder
                         .ptradd(vtable.into(), off_val.into(), 0, Origin::synthetic());
-                let fn_ptr = self.builder.load(
+                let (mem_out, fn_ptr) = self.builder.load(
                     fn_addr.into(),
                     8,
                     Type::Int,
@@ -606,6 +609,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     None,
                     Origin::synthetic(),
                 );
+                self.current_mem = mem_out;
                 Some(fn_ptr)
             } else {
                 None
@@ -623,6 +627,27 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             self.monomorphize(destination.ty(&self.mir.local_decls, self.tcx).ty)
         };
         let dest_size = type_size(self.tcx, dest_ty);
+
+        // Check if this is a large struct return (>16 bytes) that requires SRET.
+        // On x86-64 SysV ABI, structs larger than 16 bytes are returned via
+        // a hidden pointer passed as the first argument.
+        let needs_sret = dest_size.map_or(false, |sz| sz > 16);
+        let sret_slot = if needs_sret {
+            // If the destination is _0 and the function itself has an SRET
+            // pointer, reuse it so the callee writes directly into the
+            // caller's return buffer (avoids an extra copy).
+            if destination.projection.is_empty()
+                && destination.local == mir::Local::from_usize(0)
+                && let Some(sret) = self.sret_ptr
+            {
+                Some(sret)
+            } else {
+                let sz = dest_size.unwrap() as u32;
+                Some(self.builder.stack_slot(sz, Origin::synthetic()))
+            }
+        } else {
+            None
+        };
 
         // When the destination has projections (e.g. `_5.fld0 = fn1()`),
         // pre-compute the projected address before translating arguments
@@ -646,6 +671,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
         // Translate arguments to IR operands using semantic values.
         let mut ir_args: Vec<tuffy_ir::instruction::Operand> = Vec::new();
+
+        // For SRET, pass the return slot address as the first argument.
+        if let Some(slot) = sret_slot {
+            ir_args.push(slot.into());
+        }
 
         for arg in args {
             // Skip zero-sized (Unit) and untranslatable args — they don't
@@ -700,7 +730,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         };
                         if fsz <= 8 {
                             let fty = translate_ty(ft).unwrap_or(Type::Int);
-                            let val = self.builder.load(
+                            let (mem_out, val) = self.builder.load(
                                 addr.into(),
                                 fsz as u32,
                                 fty,
@@ -708,10 +738,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 None,
                                 Origin::synthetic(),
                             );
+                            self.current_mem = mem_out;
                             ir_args.push(val.into());
                         } else if fsz <= 16 {
                             // Decompose 9-16 byte fields into two words.
-                            let w0 = self.builder.load(
+                            let (mem_out, w0) = self.builder.load(
                                 addr.into(),
                                 8,
                                 Type::Int,
@@ -719,6 +750,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 None,
                                 Origin::synthetic(),
                             );
+                            self.current_mem = mem_out;
                             ir_args.push(w0.into());
                             let off8 = self.builder.iconst(8, Origin::synthetic());
                             let a1 = self.builder.ptradd(
@@ -727,7 +759,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 0,
                                 Origin::synthetic(),
                             );
-                            let w1 = self.builder.load(
+                            let (mem_out, w1) = self.builder.load(
                                 a1.into(),
                                 8,
                                 Type::Int,
@@ -735,6 +767,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 None,
                                 Origin::synthetic(),
                             );
+                            self.current_mem = mem_out;
                             ir_args.push(w1.into());
                         } else {
                             // >16 byte fields: pass pointer.
@@ -854,7 +887,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let arg_ty = self.builder.value_type(ir_args[self_idx].value);
                 if matches!(arg_ty, Some(Type::Ptr(_))) {
                     let old_self = ir_args[self_idx].clone();
-                    let derefed = self.builder.load(
+                    let (mem_out, derefed) = self.builder.load(
                         old_self,
                         8,
                         Type::Ptr(0),
@@ -862,6 +895,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         None,
                         Origin::synthetic(),
                     );
+                    self.current_mem = mem_out;
                     ir_args[self_idx] = derefed.into();
                 }
             }
@@ -921,6 +955,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     );
                 }
             }
+        } else if let Some(slot) = sret_slot {
+            // SRET return (>16 bytes): the callee wrote the struct to the
+            // stack slot we passed as the first argument. Just record the
+            // slot as the destination local.
+            self.locals.set(destination.local, slot);
+            self.stack_locals.mark(destination.local);
         } else if dest_size.unwrap_or(0) > 8 && !is_i128_or_u128(dest_ty) {
             // Two-register return (9-16 bytes): backend will handle RDX capture
             // and stack reconstruction based on call result type and size.

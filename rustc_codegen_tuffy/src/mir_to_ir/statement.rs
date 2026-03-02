@@ -241,7 +241,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                             Origin::synthetic(),
                                                         )
                                                     };
-                                                    let word = self.builder.load(
+                                                    let (mem_out, word) = self.builder.load(
                                                         src_addr.into(),
                                                         chunk,
                                                         Type::Int,
@@ -249,6 +249,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                         None,
                                                         Origin::synthetic(),
                                                     );
+                                                    self.current_mem = mem_out;
                                                     let dst_addr = if byte_off == 0 {
                                                         slot
                                                     } else {
@@ -366,7 +367,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                             Origin::synthetic(),
                                                         )
                                                     };
-                                                    let word = self.builder.load(
+                                                    let (mem_out, word) = self.builder.load(
                                                         src_addr.into(),
                                                         chunk,
                                                         Type::Int,
@@ -374,6 +375,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                         None,
                                                         Origin::synthetic(),
                                                     );
+                                                    self.current_mem = mem_out;
                                                     let dst_addr = if byte_off == 0 {
                                                         slot
                                                     } else {
@@ -568,7 +570,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                 Origin::synthetic(),
                                             )
                                         };
-                                        let word = self.builder.load(
+                                        let (mem_out, word) = self.builder.load(
                                             src_addr.into(),
                                             chunk,
                                             Type::Int,
@@ -576,6 +578,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                             None,
                                             Origin::synthetic(),
                                         );
+                                        self.current_mem = mem_out;
                                         let dst_addr = if off == 0 {
                                             new_slot
                                         } else {
@@ -682,7 +685,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                 Origin::synthetic(),
                                             )
                                         };
-                                        let word = self.builder.load(
+                                        let (mem_out, word) = self.builder.load(
                                             src_addr.into(),
                                             chunk,
                                             Type::Int,
@@ -690,6 +693,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                             None,
                                             Origin::synthetic(),
                                         );
+                                        self.current_mem = mem_out;
                                         let dst_addr = if byte_off == 0 {
                                             addr
                                         } else {
@@ -857,7 +861,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 0,
                                 Origin::synthetic(),
                             );
-                            let meta = self.builder.load(
+                            let (mem_out, meta) = self.builder.load(
                                 meta_addr.into(),
                                 8,
                                 Type::Int,
@@ -865,6 +869,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 None,
                                 Origin::synthetic(),
                             );
+                            self.current_mem = mem_out;
                             self.cast_fat_meta.set(place.local, meta);
                         }
                     }

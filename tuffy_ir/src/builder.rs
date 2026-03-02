@@ -595,8 +595,10 @@ impl<'a> Builder<'a> {
         mem: Operand,
         ann: Option<Annotation>,
         origin: Origin,
-    ) -> ValueRef {
-        self.push_inst(Op::Load(ptr, bytes, mem), ty, None, origin, ann)
+    ) -> (ValueRef, ValueRef) {
+        let primary = self.push_inst(Op::Load(ptr, bytes, mem), Type::Mem, Some(ty), origin, ann);
+        let secondary = ValueRef::inst_secondary_result(primary.index());
+        (primary, secondary)
     }
 
     /// Store value to pointer. `bytes` is the access width. Takes mem token, returns mem token.

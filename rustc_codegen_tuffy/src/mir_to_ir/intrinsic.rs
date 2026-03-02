@@ -400,8 +400,40 @@ pub(super) fn translate_intrinsic<'tcx>(
             true
         }
 
-        // Unhandled intrinsics must be reported.
-        _ => unimplemented!("MIR intrinsic: {}", name),
+        // Funnel shifts: fshl(a, b, c) = (a << c) | (b >> (bits - c))
+        //                fshr(a, b, c) = (a << (bits - c)) | (b >> c)
+        "unchecked_funnel_shl" | "unchecked_funnel_shr" => {
+            if ir_args.len() >= 3 {
+                let a = ir_args[0];
+                let b = ir_args[1];
+                let c = ir_args[2];
+                let bits = substs
+                    .first()
+                    .and_then(|arg| arg.as_type())
+                    .and_then(|t| type_size(tcx, t))
+                    .map(|sz| (sz * 8) as i64)
+                    .unwrap_or(64);
+                let bits_val = builder.iconst(bits, Origin::synthetic());
+                let complement = builder.sub(bits_val.into(), c.into(), None, Origin::synthetic());
+                let (hi, lo) = if name == "unchecked_funnel_shl" {
+                    (
+                        builder.shl(a.into(), c.into(), None, Origin::synthetic()),
+                        builder.shr(b.into(), complement.into(), None, Origin::synthetic()),
+                    )
+                } else {
+                    (
+                        builder.shl(a.into(), complement.into(), None, Origin::synthetic()),
+                        builder.shr(b.into(), c.into(), None, Origin::synthetic()),
+                    )
+                };
+                let result = builder.or(hi.into(), lo.into(), None, Origin::synthetic());
+                locals.set(destination_local, result);
+            }
+            true
+        }
+
+        // Not handled here — fall through to translate_memory_intrinsic.
+        _ => false,
     }
 }
 
@@ -578,7 +610,7 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
                         builder.ptradd(y.into(), o.into(), 0, Origin::synthetic()),
                     )
                 };
-                let vx = builder.load(
+                let (mem1, vx) = builder.load(
                     xa.into(),
                     chunk,
                     Type::Int,
@@ -586,15 +618,15 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
                     None,
                     Origin::synthetic(),
                 );
-                let vy = builder.load(
+                let (mem2, vy) = builder.load(
                     ya.into(),
                     chunk,
                     Type::Int,
-                    mem.into(),
+                    mem1.into(),
                     None,
                     Origin::synthetic(),
                 );
-                mem = builder.store(vy.into(), xa.into(), chunk, mem.into(), Origin::synthetic());
+                mem = builder.store(vy.into(), xa.into(), chunk, mem2.into(), Origin::synthetic());
                 mem = builder.store(vx.into(), ya.into(), chunk, mem.into(), Origin::synthetic());
             }
             Some(mem)
@@ -611,7 +643,7 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
             }
             let ptr = ir_args[0];
             let size = elem_size as u32;
-            let val = builder.load(
+            let (mem_out, val) = builder.load(
                 ptr.into(),
                 size,
                 Type::Int,
@@ -620,7 +652,7 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
                 Origin::synthetic(),
             );
             locals.set(destination_local, val);
-            Some(current_mem)
+            Some(mem_out)
         }
 
         // atomic_store_relaxed, atomic_store_release, atomic_store_seqcst
@@ -652,7 +684,7 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
             let size = elem_size as u32;
 
             // Load current value.
-            let old = builder.load(
+            let (mem_out, old) = builder.load(
                 ptr.into(),
                 size,
                 Type::Int,
@@ -660,6 +692,7 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
                 None,
                 Origin::synthetic(),
             );
+            let mut mem = mem_out;
 
             // Compare old == expected.
             let eq = builder.icmp(
@@ -681,7 +714,7 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
                 store_val.into(),
                 ptr.into(),
                 size,
-                current_mem.into(),
+                mem.into(),
                 Origin::synthetic(),
             );
 
@@ -720,7 +753,7 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
             let ptr = ir_args[0];
             let new_val = ir_args[1];
             let size = elem_size as u32;
-            let old = builder.load(
+            let (mem_out, old) = builder.load(
                 ptr.into(),
                 size,
                 Type::Int,
@@ -732,7 +765,7 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
                 new_val.into(),
                 ptr.into(),
                 size,
-                current_mem.into(),
+                mem_out.into(),
                 Origin::synthetic(),
             );
             locals.set(destination_local, old);
@@ -765,7 +798,7 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
             let operand = ir_args[1];
             let size = elem_size as u32;
 
-            let old = builder.load(
+            let (mem_out, old) = builder.load(
                 ptr.into(),
                 size,
                 Type::Int,
@@ -773,6 +806,7 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
                 None,
                 Origin::synthetic(),
             );
+            let mut mem = mem_out;
 
             // Compute new value based on the operation.
             let new_val = if name.starts_with("atomic_and") {
@@ -856,14 +890,14 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
                 new_val.into(),
                 ptr.into(),
                 size,
-                current_mem.into(),
+                mem.into(),
                 Origin::synthetic(),
             );
             locals.set(destination_local, old);
             Some(new_mem)
         }
 
-        _ => unimplemented!("MIR memory intrinsic: {}", name),
+        _ => None,
     }
 }
 
