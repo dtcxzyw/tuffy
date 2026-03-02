@@ -415,19 +415,29 @@ pub fn translate_function<'tcx>(
                         if size == 0 {
                             continue;
                         }
+                        // Large Memory-class params (size > 16, e.g. (bool, [i128; 1]) at
+                        // 32 bytes) are passed by pointer in the SysV ABI.  The existing
+                        // locals value IS already the pointer to the data in the caller's
+                        // stack frame.  Creating a new slot and only copying 8 bytes (the
+                        // pointer itself) would lose the indirection, so just mark the
+                        // local as stack-allocated without allocating a new slot.
+                        if matches!(repr_kind(tcx, ty), ReprKind::Memory) && size > 16 {
+                            ctx.stack_locals.mark(local);
+                            continue;
+                        }
                         let slot = ctx
                             .builder
                             .stack_slot(std::cmp::max(size as u32, 1), Origin::synthetic());
                         if let Some(prev) = ctx.locals.get(local) {
-                            // i128/u128 are single IR values that need a
-                            // full-width store (16 bytes).  Other large types
-                            // (fat pointers) store only the data-pointer half
-                            // here; their metadata is handled below via
-                            // fat_locals.
-                            let store_bytes = if is_i128_or_u128(ty) {
-                                size as u32
-                            } else {
-                                std::cmp::min(size as u32, 8)
+                            // ScalarPair types (fat pointers) store only the first word;
+                            // the second word is handled below via fat_locals.
+                            // Scalar types (including i128/u128) store the full width.
+                            // Small Memory types (e.g. [i32; 1], 4 bytes) store
+                            // their actual size.
+                            let store_bytes = match repr_kind(tcx, ty) {
+                                ReprKind::Scalar => size as u32,
+                                ReprKind::ScalarPair => 8,
+                                _ => size as u32,
                             };
                             ctx.current_mem = ctx.builder.store(
                                 prev.into(),
@@ -470,7 +480,7 @@ pub fn translate_function<'tcx>(
         if ret_size > 8
             && ret_size <= 16
             && !ctx.stack_locals.is_stack(ret_local)
-            && !is_i128_or_u128(ret_ty)
+            && !matches!(repr_kind(tcx, ret_ty), ReprKind::Scalar)
         {
             let slot = ctx.builder.stack_slot(ret_size as u32, Origin::synthetic());
             ctx.locals.set(ret_local, slot);
