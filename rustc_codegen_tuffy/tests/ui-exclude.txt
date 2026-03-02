@@ -351,3 +351,33 @@ use/use-keyword.rs
 
 # Upstream lint issue — #[expect(redundant_lifetimes)] not propagated into derive expansion.
 lint/rfc-2383-lint-reason/derive-expect-issue-150553.rs
+
+# Nightly 1.96+ frontend changes — features removed, APIs changed, or errors
+# that are unrelated to the tuffy codegen backend.
+associated-consts/assoc-const-eq-bound-var-in-ty.rs
+associated-consts/assoc-const-eq-const_evaluatable_unchecked.rs
+associated-consts/assoc-const-eq-supertraits.rs
+associated-consts/assoc-const-eq-ty-alias-noninteracting.rs
+associated-consts/assoc-const.rs
+associated-consts/equality-unused-issue-126729.rs
+cast/ptr-to-ptr-different-regions.rs
+cast/ptr-to-trait-obj-ok.rs
+const-generics/associated_const_equality/equality_bound_with_infer.rs
+deref-patterns/default-infer.rs
+deref-patterns/refs.rs
+generic-const-items/associated-const-equality.rs
+hygiene/format-args.rs
+hygiene/generic_params.rs
+invalid-compile-flags/codegen-option-without-group.rs
+invalid-compile-flags/debug-option-without-group.rs
+invalid-compile-flags/print-without-arg.rs
+issues/issue-18464.rs
+lowering/issue-96847.rs
+new-range/disabled.rs
+new-range/enabled.rs
+regions/regions-bound-lists-feature-gate-2.rs
+regions/regions-bound-lists-feature-gate.rs
+simd/dont-invalid-bitcast-masks.rs
+traits/ice-with-dyn-pointee.rs
+type/pattern_types/bad_const_generics_args_on_const_param.rs
+unpretty/box.rs
