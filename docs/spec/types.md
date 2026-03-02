@@ -61,11 +61,15 @@ element size.
 
 ## `struct{T0, T1, ...}`
 
-Struct type with field types. Represents a heterogeneous aggregate with named or indexed fields.
+Struct type with field types. Represents a heterogeneous aggregate with indexed fields.
 Struct values flow through the IR as single SSA values. Field access uses `extractvalue` and
 `insertvalue` instructions with index paths.
 
-Example: `struct{int, bool, ptr(0)}` is a struct with three fields (int, bool, pointer).
+**Padding must be explicitly represented** in the struct type. Padding fields are typically
+represented as `[byte(N); M]` (array of N-byte chunks) or `byte(N)` for individual padding bytes.
+
+Example: `struct{int, [byte(8); 1], bool}` is a struct with an int field, 8 bytes of padding,
+and a bool field. The padding is explicit and must be accounted for in field indices.
 
 The backend legalize pass expands struct values into register-sized pieces according to the
 target ABI (e.g., System V AMD64 ABI rules for struct passing and return).
