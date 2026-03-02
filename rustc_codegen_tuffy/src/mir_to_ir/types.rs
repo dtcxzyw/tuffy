@@ -201,7 +201,16 @@ pub(super) fn struct_field_types<'tcx>(
         // Get the field type from the MIR
         let field_ty = match ty.kind() {
             ty::Adt(def, args) => {
+                // Only decompose single-variant ADTs (structs/single-variant enums).
+                // Multi-variant enums have layout fields (e.g. discriminant) that
+                // don't correspond to variant fields.
+                if def.variants().len() != 1 {
+                    return None;
+                }
                 let variant = &def.variants()[rustc_abi::VariantIdx::from_u32(0)];
+                if field_idx >= variant.fields.len() {
+                    return None;
+                }
                 variant.fields[rustc_abi::FieldIdx::from_usize(field_idx)]
                     .ty(tcx, args)
             }

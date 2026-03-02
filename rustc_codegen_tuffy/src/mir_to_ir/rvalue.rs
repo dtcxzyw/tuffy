@@ -834,6 +834,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         _ => self.tcx.types.i32,
                     };
                     match mir_ty.kind() {
+                        ty::Float(ty::FloatTy::F16) => Some(Type::Float(FloatType::F16)),
                         ty::Float(ty::FloatTy::F32) => Some(Type::Float(FloatType::F32)),
                         ty::Float(ty::FloatTy::F64) => Some(Type::Float(FloatType::F64)),
                         _ => None,
@@ -973,16 +974,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         | BinOp::Eq
                         | BinOp::Ne
                         | BinOp::Cmp
-                ) && {
-                    let mir_ty = match lhs {
-                        Operand::Copy(p) | Operand::Move(p) => {
-                            self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty)
-                        }
-                        Operand::Constant(c) => self.monomorphize(c.ty()),
-                        _ => self.tcx.types.i32,
-                    };
-                    mir_ty.is_floating_point()
-                };
+                ) && float_ty.is_some();
 
                 let val = match op {
                     BinOp::Add | BinOp::AddWithOverflow | BinOp::AddUnchecked => {
@@ -2055,7 +2047,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 self.stack_locals.mark(dest_place.local);
                 Some(slot)
             }
-            _ => unimplemented!("MIR rvalue: {:?}", rvalue),
+            _ => None,
         }
     }
 
