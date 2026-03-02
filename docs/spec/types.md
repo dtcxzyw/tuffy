@@ -1,7 +1,8 @@
 # Type System
 
-Tuffy IR has a minimal type system. All aggregate types (structs, enums, arrays) are
-decomposed into scalars before entering the IR.
+Tuffy IR has a minimal type system supporting scalar types and aggregate types (structs, arrays).
+Aggregate types flow through the IR as single values; ABI-specific decomposition is handled by
+the backend legalize pass.
 
 ## `int`
 
@@ -51,3 +52,31 @@ At CFG join points, memory versions merge via regular block parameters of type `
 IEEE 754 floating point type. Variants: `bf16` (bfloat16), `f16` (half), `f32` (single),
 `f64` (double). Floating point operations (`fadd`, `fsub`, etc.) operate on float-typed
 values. The result type of a float operation matches the operand float width.
+
+## `vec(VT)`
+
+Vector type parameterized by total bit-width. Variants: `vec<N>` (fixed-width, e.g., 128 for SSE),
+`vec<vscale x N>` (scalable, e.g., SVE, RVV). Element count is derived from the bit-width and
+element size.
+
+## `struct{T0, T1, ...}`
+
+Struct type with field types. Represents a heterogeneous aggregate with named or indexed fields.
+Struct values flow through the IR as single SSA values. Field access uses `extractvalue` and
+`insertvalue` instructions with index paths.
+
+Example: `struct{int, bool, ptr(0)}` is a struct with three fields (int, bool, pointer).
+
+The backend legalize pass expands struct values into register-sized pieces according to the
+target ABI (e.g., System V AMD64 ABI rules for struct passing and return).
+
+## `[T; N]`
+
+Array type with element type T and count N. Represents a homogeneous aggregate with N elements
+of type T. Array values flow through the IR as single SSA values. Element access uses
+`extractvalue` and `insertvalue` instructions with index paths.
+
+Example: `[int; 10]` is an array of 10 integers.
+
+The backend legalize pass expands array values into register-sized pieces according to the
+target ABI.
