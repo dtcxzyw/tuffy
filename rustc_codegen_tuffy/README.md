@@ -49,6 +49,8 @@ The downstream crates (`tuffy_ir`, `tuffy_opt`, `tuffy_target`, `tuffy_target_x8
 
 - Uses `tuffy_codegen::AbiMetadataBox` to communicate ABI details (secondary returns, wide returns) to the backend without target coupling.
 - Handles i128/u128 types through annotation-based legalization rather than type splitting at the IR level.
+- **load/store i128**: emits a single `load.16` / `store.16` IR instruction; the backend legalize pass splits it into two 8-byte operations.
+- **load/store struct**: expanded in this crate (frontend) into per-field or per-word loads/stores before emitting IR.
 - Supports `dump-ir` via `-C llvm-args=dump-ir` for debugging IR output.
 
 ## Error Policy
