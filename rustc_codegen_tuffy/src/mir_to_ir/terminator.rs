@@ -445,13 +445,30 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             }
         };
 
-        // If the discriminant is a pointer (e.g. nullable pointer optimization),
-        // convert it to an integer so icmp gets Int operands.
+        // If the discriminant is a pointer, it may be:
+        // (a) an integer type > 8 bytes whose address was returned by
+        //     translate_place_to_value — load the actual integer value, or
+        // (b) a nullable-pointer-optimised discriminant — convert to integer.
         // Bool discriminants need BoolToInt for icmp.
         if matches!(self.builder.value_type(discr_val), Some(Type::Ptr(_))) {
-            discr_val = self
-                .builder
-                .ptrtoaddr(discr_val.into(), Origin::synthetic());
+            let is_integer_discr = discr_ty.is_some_and(|t| t.is_integral());
+            if is_integer_discr {
+                let byte_size = discr_ty
+                    .and_then(|t| type_size(self.tcx, t))
+                    .unwrap_or(8) as u32;
+                discr_val = self.builder.load(
+                    discr_val.into(),
+                    byte_size,
+                    Type::Int,
+                    self.current_mem.into(),
+                    None,
+                    Origin::synthetic(),
+                );
+            } else {
+                discr_val = self
+                    .builder
+                    .ptrtoaddr(discr_val.into(), Origin::synthetic());
+            }
         } else if matches!(self.builder.value_type(discr_val), Some(Type::Bool)) {
             discr_val = self
                 .builder
