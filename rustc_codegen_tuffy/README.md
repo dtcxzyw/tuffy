@@ -62,6 +62,24 @@ When translating MIR constructs to tuffy IR, follow these principles:
 - **No special-case handling for specific examples.** Translation logic must be general and correct for all valid inputs, not tailored to pass particular test cases.
 - Emit IR that accurately represents the semantics of the source construct, not IR that happens to work for a specific input.
 
+## Testing
+
+### Codegen Tests
+
+Codegen tests verify MIR-to-IR translation correctness using CHECK annotations:
+
+```rust
+// compile-flags: -C opt-level=0
+// CHECK: func @add(%a: int:s32, %b: int:s32) -> int:s32
+// CHECK: v3:s32 = add v1:s32, v2:s32
+
+pub fn add(a: i32, b: i32) -> i32 { a + b }
+```
+
+Run with: `tests/run-codegen-tests.sh`
+
+CHECK lines use exact string matching (not regex). Each CHECK line must appear in the generated IR output.
+
 ## Error Policy
 
 Unsupported MIR constructs (rvalue kinds, statement kinds, terminator kinds, intrinsics, place projections) must **not** be silently skipped or marked as unreachable. Instead:
