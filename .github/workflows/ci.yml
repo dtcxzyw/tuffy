@@ -70,6 +70,11 @@ jobs:
           chmod +x rustc_codegen_tuffy/tests/run-tests.sh
           rustc_codegen_tuffy/tests/run-tests.sh
 
+      - name: Run codegen tests
+        run: |
+          chmod +x rustc_codegen_tuffy/tests/run-codegen-tests.sh
+          rustc_codegen_tuffy/tests/run-codegen-tests.sh
+
       - name: Clone rustc UI tests (pinned to 1.93.1)
         run: |
           git clone --filter=blob:none --sparse -b 1.93.1 https://github.com/rust-lang/rust.git scratch/rust
