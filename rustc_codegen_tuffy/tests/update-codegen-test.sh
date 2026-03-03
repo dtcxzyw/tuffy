@@ -40,11 +40,13 @@ fi
 # Compile and capture IR
 name=$(basename "$TEST_FILE" .rs)
 ir_output=$(mktemp)
-trap "rm -f $ir_output" EXIT
+out_file=$(mktemp)
+trap "rm -f $ir_output $out_file" EXIT
 
 if ! rustc +nightly -Z codegen-backend="$BACKEND" \
     -C llvm-args=dump-ir $compile_flags \
     --crate-name "$name" \
+    -o "$out_file" \
     "$TEST_FILE" 2>"$ir_output"; then
     echo "ERROR: Compilation failed"
     cat "$ir_output"

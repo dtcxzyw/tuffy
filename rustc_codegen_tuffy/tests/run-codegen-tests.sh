@@ -55,6 +55,7 @@ run_codegen_test() {
     if ! rustc +nightly -Z codegen-backend="$BACKEND" \
         -C llvm-args=dump-ir $compile_flags \
         --crate-name "$name" \
+        -o "$OUT_DIR/$name" \
         "$src" 2>"$ir_output"; then
         echo "FAIL (compile error)"
         cat "$ir_output"
