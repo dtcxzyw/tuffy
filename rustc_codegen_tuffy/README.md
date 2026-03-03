@@ -78,6 +78,8 @@ pub fn add(a: i32, b: i32) -> i32 { a + b }
 
 Run with: `tests/run-codegen-tests.sh`
 
+To automatically generate or update CHECK lines: `tests/update-codegen-test.sh <test.rs>`
+
 CHECK lines use exact string matching (not regex), including indentation. Each CHECK line must appear in order in the generated IR output.
 
 ### Test Requirements
