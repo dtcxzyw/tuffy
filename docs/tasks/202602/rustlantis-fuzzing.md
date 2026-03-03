@@ -31,9 +31,16 @@ cargo build --release
 Two approaches are available:
 
 1. Built-in difftest framework: `./fuzz-one.sh <seed>`
-2. Standalone script: `./fuzz.sh <start_seed> <end_seed>`
+2. Standalone script: `./fuzz.sh <start_seed> <end_seed> [jobs]`
 
-Both compare tuffy output against LLVM with `-Zmir-opt-level=0`.
+The standalone script supports parallel execution. The optional `jobs` parameter controls concurrency (defaults to `nproc`). Examples:
+
+```bash
+./fuzz.sh 0 1000        # Use all CPU cores
+./fuzz.sh 0 1000 8      # Use 8 parallel jobs
+```
+
+Both compare tuffy output against LLVM with `-Zmir-opt-level=3`.
 
 Hints:
 - Adjust `config.toml` to generate smaller inputs (fewer basic blocks, functions, args, etc.) when debugging — smaller programs are much easier to minimize and reason about. The shipped config already uses reduced values compared to upstream defaults.

@@ -1,31 +1,32 @@
 #!/bin/bash
-# Batch rustlantis differential test script
-# Usage: ./fuzz.sh <start_seed> <end_seed>
+# Batch rustlantis differential test script with parallel execution
+# Usage: ./fuzz.sh <start_seed> <end_seed> [jobs]
 set -euo pipefail
 
 CODEGEN="/tuffy/rustc_codegen_tuffy/target/release/librustc_codegen_tuffy.so"
 START=${1:-1}
 END=${2:-50}
-PASS=0
-FAIL=0
-CRASH=0
+JOBS=${3:-$(nproc)}
 
-for seed in $(seq $START $END); do
-    src="/tmp/rl_fuzz_${seed}.rs"
+test_seed() {
+    local seed=$1
+    local src="/tmp/rl_fuzz_${seed}.rs"
+
     cd /tmp/rustlantis
     cargo run --release --bin generate -- "$seed" > "$src" 2>/dev/null
 
     # Compile with LLVM
     if ! rustc +nightly -Zmir-opt-level=3 -C debug-assertions=off -C opt-level=3 -o "/tmp/rl_llvm_${seed}" "$src" 2>/dev/null; then
-        echo "SKIP($seed): LLVM compile failed"
-        continue
+        echo "SKIP:$seed"
+        rm -f "$src"
+        return
     fi
 
     # Compile with tuffy
     if ! rustc +nightly -Zmir-opt-level=3 -C debug-assertions=off -C opt-level=3 -Zcodegen-backend="$CODEGEN" -o "/tmp/rl_tuffy_${seed}" "$src" 2>/dev/null; then
-        echo "CRASH($seed): tuffy compile failed"
-        CRASH=$((CRASH + 1))
-        continue
+        echo "CRASH:$seed"
+        rm -f "$src" "/tmp/rl_llvm_${seed}"
+        return
     fi
 
     # Run both
@@ -33,17 +34,32 @@ for seed in $(seq $START $END); do
     tuffy_out=$(timeout 5 /tmp/rl_tuffy_${seed} 2>&1 || true)
 
     if [ "$llvm_out" = "$tuffy_out" ]; then
-        PASS=$((PASS + 1))
+        echo "PASS:$seed"
     else
-        echo "MISMATCH($seed):"
-        echo "  LLVM:  $llvm_out"
-        echo "  TUFFY: $tuffy_out"
-        FAIL=$((FAIL + 1))
+        echo "MISMATCH:$seed:$llvm_out:$tuffy_out"
     fi
 
     # Cleanup
     rm -f "$src" "/tmp/rl_llvm_${seed}" "/tmp/rl_tuffy_${seed}"
+}
+
+export -f test_seed
+export CODEGEN
+
+# Run tests in parallel
+results=$(seq $START $END | xargs -P "$JOBS" -I {} bash -c 'test_seed {}')
+
+# Aggregate results
+PASS=$(echo "$results" | grep -c "^PASS:" || true)
+FAIL=$(echo "$results" | grep -c "^MISMATCH:" || true)
+CRASH=$(echo "$results" | grep -c "^CRASH:" || true)
+
+# Print mismatches
+echo "$results" | grep "^MISMATCH:" | while IFS=: read -r status seed llvm tuffy; do
+    echo "MISMATCH($seed):"
+    echo "  LLVM:  $llvm"
+    echo "  TUFFY: $tuffy"
 done
 
 echo ""
-echo "Results: PASS=$PASS FAIL=$FAIL CRASH=$CRASH (seeds $START..$END)"
+echo "Results: PASS=$PASS FAIL=$FAIL CRASH=$CRASH (seeds $START..$END, $JOBS jobs)"
