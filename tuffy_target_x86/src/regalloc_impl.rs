@@ -77,7 +77,10 @@ impl RegAllocInst for VInst {
                 ops.push(usedef_op(*dst));
             }
             // shift by immediate / bswap in-place
-            MInst::ShlImm { dst, .. } | MInst::SarImm { dst, .. } | MInst::Bswap { dst, .. } => {
+            MInst::ShlImm { dst, .. }
+            | MInst::ShrImm { dst, .. }
+            | MInst::SarImm { dst, .. }
+            | MInst::Bswap { dst, .. } => {
                 ops.push(usedef_op(*dst));
             }
             // and dst, imm

@@ -838,15 +838,10 @@ fn select_inst(
                 ctx.out.push(MInst::Bswap { size, dst });
                 if *byte_count == 2 {
                     // bswap r32 puts result in high 16 bits of 32-bit reg; shift right
-                    let cl = ctx.alloc.alloc_fixed(Gpr::Rcx.to_preg());
-                    ctx.out.push(MInst::MovRI {
-                        size: OpSize::S32,
-                        dst: cl,
-                        imm: 16,
-                    });
-                    ctx.out.push(MInst::ShrRCL {
+                    ctx.out.push(MInst::ShrImm {
                         size: OpSize::S64,
                         dst,
+                        imm: 16,
                     });
                 }
                 ctx.regs.assign(vref, dst);

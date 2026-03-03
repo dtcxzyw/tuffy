@@ -255,6 +255,11 @@ fn rewrite_inst(inst: &VInst, assignments: &[PReg]) -> PInst {
             dst: r(dst),
             imm: *imm,
         },
+        MInst::ShrImm { size, dst, imm } => MInst::ShrImm {
+            size: *size,
+            dst: r(dst),
+            imm: *imm,
+        },
         MInst::SarImm { size, dst, imm } => MInst::SarImm {
             size: *size,
             dst: r(dst),

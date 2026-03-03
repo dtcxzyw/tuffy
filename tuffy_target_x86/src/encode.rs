@@ -282,6 +282,15 @@ fn sar_imm_code(size: OpSize) -> Code {
     }
 }
 
+fn shr_imm_code(size: OpSize) -> Code {
+    match size {
+        OpSize::S64 => Code::Shr_rm64_imm8,
+        OpSize::S32 => Code::Shr_rm32_imm8,
+        OpSize::S16 => Code::Shr_rm16_imm8,
+        OpSize::S8 => Code::Shr_rm8_imm8,
+    }
+}
+
 // --- Branch / conditional codes ---
 
 fn jcc_code(cc: CondCode) -> Code {
@@ -630,6 +639,12 @@ fn encode_inst(inst: &PInst, ctx: &mut EncodeContext) {
         MInst::ShlImm { size, dst, imm } => {
             ctx.emit(
                 Instruction::with2(shl_imm_code(*size), gpr_to_iced(*dst, *size), *imm as u32)
+                    .unwrap(),
+            );
+        }
+        MInst::ShrImm { size, dst, imm } => {
+            ctx.emit(
+                Instruction::with2(shr_imm_code(*size), gpr_to_iced(*dst, *size), *imm as u32)
                     .unwrap(),
             );
         }

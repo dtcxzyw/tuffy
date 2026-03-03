@@ -161,6 +161,8 @@ pub enum MInst<R: RegType> {
     SarRCL { size: OpSize, dst: R },
     /// shl dst, imm8 (dst <<= imm8)
     ShlImm { size: OpSize, dst: R, imm: u8 },
+    /// shr dst, imm8 (logical right shift by immediate)
+    ShrImm { size: OpSize, dst: R, imm: u8 },
     /// sar dst, imm8 (arithmetic right shift by immediate)
     SarImm { size: OpSize, dst: R, imm: u8 },
     /// and dst, imm32 (dst &= imm32)
