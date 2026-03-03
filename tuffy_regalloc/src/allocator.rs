@@ -36,14 +36,19 @@ pub struct AllocResult {
 ///   calls and reports which ones were actually used.
 /// `spill_reg`: physical register reserved for spill loads/stores (must NOT
 ///   be in `allocatable`).
-pub fn allocate<I: RegAllocInst>(
+/// `aliases_fn`: function to check if two physical registers alias.
+pub fn allocate<I: RegAllocInst, F>(
     insts: &[I],
     vreg_count: u32,
     constraints: &[Option<PReg>],
     allocatable: &[PReg],
     callee_saved: &[PReg],
     spill_reg: PReg,
-) -> AllocResult {
+    aliases_fn: F,
+) -> AllocResult
+where
+    F: Fn(PReg, PReg) -> bool,
+{
     if vreg_count == 0 {
         return AllocResult {
             assignments: vec![],
@@ -121,6 +126,7 @@ pub fn allocate<I: RegAllocInst>(
                     spill_reg,
                     &mut spill_map,
                     &mut spill_slot_count,
+                    &aliases_fn,
                 );
             }
         } else {
@@ -191,6 +197,7 @@ pub fn allocate<I: RegAllocInst>(
                     &mut spill_slot_count,
                     &call_positions,
                     &caller_saved_set,
+                    &aliases_fn,
                 );
             }
         }
@@ -338,27 +345,33 @@ fn pick_free_preferring(free: &BTreeSet<u8>, prefer: &HashSet<u8>) -> Option<u8>
 /// 1. It has already been assigned `candidate` and its range overlaps, OR
 /// 2. It has a fixed constraint to `candidate`, hasn't been assigned yet,
 ///    and its range overlaps (future fixed-constraint conflict).
-fn conflicts_with(
+fn conflicts_with<F>(
     candidate: u8,
     start: u32,
     end: u32,
     assignments: &[Option<PReg>],
     ranges: &[LiveRange],
     constraints: &[Option<PReg>],
-) -> bool {
+    aliases_fn: &F,
+) -> bool
+where
+    F: Fn(PReg, PReg) -> bool,
+{
+    let candidate_preg = PReg(candidate);
     for r in ranges {
         let ri = r.vreg.0 as usize;
         if r.start < end && r.end > start {
             // Already assigned to candidate?
             if let Some(preg) = assignments[ri]
-                && preg.0 == candidate
+                && (preg.0 == candidate || aliases_fn(candidate_preg, preg))
             {
                 return true;
             }
             // Future fixed constraint to candidate?
             if assignments[ri].is_none()
                 && ri < constraints.len()
-                && constraints[ri] == Some(PReg(candidate))
+                && let Some(c) = constraints[ri]
+                && (c.0 == candidate || aliases_fn(candidate_preg, c))
             {
                 return true;
             }
@@ -370,7 +383,7 @@ fn conflicts_with(
 /// Handle a fixed-constraint interval. If the required PReg is occupied,
 /// evict the conflicting interval and reassign it to a safe register.
 #[allow(clippy::too_many_arguments)]
-fn handle_fixed(
+fn handle_fixed<F>(
     fixed: PReg,
     range: &LiveRange,
     active: &mut Vec<(u32, u32)>,
@@ -384,7 +397,10 @@ fn handle_fixed(
     spill_reg: PReg,
     spill_map: &mut HashMap<u32, u32>,
     spill_slot_count: &mut u32,
-) {
+    aliases_fn: &F,
+) where
+    F: Fn(PReg, PReg) -> bool,
+{
     let vi = range.vreg.0 as usize;
 
     if free.remove(&fixed.0) {
@@ -424,6 +440,7 @@ fn handle_fixed(
                 assignments,
                 ranges,
                 constraints,
+                aliases_fn,
             ) {
                 free.remove(&candidate);
                 assignments[evict_vi as usize] = Some(PReg(candidate));
@@ -445,6 +462,7 @@ fn handle_fixed(
                     assignments,
                     ranges,
                     constraints,
+                    aliases_fn,
                 ) {
                     free.remove(&candidate);
                     assignments[evict_vi as usize] = Some(PReg(candidate));
@@ -469,6 +487,7 @@ fn handle_fixed(
                     assignments,
                     ranges,
                     constraints,
+                    aliases_fn,
                 ) {
                     free.remove(&p.0);
                     assignments[evict_vi as usize] = Some(p);
@@ -547,7 +566,7 @@ fn evict_callee_saved_for_call(
 /// from a non-overlapping interval. If truly no register works, spill
 /// to a stack slot.
 #[allow(clippy::too_many_arguments)]
-fn spill_at(
+fn spill_at<F>(
     range: &LiveRange,
     active: &mut Vec<(u32, u32)>,
     _free: &mut BTreeSet<u8>,
@@ -560,7 +579,10 @@ fn spill_at(
     spill_slot_count: &mut u32,
     call_positions: &[u32],
     caller_saved_set: &HashSet<u8>,
-) {
+    aliases_fn: &F,
+) where
+    F: Fn(PReg, PReg) -> bool,
+{
     let vi = range.vreg.0 as usize;
     let spans_call = spans_any_call(range, call_positions);
 
@@ -578,6 +600,7 @@ fn spill_at(
             assignments,
             ranges,
             constraints,
+            aliases_fn,
         ) {
             assignments[vi] = Some(p);
             active.push((range.end, range.vreg.0));

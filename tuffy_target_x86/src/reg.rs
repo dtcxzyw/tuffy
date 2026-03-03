@@ -1,6 +1,7 @@
 //! x86-64 register definitions.
 
 use tuffy_regalloc::PReg;
+use tuffy_target::regbank::{RegBank, RegClass, make_preg, preg_class, preg_reg_num};
 
 /// x86-64 general-purpose registers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -109,3 +110,118 @@ const ALL_GPRS: [Gpr; 16] = [
     Gpr::R14,
     Gpr::R15,
 ];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Xmm {
+    Xmm0 = 0,
+    Xmm1 = 1,
+    Xmm2 = 2,
+    Xmm3 = 3,
+    Xmm4 = 4,
+    Xmm5 = 5,
+    Xmm6 = 6,
+    Xmm7 = 7,
+    Xmm8 = 8,
+    Xmm9 = 9,
+    Xmm10 = 10,
+    Xmm11 = 11,
+    Xmm12 = 12,
+    Xmm13 = 13,
+    Xmm14 = 14,
+    Xmm15 = 15,
+}
+
+impl Xmm {
+    pub fn to_preg(self) -> PReg {
+        make_preg(RegClass::XMM, self as u8)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Ymm {
+    Ymm0 = 0,
+    Ymm1 = 1,
+    Ymm2 = 2,
+    Ymm3 = 3,
+    Ymm4 = 4,
+    Ymm5 = 5,
+    Ymm6 = 6,
+    Ymm7 = 7,
+    Ymm8 = 8,
+    Ymm9 = 9,
+    Ymm10 = 10,
+    Ymm11 = 11,
+    Ymm12 = 12,
+    Ymm13 = 13,
+    Ymm14 = 14,
+    Ymm15 = 15,
+}
+
+impl Ymm {
+    pub fn to_preg(self) -> PReg {
+        make_preg(RegClass::YMM, self as u8)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Zmm {
+    Zmm0 = 0,
+    Zmm1 = 1,
+    Zmm2 = 2,
+    Zmm3 = 3,
+    Zmm4 = 4,
+    Zmm5 = 5,
+    Zmm6 = 6,
+    Zmm7 = 7,
+    Zmm8 = 8,
+    Zmm9 = 9,
+    Zmm10 = 10,
+    Zmm11 = 11,
+    Zmm12 = 12,
+    Zmm13 = 13,
+    Zmm14 = 14,
+    Zmm15 = 15,
+    Zmm16 = 16,
+    Zmm17 = 17,
+    Zmm18 = 18,
+    Zmm19 = 19,
+    Zmm20 = 20,
+    Zmm21 = 21,
+    Zmm22 = 22,
+    Zmm23 = 23,
+    Zmm24 = 24,
+    Zmm25 = 25,
+    Zmm26 = 26,
+    Zmm27 = 27,
+    Zmm28 = 28,
+    Zmm29 = 29,
+    Zmm30 = 30,
+    Zmm31 = 31,
+}
+
+impl Zmm {
+    pub fn to_preg(self) -> PReg {
+        make_preg(RegClass::ZMM, self as u8)
+    }
+}
+
+pub struct X86RegBank;
+
+impl RegBank for X86RegBank {
+    fn aliases(p1: PReg, p2: PReg) -> bool {
+        let c1 = preg_class(p1);
+        let c2 = preg_class(p2);
+        let n1 = preg_reg_num(p1);
+        let n2 = preg_reg_num(p2);
+
+        if n1 == n2 {
+            let is_vec1 = c1.0 >= 1 && c1.0 <= 3;
+            let is_vec2 = c2.0 >= 1 && c2.0 <= 3;
+            return is_vec1 && is_vec2;
+        }
+        false
+    }
+}

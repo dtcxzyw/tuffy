@@ -6,12 +6,14 @@ use tuffy_ir::function::Function;
 use tuffy_ir::module::SymbolTable;
 use tuffy_regalloc::{OpKind, PReg, RegAllocInst};
 use tuffy_target::backend::{AbiMetadata, Backend};
+use tuffy_target::regbank::RegBank;
 use tuffy_target::reloc::{RelocKind, Relocation};
 use tuffy_target::types::{CompiledFunction, StaticData};
 
 use crate::emit::emit_elf_with_data;
 use crate::encode::encode_function;
 use crate::frame::insert_prologue_epilogue;
+use crate::reg::X86RegBank;
 use tuffy_regalloc::allocator::AllocResult;
 use tuffy_target::isel::IselResult;
 
@@ -533,6 +535,7 @@ pub fn lower_isel_result(isel_result: &IselResult<VInst>) -> Vec<PInst> {
         &ALLOC_REGS,
         &CALLEE_SAVED_REGS,
         SPILL_REG,
+        X86RegBank::aliases,
     );
     let pinsts = rewrite_with_spills(
         &isel_result.insts,
@@ -583,6 +586,7 @@ impl Backend for X86Backend {
             &ALLOC_REGS,
             &CALLEE_SAVED_REGS,
             SPILL_REG,
+            X86RegBank::aliases,
         );
 
         // 3. Rewrite VReg → Gpr, inserting spill loads/stores
