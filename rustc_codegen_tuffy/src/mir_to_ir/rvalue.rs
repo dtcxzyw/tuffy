@@ -1282,6 +1282,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         };
                         let target_ty_m = self.monomorphize(*target_ty);
                         let signed = matches!(target_ty_m.kind(), ty::Int(_));
+                        let bit_width = type_size(self.tcx, target_ty_m)
+                            .map(|s| s * 8)
+                            .unwrap_or(64);
+
                         // `val` may be Float (when loaded from a struct field) or Int
                         // (the bit-pattern convention used for scalars). Normalise to
                         // both forms so we can use the right one below.
@@ -1309,16 +1313,34 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         } else {
                             val
                         };
-                        let raw = if signed {
-                            self.builder.fp_to_si(float_val.into(), Origin::synthetic())
+                        // For 128-bit targets, fp_to_ui/fp_to_si only produce 64-bit results.
+                        // Convert to 64-bit first, then extend.
+                        let (raw, needs_extend) = if bit_width > 64 {
+                            let raw64 = if signed {
+                                self.builder.fp_to_si(float_val.into(), Origin::synthetic())
+                            } else {
+                                self.builder.fp_to_ui(float_val.into(), Origin::synthetic())
+                            };
+                            (raw64, true)
                         } else {
-                            self.builder.fp_to_ui(float_val.into(), Origin::synthetic())
+                            let raw = if signed {
+                                self.builder.fp_to_si(float_val.into(), Origin::synthetic())
+                            } else {
+                                self.builder.fp_to_ui(float_val.into(), Origin::synthetic())
+                            };
+                            (raw, false)
                         };
+
                         // Rust's FloatToInt is saturating: clamp to target range.
-                        let bit_width = type_size(self.tcx, target_ty_m)
-                            .map(|s| s * 8)
-                            .unwrap_or(64);
-                        let result = if bit_width < 64 {
+                        let result = if needs_extend {
+                            // For 128-bit types, fp_to_ui/fp_to_si produce 64-bit results.
+                            // Explicitly extend to 128 bits.
+                            if signed {
+                                self.builder.sext(raw.into(), 128, Origin::synthetic())
+                            } else {
+                                self.builder.zext(raw.into(), 128, Origin::synthetic())
+                            }
+                        } else if bit_width < 64 {
                             let ann_s = Some(Annotation::Signed(64));
                             if signed {
                                 let lo = -(1i64 << (bit_width - 1));

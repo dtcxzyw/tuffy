@@ -776,33 +776,81 @@ fn select_inst(
         }
 
         Op::Bswap(val, byte_count) => {
-            let s = ctx.ensure_in_reg(val.value)?;
-            let dst = ctx.alloc.alloc();
-            ctx.out.push(MInst::MovRR {
-                size: OpSize::S64,
-                dst,
-                src: s,
-            });
-            let size = if *byte_count >= 8 {
-                OpSize::S64
-            } else {
-                OpSize::S32
-            };
-            ctx.out.push(MInst::Bswap { size, dst });
-            if *byte_count == 2 {
-                // bswap r32 puts result in high 16 bits of 32-bit reg; shift right
-                let cl = ctx.alloc.alloc_fixed(Gpr::Rcx.to_preg());
-                ctx.out.push(MInst::MovRI {
-                    size: OpSize::S32,
-                    dst: cl,
-                    imm: 16,
+            if *byte_count > 8 {
+                // 128-bit bswap: swap two 64-bit halves and swap bytes within each
+                let ptr = ctx.ensure_in_reg(val.value)?;
+                let lo = ctx.alloc.alloc();
+                let hi = ctx.alloc.alloc();
+
+                // Load low 8 bytes
+                ctx.out.push(MInst::MovRM {
+                    size: OpSize::S64,
+                    dst: lo,
+                    base: ptr,
+                    offset: 0,
                 });
-                ctx.out.push(MInst::ShrRCL {
+                // Load high 8 bytes
+                ctx.out.push(MInst::MovRM {
+                    size: OpSize::S64,
+                    dst: hi,
+                    base: ptr,
+                    offset: 8,
+                });
+
+                // Bswap each half
+                ctx.out.push(MInst::Bswap {
+                    size: OpSize::S64,
+                    dst: lo,
+                });
+                ctx.out.push(MInst::Bswap {
+                    size: OpSize::S64,
+                    dst: hi,
+                });
+
+                // Store swapped: lo goes to high position, hi goes to low position
+                ctx.out.push(MInst::MovMR {
+                    size: OpSize::S64,
+                    base: ptr,
+                    offset: 8,
+                    src: lo,
+                });
+                ctx.out.push(MInst::MovMR {
+                    size: OpSize::S64,
+                    base: ptr,
+                    offset: 0,
+                    src: hi,
+                });
+
+                ctx.regs.assign(vref, ptr);
+            } else {
+                let s = ctx.ensure_in_reg(val.value)?;
+                let dst = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRR {
                     size: OpSize::S64,
                     dst,
+                    src: s,
                 });
+                let size = if *byte_count >= 8 {
+                    OpSize::S64
+                } else {
+                    OpSize::S32
+                };
+                ctx.out.push(MInst::Bswap { size, dst });
+                if *byte_count == 2 {
+                    // bswap r32 puts result in high 16 bits of 32-bit reg; shift right
+                    let cl = ctx.alloc.alloc_fixed(Gpr::Rcx.to_preg());
+                    ctx.out.push(MInst::MovRI {
+                        size: OpSize::S32,
+                        dst: cl,
+                        imm: 16,
+                    });
+                    ctx.out.push(MInst::ShrRCL {
+                        size: OpSize::S64,
+                        dst,
+                    });
+                }
+                ctx.regs.assign(vref, dst);
             }
-            ctx.regs.assign(vref, dst);
         }
 
         Op::RotateLeft(val, amt, _) => {
