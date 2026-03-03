@@ -129,6 +129,8 @@ Do not use `static` global variables for mutable state (including `AtomicU64`, `
 
 **Generated Files:** When encountering a file with "DO NOT EDIT" in its header comment, identify which command or tool generates it before making any changes. Never directly modify generated files — instead, modify the source or generator. For example, `tuffy_target_x86/src/isel_gen.rs` is generated and must not be edited manually.
 
+**Component Conventions:** When modifying code in any component, you MUST follow the conventions and requirements defined in that component's `README.md`. Do not use workarounds or insert special-case logic in inappropriate components. Each component has its own architectural rules — respect them and implement changes in the correct location according to the component's design.
+
 ## Architecture
 
 The IR definition in Lean 4 (`lean/TuffyLean/IR/`) is the **source of truth**. The Rust implementation (`tuffy_ir/`) and the spec (`docs/spec/`) must conform to the Lean definitions. When there is a conflict, the Lean code takes precedence.
