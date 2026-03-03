@@ -834,8 +834,40 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // pass knows to split them into (lo, hi) even when
                     // the value fits in 64 bits (e.g. small constants).
                     if matches!(arg_ty.kind(), ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)) {
-                        let ann = translate_annotation(arg_ty).unwrap_or(Annotation::Unsigned(128));
-                        ir_args.push(IrOperand::annotated(v, ann));
+                        // If the value is a Ptr (address of the i128 in memory, from
+                        // translate_place_to_value for >8-byte scalars), load lo+hi
+                        // from the address instead of passing the pointer annotated
+                        // as 128-bit (which would pass the address value, not the data).
+                        if matches!(self.builder.value_type(v), Some(Type::Ptr(_))) {
+                            let w0 = self.builder.load(
+                                v.into(),
+                                8,
+                                Type::Int,
+                                self.current_mem.into(),
+                                None,
+                                Origin::synthetic(),
+                            );
+                            ir_args.push(w0.into());
+                            let off8 = self.builder.iconst(8, Origin::synthetic());
+                            let hi_addr = self.builder.ptradd(
+                                v.into(),
+                                off8.into(),
+                                0,
+                                Origin::synthetic(),
+                            );
+                            let w1 = self.builder.load(
+                                hi_addr.into(),
+                                8,
+                                Type::Int,
+                                self.current_mem.into(),
+                                None,
+                                Origin::synthetic(),
+                            );
+                            ir_args.push(w1.into());
+                        } else {
+                            let ann = translate_annotation(arg_ty).unwrap_or(Annotation::Unsigned(128));
+                            ir_args.push(IrOperand::annotated(v, ann));
+                        }
                     } else {
                         ir_args.push(v.into());
                     }

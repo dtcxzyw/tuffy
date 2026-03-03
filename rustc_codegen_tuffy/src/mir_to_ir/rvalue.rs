@@ -955,36 +955,40 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // For large integral types (>8 bytes, e.g. u128/i128),
                 // translate_place_to_value returns a Ptr to the stack slot.
                 // Load the integer value before coercing.
-                let l_raw = if matches!(self.builder.value_type(l_raw), Some(Type::Ptr(_)))
-                    && lhs_mir_ty.is_integral()
-                    && type_size(self.tcx, lhs_mir_ty).is_some_and(|s| s > 8)
-                {
-                    self.builder.load(
-                        l_raw.into(),
-                        8,
-                        Type::Int,
-                        self.current_mem.into(),
-                        None,
-                        Origin::synthetic(),
-                    )
-                } else {
-                    l_raw
-                };
-                let r_raw = if matches!(self.builder.value_type(r_raw), Some(Type::Ptr(_)))
-                    && rhs_mir_ty.is_integral()
-                    && type_size(self.tcx, rhs_mir_ty).is_some_and(|s| s > 8)
-                {
-                    self.builder.load(
-                        r_raw.into(),
-                        8,
-                        Type::Int,
-                        self.current_mem.into(),
-                        None,
-                        Origin::synthetic(),
-                    )
-                } else {
-                    r_raw
-                };
+                let l_raw =
+                    if matches!(self.builder.value_type(l_raw), Some(Type::Ptr(_)))
+                        && lhs_mir_ty.is_integral()
+                        && let Some(lhs_size) = type_size(self.tcx, lhs_mir_ty)
+                        && lhs_size > 8
+                    {
+                        self.builder.load(
+                            l_raw.into(),
+                            lhs_size as u32,
+                            Type::Int,
+                            self.current_mem.into(),
+                            None,
+                            Origin::synthetic(),
+                        )
+                    } else {
+                        l_raw
+                    };
+                let r_raw =
+                    if matches!(self.builder.value_type(r_raw), Some(Type::Ptr(_)))
+                        && rhs_mir_ty.is_integral()
+                        && let Some(rhs_size) = type_size(self.tcx, rhs_mir_ty)
+                        && rhs_size > 8
+                    {
+                        self.builder.load(
+                            r_raw.into(),
+                            rhs_size as u32,
+                            Type::Int,
+                            self.current_mem.into(),
+                            None,
+                            Origin::synthetic(),
+                        )
+                    } else {
+                        r_raw
+                    };
 
                 // Coerce pointer operands to integers — needed for both
                 // arithmetic/bitwise ops and comparisons.
@@ -1253,13 +1257,33 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         };
                         let target_ty_m = self.monomorphize(*target_ty);
                         let signed = matches!(target_ty_m.kind(), ty::Int(_));
-                        // Bitcast Int (bit pattern) → Float
-                        let float_val = self.builder.bitcast(
-                            val.into(),
-                            Type::Float(ft),
-                            None,
-                            Origin::synthetic(),
+                        // `val` may be Float (when loaded from a struct field) or Int
+                        // (the bit-pattern convention used for scalars). Normalise to
+                        // both forms so we can use the right one below.
+                        let val_is_float = matches!(
+                            self.builder.value_type(val),
+                            Some(Type::Float(_))
                         );
+                        let float_val = if val_is_float {
+                            val
+                        } else {
+                            self.builder.bitcast(
+                                val.into(),
+                                Type::Float(ft),
+                                None,
+                                Origin::synthetic(),
+                            )
+                        };
+                        let int_bits_val = if val_is_float {
+                            self.builder.bitcast(
+                                val.into(),
+                                Type::Int,
+                                None,
+                                Origin::synthetic(),
+                            )
+                        } else {
+                            val
+                        };
                         let raw = if signed {
                             self.builder.fp_to_si(float_val.into(), Origin::synthetic())
                         } else {
@@ -1320,7 +1344,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 .builder
                                 .iconst(sign_bit_pos as i64, Origin::synthetic());
                             let sign = self.builder.shr(
-                                val.into(),
+                                int_bits_val.into(),
                                 shift_c.into(),
                                 None,
                                 Origin::synthetic(),
@@ -1896,7 +1920,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 unimplemented!("MIR rvalue: UnaryOp::PtrMetadata")
             }
             Rvalue::UnaryOp(mir::UnOp::Neg, operand) => {
-                let v = self.translate_operand(operand)?;
+                let mut v = self.translate_operand(operand)?;
                 let op_ty = match operand {
                     Operand::Copy(p) | Operand::Move(p) => {
                         Some(self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty))
@@ -1928,6 +1952,24 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     }
                 }
                 let neg_ann = op_ty.and_then(translate_annotation);
+                // When translate_operand returns a pointer for large types
+                // (e.g. i128 tuple fields), load the value before negating.
+                if matches!(self.builder.value_type(v), Some(Type::Ptr(_))) {
+                    let size = op_ty
+                        .and_then(|t| type_size(self.tcx, t))
+                        .unwrap_or(8) as u32;
+                    if size > 8 {
+                        let loaded = self.builder.load(
+                            v.into(),
+                            size,
+                            Type::Int,
+                            self.current_mem.into(),
+                            None,
+                            Origin::synthetic(),
+                        );
+                        v = loaded;
+                    }
+                }
                 // Coerce Bool/Ptr to Int for integer negation.
                 let v = self.coerce_to_int(v);
                 if !matches!(self.builder.value_type(v), Some(Type::Int)) {

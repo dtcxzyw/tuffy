@@ -446,16 +446,13 @@ pub fn translate_function<'tcx>(
                             .builder
                             .stack_slot(std::cmp::max(size as u32, 1), Origin::synthetic());
                         if let Some(prev) = ctx.locals.get(local) {
-                            // ScalarPair types (fat pointers) store only the first word;
-                            // the second word is handled below via fat_locals.
-                            // Scalar types (including i128/u128) store the full width.
-                            // Small Memory types (e.g. [i32; 1], 4 bytes) store
-                            // their actual size.
-                            let store_bytes = match repr_kind(tcx, ty) {
-                                ReprKind::Scalar => size as u32,
-                                ReprKind::ScalarPair => 8,
-                                _ => size as u32,
-                            };
+                            // For fat pointer ScalarPairs (&str, &[T], &dyn Trait), only
+                            // store the first word (data pointer); the second word
+                            // (metadata) is handled below via fat_locals.
+                            // For non-fat-ptr ScalarPairs (e.g. (char, i64)), store the
+                            // full size so the legalizer can emit both lo and hi stores.
+                            // Scalar and Memory types store the full size.
+                            let store_bytes = if is_fat_ptr(tcx, ty) { 8 } else { size as u32 };
                             ctx.current_mem = ctx.builder.store(
                                 prev.into(),
                                 slot.into(),
