@@ -129,14 +129,8 @@ fn gen_shr_signed(
     vref: ValueRef,
     lhs: VReg,
     rhs: VReg,
-    bits: u32,
+    lhs_ann: Option<Annotation>,
 ) -> Option<()> {
-    let size = match bits {
-        8 => OpSize::S8,
-        16 => OpSize::S16,
-        32 => OpSize::S32,
-        _ => OpSize::S64,
-    };
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::MovRR {
         size: OpSize::S64,
@@ -149,7 +143,19 @@ fn gen_shr_signed(
         dst: v1,
         src: rhs,
     });
-    ctx.out.push(MInst::SarRCL { size, dst: v0 });
+    let size_2 = match lhs_ann {
+        Some(Annotation::Signed(bits)) | Some(Annotation::Unsigned(bits)) => match bits {
+            8 => OpSize::S8,
+            16 => OpSize::S16,
+            32 => OpSize::S32,
+            _ => OpSize::S64,
+        },
+        _ => OpSize::S64,
+    };
+    ctx.out.push(MInst::SarRCL {
+        size: size_2,
+        dst: v0,
+    });
     ctx.regs.assign(vref, v0);
     Some(())
 }
@@ -159,14 +165,8 @@ fn gen_shr_unsigned(
     vref: ValueRef,
     lhs: VReg,
     rhs: VReg,
-    bits: u32,
+    lhs_ann: Option<Annotation>,
 ) -> Option<()> {
-    let size = match bits {
-        8 => OpSize::S8,
-        16 => OpSize::S16,
-        32 => OpSize::S32,
-        _ => OpSize::S64,
-    };
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::MovRR {
         size: OpSize::S64,
@@ -179,7 +179,19 @@ fn gen_shr_unsigned(
         dst: v1,
         src: rhs,
     });
-    ctx.out.push(MInst::ShrRCL { size, dst: v0 });
+    let size_2 = match lhs_ann {
+        Some(Annotation::Signed(bits)) | Some(Annotation::Unsigned(bits)) => match bits {
+            8 => OpSize::S8,
+            16 => OpSize::S16,
+            32 => OpSize::S32,
+            _ => OpSize::S64,
+        },
+        _ => OpSize::S64,
+    };
+    ctx.out.push(MInst::ShrRCL {
+        size: size_2,
+        dst: v0,
+    });
     ctx.regs.assign(vref, v0);
     Some(())
 }
@@ -389,9 +401,9 @@ pub(super) fn try_select_generated(
             let l = ctx.ensure_in_reg(lhs.value)?;
             let r = ctx.ensure_in_reg(rhs.value)?;
             match lhs.annotation {
-                Some(Annotation::Signed(bits)) => gen_shr_signed(ctx, vref, l, r, bits),
-                Some(Annotation::Unsigned(bits)) => gen_shr_unsigned(ctx, vref, l, r, bits),
-                _ => gen_shr_unsigned(ctx, vref, l, r, 64),
+                Some(Annotation::Signed(_)) => gen_shr_signed(ctx, vref, l, r, lhs.annotation),
+                Some(Annotation::Unsigned(_)) => gen_shr_unsigned(ctx, vref, l, r, lhs.annotation),
+                _ => gen_shr_unsigned(ctx, vref, l, r, lhs.annotation),
             }
         }
         Op::Min(lhs, rhs) => {
