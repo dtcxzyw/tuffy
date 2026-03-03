@@ -63,24 +63,17 @@ run_codegen_test() {
         return
     fi
 
-    # Verify CHECK lines (exact string match, in order)
-    local last_line=0
-    for check_pattern in "${check_lines[@]}"; do
-        # Find line number of pattern after last_line
-        local line_num=$(tail -n +$((last_line + 1)) "$ir_output" | grep -nF "$check_pattern" | head -1 | cut -d: -f1)
+    # Verify CHECK lines (exact match)
+    local expected="$OUT_DIR/$name.expected"
+    printf "%s\n" "${check_lines[@]}" > "$expected"
 
-        if [ -z "$line_num" ]; then
-            echo "FAIL (missing or out-of-order pattern)"
-            echo "    expected: $check_pattern"
-            echo "    after line: $last_line"
-            echo "    IR output:"
-            cat "$ir_output" | head -20
-            fail=$((fail + 1))
-            return
-        fi
-
-        last_line=$((last_line + line_num))
-    done
+    if ! diff -u "$expected" "$ir_output" > /dev/null; then
+        echo "FAIL (output mismatch)"
+        echo "    diff:"
+        diff -u "$expected" "$ir_output" | head -30
+        fail=$((fail + 1))
+        return
+    fi
 
     echo "ok"
     pass=$((pass + 1))

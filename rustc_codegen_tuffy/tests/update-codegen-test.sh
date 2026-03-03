@@ -58,10 +58,7 @@ check_lines=$(mktemp)
 trap "rm -f $ir_output $check_lines" EXIT
 
 while IFS= read -r line; do
-    # Skip empty lines
-    [ -z "$line" ] && continue
-
-    # Preserve indentation and add CHECK prefix
+    # Preserve indentation and add CHECK prefix (including empty lines)
     echo "// CHECK: $line"
 done < "$ir_output" > "$check_lines"
 
