@@ -80,7 +80,11 @@ Run with: `tests/run-codegen-tests.sh`
 
 To automatically generate or update CHECK lines: `tests/update-codegen-test.sh <test.rs>`
 
+**IMPORTANT:** When modifying tests under `tests/codegen/`, always use `update-codegen-test.sh` to regenerate CHECK lines. Do not write CHECK lines manually — the script ensures they match the actual IR output format and indentation.
+
 CHECK lines use exact string matching (not regex), including indentation. Each CHECK line must appear in order in the generated IR output.
+
+**Compile flags:** Unless testing specific behaviors (e.g., debug assertion codegen, debug symbols), use `-Zmir-opt-level=3 -C debug-assertions=off` as the standard compile flags for codegen tests. This ensures tests verify optimized MIR translation.
 
 ### Test Requirements
 
