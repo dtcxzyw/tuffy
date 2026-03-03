@@ -2042,8 +2042,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             && is_slot_ptr
                             && size <= 8
                             && slot_size.is_some_and(|sz| sz <= 8);
-                        if should_load_stack_int || should_load_stack_ptr {
-                            let load_ty = if should_load_stack_ptr { Type::Ptr(0) } else { Type::Int };
+                        let should_load_stack_scalar = is_slot_ptr
+                            && size <= 8
+                            && slot_size.is_some_and(|sz| sz <= 8)
+                            && matches!(ir_ty, Some(Type::Bool | Type::Float(_)));
+                        if should_load_stack_int || should_load_stack_ptr || should_load_stack_scalar {
+                            let load_ty = if should_load_stack_ptr {
+                                Type::Ptr(0)
+                            } else {
+                                ir_ty.unwrap_or(Type::Int)
+                            };
                             let loaded = self.builder.load(
                                 slot.into(),
                                 size as u32,
