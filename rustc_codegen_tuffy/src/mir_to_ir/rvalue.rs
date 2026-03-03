@@ -1447,12 +1447,33 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             _ => return Some(val),
                         };
                         let int_val = self.coerce_to_int(val);
+
+                        // Set annotation for i128/u128 types
+                        let annotation = if let Some(size) = type_size(self.tcx, src_ty) {
+                            if size == 16 {
+                                Some(if signed {
+                                    tuffy_ir::types::Annotation::Signed(128)
+                                } else {
+                                    tuffy_ir::types::Annotation::Unsigned(128)
+                                })
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+
+                        let operand = if let Some(ann) = annotation {
+                            tuffy_ir::instruction::Operand::annotated(int_val, ann)
+                        } else {
+                            int_val.into()
+                        };
                         let float_res = if signed {
                             self.builder
-                                .si_to_fp(int_val.into(), ft, Origin::synthetic())
+                                .si_to_fp(operand, ft, Origin::synthetic())
                         } else {
                             self.builder
-                                .ui_to_fp(int_val.into(), ft, Origin::synthetic())
+                                .ui_to_fp(operand, ft, Origin::synthetic())
                         };
                         // Bitcast Float → Int (bit pattern)
                         Some(self.builder.bitcast(
