@@ -1357,8 +1357,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 )
                             }
                         } else if !signed {
-                            // For unsigned 64-bit: negative floats must saturate to 0.
-                            // Check the sign bit of the float's bit pattern (val).
+                            // Check for NaN using Uno (unordered comparison).
+                            let is_nan = self.builder.fcmp(
+                                FCmpOp::Uno,
+                                float_val.into(),
+                                float_val.into(),
+                                Origin::synthetic(),
+                            );
+                            let zero = self.builder.iconst(0, Origin::synthetic());
                             let sign_bit_pos: u32 = match ft {
                                 FloatType::F16 => 15,
                                 FloatType::BF16 => 15,
@@ -1384,11 +1390,17 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             let is_neg = self
                                 .builder
                                 .int_to_bool(sign_masked.into(), Origin::synthetic());
-                            let zero = self.builder.iconst(0, Origin::synthetic());
-                            self.builder.select(
+                            let result_if_not_nan = self.builder.select(
                                 is_neg.into(),
                                 zero.into(),
                                 raw.into(),
+                                Type::Int,
+                                Origin::synthetic(),
+                            );
+                            self.builder.select(
+                                is_nan.into(),
+                                zero.into(),
+                                result_if_not_nan.into(),
                                 Type::Int,
                                 Origin::synthetic(),
                             )
