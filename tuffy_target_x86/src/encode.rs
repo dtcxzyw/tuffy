@@ -927,13 +927,13 @@ fn encode_inst(inst: &PInst, ctx: &mut EncodeContext) {
             rhs,
             double,
         } => {
-            encode_fp_binop(ctx, *op, *dst, *lhs, *rhs, *double);
+            encode_fp_binop(ctx, *op, *dst, *lhs, *rhs, *double, Gpr::Rax);
         }
         MInst::CvtFpToInt { dst, src, double } => {
             encode_cvt_fp_to_int(ctx, *dst, *src, *double);
         }
         MInst::CvtIntToFp { dst, src, double } => {
-            encode_cvt_int_to_fp(ctx, *dst, *src, *double);
+            encode_cvt_int_to_fp(ctx, *dst, *src, *double, Gpr::Rax);
         }
         MInst::MoveXmmToGpr { dst, src, double } => {
             encode_move_xmm_to_gpr(ctx, *dst, *src, *double);
@@ -943,7 +943,7 @@ fn encode_inst(inst: &PInst, ctx: &mut EncodeContext) {
             src,
             src_double,
         } => {
-            encode_cvt_fp_to_fp(ctx, *dst, *src, *src_double);
+            encode_cvt_fp_to_fp(ctx, *dst, *src, *src_double, Gpr::Rax);
         }
         MInst::FpCmp {
             dst,
@@ -952,7 +952,7 @@ fn encode_inst(inst: &PInst, ctx: &mut EncodeContext) {
             kind,
             double,
         } => {
-            encode_fp_cmp(ctx, *dst, *lhs, *rhs, *kind, *double);
+            encode_fp_cmp(ctx, *dst, *lhs, *rhs, *kind, *double, Gpr::Rax, Gpr::Rcx);
         }
     }
 }
@@ -1040,6 +1040,7 @@ fn encode_fp_binop(
     lhs: Gpr,
     rhs: Gpr,
     double: bool,
+    xmm_scratch: Gpr,
 ) {
     let rsp_m8 = MemoryOperand::with_base_displ(Register::RSP, -8);
     let rsp_m16 = MemoryOperand::with_base_displ(Register::RSP, -16);
@@ -1083,9 +1084,9 @@ fn encode_fp_binop(
         )
         .unwrap(),
     );
-    // 2. load into xmm0
-    ctx.emit(Instruction::with2(mov_load_xmm, Register::XMM0, rsp_m8).unwrap());
-    // 3. op xmm0, [rsp-16]
+    // 2. load into xmm_scratch
+    ctx.emit(Instruction::with2(mov_load_xmm, xmm_to_iced(xmm_scratch), rsp_m8).unwrap());
+    // 3. op xmm_scratch, [rsp-16]
     let op_code = match op {
         FpBinOpKind::Add => {
             if double {
@@ -1116,9 +1117,9 @@ fn encode_fp_binop(
             }
         }
     };
-    ctx.emit(Instruction::with2(op_code, Register::XMM0, rsp_m16).unwrap());
+    ctx.emit(Instruction::with2(op_code, xmm_to_iced(xmm_scratch), rsp_m16).unwrap());
     // 4. store result back
-    ctx.emit(Instruction::with2(mov_store_xmm, rsp_m8, Register::XMM0).unwrap());
+    ctx.emit(Instruction::with2(mov_store_xmm, rsp_m8, xmm_to_iced(xmm_scratch)).unwrap());
     // 5. load result into dst GPR
     if double {
         ctx.emit(Instruction::with2(Code::Mov_r64_rm64, gpr64(dst), rsp_m8).unwrap());
@@ -1144,22 +1145,28 @@ fn encode_cvt_fp_to_int(ctx: &mut EncodeContext, dst: Gpr, src: Gpr, double: boo
 }
 
 /// CvtIntToFp: signed integer → float (GPR bits) via red-zone.
-fn encode_cvt_int_to_fp(ctx: &mut EncodeContext, dst: Gpr, src: Gpr, double: bool) {
+fn encode_cvt_int_to_fp(
+    ctx: &mut EncodeContext,
+    dst: Gpr,
+    src: Gpr,
+    double: bool,
+    xmm_scratch: Gpr,
+) {
     let rsp_m8 = MemoryOperand::with_base_displ(Register::RSP, -8);
-    // 1. cvtsi2sd/cvtsi2ss xmm0, src
+    // 1. cvtsi2sd/cvtsi2ss xmm_scratch, src
     let cvt_code = if double {
         Code::Cvtsi2sd_xmm_rm64
     } else {
         Code::Cvtsi2ss_xmm_rm64
     };
-    ctx.emit(Instruction::with2(cvt_code, Register::XMM0, gpr64(src)).unwrap());
-    // 2. movsd/movss [rsp-8], xmm0
+    ctx.emit(Instruction::with2(cvt_code, xmm_to_iced(xmm_scratch), gpr64(src)).unwrap());
+    // 2. movsd/movss [rsp-8], xmm_scratch
     let store_code = if double {
         Code::Movsd_xmmm64_xmm
     } else {
         Code::Movss_xmmm32_xmm
     };
-    ctx.emit(Instruction::with2(store_code, rsp_m8, Register::XMM0).unwrap());
+    ctx.emit(Instruction::with2(store_code, rsp_m8, xmm_to_iced(xmm_scratch)).unwrap());
     // 3. mov dst, [rsp-8]
     let load_code = if double {
         Code::Mov_r64_rm64
@@ -1199,29 +1206,53 @@ fn encode_move_xmm_to_gpr(ctx: &mut EncodeContext, dst: Gpr, src: Gpr, double: b
 }
 
 /// CvtFpToFp: float format conversion (f32↔f64) via red-zone.
-fn encode_cvt_fp_to_fp(ctx: &mut EncodeContext, dst: Gpr, src: Gpr, src_double: bool) {
+fn encode_cvt_fp_to_fp(
+    ctx: &mut EncodeContext,
+    dst: Gpr,
+    src: Gpr,
+    src_double: bool,
+    xmm_scratch: Gpr,
+) {
     let rsp_m8 = MemoryOperand::with_base_displ(Register::RSP, -8);
     // 1. mov [rsp-8], src
     ctx.emit(Instruction::with2(Code::Mov_rm64_r64, rsp_m8, gpr64(src)).unwrap());
 
     if src_double {
         // f64 → f32 (narrowing)
-        ctx.emit(Instruction::with2(Code::Movsd_xmm_xmmm64, Register::XMM0, rsp_m8).unwrap());
         ctx.emit(
-            Instruction::with2(Code::Cvtsd2ss_xmm_xmmm64, Register::XMM0, Register::XMM0).unwrap(),
+            Instruction::with2(Code::Movsd_xmm_xmmm64, xmm_to_iced(xmm_scratch), rsp_m8).unwrap(),
         );
-        ctx.emit(Instruction::with2(Code::Movss_xmmm32_xmm, rsp_m8, Register::XMM0).unwrap());
+        ctx.emit(
+            Instruction::with2(
+                Code::Cvtsd2ss_xmm_xmmm64,
+                xmm_to_iced(xmm_scratch),
+                xmm_to_iced(xmm_scratch),
+            )
+            .unwrap(),
+        );
+        ctx.emit(
+            Instruction::with2(Code::Movss_xmmm32_xmm, rsp_m8, xmm_to_iced(xmm_scratch)).unwrap(),
+        );
         // 32-bit load (zero-extends)
         ctx.emit(
             Instruction::with2(Code::Mov_r32_rm32, gpr_to_iced(dst, OpSize::S32), rsp_m8).unwrap(),
         );
     } else {
         // f32 → f64 (widening)
-        ctx.emit(Instruction::with2(Code::Movss_xmm_xmmm32, Register::XMM0, rsp_m8).unwrap());
         ctx.emit(
-            Instruction::with2(Code::Cvtss2sd_xmm_xmmm32, Register::XMM0, Register::XMM0).unwrap(),
+            Instruction::with2(Code::Movss_xmm_xmmm32, xmm_to_iced(xmm_scratch), rsp_m8).unwrap(),
         );
-        ctx.emit(Instruction::with2(Code::Movsd_xmmm64_xmm, rsp_m8, Register::XMM0).unwrap());
+        ctx.emit(
+            Instruction::with2(
+                Code::Cvtss2sd_xmm_xmmm32,
+                xmm_to_iced(xmm_scratch),
+                xmm_to_iced(xmm_scratch),
+            )
+            .unwrap(),
+        );
+        ctx.emit(
+            Instruction::with2(Code::Movsd_xmmm64_xmm, rsp_m8, xmm_to_iced(xmm_scratch)).unwrap(),
+        );
         // 64-bit load
         ctx.emit(Instruction::with2(Code::Mov_r64_rm64, gpr64(dst), rsp_m8).unwrap());
     }
@@ -1231,7 +1262,17 @@ fn encode_cvt_fp_to_fp(ctx: &mut EncodeContext, dst: Gpr, src: Gpr, src_double: 
 ///
 /// kind values match tuffy_ir::instruction::FCmpOp discriminants:
 ///   1=OEq, 2=OGt, 3=OGe, 4=OLt, 5=OLe, 6=ONe, 7=Ord, 8=Uno
-fn encode_fp_cmp(ctx: &mut EncodeContext, dst: Gpr, lhs: Gpr, rhs: Gpr, kind: u8, double: bool) {
+#[allow(clippy::too_many_arguments)]
+fn encode_fp_cmp(
+    ctx: &mut EncodeContext,
+    dst: Gpr,
+    lhs: Gpr,
+    rhs: Gpr,
+    kind: u8,
+    double: bool,
+    xmm_scratch0: Gpr,
+    xmm_scratch1: Gpr,
+) {
     let rsp_m8 = MemoryOperand::with_base_displ(Register::RSP, -8);
     let rsp_m16 = MemoryOperand::with_base_displ(Register::RSP, -16);
     let dst8 = gpr_to_iced(dst, OpSize::S8);
@@ -1276,10 +1317,12 @@ fn encode_fp_cmp(ctx: &mut EncodeContext, dst: Gpr, lhs: Gpr, rhs: Gpr, kind: u8
         )
         .unwrap(),
     );
-    ctx.emit(Instruction::with2(mov_load_xmm, Register::XMM0, rsp_m8).unwrap());
-    ctx.emit(Instruction::with2(mov_load_xmm, Register::XMM1, rsp_m16).unwrap());
-    // ucomisd/ucomiss xmm0, xmm1
-    ctx.emit(Instruction::with2(ucomi, Register::XMM0, Register::XMM1).unwrap());
+    ctx.emit(Instruction::with2(mov_load_xmm, xmm_to_iced(xmm_scratch0), rsp_m8).unwrap());
+    ctx.emit(Instruction::with2(mov_load_xmm, xmm_to_iced(xmm_scratch1), rsp_m16).unwrap());
+    // ucomisd/ucomiss xmm_scratch0, xmm_scratch1
+    ctx.emit(
+        Instruction::with2(ucomi, xmm_to_iced(xmm_scratch0), xmm_to_iced(xmm_scratch1)).unwrap(),
+    );
 
     // Flags after ucomisd xmm0, xmm1:
     //   a > b:  ZF=0 PF=0 CF=0
