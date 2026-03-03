@@ -97,6 +97,40 @@ When modifying MIR-to-IR translation modules in `mir_to_ir/`, add corresponding 
 
 After modifying `mir_to_ir/` modules, run `tests/run-codegen-tests.sh` to ensure no regressions. If tests fail, determine whether to update CHECK lines (if the new IR is correct) or fix the implementation (if the change introduced a bug).
 
+### Differential Testing with Rustlantis
+
+[Rustlantis](https://github.com/cbeuw/rustlantis) generates random, UB-free, deterministic custom MIR programs and compares execution output across compiler backends. Any output mismatch indicates a codegen bug.
+
+**Setup:**
+
+```bash
+git clone https://github.com/cbeuw/rustlantis.git /tmp/rustlantis
+cd /tmp/rustlantis
+git apply /tuffy/rustc_codegen_tuffy/rustlantis/patch/tuffy-backend.patch
+cp /tuffy/rustc_codegen_tuffy/rustlantis/patch/config.toml .
+cp /tuffy/rustc_codegen_tuffy/rustlantis/patch/fuzz.sh .
+cargo build --release
+```
+
+**Running:**
+
+```bash
+./fuzz.sh <start_seed> <end_seed> [jobs]
+```
+
+The script supports parallel execution. The optional `jobs` parameter controls concurrency (defaults to `nproc`):
+
+```bash
+./fuzz.sh 0 1000        # Use all CPU cores
+./fuzz.sh 0 1000 8      # Use 8 parallel jobs
+```
+
+**Tips:**
+
+- Adjust `config.toml` to generate smaller inputs when debugging (fewer basic blocks, functions, args)
+- Use `minimise.py` to reduce reproducers: copy failing program to `repro.rs`, run `python3 minimise.py`
+- Always minimize reproducers before reading them — raw generated programs contain noise
+
 ## Error Policy
 
 Unsupported MIR constructs (rvalue kinds, statement kinds, terminator kinds, intrinsics, place projections) must **not** be silently skipped or marked as unreachable. Instead:

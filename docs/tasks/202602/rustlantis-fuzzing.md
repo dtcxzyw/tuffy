@@ -101,6 +101,18 @@ spreading (see fix below). After the fix, all 11 seeds pass.
 |------|-----------|-----|
 | 3 | 1-tuple spread skipped: `FnOnce::call_once` passes args as `(&T,)` 1-tuple; codegen skipped spreading for 1-tuples, passing the stack address (`&&T`) instead of loading and passing the value (`&T`) | Change spreading threshold from `>= 2` to `>= 1` non-ZST fields in `call.rs` |
 
+### Run 4 (2026-03-03)
+
+Seeds 0–100 (parallel execution with 48 jobs):
+
+| Category | Count | % of total |
+|----------|------:|-----:|
+| Pass | 100 | 99.0 |
+| Crash | 0 | 0.0 |
+| Mismatch | 1 | 1.0 |
+
+Seed 61 produces different hash output between LLVM and Tuffy. The minimized test case involves a switch statement with an out-of-range constant: matching i32 value `-1113935606` against u128 constant `340282366920938463463374607430654275850` (which is the sign-extended u128 representation of the i32 value). Both backends should match this switch (as the low 32 bits are identical), but produce different hash values, indicating divergent execution paths. Root cause under investigation.
+
 - [x] Run initial fuzzing campaign (seeds 0..1000) and triage results
 - [x] Classify failures into compile crashes vs output mismatches
 - [x] Minimize reproduction cases for each distinct bug
