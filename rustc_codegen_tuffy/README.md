@@ -71,14 +71,14 @@ Codegen tests verify MIR-to-IR translation correctness using CHECK annotations:
 ```rust
 // compile-flags: -C opt-level=0
 // CHECK: func @add(%a: int:s32, %b: int:s32) -> int:s32
-// CHECK: v3:s32 = add v1:s32, v2:s32
+// CHECK:     v3:s32 = add v1:s32, v2:s32
 
 pub fn add(a: i32, b: i32) -> i32 { a + b }
 ```
 
 Run with: `tests/run-codegen-tests.sh`
 
-CHECK lines use exact string matching (not regex). Each CHECK line must appear in the generated IR output.
+CHECK lines use exact string matching (not regex), including indentation. Each CHECK line must appear in order in the generated IR output.
 
 ### Test Requirements
 
