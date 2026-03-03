@@ -1,4 +1,5 @@
 // compile-flags: -C opt-level=0
+// CHECK: fn add:
 // CHECK: bb0: {
 // CHECK:     _3 = AddWithOverflow(copy _1, copy _2)
 // CHECK:     assert(!move (_3.1: bool), "attempt to compute `{} + {}`, which would overflow", copy _1, copy _2) -> [success: bb1, unwind continue]

@@ -98,6 +98,8 @@ impl CodegenBackend for TuffyCodegenBackend {
                     compiled_symbols.insert(tcx.symbol_name(*instance).name.to_string());
                     if dump_ir {
                         let mir = tcx.instance_mir(instance.def);
+                        let fn_name = tcx.symbol_name(*instance).name;
+                        eprintln!("fn {}:", fn_name);
                         for (bb, bb_data) in mir.basic_blocks.iter_enumerated() {
                             eprintln!("{:?}: {{", bb);
                             for stmt in &bb_data.statements {
