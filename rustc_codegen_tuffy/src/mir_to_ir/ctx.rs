@@ -6,7 +6,7 @@ use tuffy_codegen::AbiMetadataBox;
 use tuffy_ir::builder::Builder;
 use tuffy_ir::instruction::Origin;
 use tuffy_ir::module::{SymbolId, SymbolTable};
-use tuffy_ir::types::Type;
+use tuffy_ir::types::{Annotation, Type};
 use tuffy_ir::value::{BlockRef, ValueRef};
 
 use super::StaticDataVec;
@@ -278,10 +278,27 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 self.locals.set(local, data_ptr);
                 self.fat_locals.set(local, metadata);
             } else {
+                let ir_ty_val = ir_ty.expect("checked above");
+                // For composite types of 9–16 bytes that contain no floats
+                // and passed as an integer, annotate the parameter as
+                // Unsigned(128) so the legalizer treats it as a two-slot
+                // (lo, hi) value — matching the caller's ABI which passes
+                // such values in two registers.
+                let base_ann = translate_annotation(ty);
+                let ann = if base_ann.is_none() && ir_ty_val == Type::Int {
+                    let sz = type_size(self.tcx, ty).unwrap_or(0);
+                    if sz > 8 && sz <= 16 && !ty_contains_float(self.tcx, ty) {
+                        Some(Annotation::Unsigned(128))
+                    } else {
+                        None
+                    }
+                } else {
+                    base_ann
+                };
                 let val = self.builder.param(
                     param_idx,
-                    ir_ty.expect("checked above"),
-                    translate_annotation(ty),
+                    ir_ty_val,
+                    ann,
                     Origin::synthetic(),
                 );
                 self.locals.set(local, val);

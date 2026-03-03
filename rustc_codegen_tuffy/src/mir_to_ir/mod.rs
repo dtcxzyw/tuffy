@@ -23,7 +23,7 @@ use tuffy_ir::builder::Builder;
 use tuffy_ir::function::{Function, RegionKind};
 use tuffy_ir::instruction::Origin;
 use tuffy_ir::module::{SymbolId, SymbolTable};
-use tuffy_ir::types::Type;
+use tuffy_ir::types::{Annotation, Type};
 
 /// Static data entry: (symbol_id, bytes, relocations).
 /// Relocations are (offset_in_bytes, target_symbol_name) for function pointers in vtables.
@@ -116,8 +116,24 @@ pub fn translate_function<'tcx>(
             Some(Type::Unit) | None => continue,
             Some(ir_ty) => {
                 // Keep MIR→IR parameters semantic; target ABI lowering happens in backend/codegen.
-                params.push(ir_ty);
-                param_anns.push(translate_annotation(ty));
+                params.push(ir_ty.clone());
+                // For composite types of 9–16 bytes that contain no floats
+                // and are passed as an integer (not a pointer), annotate as
+                // Unsigned(128) so the legalizer splits the param into two
+                // 8-byte slots — matching the x86-64 SysV ABI which passes
+                // such values in two integer registers.
+                let base_ann = translate_annotation(ty);
+                let param_ann = if base_ann.is_none() && ir_ty == Type::Int {
+                    let sz = type_size(tcx, ty).unwrap_or(0);
+                    if sz > 8 && sz <= 16 && !ty_contains_float(tcx, ty) {
+                        Some(Annotation::Unsigned(128))
+                    } else {
+                        None
+                    }
+                } else {
+                    base_ann
+                };
+                param_anns.push(param_ann);
                 param_names.push(all_names.get(i).copied().flatten());
                 // Fat pointer types (&str, &[T], &dyn Trait) are passed
                 // as two register-sized values: data pointer + metadata
@@ -415,13 +431,14 @@ pub fn translate_function<'tcx>(
                         if size == 0 {
                             continue;
                         }
-                        // Large Memory-class params (size > 16, e.g. (bool, [i128; 1]) at
-                        // 32 bytes) are passed by pointer in the SysV ABI.  The existing
-                        // locals value IS already the pointer to the data in the caller's
-                        // stack frame.  Creating a new slot and only copying 8 bytes (the
-                        // pointer itself) would lose the indirection, so just mark the
-                        // local as stack-allocated without allocating a new slot.
-                        if matches!(repr_kind(tcx, ty), ReprKind::Memory) && size > 16 {
+                        // Large params (size > 16 bytes) are passed by hidden pointer in
+                        // the SysV ABI — regardless of whether rustc classifies them as
+                        // Memory, ScalarPair, or Scalar.  The received value IS already
+                        // the pointer to the data in the caller's stack frame.  Creating
+                        // a new slot and only copying 8 bytes (the pointer itself) would
+                        // lose the indirection, so just mark the local as stack-allocated
+                        // without allocating a new slot.
+                        if size > 16 {
                             ctx.stack_locals.mark(local);
                             continue;
                         }

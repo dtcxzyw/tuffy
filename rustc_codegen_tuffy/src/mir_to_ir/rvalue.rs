@@ -915,12 +915,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
                 // Unsupported operand types produce Unit or
                 // typeless values — emit a dummy zero so the IR stays well-typed.
+                // Float operands are allowed here because float comparisons
+                // (Ge, Le, etc.) are handled further below via fcmp.
                 if !matches!(
                     self.builder.value_type(l_raw),
-                    Some(Type::Int | Type::Ptr(_) | Type::Bool)
+                    Some(Type::Int | Type::Ptr(_) | Type::Bool | Type::Float(_))
                 ) || !matches!(
                     self.builder.value_type(r_raw),
-                    Some(Type::Int | Type::Ptr(_) | Type::Bool)
+                    Some(Type::Int | Type::Ptr(_) | Type::Bool | Type::Float(_))
                 ) {
                     return Some(self.builder.iconst(0, Origin::synthetic()));
                 }
@@ -1905,7 +1907,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // Float negation: XOR the sign bit in the integer bit pattern.
                 if let Some(ty) = op_ty {
                     if ty.is_floating_point() {
-                        let v = self.coerce_to_int(v);
+                        // Bitcast Float→Int so we can XOR the sign bit.
+                        let v = if matches!(self.builder.value_type(v), Some(Type::Float(_))) {
+                            self.builder.bitcast(v.into(), Type::Int, None, Origin::synthetic())
+                        } else {
+                            self.coerce_to_int(v)
+                        };
                         let sign_mask = if type_size(self.tcx, ty) == Some(4) {
                             0x80000000_u32 as i64
                         } else {

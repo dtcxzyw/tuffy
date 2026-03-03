@@ -187,3 +187,25 @@ pub(super) fn is_fat_ptr<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> bool {
         _ => false,
     }
 }
+
+/// Return true if the type contains any float fields (recursively).
+/// Used to decide whether a composite value passed by value should be
+/// annotated as u128 for two-slot ABI handling.
+pub(super) fn ty_contains_float<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> bool {
+    match ty.kind() {
+        ty::Float(_) => true,
+        ty::Array(elem, _) => ty_contains_float(tcx, *elem),
+        ty::Tuple(fields) => fields.iter().any(|f| ty_contains_float(tcx, f)),
+        ty::Adt(def, args) => {
+            let typing_env = ty::TypingEnv::fully_monomorphized();
+            def.variants().iter().any(|v| {
+                v.fields.iter().any(|f| {
+                    let fty = f.ty(tcx, args);
+                    let fty = tcx.normalize_erasing_regions(typing_env, fty);
+                    ty_contains_float(tcx, fty)
+                })
+            })
+        }
+        _ => false,
+    }
+}
