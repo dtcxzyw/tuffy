@@ -30,6 +30,7 @@ pub struct AllocResult {
 /// `insts`: instruction stream (for liveness analysis).
 /// `vreg_count`: total number of VRegs.
 /// `constraints`: per-VReg fixed constraint (indexed by VReg.0).
+/// `vreg_classes`: per-VReg register class (indexed by VReg.0).
 /// `allocatable`: pool of physical registers the allocator may use.
 /// `callee_saved`: subset of `allocatable` that are callee-saved (must be
 ///   preserved across calls). The allocator prefers these for ranges spanning
@@ -37,10 +38,12 @@ pub struct AllocResult {
 /// `spill_reg`: physical register reserved for spill loads/stores (must NOT
 ///   be in `allocatable`).
 /// `aliases_fn`: function to check if two physical registers alias.
+#[allow(clippy::too_many_arguments)]
 pub fn allocate<I: RegAllocInst, F>(
     insts: &[I],
     vreg_count: u32,
     constraints: &[Option<PReg>],
+    vreg_classes: &[u8],
     allocatable: &[PReg],
     callee_saved: &[PReg],
     spill_reg: PReg,
@@ -104,6 +107,14 @@ where
             &alloc_set,
         );
 
+        // Filter allocatable registers by class for this VReg.
+        let vreg_class = vreg_classes.get(vi).copied().unwrap_or(0);
+        let class_free: BTreeSet<u8> = free
+            .iter()
+            .copied()
+            .filter(|&r| (r >> 5) == vreg_class)
+            .collect();
+
         if let Some(fixed) = constraints[vi] {
             if !alloc_set.contains(&fixed.0) {
                 // Non-allocatable fixed register (e.g. RBP): assign directly.
@@ -147,10 +158,10 @@ where
                 }
             }
 
-            // Pick a free register, avoiding future fixed-constraint conflicts:
+            // Pick a free register from the class-filtered set, avoiding future fixed-constraint conflicts:
             // - If spanning a call, prefer callee-saved (avoid clobbered).
             // - Otherwise, prefer caller-saved (pick from clobbered first).
-            let safe_free: BTreeSet<u8> = free
+            let safe_free: BTreeSet<u8> = class_free
                 .iter()
                 .copied()
                 .filter(|r| !future_conflict.contains(r))
@@ -158,7 +169,7 @@ where
 
             let picked = if spans_call {
                 pick_free_avoiding(&safe_free, &caller_saved_set)
-                    .or_else(|| pick_free_avoiding(&free, &caller_saved_set))
+                    .or_else(|| pick_free_avoiding(&class_free, &caller_saved_set))
                     .or_else(|| {
                         evict_callee_saved_for_call(
                             &mut active,
@@ -173,8 +184,8 @@ where
             } else {
                 pick_free_preferring(&safe_free, &caller_saved_set)
                     .or_else(|| pick_free(&safe_free))
-                    .or_else(|| pick_free_preferring(&free, &caller_saved_set))
-                    .or_else(|| pick_free(&free))
+                    .or_else(|| pick_free_preferring(&class_free, &caller_saved_set))
+                    .or_else(|| pick_free(&class_free))
             };
 
             if let Some(preg) = picked {

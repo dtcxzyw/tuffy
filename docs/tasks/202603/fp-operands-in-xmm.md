@@ -1,8 +1,8 @@
 # Move Floating-Point Operands to XMM Registers
 
-- Status: Pending
+- Status: Completed
 - Created: 2026-03-03
-- Completed: N/A
+- Completed: 2026-03-03
 - Parent: register-bank-abstraction.md
 
 ## Description

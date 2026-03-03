@@ -224,10 +224,9 @@ pub enum MInst<R: RegType> {
     /// emits two `mov` instructions in the correct order (or uses `xchg` if
     /// the destinations cross).
     MovRR2 { dst1: R, src1: R, dst2: R, src2: R },
-    /// Pseudo-instruction: SSE2 f64 binary operation via memory.
+    /// Pseudo-instruction: SSE2 f64 binary operation.
     ///
-    /// Moves lhs/rhs GPRs through stack memory into xmm0/xmm1,
-    /// performs the SSE2 op, and moves the result back to dst GPR.
+    /// Performs direct XMM register operations (dst = lhs op rhs).
     FpBinOp {
         op: FpBinOpKind,
         dst: R,
@@ -235,17 +234,17 @@ pub enum MInst<R: RegType> {
         rhs: R,
         double: bool,
     },
-    /// Pseudo-instruction: convert float (in GPR as bit pattern) to signed integer.
+    /// Pseudo-instruction: convert float (in XMM) to signed integer (in GPR).
     ///
-    /// Uses cvttsd2si (double=true) or cvttss2si (double=false) via red-zone.
+    /// Uses cvttsd2si (double=true) or cvttss2si (double=false).
     CvtFpToInt { dst: R, src: R, double: bool },
-    /// Pseudo-instruction: convert signed integer (in GPR) to float bit pattern in GPR.
+    /// Pseudo-instruction: convert signed integer (in GPR) to float (in XMM).
     ///
-    /// Uses cvtsi2sd (double=true) or cvtsi2ss (double=false) via red-zone.
+    /// Uses cvtsi2sd (double=true) or cvtsi2ss (double=false).
     CvtIntToFp { dst: R, src: R, double: bool },
-    /// Pseudo-instruction: move XMM to GPR via red-zone (for external float-returning calls).
+    /// Pseudo-instruction: move XMM to GPR (for external float-returning calls).
     MoveXmmToGpr { dst: R, src: R, double: bool },
-    /// Pseudo-instruction: convert between float formats (f32↔f64) via red-zone.
+    /// Pseudo-instruction: convert between float formats (f32↔f64).
     ///
     /// Uses cvtss2sd (src_double=false) or cvtsd2ss (src_double=true).
     CvtFpToFp {
@@ -254,10 +253,9 @@ pub enum MInst<R: RegType> {
         /// true if source is f64 (narrowing to f32), false if source is f32 (widening to f64).
         src_double: bool,
     },
-    /// Pseudo-instruction: SSE2 float comparison via red-zone.
+    /// Pseudo-instruction: SSE2 float comparison.
     ///
-    /// Moves lhs/rhs GPRs through stack memory into xmm0/xmm1,
-    /// performs ucomisd/ucomiss, and uses setcc to produce a bool result in dst.
+    /// Performs direct XMM comparison and produces a bool result in dst GPR.
     FpCmp {
         dst: R,
         lhs: R,

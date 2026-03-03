@@ -211,6 +211,7 @@ pub fn isel(
         insts: ctx.out,
         vreg_count: ctx.alloc.next,
         constraints: ctx.alloc.constraints,
+        vreg_classes: ctx.alloc.vreg_classes,
         isel_frame_size: ctx.stack.frame_size,
         has_calls,
     })
@@ -578,7 +579,7 @@ fn select_inst(
                 return None;
             } else {
                 let src = ctx.ensure_in_reg(val.value)?;
-                let dst = ctx.alloc.alloc();
+                let dst = ctx.alloc.alloc_class(1);
                 let double = !matches!(ft, tuffy_ir::types::FloatType::F32);
                 ctx.out.push(MInst::CvtIntToFp { dst, src, double });
                 ctx.regs.assign(vref, dst);
@@ -587,7 +588,7 @@ fn select_inst(
 
         Op::FpConvert(val) => {
             let src = ctx.ensure_in_reg(val.value)?;
-            let dst = ctx.alloc.alloc();
+            let dst = ctx.alloc.alloc_class(1);
             // Determine source float type from the operand's instruction type
             let src_double = !matches!(
                 func.instructions.get(val.value.index() as usize),
@@ -615,7 +616,7 @@ fn select_inst(
                 func.instructions.get(lhs.value.index() as usize),
                 Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
             );
-            let dst = ctx.alloc.alloc();
+            let dst = ctx.alloc.alloc_class(1);
             ctx.out.push(MInst::FpBinOp {
                 op: FpBinOpKind::Add,
                 dst,
@@ -632,7 +633,7 @@ fn select_inst(
                 func.instructions.get(lhs.value.index() as usize),
                 Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
             );
-            let dst = ctx.alloc.alloc();
+            let dst = ctx.alloc.alloc_class(1);
             ctx.out.push(MInst::FpBinOp {
                 op: FpBinOpKind::Sub,
                 dst,
@@ -649,7 +650,7 @@ fn select_inst(
                 func.instructions.get(lhs.value.index() as usize),
                 Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
             );
-            let dst = ctx.alloc.alloc();
+            let dst = ctx.alloc.alloc_class(1);
             ctx.out.push(MInst::FpBinOp {
                 op: FpBinOpKind::Mul,
                 dst,
@@ -666,7 +667,7 @@ fn select_inst(
                 func.instructions.get(lhs.value.index() as usize),
                 Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
             );
-            let dst = ctx.alloc.alloc();
+            let dst = ctx.alloc.alloc_class(1);
             ctx.out.push(MInst::FpBinOp {
                 op: FpBinOpKind::Div,
                 dst,
@@ -695,7 +696,7 @@ fn select_inst(
         }
         Op::FNeg(val) => {
             let src = ctx.ensure_in_reg(val.value)?;
-            let dst = ctx.alloc.alloc();
+            let dst = ctx.alloc.alloc_class(1);
             // Determine f32 vs f64 from source type
             let is_f32 = matches!(
                 func.instructions.get(val.value.index() as usize),
@@ -706,7 +707,7 @@ fn select_inst(
             } else {
                 i64::MIN // 0x8000000000000000
             };
-            let mask_reg = ctx.alloc.alloc();
+            let mask_reg = ctx.alloc.alloc_class(1);
             ctx.out.push(MInst::MovRI64 {
                 dst: mask_reg,
                 imm: sign_mask,

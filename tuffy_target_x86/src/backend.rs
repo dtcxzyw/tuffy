@@ -25,7 +25,9 @@ use crate::reg::Gpr;
 /// Caller-saved registers are listed first (preferred for short-lived values),
 /// followed by callee-saved registers (used for values live across calls).
 /// R11 is reserved as the spill temp register.
-const ALLOC_REGS: [PReg; 12] = [
+/// XMM registers (class 1) are also included for floating-point operations.
+const ALLOC_REGS: [PReg; 28] = [
+    // GPRs (class 0)
     PReg(0), // Rax
     PReg(1), // Rcx
     PReg(2), // Rdx
@@ -33,12 +35,29 @@ const ALLOC_REGS: [PReg; 12] = [
     PReg(9), // R9
     PReg(6), // Rsi
     PReg(7), // Rdi
-    // Callee-saved registers (for values live across calls).
+    // Callee-saved GPRs (for values live across calls).
     PReg(3),  // Rbx
     PReg(12), // R12
     PReg(13), // R13
     PReg(14), // R14
     PReg(15), // R15
+    // XMM registers (class 1) - all caller-saved on x86-64 System V ABI
+    PReg(32), // XMM0
+    PReg(33), // XMM1
+    PReg(34), // XMM2
+    PReg(35), // XMM3
+    PReg(36), // XMM4
+    PReg(37), // XMM5
+    PReg(38), // XMM6
+    PReg(39), // XMM7
+    PReg(40), // XMM8
+    PReg(41), // XMM9
+    PReg(42), // XMM10
+    PReg(43), // XMM11
+    PReg(44), // XMM12
+    PReg(45), // XMM13
+    PReg(46), // XMM14
+    PReg(47), // XMM15
 ];
 
 /// Primary register reserved for spill loads/stores. Must NOT be in ALLOC_REGS.
@@ -533,6 +552,7 @@ pub fn lower_isel_result(isel_result: &IselResult<VInst>) -> Vec<PInst> {
         &isel_result.insts,
         isel_result.vreg_count,
         &isel_result.constraints,
+        &isel_result.vreg_classes,
         &ALLOC_REGS,
         &CALLEE_SAVED_REGS,
         SPILL_REG,
@@ -584,6 +604,7 @@ impl Backend for X86Backend {
             &isel_result.insts,
             isel_result.vreg_count,
             &isel_result.constraints,
+            &isel_result.vreg_classes,
             &ALLOC_REGS,
             &CALLEE_SAVED_REGS,
             SPILL_REG,

@@ -157,8 +157,18 @@ fn alloc_simple_no_conflicts() {
         TInst::Ret,
     ];
     let constraints = vec![None, None];
+    let vreg_classes = vec![0, 0];
     let regs = vec![PReg(0), PReg(1)];
-    let result = allocate(&insts, 2, &constraints, &regs, &[], PReg(2), |_, _| false);
+    let result = allocate(
+        &insts,
+        2,
+        &constraints,
+        &vreg_classes,
+        &regs,
+        &[],
+        PReg(2),
+        |_, _| false,
+    );
 
     assert_eq!(result.assignments.len(), 2);
     // Both should get valid registers from the pool.
@@ -179,8 +189,18 @@ fn alloc_fixed_constraint() {
         TInst::Ret,
     ];
     let constraints = vec![Some(PReg(1)), None];
+    let vreg_classes = vec![0, 0];
     let regs = vec![PReg(0), PReg(1)];
-    let result = allocate(&insts, 2, &constraints, &regs, &[], PReg(2), |_, _| false);
+    let result = allocate(
+        &insts,
+        2,
+        &constraints,
+        &vreg_classes,
+        &regs,
+        &[],
+        PReg(2),
+        |_, _| false,
+    );
 
     assert_eq!(result.assignments[0], PReg(1));
     assert!(regs.contains(&result.assignments[1]));
@@ -197,8 +217,18 @@ fn alloc_overlapping_intervals() {
         TInst::Ret,
     ];
     let constraints = vec![None, None];
+    let vreg_classes = vec![0, 0];
     let regs = vec![PReg(0), PReg(1)];
-    let result = allocate(&insts, 2, &constraints, &regs, &[], PReg(2), |_, _| false);
+    let result = allocate(
+        &insts,
+        2,
+        &constraints,
+        &vreg_classes,
+        &regs,
+        &[],
+        PReg(2),
+        |_, _| false,
+    );
 
     assert_eq!(result.assignments.len(), 2);
     // They must get different registers since they overlap.

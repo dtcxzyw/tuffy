@@ -110,6 +110,8 @@ pub struct VRegAlloc {
     /// Fixed physical register constraint per VReg (indexed by VReg.0).
     /// None means the allocator is free to choose.
     pub constraints: Vec<Option<PReg>>,
+    /// Register class per VReg (indexed by VReg.0).
+    pub vreg_classes: Vec<u8>,
 }
 
 impl VRegAlloc {
@@ -117,14 +119,25 @@ impl VRegAlloc {
         Self {
             next: 0,
             constraints: Vec::new(),
+            vreg_classes: Vec::new(),
         }
     }
 
-    /// Allocate a fresh virtual register with no constraint.
+    /// Allocate a fresh virtual register with no constraint (GPR class).
     pub fn alloc(&mut self) -> VReg {
         let vreg = VReg(self.next);
         self.next += 1;
         self.constraints.push(None);
+        self.vreg_classes.push(0);
+        vreg
+    }
+
+    /// Allocate a fresh virtual register with specified class.
+    pub fn alloc_class(&mut self, class: u8) -> VReg {
+        let vreg = VReg(self.next);
+        self.next += 1;
+        self.constraints.push(None);
+        self.vreg_classes.push(class);
         vreg
     }
 
@@ -133,6 +146,7 @@ impl VRegAlloc {
         let vreg = VReg(self.next);
         self.next += 1;
         self.constraints.push(Some(preg));
+        self.vreg_classes.push(preg.0 >> 5);
         vreg
     }
 }
@@ -154,6 +168,8 @@ pub struct IselResult<I> {
     /// Fixed physical register constraint per VReg (indexed by VReg.0).
     /// None means the allocator is free to choose.
     pub constraints: Vec<Option<PReg>>,
+    /// Register class per VReg (indexed by VReg.0).
+    pub vreg_classes: Vec<u8>,
     /// Stack frame size from StackSlot operations only (not spills).
     pub isel_frame_size: i32,
     /// Whether the function contains any call instructions.

@@ -86,8 +86,10 @@ impl Gpr {
     }
 
     /// Convert from target-agnostic physical register.
+    /// Works for both GPR (class 0) and XMM (class 1) registers.
+    /// Extracts the register number (lower 5 bits) regardless of class.
     pub fn from_preg(preg: PReg) -> Self {
-        ALL_GPRS[preg.0 as usize]
+        ALL_GPRS[(preg.0 & 0x1F) as usize]
     }
 }
 
