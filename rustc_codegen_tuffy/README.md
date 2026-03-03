@@ -80,6 +80,15 @@ Run with: `tests/run-codegen-tests.sh`
 
 CHECK lines use exact string matching (not regex). Each CHECK line must appear in the generated IR output.
 
+### Test Requirements
+
+When modifying MIR-to-IR translation modules in `mir_to_ir/`, add corresponding regression tests to `tests/codegen/`:
+
+- Organize tests by module: changes to `intrinsic.rs` → tests in `tests/codegen/intrinsic/`
+- Keep test cases minimal and focused on the specific behavior being tested
+- Use meaningful names for all identifiers (functions, variables, types)
+- Each test must include CHECK annotations verifying the expected IR output
+
 ## Error Policy
 
 Unsupported MIR constructs (rvalue kinds, statement kinds, terminator kinds, intrinsics, place projections) must **not** be silently skipped or marked as unreachable. Instead:

@@ -82,12 +82,10 @@ echo "=== Codegen Tests ==="
 echo "Backend: $BACKEND"
 echo ""
 
-# Run all tests in codegen directory
-for test_file in "$CODEGEN_DIR"/*.rs; do
-    if [ -f "$test_file" ]; then
-        run_codegen_test "$test_file"
-    fi
-done
+# Run all tests in codegen directory (recursive)
+while IFS= read -r test_file; do
+    run_codegen_test "$test_file"
+done < <(find "$CODEGEN_DIR" -name "*.rs" -type f | sort)
 
 echo ""
 echo "=== Results: $pass passed, $fail failed ==="
