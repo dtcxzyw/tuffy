@@ -1,8 +1,8 @@
 # Add Register Bank Abstraction to tuffy_target
 
-- Status: Pending
+- Status: Completed
 - Created: 2026-03-03
-- Completed: N/A
+- Completed: 2026-03-03
 - Parent: N/A
 
 ## Description
