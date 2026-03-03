@@ -397,46 +397,64 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                     );
                                                 }
                                             } else {
-                                                // No source slot — store the full
-                                                // type width (including 16 for i128/u128).
+                                                // CheckedBinaryOp stores (result, bool)
+                                                // but translate_rvalue only returns the
+                                                // arithmetic result.  For (T, bool) tuples
+                                                // where T is > 8 bytes (e.g. i128), only
+                                                // store size_of(T) bytes, and place the
+                                                // overflow flag at offset size_of(T).
+                                                let checked_rvalue = match rvalue {
+                                                    Rvalue::BinaryOp(
+                                                        BinOp::AddWithOverflow
+                                                        | BinOp::SubWithOverflow
+                                                        | BinOp::MulWithOverflow,
+                                                        box (lhs, _),
+                                                    ) => {
+                                                        let lhs_ty = lhs
+                                                            .ty(&self.mir.local_decls, self.tcx);
+                                                        let lhs_ty =
+                                                            self.monomorphize(lhs_ty);
+                                                        let arith_bytes = type_size(
+                                                            self.tcx,
+                                                            lhs_ty,
+                                                        )
+                                                        .unwrap_or(8)
+                                                            as u32;
+                                                        Some(arith_bytes)
+                                                    }
+                                                    _ => None,
+                                                };
+                                                let store_bytes = checked_rvalue.unwrap_or(bytes);
                                                 self.current_mem = self.builder.store(
                                                     val.into(),
                                                     slot.into(),
-                                                    bytes,
+                                                    store_bytes,
                                                     self.current_mem.into(),
                                                     Origin::synthetic(),
                                                 );
-                                                // CheckedBinaryOp stores (result, bool)
-                                                // but translate_rvalue only returns the
-                                                // arithmetic result.  Zero the overflow
-                                                // flag so later reads don't see garbage.
-                                                let is_checked = matches!(
-                                                    rvalue,
-                                                    Rvalue::BinaryOp(
-                                                        BinOp::AddWithOverflow
-                                                            | BinOp::SubWithOverflow
-                                                            | BinOp::MulWithOverflow,
-                                                        _
-                                                    )
-                                                );
-                                                if is_checked && bytes > 8 {
-                                                    let off =
-                                                        self.builder.iconst(8, Origin::synthetic());
-                                                    let flag_addr = self.builder.ptradd(
-                                                        slot.into(),
-                                                        off.into(),
-                                                        0,
-                                                        Origin::synthetic(),
-                                                    );
-                                                    let zero =
-                                                        self.builder.iconst(0, Origin::synthetic());
-                                                    self.current_mem = self.builder.store(
-                                                        zero.into(),
-                                                        flag_addr.into(),
-                                                        1,
-                                                        self.current_mem.into(),
-                                                        Origin::synthetic(),
-                                                    );
+                                                if let Some(arith_bytes) = checked_rvalue {
+                                                    if arith_bytes >= 8 {
+                                                        let off = self.builder.iconst(
+                                                            arith_bytes as i64,
+                                                            Origin::synthetic(),
+                                                        );
+                                                        let flag_addr = self.builder.ptradd(
+                                                            slot.into(),
+                                                            off.into(),
+                                                            0,
+                                                            Origin::synthetic(),
+                                                        );
+                                                        let zero = self
+                                                            .builder
+                                                            .iconst(0, Origin::synthetic());
+                                                        self.current_mem = self.builder.store(
+                                                            zero.into(),
+                                                            flag_addr.into(),
+                                                            1,
+                                                            self.current_mem.into(),
+                                                            Origin::synthetic(),
+                                                        );
+                                                    }
                                                 }
                                             }
                                         } // close ref_fat_src else
@@ -464,7 +482,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             // where the projected field is > 8 bytes).
                             // Without this, later uses treat the slot pointer as
                             // a data value instead of an address.
-                            let mark_as_stack = match rvalue {
+                            // Only mark dest as a stack local when val is actually
+                            // a Ptr (a stack slot address).  When translate_operand
+                            // loaded the value from a slot for an integral type > 8
+                            // bytes (e.g. u128), val is an Int, not a Ptr — marking
+                            // the dest as stack in that case corrupts later uses that
+                            // call coerce_to_ptr on a non-pointer Int.
+                            let mark_as_stack = matches!(
+                                self.builder.value_type(val),
+                                Some(Type::Ptr(_))
+                            ) && match rvalue {
                                 // Direct copy/move from a stack local (no projections).
                                 // Only propagate when the source type is > 8 bytes,
                                 // because translate_operand loads small (≤8 byte)

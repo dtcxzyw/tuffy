@@ -1495,6 +1495,37 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 }
                             }
                         }
+                        // Transmute from a stack local into an integral type.
+                        // Load the target-sized value directly from the source slot
+                        // instead of returning the pointer.  Returning the pointer
+                        // would make the destination alias the source slot, causing
+                        // later independent writes to both locals to corrupt each other.
+                        if matches!(kind, CastKind::Transmute)
+                            && matches!(self.builder.value_type(val), Some(Type::Ptr(_)))
+                        {
+                            if let Operand::Copy(src) | Operand::Move(src) = operand {
+                                if src.projection.is_empty()
+                                    && self.stack_locals.is_stack(src.local)
+                                {
+                                    let target_size =
+                                        type_size(self.tcx, target_ty_mono).unwrap_or(0);
+                                    let target_ir_ty = translate_ty(self.tcx, target_ty_mono);
+                                    if target_size > 0
+                                        && matches!(target_ir_ty, Some(Type::Int))
+                                    {
+                                        let loaded = self.builder.load(
+                                            val.into(),
+                                            target_size as u32,
+                                            Type::Int,
+                                            self.current_mem.into(),
+                                            None,
+                                            Origin::synthetic(),
+                                        );
+                                        return Some(loaded);
+                                    }
+                                }
+                            }
+                        }
                         // Transmute / PtrToPtr from a pointer-typed source
                         // to a non-pointer target
                         if matches!(self.builder.value_type(val), Some(Type::Ptr(_)))
@@ -1560,7 +1591,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         self.stack_locals.mark(place.local);
                         Some(slot)
                     } else {
-                        let slot = self.builder.stack_slot(1, Origin::synthetic());
+                        let local_ty =
+                            self.monomorphize(self.mir.local_decls[place.local].ty);
+                        let size = type_size(self.tcx, local_ty).unwrap_or(1) as u32;
+                        let slot =
+                            self.builder.stack_slot(size.max(1), Origin::synthetic());
                         self.locals.set(place.local, slot);
                         self.stack_locals.mark(place.local);
                         Some(slot)

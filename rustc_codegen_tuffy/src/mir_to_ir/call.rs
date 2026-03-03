@@ -1028,7 +1028,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // slot as the destination local.
             self.locals.set(destination.local, slot);
             self.stack_locals.mark(destination.local);
-        } else if dest_size.unwrap_or(0) > 8 && !matches!(repr_kind(self.tcx, dest_ty), ReprKind::Scalar) {
+        } else if dest_size.unwrap_or(0) > 8
+            && (!matches!(repr_kind(self.tcx, dest_ty), ReprKind::Scalar)
+                || matches!(
+                    dest_ty.kind(),
+                    ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
+                ))
+        {
             // Two-register return (9-16 bytes): RAX has the first 8 bytes,
             // RDX has the remaining bytes.  Capture both and store to a
             // stack slot.
