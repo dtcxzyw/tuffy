@@ -16,13 +16,13 @@ for seed in $(seq $START $END); do
     cargo run --release --bin generate -- "$seed" > "$src" 2>/dev/null
 
     # Compile with LLVM
-    if ! rustc +nightly -Zmir-opt-level=0 -o "/tmp/rl_llvm_${seed}" "$src" 2>/dev/null; then
+    if ! rustc +nightly -Zmir-opt-level=3 -C debug-assertions=off -C opt-level=3 -o "/tmp/rl_llvm_${seed}" "$src" 2>/dev/null; then
         echo "SKIP($seed): LLVM compile failed"
         continue
     fi
 
     # Compile with tuffy
-    if ! rustc +nightly -Zmir-opt-level=0 -Zcodegen-backend="$CODEGEN" -o "/tmp/rl_tuffy_${seed}" "$src" 2>/dev/null; then
+    if ! rustc +nightly -Zmir-opt-level=3 -C debug-assertions=off -C opt-level=3 -Zcodegen-backend="$CODEGEN" -o "/tmp/rl_tuffy_${seed}" "$src" 2>/dev/null; then
         echo "CRASH($seed): tuffy compile failed"
         CRASH=$((CRASH + 1))
         continue

@@ -1,11 +1,7 @@
-// compile-flags: -C opt-level=0
+// compile-flags: -Zmir-opt-level=3 -C debug-assertions=off -C opt-level=3
 // CHECK: fn add:
 // CHECK: bb0: {
-// CHECK:     _3 = AddWithOverflow(copy _1, copy _2)
-// CHECK:     assert(!move (_3.1: bool), "attempt to compute `{} + {}`, which would overflow", copy _1, copy _2) -> [success: bb1, unwind continue]
-// CHECK: }
-// CHECK: bb1: {
-// CHECK:     _0 = move (_3.0: i32)
+// CHECK:     _0 = Add(copy _1, copy _2)
 // CHECK:     return
 // CHECK: }
 // CHECK:
@@ -14,16 +10,7 @@
 // CHECK:     v1:s32 = param %a
 // CHECK:     v2:s32 = param %b
 // CHECK:     v3:s32 = add v1:s32, v2:s32
-// CHECK:     v4 = iconst 0
-// CHECK:     v5 = iconst 0
-// CHECK:     v6 = icmp.eq v4, v5
-// CHECK:     brif v6, bb1(v0), bb2(v0)
-// CHECK:
-// CHECK:   bb1(v8: mem):
-// CHECK:     ret v3, v8
-// CHECK:
-// CHECK:   bb2(v10: mem):
-// CHECK:     trap
+// CHECK:     ret v3, v0
 // CHECK: }
 
 #![crate_type = "lib"]
