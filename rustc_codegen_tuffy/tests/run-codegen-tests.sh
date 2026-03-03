@@ -62,16 +62,23 @@ run_codegen_test() {
         return
     fi
 
-    # Verify CHECK lines (exact string match)
+    # Verify CHECK lines (exact string match, in order)
+    local last_line=0
     for check_pattern in "${check_lines[@]}"; do
-        if ! grep -qF "$check_pattern" "$ir_output"; then
-            echo "FAIL (missing pattern)"
+        # Find line number of pattern after last_line
+        local line_num=$(tail -n +$((last_line + 1)) "$ir_output" | grep -nF "$check_pattern" | head -1 | cut -d: -f1)
+
+        if [ -z "$line_num" ]; then
+            echo "FAIL (missing or out-of-order pattern)"
             echo "    expected: $check_pattern"
+            echo "    after line: $last_line"
             echo "    IR output:"
             cat "$ir_output" | head -20
             fail=$((fail + 1))
             return
         fi
+
+        last_line=$((last_line + line_num))
     done
 
     echo "ok"
