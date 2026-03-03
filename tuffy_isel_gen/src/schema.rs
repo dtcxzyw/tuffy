@@ -98,6 +98,13 @@ pub struct EmitInst {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum OpSizeValue {
+    Fixed(String),
+    FromAnnotation { kind: String, reg: String },
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum EmitField {
     Reg {
@@ -107,7 +114,7 @@ pub enum EmitField {
     },
     Size {
         name: String,
-        value: String,
+        value: OpSizeValue,
     },
     Cc {
         name: String,

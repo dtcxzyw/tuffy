@@ -102,6 +102,24 @@ fn pattern_params(pattern: &IrPattern) -> Vec<String> {
     }
 }
 
+/// Check if a rule uses fromAnnotation for any OpSize.
+fn needs_annotation_params(rule: &IselRule) -> Vec<String> {
+    let mut regs = Vec::new();
+    for inst in &rule.emit {
+        for field in &inst.fields {
+            if let EmitField::Size {
+                value: OpSizeValue::FromAnnotation { reg, .. },
+                ..
+            } = field
+                && !regs.contains(reg)
+            {
+                regs.push(reg.clone());
+            }
+        }
+    }
+    regs
+}
+
 /// Generate a per-rule function like `fn gen_add(...)`.
 fn generate_rule_fn(out: &mut String, rule: &IselRule, metadata: &IselMetadata) {
     let params = pattern_params(&rule.pattern);
@@ -111,10 +129,17 @@ fn generate_rule_fn(out: &mut String, rule: &IselRule, metadata: &IselMetadata) 
         .collect::<Vec<_>>()
         .join(", ");
 
+    let ann_regs = needs_annotation_params(rule);
+    let ann_params: String = ann_regs
+        .iter()
+        .map(|r| format!(", {r}_ann: Option<Annotation>"))
+        .collect::<Vec<_>>()
+        .join("");
+
     let extra_params = if rule.icmp_cc_from_op {
         ", cmp_op: ICmpOp, lhs_ann: Option<Annotation>"
     } else {
-        ""
+        &ann_params
     };
 
     writeln!(
@@ -236,8 +261,36 @@ fn emit_inst(
                     inst_index,
                     field_name: name,
                 };
-                let mapped = map_lookup(&metadata.maps.size, "metadata.maps.size", value, &ctx)?;
-                rendered_fields.push(format!("{name}: {mapped}"));
+                match value {
+                    OpSizeValue::Fixed(size_str) => {
+                        let mapped =
+                            map_lookup(&metadata.maps.size, "metadata.maps.size", size_str, &ctx)?;
+                        rendered_fields.push(format!("{name}: {mapped}"));
+                    }
+                    OpSizeValue::FromAnnotation { kind, reg } => {
+                        if kind != "from_annotation" {
+                            return Err(
+                                ctx.error(name, format!("unknown OpSizeValue kind: {kind}"))
+                            );
+                        }
+                        let size_var = format!("size_{}", inst_index);
+                        let ann_param = format!("{reg}_ann");
+                        writeln!(&mut alloc_buf, "    let {size_var} = match {ann_param} {{")
+                            .unwrap();
+                        writeln!(
+                            &mut alloc_buf,
+                            "        Some(Annotation::Signed(bits)) | Some(Annotation::Unsigned(bits)) => match bits {{"
+                        ).unwrap();
+                        writeln!(&mut alloc_buf, "            8 => OpSize::S8,").unwrap();
+                        writeln!(&mut alloc_buf, "            16 => OpSize::S16,").unwrap();
+                        writeln!(&mut alloc_buf, "            32 => OpSize::S32,").unwrap();
+                        writeln!(&mut alloc_buf, "            _ => OpSize::S64,").unwrap();
+                        writeln!(&mut alloc_buf, "        }},").unwrap();
+                        writeln!(&mut alloc_buf, "        _ => OpSize::S64,").unwrap();
+                        writeln!(&mut alloc_buf, "    }};").unwrap();
+                        rendered_fields.push(format!("{name}: {size_var}"));
+                    }
+                }
             }
             EmitField::Cc { name, value } => {
                 let ctx = EmitContext {
@@ -272,10 +325,10 @@ fn emit_inst(
 }
 
 /// Group rules by their IR op name for dispatch.
-struct OpGroup {
+struct OpGroup<'a> {
     op_name: String,
     /// Rules for this op, with their annotation guards on the LHS operand.
-    rules: Vec<(AnnGuard, String)>, // (guard, rule_name)
+    rules: Vec<(AnnGuard, &'a IselRule)>,
 }
 
 /// Generate the `try_select_generated` dispatch function.
@@ -297,18 +350,18 @@ fn generate_dispatch(out: &mut String, rules: &[IselRule]) {
             IrPattern::Binop { op, lhs, .. } => {
                 let guard = lhs.ann;
                 if let Some(group) = groups.iter_mut().find(|g| g.op_name == *op) {
-                    group.rules.push((guard, rule.name.clone()));
+                    group.rules.push((guard, rule));
                 } else {
                     groups.push(OpGroup {
                         op_name: op.clone(),
-                        rules: vec![(guard, rule.name.clone())],
+                        rules: vec![(guard, rule)],
                     });
                 }
             }
             IrPattern::Unop { op, .. } => {
                 groups.push(OpGroup {
                     op_name: op.clone(),
-                    rules: vec![(AnnGuard::Any, rule.name.clone())],
+                    rules: vec![(AnnGuard::Any, rule)],
                 });
             }
             IrPattern::Icmp { .. } => {
@@ -335,13 +388,24 @@ fn generate_dispatch(out: &mut String, rules: &[IselRule]) {
 
         if group.rules.len() == 1 && group.rules[0].0 == AnnGuard::Any {
             // Single rule, no annotation dispatch needed.
-            let rule_name = &group.rules[0].1;
+            let rule = group.rules[0].1;
             let args = operand_names
                 .iter()
                 .map(|(v, _)| v.as_str())
                 .collect::<Vec<_>>()
                 .join(", ");
-            writeln!(out, "            gen_{rule_name}(ctx, vref, {args})").unwrap();
+            let ann_regs = needs_annotation_params(rule);
+            let ann_args: String = ann_regs
+                .iter()
+                .map(|r| format!(", {r}.annotation"))
+                .collect::<Vec<_>>()
+                .join("");
+            writeln!(
+                out,
+                "            gen_{rule_name}(ctx, vref, {args}{ann_args})",
+                rule_name = rule.name
+            )
+            .unwrap();
         } else {
             // Multiple rules with annotation guards — dispatch on lhs annotation.
             let first_field = &operand_names[0].1;
@@ -349,24 +413,32 @@ fn generate_dispatch(out: &mut String, rules: &[IselRule]) {
 
             let mut has_any = false;
 
-            for (guard, rule_name) in &group.rules {
+            for (guard, rule) in &group.rules {
                 let args = operand_names
                     .iter()
                     .map(|(v, _)| v.as_str())
                     .collect::<Vec<_>>()
                     .join(", ");
+                let ann_regs = needs_annotation_params(rule);
+                let ann_args: String = ann_regs
+                    .iter()
+                    .map(|r| format!(", {r}.annotation"))
+                    .collect::<Vec<_>>()
+                    .join("");
                 match guard {
                     AnnGuard::Signed => {
                         writeln!(
                             out,
-                            "                Some(Annotation::Signed(_)) => gen_{rule_name}(ctx, vref, {args}),"
+                            "                Some(Annotation::Signed(_)) => gen_{rule_name}(ctx, vref, {args}{ann_args}),",
+                            rule_name = rule.name
                         )
                         .unwrap();
                     }
                     AnnGuard::Unsigned => {
                         writeln!(
                             out,
-                            "                Some(Annotation::Unsigned(_)) => gen_{rule_name}(ctx, vref, {args}),"
+                            "                Some(Annotation::Unsigned(_)) => gen_{rule_name}(ctx, vref, {args}{ann_args}),",
+                            rule_name = rule.name
                         )
                         .unwrap();
                     }
@@ -374,7 +446,8 @@ fn generate_dispatch(out: &mut String, rules: &[IselRule]) {
                         has_any = true;
                         writeln!(
                             out,
-                            "                _ => gen_{rule_name}(ctx, vref, {args}),"
+                            "                _ => gen_{rule_name}(ctx, vref, {args}{ann_args}),",
+                            rule_name = rule.name
                         )
                         .unwrap();
                     }
@@ -388,16 +461,23 @@ fn generate_dispatch(out: &mut String, rules: &[IselRule]) {
                     .iter()
                     .find(|(g, _)| *g == AnnGuard::Unsigned)
                     .or_else(|| group.rules.first())
-                    .map(|(_, n)| n.as_str())
+                    .map(|(_, r)| *r)
                     .unwrap();
                 let args = operand_names
                     .iter()
                     .map(|(v, _)| v.as_str())
                     .collect::<Vec<_>>()
                     .join(", ");
+                let ann_regs = needs_annotation_params(default_rule);
+                let ann_args: String = ann_regs
+                    .iter()
+                    .map(|r| format!(", {r}.annotation"))
+                    .collect::<Vec<_>>()
+                    .join("");
                 writeln!(
                     out,
-                    "                _ => gen_{default_rule}(ctx, vref, {args}),"
+                    "                _ => gen_{default_rule}(ctx, vref, {args}{ann_args}),",
+                    default_rule = default_rule.name
                 )
                 .unwrap();
             }

@@ -27,6 +27,19 @@ fn main() {
     fs::write(&output_path, &rust_src)
         .unwrap_or_else(|e| panic!("failed to write {}: {e}", output_path.display()));
 
+    // Run cargo fmt on the generated file
+    let package = output_path
+        .parent()
+        .and_then(|p| p.parent())
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str());
+
+    if let Some(pkg) = package {
+        let _ = std::process::Command::new("cargo")
+            .args(["fmt", "--package", pkg])
+            .status();
+    }
+
     eprintln!(
         "Generated {} rules for target {} (format v{}) -> {}",
         spec.rules.len(),
