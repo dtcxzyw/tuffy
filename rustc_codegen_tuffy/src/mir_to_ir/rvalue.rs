@@ -950,6 +950,40 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let l_ann = translate_annotation(lhs_mir_ty).or(l_ann);
                 let r_ann = translate_annotation(rhs_mir_ty).or(r_ann);
 
+                // For large integral types (>8 bytes, e.g. u128/i128),
+                // translate_place_to_value returns a Ptr to the stack slot.
+                // Load the integer value before coercing.
+                let l_raw = if matches!(self.builder.value_type(l_raw), Some(Type::Ptr(_)))
+                    && lhs_mir_ty.is_integral()
+                    && type_size(self.tcx, lhs_mir_ty).is_some_and(|s| s > 8)
+                {
+                    self.builder.load(
+                        l_raw.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
+                    )
+                } else {
+                    l_raw
+                };
+                let r_raw = if matches!(self.builder.value_type(r_raw), Some(Type::Ptr(_)))
+                    && rhs_mir_ty.is_integral()
+                    && type_size(self.tcx, rhs_mir_ty).is_some_and(|s| s > 8)
+                {
+                    self.builder.load(
+                        r_raw.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
+                    )
+                } else {
+                    r_raw
+                };
+
                 // Coerce pointer operands to integers — needed for both
                 // arithmetic/bitwise ops and comparisons.
                 let l = self.coerce_to_int(l_raw);
