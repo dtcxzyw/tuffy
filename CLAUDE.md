@@ -54,6 +54,14 @@ Automatically decide when to commit based on logical units of work. Do not ask t
 
 Never amend previous commits (`git commit --amend`). Always create new commits to keep a linear, auditable history.
 
+## Binary Files and Build Artifacts
+
+Place binary outputs in `/tmp` or `scratch/` directory. Do not generate build artifacts in the working directory unless they follow established conventions.
+
+For conventional build directories (e.g., Rust `target/`, Python `.venv/`, Lean `.lake/`), ensure they are listed in `.gitignore`.
+
+**Never commit binary files to git unless explicitly authorized by the user.** This includes compiled executables, libraries (.so, .rlib, .a), object files, and other build artifacts.
+
 ## Build Commands
 
 ```
