@@ -9,6 +9,31 @@ use super::ctx::TranslationCtx;
 use super::types::*;
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
+    /// Load a large type (>8 bytes) from memory if the value is a pointer.
+    /// For types <= 8 bytes, returns the value unchanged.
+    fn load_large_value_if_needed(
+        &mut self,
+        value: ValueRef,
+        ty: ty::Ty<'tcx>,
+        annotation: Option<Annotation>,
+    ) -> ValueRef {
+        if matches!(self.builder.value_type(value), Some(Type::Ptr(_)))
+            && let Some(size) = type_size(self.tcx, ty)
+            && size > 8
+        {
+            self.builder.load(
+                value.into(),
+                size as u32,
+                Type::Int,
+                self.current_mem.into(),
+                annotation,
+                Origin::synthetic(),
+            )
+        } else {
+            value
+        }
+    }
+
     pub(super) fn translate_place_to_addr(
         &mut self,
         place: &Place<'tcx>,
@@ -1987,23 +2012,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     }
                 }
                 let neg_ann = op_ty.and_then(translate_annotation);
-                // When translate_operand returns a pointer for large types
-                // (e.g. i128 tuple fields), load the value before negating.
-                if matches!(self.builder.value_type(v), Some(Type::Ptr(_))) {
-                    let size = op_ty
-                        .and_then(|t| type_size(self.tcx, t))
-                        .unwrap_or(8) as u32;
-                    if size > 8 {
-                        let loaded = self.builder.load(
-                            v.into(),
-                            size,
-                            Type::Int,
-                            self.current_mem.into(),
-                            None,
-                            Origin::synthetic(),
-                        );
-                        v = loaded;
-                    }
+                if let Some(ty) = op_ty {
+                    v = self.load_large_value_if_needed(v, ty, neg_ann);
                 }
                 // Coerce Bool/Ptr to Int for integer negation.
                 let v = self.coerce_to_int(v);
@@ -2026,24 +2036,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     Operand::Constant(c) => Some(self.monomorphize(c.ty())),
                     _ => None,
                 };
-                // When translate_operand returns a pointer for large types
-                // (e.g. u128 tuple fields), load the value before operating.
                 let not_ann = mir_ty.and_then(|t| translate_annotation(t));
-                if matches!(self.builder.value_type(v), Some(Type::Ptr(_))) {
-                    let size = mir_ty
-                        .and_then(|t| type_size(self.tcx, t))
-                        .unwrap_or(8) as u32;
-                    if size > 0 {
-                        let loaded = self.builder.load(
-                            v.into(),
-                            size,
-                            Type::Int,
-                            self.current_mem.into(),
-                            not_ann,
-                            Origin::synthetic(),
-                        );
-                        v = loaded;
-                    }
+                if let Some(ty) = mir_ty {
+                    v = self.load_large_value_if_needed(v, ty, not_ann);
                 }
                 let is_bool = mir_ty.is_some_and(|t| t.is_bool());
                 if is_bool {
