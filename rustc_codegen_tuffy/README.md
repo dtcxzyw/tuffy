@@ -54,6 +54,14 @@ The downstream crates (`tuffy_ir`, `tuffy_opt`, `tuffy_target`, `tuffy_target_x8
 - **function parameters**: struct parameters are represented as single IR values with struct type; the backend legalize pass splits them into multiple register-sized parameters according to the target ABI.
 - Supports `dump-ir` via `-C llvm-args=dump-ir` for debugging IR output.
 
+## Translation Conventions
+
+When translating MIR constructs to tuffy IR, follow these principles:
+
+- **Reference LLVM IR semantics** when uncertain about translation strategy. LLVM IR provides a well-documented, battle-tested model for lowering high-level constructs.
+- **No special-case handling for specific examples.** Translation logic must be general and correct for all valid inputs, not tailored to pass particular test cases.
+- Emit IR that accurately represents the semantics of the source construct, not IR that happens to work for a specific input.
+
 ## Error Policy
 
 Unsupported MIR constructs (rvalue kinds, statement kinds, terminator kinds, intrinsics, place projections) must **not** be silently skipped or marked as unreachable. Instead:
