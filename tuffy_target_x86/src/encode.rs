@@ -912,6 +912,9 @@ fn encode_inst(inst: &PInst, ctx: &mut EncodeContext) {
         MInst::CvtIntToFp { dst, src, double } => {
             encode_cvt_int_to_fp(ctx, *dst, *src, *double);
         }
+        MInst::MoveXmm0ToGpr { dst, double } => {
+            encode_move_xmm0_to_gpr(ctx, *dst, *double);
+        }
         MInst::CvtFpToFp {
             dst,
             src,
@@ -1135,6 +1138,30 @@ fn encode_cvt_int_to_fp(ctx: &mut EncodeContext, dst: Gpr, src: Gpr, double: boo
     };
     ctx.emit(Instruction::with2(store_code, rsp_m8, Register::XMM0).unwrap());
     // 3. mov dst, [rsp-8]
+    let load_code = if double {
+        Code::Mov_r64_rm64
+    } else {
+        Code::Mov_r32_rm32
+    };
+    let dst_reg = if double {
+        gpr64(dst)
+    } else {
+        gpr_to_iced(dst, OpSize::S32)
+    };
+    ctx.emit(Instruction::with2(load_code, dst_reg, rsp_m8).unwrap());
+}
+
+/// MoveXmm0ToGpr: XMM0 → GPR via red-zone (for external float-returning calls).
+fn encode_move_xmm0_to_gpr(ctx: &mut EncodeContext, dst: Gpr, double: bool) {
+    let rsp_m8 = MemoryOperand::with_base_displ(Register::RSP, -8);
+    // 1. movsd/movss [rsp-8], xmm0
+    let store_code = if double {
+        Code::Movsd_xmmm64_xmm
+    } else {
+        Code::Movss_xmmm32_xmm
+    };
+    ctx.emit(Instruction::with2(store_code, rsp_m8, Register::XMM0).unwrap());
+    // 2. mov dst, [rsp-8]
     let load_code = if double {
         Code::Mov_r64_rm64
     } else {

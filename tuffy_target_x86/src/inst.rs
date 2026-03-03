@@ -243,6 +243,8 @@ pub enum MInst<R: RegType> {
     ///
     /// Uses cvtsi2sd (double=true) or cvtsi2ss (double=false) via red-zone.
     CvtIntToFp { dst: R, src: R, double: bool },
+    /// Pseudo-instruction: move XMM0 to GPR via red-zone (for external float-returning calls).
+    MoveXmm0ToGpr { dst: R, double: bool },
     /// Pseudo-instruction: convert between float formats (f32↔f64) via red-zone.
     ///
     /// Uses cvtss2sd (src_double=false) or cvtsd2ss (src_double=true).

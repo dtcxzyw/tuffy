@@ -573,22 +573,9 @@ fn select_inst(
             );
 
             if is_i128 {
-                // TODO: i128 to float conversion not fully implemented
-                // For now, just return 0.0 to avoid crash
-                let zero_int = ctx.alloc.alloc();
-                ctx.out.push(MInst::XorRR {
-                    size: OpSize::S64,
-                    dst: zero_int,
-                    src: zero_int,
-                });
-                let zero_float = ctx.alloc.alloc();
-                let double = !matches!(ft, tuffy_ir::types::FloatType::F32);
-                ctx.out.push(MInst::CvtIntToFp {
-                    dst: zero_float,
-                    src: zero_int,
-                    double,
-                });
-                ctx.regs.assign(vref, zero_float);
+                // i128 to float: not yet fully implemented
+                // TODO: implement i128 to float conversion
+                return None;
             } else {
                 let src = ctx.ensure_in_reg(val.value)?;
                 let dst = ctx.alloc.alloc();
