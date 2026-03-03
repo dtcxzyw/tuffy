@@ -375,8 +375,9 @@ fn rewrite_inst(inst: &VInst, assignments: &[PReg]) -> PInst {
             src: r(src),
             double: *double,
         },
-        MInst::MoveXmm0ToGpr { dst, double } => MInst::MoveXmm0ToGpr {
+        MInst::MoveXmmToGpr { dst, src, double } => MInst::MoveXmmToGpr {
             dst: r(dst),
+            src: r(src),
             double: *double,
         },
         MInst::CvtFpToFp {

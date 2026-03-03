@@ -108,6 +108,29 @@ fn gpr64(gpr: Gpr) -> Register {
     gpr_to_iced(gpr, OpSize::S64)
 }
 
+/// Map Gpr to XMM register (for XMM instructions after register allocation).
+fn xmm_to_iced(gpr: Gpr) -> Register {
+    const XMM: [Register; 16] = [
+        Register::XMM0,
+        Register::XMM1,
+        Register::XMM2,
+        Register::XMM3,
+        Register::XMM4,
+        Register::XMM5,
+        Register::XMM6,
+        Register::XMM7,
+        Register::XMM8,
+        Register::XMM9,
+        Register::XMM10,
+        Register::XMM11,
+        Register::XMM12,
+        Register::XMM13,
+        Register::XMM14,
+        Register::XMM15,
+    ];
+    XMM[gpr as usize]
+}
+
 /// Build a [base+disp] memory operand.
 fn mem(base: Gpr, offset: i32) -> MemoryOperand {
     MemoryOperand::with_base_displ(gpr64(base), offset as i64)
@@ -912,8 +935,8 @@ fn encode_inst(inst: &PInst, ctx: &mut EncodeContext) {
         MInst::CvtIntToFp { dst, src, double } => {
             encode_cvt_int_to_fp(ctx, *dst, *src, *double);
         }
-        MInst::MoveXmm0ToGpr { dst, double } => {
-            encode_move_xmm0_to_gpr(ctx, *dst, *double);
+        MInst::MoveXmmToGpr { dst, src, double } => {
+            encode_move_xmm_to_gpr(ctx, *dst, *src, *double);
         }
         MInst::CvtFpToFp {
             dst,
@@ -1151,16 +1174,16 @@ fn encode_cvt_int_to_fp(ctx: &mut EncodeContext, dst: Gpr, src: Gpr, double: boo
     ctx.emit(Instruction::with2(load_code, dst_reg, rsp_m8).unwrap());
 }
 
-/// MoveXmm0ToGpr: XMM0 → GPR via red-zone (for external float-returning calls).
-fn encode_move_xmm0_to_gpr(ctx: &mut EncodeContext, dst: Gpr, double: bool) {
+/// MoveXmmToGpr: XMM → GPR via red-zone (for external float-returning calls).
+fn encode_move_xmm_to_gpr(ctx: &mut EncodeContext, dst: Gpr, src: Gpr, double: bool) {
     let rsp_m8 = MemoryOperand::with_base_displ(Register::RSP, -8);
-    // 1. movsd/movss [rsp-8], xmm0
+    // 1. movsd/movss [rsp-8], xmm_src
     let store_code = if double {
         Code::Movsd_xmmm64_xmm
     } else {
         Code::Movss_xmmm32_xmm
     };
-    ctx.emit(Instruction::with2(store_code, rsp_m8, Register::XMM0).unwrap());
+    ctx.emit(Instruction::with2(store_code, rsp_m8, xmm_to_iced(src)).unwrap());
     // 2. mov dst, [rsp-8]
     let load_code = if double {
         Code::Mov_r64_rm64
