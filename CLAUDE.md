@@ -127,6 +127,8 @@ When outputting content using tools, output in multiple smaller segments rather 
 
 Do not use `static` global variables for mutable state (including `AtomicU64`, `Mutex`, etc.). Counters and other session state must live on a context struct, not at module scope. This ensures deterministic behavior and avoids cross-compilation-unit interference.
 
+**Generated Files:** When encountering a file with "DO NOT EDIT" in its header comment, identify which command or tool generates it before making any changes. Never directly modify generated files — instead, modify the source or generator. For example, `tuffy_target_x86/src/isel_gen.rs` is generated and must not be edited manually.
+
 ## Architecture
 
 The IR definition in Lean 4 (`lean/TuffyLean/IR/`) is the **source of truth**. The Rust implementation (`tuffy_ir/`) and the spec (`docs/spec/`) must conform to the Lean definitions. When there is a conflict, the Lean code takes precedence.
