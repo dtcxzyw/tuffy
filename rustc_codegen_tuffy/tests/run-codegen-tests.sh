@@ -39,11 +39,11 @@ run_codegen_test() {
         compile_flags=$(grep "^// compile-flags:" "$src" | head -1 | sed 's|^// compile-flags:||')
     fi
 
-    # Extract CHECK lines
+    # Extract CHECK lines (preserving empty lines for MIR/IR separator)
     local check_lines=()
     while IFS= read -r line; do
         check_lines+=("$line")
-    done < <(grep "^// CHECK:" "$src" | sed 's|^// CHECK: ||')
+    done < <(grep "^// CHECK:" "$src" | sed 's|^// CHECK:||' | sed 's|^ ||')
 
     if [ ${#check_lines[@]} -eq 0 ]; then
         echo "SKIP (no CHECK lines)"

@@ -1,4 +1,13 @@
 // compile-flags: -C opt-level=0
+// CHECK: bb0: {
+// CHECK:     _3 = AddWithOverflow(copy _1, copy _2)
+// CHECK:     assert(!move (_3.1: bool), "attempt to compute `{} + {}`, which would overflow", copy _1, copy _2) -> [success: bb1, unwind continue]
+// CHECK: }
+// CHECK: bb1: {
+// CHECK:     _0 = move (_3.0: i32)
+// CHECK:     return
+// CHECK: }
+// CHECK:
 // CHECK: func @add(%a: int:s32, %b: int:s32) -> int:s32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1:s32 = param %a

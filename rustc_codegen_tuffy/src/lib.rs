@@ -96,6 +96,20 @@ impl CodegenBackend for TuffyCodegenBackend {
                         continue;
                     }
                     compiled_symbols.insert(tcx.symbol_name(*instance).name.to_string());
+                    if dump_ir {
+                        let mir = tcx.instance_mir(instance.def);
+                        for (bb, bb_data) in mir.basic_blocks.iter_enumerated() {
+                            eprintln!("{:?}: {{", bb);
+                            for stmt in &bb_data.statements {
+                                eprintln!("    {:?}", stmt);
+                            }
+                            if let Some(ref term) = bb_data.terminator {
+                                eprintln!("    {:?}", term.kind);
+                            }
+                            eprintln!("}}");
+                        }
+                        eprintln!();
+                    }
                     let result_opt =
                         mir_to_ir::translate_function(tcx, *instance, &session, &mut data_counter);
                     if let Some(mut result) = result_opt {

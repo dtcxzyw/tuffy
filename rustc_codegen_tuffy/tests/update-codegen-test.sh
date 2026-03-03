@@ -53,13 +53,17 @@ if ! rustc +nightly -Z codegen-backend="$BACKEND" \
     exit 1
 fi
 
-# Generate CHECK lines from IR output
+# Generate CHECK lines from IR output (preserving empty lines)
 check_lines=$(mktemp)
 trap "rm -f $ir_output $check_lines" EXIT
 
 while IFS= read -r line; do
-    # Preserve indentation and add CHECK prefix (including empty lines)
-    echo "// CHECK: $line"
+    # Add CHECK prefix, preserving empty lines and indentation
+    if [ -z "$line" ]; then
+        echo "// CHECK:"
+    else
+        echo "// CHECK: $line"
+    fi
 done < "$ir_output" > "$check_lines"
 
 # Create updated test file
