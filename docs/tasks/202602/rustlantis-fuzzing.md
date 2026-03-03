@@ -111,7 +111,11 @@ Seeds 0–100 (parallel execution with 48 jobs):
 | Crash | 0 | 0.0 |
 | Mismatch | 1 | 1.0 |
 
-Seed 61 produces different hash output between LLVM and Tuffy. The minimized test case involves a switch statement with an out-of-range constant: matching i32 value `-1113935606` against u128 constant `340282366920938463463374607430654275850` (which is the sign-extended u128 representation of the i32 value). Both backends should match this switch (as the low 32 bits are identical), but produce different hash values, indicating divergent execution paths. Root cause under investigation.
+Seed 61 mismatch fixed. Root cause: when MIR optimization converts tuple arguments to constants (e.g., `Move(_1)` → `const (42_i32,)`), `translate_operand` returns a pointer to the constant data. For small aggregates (≤8 bytes) passed by value, the pointer was being passed directly instead of loading the value first. This caused the callee to receive a pointer address instead of the tuple value, producing different hash output.
+
+| Seed | Root cause | Fix |
+|------|-----------|-----|
+| 61 | Constant tuple arguments (≤8 bytes) passed as pointers instead of values in optimized MIR | Load value from constant address before passing as argument in `call.rs` |
 
 - [x] Run initial fuzzing campaign (seeds 0..1000) and triage results
 - [x] Classify failures into compile crashes vs output mismatches

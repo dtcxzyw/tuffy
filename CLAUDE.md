@@ -6,6 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 When the user provides a common instruction or policy that applies broadly to future work in this repository, update this file to capture it. This ensures future sessions inherit the instruction without the user needing to repeat it.
 
+## Problem Solving Policy
+
+**IMPORTANT:** You have sufficient time to thoroughly analyze and debug problems. Do not choose temporary workarounds or give up due to perceived time constraints. When encountering bugs or issues:
+
+- Investigate root causes systematically rather than documenting problems and moving on
+- Persist through complex debugging sessions even if they take multiple attempts
+- Avoid shortcuts or partial solutions when complete fixes are achievable
+- Only escalate or defer issues when genuinely blocked by external factors
+
 ## Language Policy
 
 **IMPORTANT:** When interacting with the user, you MUST match the language they are using. If the user writes in Chinese, respond in Chinese. If the user writes in English, respond in English.

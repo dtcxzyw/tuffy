@@ -698,19 +698,39 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // with at least 1 non-ZST field — even 1-tuples need
             // spreading when the tuple lives on the stack (otherwise the
             // stack address would be passed instead of the loaded value).
-            if needs_tuple_spread
+            //
+            // Handle both place operands (Copy/Move) and constant operands.
+            let tuple_base = if needs_tuple_spread
                 && let ty::Tuple(fields) = arg_ty.kind()
                 && fields
                     .iter()
                     .filter(|f| type_size(self.tcx, *f).unwrap_or(0) > 0)
                     .count()
                     >= 1
-                && let Operand::Copy(place) | Operand::Move(place) = &arg.node
-                && let Some(base) = self.locals.get(place.local)
-                && matches!(self.builder.value_type(base), Some(Type::Ptr(_)))
             {
+                match &arg.node {
+                    Operand::Copy(place) | Operand::Move(place) => {
+                        self.locals.get(place.local).filter(|base| {
+                            matches!(self.builder.value_type(*base), Some(Type::Ptr(_)))
+                        })
+                    }
+                    Operand::Constant(_) => {
+                        // For constant tuples, translate_operand returns the address
+                        self.translate_operand(&arg.node).filter(|val| {
+                            matches!(self.builder.value_type(*val), Some(Type::Ptr(_)))
+                        })
+                    }
+                    _ => None,
+                }
+            } else {
+                None
+            };
+
+            if let Some(base) = tuple_base {
                 let typing_env = ty::TypingEnv::fully_monomorphized();
-                if let Ok(layout) = self.tcx.layout_of(typing_env.as_query_input(arg_ty)) {
+                if let Ok(layout) = self.tcx.layout_of(typing_env.as_query_input(arg_ty))
+                    && let ty::Tuple(fields) = arg_ty.kind()
+                {
                     for i in 0..fields.len() {
                         let ft = fields[i];
                         let fsz = type_size(self.tcx, ft).unwrap_or(0);
@@ -772,12 +792,32 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 }
             }
 
-            if let Some(v) = self.translate_operand(&arg.node) {
+            if let Some(mut v) = self.translate_operand(&arg.node) {
+                let arg_size = type_size(self.tcx, arg_ty).unwrap_or(0);
+
+                // For constant aggregates (tuples, structs) ≤8 bytes, translate_operand
+                // returns a pointer to the constant data. Load the value so it's passed
+                // by value in a register, not by reference.
+                if matches!(&arg.node, Operand::Constant(_))
+                    && matches!(arg_ty.kind(), ty::Tuple(_))
+                    && arg_size > 0 && arg_size <= 8
+                {
+                    if matches!(self.builder.value_type(v), Some(Type::Ptr(_))) {
+                        v = self.builder.load(
+                            v.into(),
+                            arg_size as u32,
+                            Type::Int,
+                            self.current_mem.into(),
+                            None,
+                            Origin::synthetic(),
+                        );
+                    }
+                }
+
                 // Decompose 9-16 byte struct arguments into two register-
                 // sized words for the SysV ABI.  Stack-allocated structs
                 // are represented as Ptr values; load both halves so the
                 // callee receives them in two registers (rdi+rsi, etc.).
-                let arg_size = type_size(self.tcx, arg_ty).unwrap_or(0);
                 // Fat pointer values from constants (symbol_addr to
                 // string data) or non-stack locals (the data pointer
                 // itself) are NOT addresses of [ptr, len] pairs.
