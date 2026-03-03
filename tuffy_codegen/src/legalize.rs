@@ -336,6 +336,9 @@ fn collect_wide_values<M: AbiMetadata>(
             {
                 wide.insert(vref.raw());
             }
+            Op::Shr(a, _) if is_128(a.annotation.as_ref()) => {
+                wide.insert(vref.raw());
+            }
             _ => {}
         }
     }
@@ -608,10 +611,13 @@ fn legalize_inst<M: AbiMetadata + Clone>(
             let m1 = b.store(Operand::new(lo), p.clone(), 8, m, o());
             let off = b.iconst(8i64, o());
             let hi_addr = b.ptradd(p, Operand::new(off), 0, o());
+            // For stores narrower than 16 bytes (e.g. 12-byte structs), only
+            // write the remaining bytes for the high half to avoid overflow.
+            let hi_bytes = bytes.saturating_sub(8).max(1);
             let m2 = b.store(
                 Operand::new(hi),
                 Operand::new(hi_addr),
-                8,
+                hi_bytes,
                 Operand::new(m1),
                 o(),
             );
