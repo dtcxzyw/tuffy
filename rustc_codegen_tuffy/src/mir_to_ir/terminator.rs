@@ -159,7 +159,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         // value.  This can happen in custom MIR where the
                         // return place is left uninitialised (the value is
                         // garbage but the function must still return).
-                        let dummy = self.builder.iconst(0, Origin::synthetic());
+                        let ret_ir_ty = translate_ty(self.tcx, ret_mir_ty);
+                        let dummy = if matches!(ret_ir_ty, Some(Type::Ptr(_))) {
+                            let zero = self.builder.iconst(0, Origin::synthetic());
+                            self.builder.inttoptr(zero.into(), 0, Origin::synthetic())
+                        } else {
+                            self.builder.iconst(0, Origin::synthetic())
+                        };
                         self.builder.ret(
                             Some(dummy.into()),
                             self.current_mem.into(),
