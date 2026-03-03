@@ -6,6 +6,8 @@ namespace TuffyLean.Target.X86
 /-- x86 operand size. -/
 inductive OpSize where
   | s8 | s16 | s32 | s64
+  /-- Derive size from the annotation of a named register. -/
+  | fromAnnotation (regName : String)
   deriving Repr, BEq, Hashable
 
 /-- x86 condition codes for Jcc/CMOVcc/SETcc. -/

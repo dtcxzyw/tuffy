@@ -21,6 +21,8 @@ private def opSizeToJson : OpSize → String
   | .s16 => quote "s16"
   | .s32 => quote "s32"
   | .s64 => quote "s64"
+  | .fromAnnotation regName =>
+    jsonObj [("kind", quote "from_annotation"), ("reg", quote regName)]
 
 private def condCodeToJson : CondCode → String
   | .e  => quote "e"

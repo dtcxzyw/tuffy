@@ -77,7 +77,7 @@ def shrUnsignedRule : IselRule := {
   pattern := .binop "Shr" ⟨"lhs", .unsigned⟩ ⟨"rhs", .any⟩
   emit := [movRR .s64 (.fresh "dst") (.named "lhs"),
            movRR .s64 (.freshFixed "rcx" .rcx) (.named "rhs"),
-           shrRCL .s64 (.fresh "dst")]
+           shrRCL (.fromAnnotation "lhs") (.fresh "dst")]
   result := .reg "dst"
 }
 
@@ -86,7 +86,7 @@ def shrSignedRule : IselRule := {
   pattern := .binop "Shr" ⟨"lhs", .signed⟩ ⟨"rhs", .any⟩
   emit := [movRR .s64 (.fresh "dst") (.named "lhs"),
            movRR .s64 (.freshFixed "rcx" .rcx) (.named "rhs"),
-           sarRCL .s64 (.fresh "dst")]
+           sarRCL (.fromAnnotation "lhs") (.fresh "dst")]
   result := .reg "dst"
 }
 
