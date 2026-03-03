@@ -989,11 +989,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             self.builder.iconst(0, Origin::synthetic())
         };
         let call_ret_ty = translate_ty(self.tcx, dest_ty).unwrap_or(Type::Unit);
-        let call_ret_ann = if matches!(dest_ty.kind(), ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)) {
-            translate_annotation(dest_ty)
-        } else {
-            None
-        };
+        let call_ret_ann = None;
         let (call_mem, call_data) = self.builder.call(
             callee_val.into(),
             ir_args,
@@ -1028,16 +1024,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // slot as the destination local.
             self.locals.set(destination.local, slot);
             self.stack_locals.mark(destination.local);
-        } else if dest_size.unwrap_or(0) > 8
-            && (!matches!(repr_kind(self.tcx, dest_ty), ReprKind::Scalar)
-                || matches!(
-                    dest_ty.kind(),
-                    ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
-                ))
-        {
+        } else if dest_size.unwrap_or(0) > 8 {
             // Two-register return (9-16 bytes): RAX has the first 8 bytes,
             // RDX has the remaining bytes.  Capture both and store to a
             // stack slot.
+            //
+            // SRET (>16 bytes) is handled above, so any remaining >8-byte
+            // return — whether Scalar (u128/i128) or non-Scalar (small struct)
+            // — uses RAX+RDX on x86-64 SysV ABI.  No type-specific special
+            // casing is needed here.
             let size = dest_size.unwrap();
             let slot = if let Some(existing) = self.locals.get(destination.local) {
                 if self.stack_locals.is_stack(destination.local) {
