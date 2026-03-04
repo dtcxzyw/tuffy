@@ -1646,11 +1646,17 @@ fn leg_ret<M: AbiMetadata>(
             s.vmap.pair(rv.value)
         } else {
             let lo = s.vmap.one(rv.value);
-            let hi = b.iconst(0i64, o());
+            // If terminator.rs set up a secondary-return move for this ret
+            // (stack-allocated u128 return), carry it forward. Otherwise
+            // emit iconst(0) as a harmless placeholder; in practice this
+            // branch is only reached for true u128 functions.
+            let hi = if let Some(src_idx) = s.old_meta.get_secondary_return_move(old_vref.index()) {
+                s.vmap.one(ValueRef::inst_result(src_idx))
+            } else {
+                b.iconst(0i64, o())
+            };
             (lo, hi)
         };
-        let hi_idx = b.iconst(0i64, o());
-        let _ = hi_idx;
         let ret_inst = b.ret(
             Some(Operand::annotated(lo, Annotation::Unsigned(64))),
             Operand::new(m),

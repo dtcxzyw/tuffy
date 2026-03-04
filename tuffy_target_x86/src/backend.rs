@@ -131,6 +131,10 @@ impl AbiMetadata for X86AbiMetadata {
             .find(|&(_, &target)| target == call_idx)
             .map(|(&cap_idx, _)| cap_idx)
     }
+
+    fn get_secondary_return_move(&self, ret_inst_idx: u32) -> Option<u32> {
+        self.rdx_moves.get(&ret_inst_idx).copied()
+    }
 }
 
 /// Rewrite a VReg instruction to a Gpr instruction using the assignment map.

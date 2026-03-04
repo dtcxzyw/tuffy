@@ -37,6 +37,10 @@ pub trait AbiMetadata: Default {
     /// Find the capture instruction index associated with a given call index,
     /// if one exists. Returns the old capture instruction index.
     fn find_capture_for_call(&self, call_idx: u32) -> Option<u32>;
+
+    /// Find the source instruction index registered as the secondary return
+    /// value for a given `ret` instruction, if any.
+    fn get_secondary_return_move(&self, ret_inst_idx: u32) -> Option<u32>;
 }
 
 /// Allocator stub definition: a pair of (export_name, target_name).

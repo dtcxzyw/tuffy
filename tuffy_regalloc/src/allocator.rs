@@ -138,6 +138,7 @@ where
                     &mut spill_map,
                     &mut spill_slot_count,
                     &aliases_fn,
+                    vreg_classes,
                 );
             }
         } else {
@@ -209,6 +210,8 @@ where
                     &call_positions,
                     &caller_saved_set,
                     &aliases_fn,
+                    vreg_classes,
+                    vreg_class,
                 );
             }
         }
@@ -409,6 +412,7 @@ fn handle_fixed<F>(
     spill_map: &mut HashMap<u32, u32>,
     spill_slot_count: &mut u32,
     aliases_fn: &F,
+    vreg_classes: &[u8],
 ) where
     F: Fn(PReg, PReg) -> bool,
 {
@@ -434,6 +438,7 @@ fn handle_fixed<F>(
             .expect("evicted vreg must have a range");
 
         let evict_spans_call = spans_any_call(evict_range, call_positions);
+        let evict_class = vreg_classes.get(evict_vi as usize).copied().unwrap_or(0);
 
         // Find a conflict-free register for the evicted interval.
         let mut reassigned = false;
@@ -441,6 +446,9 @@ fn handle_fixed<F>(
         // 1. Try free registers (respecting call-safety).
         let candidates: Vec<u8> = free.iter().copied().collect();
         for candidate in candidates {
+            if (candidate >> 5) != evict_class {
+                continue;
+            }
             if evict_spans_call && caller_saved_set.contains(&candidate) {
                 continue;
             }
@@ -466,6 +474,9 @@ fn handle_fixed<F>(
         if !reassigned && evict_spans_call {
             let candidates: Vec<u8> = free.iter().copied().collect();
             for candidate in candidates {
+                if (candidate >> 5) != evict_class {
+                    continue;
+                }
                 if !conflicts_with(
                     candidate,
                     evict_range.start,
@@ -489,6 +500,9 @@ fn handle_fixed<F>(
         if !reassigned {
             for &p in allocatable {
                 if p == fixed {
+                    continue;
+                }
+                if (p.0 >> 5) != evict_class {
                     continue;
                 }
                 if !conflicts_with(
@@ -591,6 +605,8 @@ fn spill_at<F>(
     call_positions: &[u32],
     caller_saved_set: &HashSet<u8>,
     aliases_fn: &F,
+    _vreg_classes: &[u8],
+    vreg_class: u8,
 ) where
     F: Fn(PReg, PReg) -> bool,
 {
@@ -598,9 +614,14 @@ fn spill_at<F>(
     let spans_call = spans_any_call(range, call_positions);
 
     // Try to find ANY allocatable register that doesn't conflict with
-    // the current interval's range. Skip caller-saved registers for
-    // ranges that span calls (they would be clobbered).
+    // the current interval's range. Only consider registers matching the
+    // vreg's register class. Skip caller-saved registers for ranges that
+    // span calls (they would be clobbered).
     for &p in allocatable {
+        // Must be in the same register class.
+        if (p.0 >> 5) != vreg_class {
+            continue;
+        }
         if spans_call && caller_saved_set.contains(&p.0) {
             continue;
         }
