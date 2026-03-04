@@ -162,15 +162,40 @@ Remaining mismatches in unoptimized builds:
 
 All three seeds pass when compiled with optimizations, indicating bugs specific to unoptimized code generation.
 
+### Run 7 (2026-03-04) - Additional unoptimized build fixes
+
+Fixed two additional issues affecting unoptimized builds:
+
+| Seed | Root cause | Fix |
+|------|-----------|-----|
+| N/A | Uninitialized float return values caused IR verification failures | Bitcast integer zero to float type when returning uninitialized float values in terminator.rs |
+| 52 | u128 to f64 conversion failed in isel despite legalization fix | Check operand annotations in addition to wide set for detecting 128-bit values in legalization |
+
+Seeds 0–100 (unoptimized builds, after fixes):
+
+| Category | Count | % of total |
+|----------|------:|-----:|
+| Pass | 99 | 98.0 |
+| Crash | 0 | 0.0 |
+| Mismatch | 2 | 2.0 |
+
+Remaining mismatches in unoptimized builds:
+- Seed 7: exit code 139 (SIGSEGV)
+- Seed 29: exit code 139 (SIGSEGV)
+
+Both seeds pass when compiled with optimizations. Seed 52 is now fixed.
+
 - [x] Run initial fuzzing campaign (seeds 0..1000) and triage results
 - [x] Classify failures into compile crashes vs output mismatches
 - [x] Minimize reproduction cases for each distinct bug
 - [x] Fix identified codegen bugs in rustc_codegen_tuffy
-- [x] Fix u128/i128 to float conversion (seed 347)
-- [ ] Fix remaining unoptimized build bugs (seeds 7, 29, 52)
+- [x] Fix u128/i128 to float conversion (seed 347, seed 52)
+- [x] Fix uninitialized float return IR verification
+- [ ] Fix remaining unoptimized build segfaults (seeds 7, 29)
 - [ ] Increase config complexity as pass rate improves
 
 ## Affected Modules
 
 - `rustc_codegen_tuffy` — codegen backend under test
 - `tuffy_codegen/src/legalize.rs` — u128 to float conversion legalization
+- `rustc_codegen_tuffy/src/mir_to_ir/terminator.rs` — uninitialized float return handling
