@@ -723,14 +723,18 @@ fn copy_inst<M: AbiMetadata + Clone>(
         Op::FpToSi(a) => b.fp_to_si(remap_op(s, a), o()),
         Op::FpToUi(a) => b.fp_to_ui(remap_op(s, a), o()),
         Op::SiToFp(a, ft) => {
-            if s.wide.contains(&a.value.raw()) {
+            let is_128 = s.wide.contains(&a.value.raw())
+                || matches!(a.annotation, Some(Annotation::Signed(128)));
+            if is_128 {
                 leg_int128_to_fp(s, b, old_vref, a, *ft, true, symbols);
                 return;
             }
             b.si_to_fp(remap_op(s, a), *ft, o())
         }
         Op::UiToFp(a, ft) => {
-            if s.wide.contains(&a.value.raw()) {
+            let is_128 = s.wide.contains(&a.value.raw())
+                || matches!(a.annotation, Some(Annotation::Unsigned(128)));
+            if is_128 {
                 leg_int128_to_fp(s, b, old_vref, a, *ft, false, symbols);
                 return;
             }
