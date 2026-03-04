@@ -1,8 +1,8 @@
 # Add DontCare(N) Annotation for Integers
 
-- Status: Draft
+- Status: Completed
 - Created: 2026-03-04
-- Completed: N/A
+- Completed: 2026-03-04
 - Parent: N/A
 
 ## Description
