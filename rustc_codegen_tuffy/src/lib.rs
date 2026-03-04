@@ -129,7 +129,12 @@ impl CodegenBackend for TuffyCodegenBackend {
                                 eprintln!("        {:?}", stmt);
                             }
                             if let Some(ref term) = bb_data.terminator {
-                                eprintln!("        {:?}", term.kind);
+                                use rustc_middle::mir::TerminatorKind;
+                                // Avoid Debug-formatting Call terminators to prevent rustc ICE
+                                match &term.kind {
+                                    TerminatorKind::Call { .. } => eprintln!("        call"),
+                                    _ => eprintln!("        {:?}", term.kind),
+                                }
                             }
                             eprintln!("    }}");
                         }
