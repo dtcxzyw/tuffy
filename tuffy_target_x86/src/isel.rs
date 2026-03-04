@@ -88,7 +88,160 @@ fn bytes_to_opsize(bytes: u32) -> OpSize {
     }
 }
 
-/// System V AMD64 ABI: first 6 integer args in rdi, rsi, rdx, rcx, r8, r9.
+/// Emit a store of exactly `bytes` bytes from `src` to `base + offset`.
+///
+/// For non-power-of-2 sizes (3, 5, 6, 7), splits into standard-size stores to
+/// avoid writing past the intended range (which would corrupt adjacent memory).
+fn emit_partial_store(ctx: &mut IselCtx, base: VReg, base_offset: i32, src: VReg, bytes: u32) {
+    match bytes {
+        1 => ctx.out.push(MInst::MovMR {
+            size: OpSize::S8,
+            base,
+            offset: base_offset,
+            src,
+        }),
+        2 => ctx.out.push(MInst::MovMR {
+            size: OpSize::S16,
+            base,
+            offset: base_offset,
+            src,
+        }),
+        3 => {
+            // 2-byte store (bits 0–15) + 1-byte store (bits 16–23).
+            ctx.out.push(MInst::MovMR {
+                size: OpSize::S16,
+                base,
+                offset: base_offset,
+                src,
+            });
+            let tmp = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst: tmp,
+                src,
+            });
+            ctx.out.push(MInst::ShrImm {
+                size: OpSize::S64,
+                dst: tmp,
+                imm: 16,
+            });
+            ctx.out.push(MInst::MovMR {
+                size: OpSize::S8,
+                base,
+                offset: base_offset + 2,
+                src: tmp,
+            });
+        }
+        4 => ctx.out.push(MInst::MovMR {
+            size: OpSize::S32,
+            base,
+            offset: base_offset,
+            src,
+        }),
+        5 => {
+            ctx.out.push(MInst::MovMR {
+                size: OpSize::S32,
+                base,
+                offset: base_offset,
+                src,
+            });
+            let tmp = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst: tmp,
+                src,
+            });
+            ctx.out.push(MInst::ShrImm {
+                size: OpSize::S64,
+                dst: tmp,
+                imm: 32,
+            });
+            ctx.out.push(MInst::MovMR {
+                size: OpSize::S8,
+                base,
+                offset: base_offset + 4,
+                src: tmp,
+            });
+        }
+        6 => {
+            ctx.out.push(MInst::MovMR {
+                size: OpSize::S32,
+                base,
+                offset: base_offset,
+                src,
+            });
+            let tmp = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst: tmp,
+                src,
+            });
+            ctx.out.push(MInst::ShrImm {
+                size: OpSize::S64,
+                dst: tmp,
+                imm: 32,
+            });
+            ctx.out.push(MInst::MovMR {
+                size: OpSize::S16,
+                base,
+                offset: base_offset + 4,
+                src: tmp,
+            });
+        }
+        7 => {
+            ctx.out.push(MInst::MovMR {
+                size: OpSize::S32,
+                base,
+                offset: base_offset,
+                src,
+            });
+            let tmp = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst: tmp,
+                src,
+            });
+            ctx.out.push(MInst::ShrImm {
+                size: OpSize::S64,
+                dst: tmp,
+                imm: 32,
+            });
+            ctx.out.push(MInst::MovMR {
+                size: OpSize::S16,
+                base,
+                offset: base_offset + 4,
+                src: tmp,
+            });
+            let tmp2 = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst: tmp2,
+                src,
+            });
+            ctx.out.push(MInst::ShrImm {
+                size: OpSize::S64,
+                dst: tmp2,
+                imm: 48,
+            });
+            ctx.out.push(MInst::MovMR {
+                size: OpSize::S8,
+                base,
+                offset: base_offset + 6,
+                src: tmp2,
+            });
+        }
+        _ => {
+            // 8+ bytes: use the nearest opsize (handled by caller for wide stores).
+            ctx.out.push(MInst::MovMR {
+                size: bytes_to_opsize(bytes),
+                base,
+                offset: base_offset,
+                src,
+            });
+        }
+    }
+}
+
 const ARG_REGS: [Gpr; 6] = [Gpr::Rdi, Gpr::Rsi, Gpr::Rdx, Gpr::Rcx, Gpr::R8, Gpr::R9];
 
 #[derive(Clone, Copy)]
@@ -477,24 +630,15 @@ fn select_inst(
 
         Op::Store(val, ptr, bytes, _mem) => {
             let val_vreg = ctx.ensure_in_reg(val.value)?;
-            let size = bytes_to_opsize(*bytes);
-            if let Some(offset) = ctx.stack.get(ptr.value) {
+            // Determine the base register and base offset for the target address.
+            let (base, base_offset) = if let Some(offset) = ctx.stack.get(ptr.value) {
                 let rbp = ctx.alloc.alloc_fixed(Gpr::Rbp.to_preg());
-                ctx.out.push(MInst::MovMR {
-                    size,
-                    base: rbp,
-                    offset,
-                    src: val_vreg,
-                });
+                (rbp, offset)
             } else {
-                let ptr_vreg = ctx.ensure_in_reg(ptr.value)?;
-                ctx.out.push(MInst::MovMR {
-                    size,
-                    base: ptr_vreg,
-                    offset: 0,
-                    src: val_vreg,
-                });
-            }
+                (ctx.ensure_in_reg(ptr.value)?, 0i32)
+            };
+            // Emit stores; for non-power-of-2 sizes split into standard-size pieces.
+            emit_partial_store(ctx, base, base_offset, val_vreg, *bytes);
         }
 
         Op::Unreachable | Op::Trap => {
