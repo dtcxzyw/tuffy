@@ -228,12 +228,13 @@ Call(RET.fld1 = core::intrinsics::transmute(_3), ReturnTo(bb1), UnwindUnreachabl
 
 Findings:
 - Crashes with SIGSEGV (exit code 139) at runtime
-- IR shows both stores to RET.fld1 at offset 0 instead of correct field offset
-- Simple field assignment tests work correctly, so field_offset calculation is fine
-- Issue is specific to how Call results are assigned to struct fields
-- The Call destination handling may not be calculating field offsets correctly
+- IR shows both stores to RET.fld1 at offset 0
+- **Field offset investigation (2026-03-04)**: Verified that offset 0 is CORRECT. rustc reorders struct fields to minimize padding: fld1 (i128, 16-byte aligned) is placed at offset 0, fld0 (u16) is placed at offset 16. Simple test cases work correctly with this layout.
+- The crash is NOT caused by incorrect field offsets
+- Issue is likely in i128 multiplication legalization or codegen
+- LLVM version works correctly, tuffy version crashes
 
-Both seeds require further investigation into calling conventions and Call destination handling.
+Both seeds require further investigation. The field offset calculation is working correctly, so the bugs are elsewhere in the codegen pipeline.
 
 - [x] Run initial fuzzing campaign (seeds 0..1000) and triage results
 - [x] Classify failures into compile crashes vs output mismatches
