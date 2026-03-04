@@ -758,7 +758,31 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 let rvalue_ty = rvalue.ty(&self.mir.local_decls, self.tcx);
                                 let rvalue_ty = self.monomorphize(rvalue_ty);
                                 let src_bytes = type_size(self.tcx, rvalue_ty).unwrap_or(8);
-                                if src_bytes > 8 {
+                                // Check if the rvalue produces a true 128-bit IR value.
+                                // Constants like 42_i128 return iconst (8 bytes) from
+                                // translate_rvalue, so they need scalar extension.
+                                // Operations like i128 * i128 produce true 128-bit values.
+                                let val_is_wide = match rvalue {
+                                    Rvalue::BinaryOp(_, box (lhs, _)) => {
+                                        let lhs_ty = lhs.ty(&self.mir.local_decls, self.tcx);
+                                        let lhs_ty = self.monomorphize(lhs_ty);
+                                        matches!(
+                                            lhs_ty.kind(),
+                                            ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
+                                        )
+                                    }
+                                    Rvalue::UnaryOp(_, op) => {
+                                        let op_ty = op.ty(&self.mir.local_decls, self.tcx);
+                                        let op_ty = self.monomorphize(op_ty);
+                                        matches!(
+                                            op_ty.kind(),
+                                            ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
+                                        )
+                                    }
+                                    Rvalue::Use(Operand::Constant(_)) => false,
+                                    _ => src_bytes > 8,
+                                };
+                                if val_is_wide {
                                     self.current_mem = self.builder.store(
                                         val.into(),
                                         addr.into(),
