@@ -146,3 +146,9 @@ Unsupported MIR constructs (rvalue kinds, statement kinds, terminator kinds, int
 - `tuffy_codegen` — target-dispatching facade
 - `num-bigint` — arbitrary-precision integer constants
 - `rustc_*` — rustc internal crates (via `#![feature(rustc_private)]`)
+
+## References
+
+- [MIR (Mid-level IR)](https://rustc-dev-guide.rust-lang.org/mir/index.html)
+- [Lowering MIR](https://rustc-dev-guide.rust-lang.org/backend/lowering-mir.html)
+- [Backend Agnostic Codegen](https://rustc-dev-guide.rust-lang.org/backend/backend-agnostic.html)
