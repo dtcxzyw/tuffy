@@ -117,6 +117,24 @@ Seed 61 mismatch fixed. Root cause: when MIR optimization converts tuple argumen
 |------|-----------|-----|
 | 61 | Constant tuple arguments (≤8 bytes) passed as pointers instead of values in optimized MIR | Load value from constant address before passing as argument in `call.rs` |
 
+### Run 5 (2026-03-04)
+
+Seeds 0–1000 (parallel execution with 48 jobs):
+
+| Category | Count | % of total |
+|----------|------:|-----:|
+| Pass | 992 | 99.2 |
+| Crash | 0 | 0.0 |
+| Mismatch (wrong code) | 8 | 0.8 |
+| Mismatch (runtime crash) | 1 | 0.1 |
+
+Pass rate improved from 72% (Run 2) to 99.2%. All compilation crashes eliminated. 9 mismatches remain:
+
+Mismatching seeds: 266, 347, 391, 490, 669, 731, 922, 944, 993
+
+- Seed 347: runtime crash (core dump)
+- Seeds 266, 391, 490, 669, 731, 922, 944, 993: wrong code (different hash output)
+
 - [x] Run initial fuzzing campaign (seeds 0..1000) and triage results
 - [x] Classify failures into compile crashes vs output mismatches
 - [x] Minimize reproduction cases for each distinct bug
