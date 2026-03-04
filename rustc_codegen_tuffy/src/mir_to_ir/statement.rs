@@ -779,7 +779,46 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                             ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
                                         )
                                     }
-                                    Rvalue::Use(Operand::Constant(_)) => false,
+                                    Rvalue::Use(Operand::Constant(c)) => {
+                                        let c_ty = self.monomorphize(c.ty());
+                                        if type_size(self.tcx, c_ty).unwrap_or(8) <= 8 {
+                                            false
+                                        } else {
+                                            // For 128-bit constants: use wide store only when
+                                            // the value doesn't fit in i64/u64. Small constants
+                                            // (e.g. 42_u128) use the scalar extension below.
+                                            let mono_c = self.tcx.instantiate_and_normalize_erasing_regions(
+                                                self.instance.args,
+                                                ty::TypingEnv::fully_monomorphized(),
+                                                ty::EarlyBinder::bind(c.const_),
+                                            );
+                                            let resolved = match mono_c {
+                                                mir::Const::Val(v, _) => Some(v),
+                                                _ => mono_c
+                                                    .eval(self.tcx, ty::TypingEnv::fully_monomorphized(), c.span)
+                                                    .ok(),
+                                            };
+                                            let bits = resolved.and_then(|cv| {
+                                                if let mir::ConstValue::Scalar(
+                                                    mir::interpret::Scalar::Int(si),
+                                                ) = cv
+                                                {
+                                                    Some(si.to_bits(si.size()))
+                                                } else {
+                                                    None
+                                                }
+                                            });
+                                            bits.is_some_and(|bits| {
+                                                if matches!(c_ty.kind(), ty::Int(_)) {
+                                                    let signed = bits as i128;
+                                                    signed > i64::MAX as i128
+                                                        || signed < i64::MIN as i128
+                                                } else {
+                                                    bits > u64::MAX as u128
+                                                }
+                                            })
+                                        }
+                                    }
                                     _ => src_bytes > 8,
                                 };
                                 if val_is_wide {
