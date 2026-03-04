@@ -86,6 +86,64 @@ CHECK lines use exact string matching (not regex), including indentation. Each C
 
 **Compile flags:** Unless testing specific behaviors (e.g., debug assertion codegen, debug symbols), use `-Zmir-opt-level=3 -C debug-assertions=off` as the standard compile flags for codegen tests. This ensures tests verify optimized MIR translation.
 
+### Smoke Tests
+
+Basic sanity check that verifies the backend can compile and execute a simple program:
+
+```bash
+tests/run-tests.sh
+```
+
+Compiles and runs `tests/fixtures/hello.rs`, verifying that `println!("Hello, world!")` produces correct output.
+
+### UI Tests
+
+Runs rustc UI tests from `rust-lang/rust` against the tuffy backend:
+
+```bash
+tests/run-ui-tests.sh [options] [rust-src-dir]
+```
+
+Options:
+- `--fail-fast`: Stop at first failure
+- `--shuffle`: Randomize test order (default: sorted)
+- `--filter PATTERN`: Only run tests matching pattern
+
+Requires `scratch/rust/tests/ui/` (sparse clone of rust-lang/rust at pinned version). Tests are compiled as libraries (`--crate-type lib`) to verify MIR translation without linking. Tests with error annotations (`//~`) or unsupported directives are automatically skipped.
+
+Setup:
+```bash
+git clone --filter=blob:none --sparse -b 1.93.1 https://github.com/rust-lang/rust.git scratch/rust
+cd scratch/rust && git sparse-checkout set tests/ui
+```
+
+### Run-Pass Tests
+
+Runs executable tests from rustc UI test suite (compile, link, and execute):
+
+```bash
+tests/run-pass-tests.sh [options] [rust-src-dir]
+```
+
+Options:
+- `--fail-fast`: Stop at first failure
+
+Filters UI tests for those with `fn main()` and no error annotations, then compiles as binaries and executes them. Distinguishes between compile failures, link failures, and runtime failures. Uses the same `scratch/rust/tests/ui/` directory as UI tests.
+
+### Doctest Tests
+
+Extracts and compiles doctests from Rust standard library source:
+
+```bash
+tests/run-doctest.sh [library-dir] [--run]
+```
+
+Arguments:
+- `library-dir`: Path to `scratch/rust/library` (default: `../../scratch/rust/library`)
+- `--run`: Execute compiled binaries (default: compile-only)
+
+Extracts code blocks from doc comments, wraps them in `fn main()` if needed, and compiles with tuffy backend. Requires a full clone of rust-lang/rust (not sparse).
+
 ### Test Requirements
 
 When modifying MIR-to-IR translation modules in `mir_to_ir/`, add corresponding regression tests to `tests/codegen/`:
