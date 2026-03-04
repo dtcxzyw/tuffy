@@ -9,30 +9,6 @@ use super::ctx::TranslationCtx;
 use super::types::*;
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
-    /// Load a large type (>8 bytes) from memory if the value is a pointer.
-    /// For types <= 8 bytes, returns the value unchanged.
-    fn load_large_value_if_needed(
-        &mut self,
-        value: ValueRef,
-        ty: ty::Ty<'tcx>,
-        annotation: Option<Annotation>,
-    ) -> ValueRef {
-        if matches!(self.builder.value_type(value), Some(Type::Ptr(_)))
-            && let Some(size) = type_size(self.tcx, ty)
-            && size > 8
-        {
-            self.builder.load(
-                value.into(),
-                size as u32,
-                Type::Int,
-                self.current_mem.into(),
-                annotation,
-                Origin::synthetic(),
-            )
-        } else {
-            value
-        }
-    }
 
     pub(super) fn translate_place_to_addr(
         &mut self,
@@ -2104,7 +2080,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 unimplemented!("MIR rvalue: UnaryOp::PtrMetadata")
             }
             Rvalue::UnaryOp(mir::UnOp::Neg, operand) => {
-                let mut v = self.translate_operand(operand)?;
+                let v = self.translate_operand(operand)?;
                 let op_ty = match operand {
                     Operand::Copy(p) | Operand::Move(p) => {
                         Some(self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty))
@@ -2136,9 +2112,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     }
                 }
                 let neg_ann = op_ty.and_then(translate_annotation);
-                if let Some(ty) = op_ty {
-                    v = self.load_large_value_if_needed(v, ty, neg_ann);
-                }
                 // Coerce Bool/Ptr to Int for integer negation.
                 let v = self.coerce_to_int(v);
                 if !matches!(self.builder.value_type(v), Some(Type::Int)) {
@@ -2151,7 +2124,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 )
             }
             Rvalue::UnaryOp(mir::UnOp::Not, operand) => {
-                let mut v = self.translate_operand(operand)?;
+                let v = self.translate_operand(operand)?;
                 let mir_ty = match operand {
                     Operand::Copy(p) | Operand::Move(p) => {
                         let ty = p.ty(&self.mir.local_decls, self.tcx).ty;
@@ -2161,9 +2134,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     _ => None,
                 };
                 let not_ann = mir_ty.and_then(|t| translate_annotation(t));
-                if let Some(ty) = mir_ty {
-                    v = self.load_large_value_if_needed(v, ty, not_ann);
-                }
                 let is_bool = mir_ty.is_some_and(|t| t.is_bool());
                 if is_bool {
                     // Boolean NOT: XOR 1.
@@ -2302,8 +2272,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     }
                     // Non-stack local holding a memory address (e.g. symbol_addr
                     // for an indirect constant like `const S: Point = ...`).
-                    // For small scalar types (≤8 bytes, mapped to Int), load the
-                    // actual data instead of returning the raw pointer.
+                    // For Int-typed locals stored at a memory address (symbol or
+                    // PtrAdd), load the actual value instead of returning the
+                    // raw pointer.  This covers both small scalars (≤8 bytes)
+                    // and large integers such as i128/u128 (16 bytes).
                     if !self.stack_locals.is_stack(place.local)
                         && let Some(v) = val
                         && matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
@@ -2311,7 +2283,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     {
                         let ty = self.monomorphize(self.mir.local_decls[place.local].ty);
                         let size = type_size(self.tcx, ty).unwrap_or(8);
-                        if size <= 8 && matches!(translate_ty(self.tcx, ty), Some(Type::Int)) {
+                        if matches!(translate_ty(self.tcx, ty), Some(Type::Int))
+                            && (size <= 8 || ty.is_integral())
+                        {
                             let loaded = self.builder.load(
                                 v.into(),
                                 size as u32,

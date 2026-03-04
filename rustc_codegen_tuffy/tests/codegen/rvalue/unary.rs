@@ -1,4 +1,21 @@
 // compile-flags: -Zmir-opt-level=3 -C debug-assertions=off
+// CHECK: fn neg_i128(_1: i128) -> i128 {
+// CHECK:     debug a => _1;
+// CHECK:     let mut _0: i128;
+// CHECK:
+// CHECK:     bb0: {
+// CHECK:         _0 = Neg(copy _1);
+// CHECK:         return;
+// CHECK:     }
+// CHECK: }
+// CHECK: func @neg_i128(%a: int:s128) -> int:s128 {
+// CHECK:   bb0(v0: mem):
+// CHECK:     v1:s128 = param %a
+// CHECK:     v2 = iconst 0
+// CHECK:     v3:s128 = sub v2, v1
+// CHECK:     ret v3, v0
+// CHECK: }
+// CHECK:
 // CHECK: fn neg_i32(_1: i32) -> i32 {
 // CHECK:     debug a => _1;
 // CHECK:     let mut _0: i32;
@@ -35,6 +52,40 @@
 // CHECK:     ret v5, v0
 // CHECK: }
 // CHECK:
+// CHECK: fn not_i128(_1: i128) -> i128 {
+// CHECK:     debug a => _1;
+// CHECK:     let mut _0: i128;
+// CHECK:
+// CHECK:     bb0: {
+// CHECK:         _0 = Not(copy _1);
+// CHECK:         return;
+// CHECK:     }
+// CHECK: }
+// CHECK: func @not_i128(%a: int:s128) -> int:s128 {
+// CHECK:   bb0(v0: mem):
+// CHECK:     v1:s128 = param %a
+// CHECK:     v2 = iconst -1
+// CHECK:     v3:s128 = xor v1, v2
+// CHECK:     ret v3, v0
+// CHECK: }
+// CHECK:
+// CHECK: fn not_u128(_1: u128) -> u128 {
+// CHECK:     debug a => _1;
+// CHECK:     let mut _0: u128;
+// CHECK:
+// CHECK:     bb0: {
+// CHECK:         _0 = Not(copy _1);
+// CHECK:         return;
+// CHECK:     }
+// CHECK: }
+// CHECK: func @not_u128(%a: int:u128) -> int:u128 {
+// CHECK:   bb0(v0: mem):
+// CHECK:     v1:u128 = param %a
+// CHECK:     v2 = iconst -1
+// CHECK:     v3:u128 = xor v1, v2
+// CHECK:     ret v3, v0
+// CHECK: }
+// CHECK:
 // CHECK: fn not_u32(_1: u32) -> u32 {
 // CHECK:     debug a => _1;
 // CHECK:     let mut _0: u32;
@@ -68,5 +119,20 @@ pub fn not_bool(a: bool) -> bool {
 
 #[no_mangle]
 pub fn not_u32(a: u32) -> u32 {
+    !a
+}
+
+#[no_mangle]
+pub fn neg_i128(a: i128) -> i128 {
+    -a
+}
+
+#[no_mangle]
+pub fn not_i128(a: i128) -> i128 {
+    !a
+}
+
+#[no_mangle]
+pub fn not_u128(a: u128) -> u128 {
     !a
 }
