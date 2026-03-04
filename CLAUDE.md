@@ -148,10 +148,16 @@ Do not use `static` global variables for mutable state (including `AtomicU64`, `
 
 **Component Conventions:** When modifying code in any component, you MUST follow the conventions and requirements defined in that component's `README.md`. Do not use workarounds or insert special-case logic in inappropriate components. Each component has its own architectural rules — respect them and implement changes in the correct location according to the component's design.
 
+## Testing Policy
+
+**IMPORTANT:** Do not delete or skip existing tests in the repository unless explicitly authorized by the user. All existing tests must continue to pass. This policy ensures test coverage is maintained and prevents regression.
+
+**Regression Tests:** After fixing a bug, you must add a corresponding regression test. For example, when fixing a MIR-to-IR bug in `rustc_codegen_tuffy`, add a new regression test to `rustc_codegen_tuffy/tests/codegen` and use `rustc_codegen_tuffy/tests/update-codegen-test.sh` to generate check lines.
+
 ## Architecture
 
 The IR definition in Lean 4 (`lean/TuffyLean/IR/`) is the **source of truth**. The Rust implementation (`tuffy_ir/`) and the spec (`docs/spec/`) must conform to the Lean definitions. When there is a conflict, the Lean code takes precedence.
 
 `docs/initial.md` is frozen — it records early design decisions and must not be modified. New design discussions belong in `docs/RFCs/`.
 
-Source code architecture overviews are documented in the `README.md` within each component's directory.
+Source code architecture overviews are documented in the `README.md` within each component's directory. For example, when modifying `rustc_codegen_tuffy`, you must follow the requirements defined in `rustc_codegen_tuffy/README.md`.
