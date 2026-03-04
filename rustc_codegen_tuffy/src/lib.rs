@@ -106,25 +106,18 @@ impl CodegenBackend for TuffyCodegenBackend {
                             let mir = tcx.instance_mir(instance.def);
                             let fn_name = tcx.symbol_name(*instance).name;
 
-                            // Print function signature
                             eprint!("fn {}(", fn_name);
                             for (idx, local) in mir.local_decls.iter_enumerated().skip(1).take(mir.arg_count) {
-                                if idx.as_usize() > 1 {
-                                    eprint!(", ");
-                                }
+                                if idx.as_usize() > 1 { eprint!(", "); }
                                 eprint!("{:?}: {:?}", idx, local.ty);
                             }
                             eprintln!(") -> {:?} {{", mir.local_decls[rustc_middle::mir::RETURN_PLACE].ty);
 
-                            // Print local variable declarations
                             for (local, decl) in mir.local_decls.iter_enumerated().skip(mir.arg_count + 1) {
                                 eprintln!("    let mut {:?}: {:?};", local, decl.ty);
                             }
-                            if mir.local_decls.len() > mir.arg_count + 1 {
-                                eprintln!();
-                            }
+                            if mir.local_decls.len() > mir.arg_count + 1 { eprintln!(); }
 
-                            // Print basic blocks
                             for (bb, bb_data) in mir.basic_blocks.iter_enumerated() {
                                 eprintln!("    {:?}: {{", bb);
                                 for stmt in &bb_data.statements {
