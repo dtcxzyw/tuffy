@@ -213,26 +213,27 @@ Findings:
 - LLVM produces hash: 370434447370778688
 - u128 multiplication works correctly in isolation (verified with standalone test)
 - u128 constants are stored correctly (verified with standalone test)
-- Issue appears to be in how u128 values are passed to functions or how they're hashed
-- IR shows: `v8:u128 = mul v6:u128, v7:u128` followed by `call v9(v5, v8:u128)`
+- Issue appears to be in how u128 values are passed to generic functions (impl Hash)
+- IR shows u128 passed as single annotated operand, but backend may not handle this correctly
 
-The bug is likely in the calling convention or ABI handling for u128 arguments.
+The bug is likely in the legalization or code generation for u128 function arguments.
 
 #### Seed 29 Investigation
 
-Seed 29 minimizes to a transmute from u128 to i128 stored in a struct field:
+Seed 29 minimizes to two assignments to RET.fld1:
 ```rust
 RET.fld1 = 74045951570396969358155043307167018649_i128 * (-84426674019192898531552418757191699584_i128);
 Call(RET.fld1 = core::intrinsics::transmute(_3), ReturnTo(bb1), UnwindUnreachable())
 ```
 
 Findings:
-- Still crashes with SIGSEGV (exit code 139) at runtime
-- IR improved from `store.8` to `store.16` after the fix
-- The crash happens during execution, not compilation
-- Issue is likely in the transmute handling or subsequent code
+- Crashes with SIGSEGV (exit code 139) at runtime
+- IR shows both stores to RET.fld1 at offset 0 instead of correct field offset
+- Simple field assignment tests work correctly, so field_offset calculation is fine
+- Issue is specific to how Call results are assigned to struct fields
+- The Call destination handling may not be calculating field offsets correctly
 
-Both seeds require further investigation into calling conventions and intrinsics handling.
+Both seeds require further investigation into calling conventions and Call destination handling.
 
 - [x] Run initial fuzzing campaign (seeds 0..1000) and triage results
 - [x] Classify failures into compile crashes vs output mismatches
