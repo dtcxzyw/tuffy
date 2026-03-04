@@ -418,6 +418,12 @@ pub(super) fn translate_scalar(
             let val = BigInt::from(bits);
             Some(builder.iconst(val, Origin::synthetic()))
         }
+        ty::Tuple(_) => {
+            // 1-tuples optimized to scalars by MIR (e.g., const (42_i32,)).
+            // Treat the raw bits as an unsigned integer.
+            let val = BigInt::from(bits);
+            Some(builder.iconst(val, Origin::synthetic()))
+        }
         _ => None,
     }
 }
