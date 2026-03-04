@@ -2,7 +2,7 @@
 
 - Status: Completed
 - Created: 2026-02-27
-- Completed: 2026-03-05
+- Completed: 2026-03-06
 
 
 - Parent: N/A
@@ -340,10 +340,46 @@ Seeds 0–1000 (optimized builds, `-Zmir-opt-level=3 -C opt-level=3`):
 
 All 1001 seeds (0–1000) pass. 0 crashes, 0 mismatches.
 
+### Run 14 (2026-03-06) - Extended optimized build fuzzing (seeds 0–10000)
+
+Extended the optimized-build fuzzing campaign to seeds 0–10000. Found and fixed
+multiple new bugs in both legalization and MIR-to-IR translation:
+
+**legalize.rs fixes** (commit `b58b3d1`):
+
+| Bug | Affected Seeds | Root cause | Fix |
+|-----|---------------|-----------|-----|
+| `leg_shr`: non-wide u128 operand produced wrong hi word | 7263 | When legalizing `shr v:u128, amt` where `v` is a small constant (not in the wide set), `vmap.pair(v)` returned `(v, v)`, making hi = lo instead of 0. | Added `wide_pair()` helper that emits hi = 0 for unsigned non-wide values and hi = lo >> 63 for signed. Also fixed `is_wide()` to recognize `Mapped::Pair` entries. |
+| `leg_store_128`: non-wide constant stored with wrong hi word | Various | Storing a small 128-bit constant (fitting in u64) computed hi as `(lo, lo)` instead of deriving hi from the BigInt. | Fixed by computing hi from `Op::Const` BigInt when value is not in the wide set. |
+| `Sext`/`Zext` for fp-to-int missing compiler-rt saturation | Various | Float-to-i128/u128 conversions going through `Sext(FpToSi, 128)` / `Zext(FpToUi, 128)` did not call the compiler-rt saturation routines (`__fixsfti`, `__fixdfti`, etc.). | Added `get_fp_to_int_float_type()` and `leg_fp_to_int128()` to route these through the correct libcalls. |
+
+**rustc_codegen_tuffy MIR-to-IR fixes** (commit `2b641db`):
+
+| Bug | Affected Seeds | Root cause | Fix |
+|-----|---------------|-----------|-----|
+| Spill not persisted for projected intrinsic/call destinations | Various | For non-Deref projected destinations (e.g. `_struct.field`), the local slot was restored to the pre-spill value after the call, so subsequent reads returned stale data. | Persist the spill slot for non-Deref projections; only Deref projections restore to the original. |
+| Newtype wrapper over u128/i128 passed as pointer | Various | A 16-byte Scalar argument (e.g. `struct Foo(u128)`) was passed by pointer instead of loading lo+hi halves. | Load the two 8-byte halves from the pointer and pass as two integer registers. |
+| Negation/NOT of >8-byte integer applied to pointer | Various | For i128/u128 operands, `translate_place_to_value` returns a Ptr; negation and bitwise NOT applied the operation to the pointer address instead of the loaded value. | Load the 128-bit integer from the pointer before applying the operation. |
+| 8-byte non-pointer type copied by value instead of memory | Various | Assignment of an 8-byte projected non-pointer type (e.g. `(char, bool)`) passed the source pointer as the value instead of copying bytes from the source address. | Extended the word-by-word copy condition to also cover non-pointer 8-byte types. |
+| Bool-typed unreachable return emitted wrong IR type | Various | Default return value for Bool-typed functions fell through to `iconst(0)` (Int), causing IR type mismatches. | Emit `bconst(false)` for Bool return types. |
+
+Seeds 0–10000 (optimized builds, `-Zmir-opt-level=3 -C opt-level=3`):
+
+| Category | Count | % of total |
+|----------|------:|-----:|
+| Pass | 10001 | 100.0 |
+| Crash | 0 | 0.0 |
+| Mismatch | 0 | 0.0 |
+
+All 10001 seeds (0–10000) pass. 0 crashes, 0 mismatches.
+
 ## Affected Modules
 
 - `rustc_codegen_tuffy` — codegen backend under test
-- `tuffy_codegen/src/legalize.rs` — u128 to float conversion legalization; secondary return move remapping; i128 call argument legalization
-- `rustc_codegen_tuffy/src/mir_to_ir/terminator.rs` — uninitialized float return handling
+- `tuffy_codegen/src/legalize.rs` — u128 to float conversion legalization; secondary return move remapping; i128 call argument legalization; leg_shr/leg_store_128 non-wide constant hi fixes; fp-to-int128 compiler-rt routing
+- `rustc_codegen_tuffy/src/mir_to_ir/terminator.rs` — uninitialized float return handling; Bool return type fix
 - `rustc_codegen_tuffy/src/mir_to_ir/mod.rs` — address-taken prescan stack slot allocation
+- `rustc_codegen_tuffy/src/mir_to_ir/call.rs` — spill persistence for projected destinations; newtype wrapper u128 argument loading
+- `rustc_codegen_tuffy/src/mir_to_ir/rvalue.rs` — negation/NOT of >8-byte integers stored as pointers
+- `rustc_codegen_tuffy/src/mir_to_ir/statement.rs` — 8-byte non-pointer type aggregate copy
 - `tuffy_target_x86/src/isel.rs` — partial store for non-power-of-2 byte sizes
