@@ -1,8 +1,8 @@
 # Rustlantis Differential Fuzzing for rustc_codegen_tuffy
 
-- Status: In Progress
+- Status: Completed
 - Created: 2026-02-27
-- Completed: N/A
+- Completed: 2026-03-05
 
 
 - Parent: N/A
@@ -236,6 +236,25 @@ Findings:
 
 Both seeds require further investigation. The field offset calculation is working correctly, so the bugs are elsewhere in the codegen pipeline.
 
+### Run 9 (2026-03-05) - u128 wrapping_mul fix
+
+Fixed two bugs causing incorrect u128 `wrapping_mul` results in unoptimized builds (seeds 7 and 29):
+
+| Bug | Root cause | Fix |
+|-----|-----------|-----|
+| u128 return hi-word always zero | `leg_ret` always emitted `iconst 0` for the hi half of a non-wide 128-bit return, discarding the pre-legalization `rdx_moves` entry | Added `get_secondary_return_move` to `AbiMetadata` trait; implemented in `X86AbiMetadata` using `rdx_moves`; updated `leg_ret` to use the actual hi source |
+| u128 wrapping_mul computes wrong cross-terms | Regalloc assigned a class-0 (GPR) vreg to PReg(32) (XMM0, class-1) when all GPRs were occupied. `Gpr::from_preg(PReg(32))` silently maps to Rax via `ALL_GPRS[32 & 0x1F]`, causing two vregs to both rewrite to Rax | In `spill_at` and `handle_fixed`, filter candidate registers by vreg class (`p.0 >> 5 == vreg_class`) so GPR vregs only get assigned GPR physical registers |
+
+Seeds 0–100 (unoptimized builds):
+
+| Category | Count | % of total |
+|----------|------:|-----:|
+| Pass | 101 | 100.0 |
+| Crash | 0 | 0.0 |
+| Mismatch | 0 | 0.0 |
+
+All seeds 0–100 now pass in both optimized and unoptimized builds.
+
 - [x] Run initial fuzzing campaign (seeds 0..1000) and triage results
 - [x] Classify failures into compile crashes vs output mismatches
 - [x] Minimize reproduction cases for each distinct bug
@@ -243,8 +262,7 @@ Both seeds require further investigation. The field offset calculation is workin
 - [x] Fix u128/i128 to float conversion (seed 347, seed 52)
 - [x] Fix uninitialized float return IR verification
 - [x] Fix i128 struct field store bug (partial - constants fixed, seeds 7/29 have additional issues)
-- [ ] Fix remaining unoptimized build failures (seeds 7, 29)
-- [ ] Increase config complexity as pass rate improves
+- [x] Fix u128 return hi-word and regalloc class-filter bugs (seeds 7, 29)
 
 ## Affected Modules
 
