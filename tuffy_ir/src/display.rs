@@ -129,7 +129,7 @@ fn fmt_annotation(ann: &Annotation) -> String {
     match ann {
         Annotation::Signed(n) => format!(":s{n}"),
         Annotation::Unsigned(n) => format!(":u{n}"),
-        Annotation::DontCare(n) => format!(":dc{n}"),
+        Annotation::DontCare(n) => format!(":i{n}"),
     }
 }
 

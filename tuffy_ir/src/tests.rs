@@ -1809,7 +1809,7 @@ fn test_dontcare_annotation_display() {
     b.exit_region();
 
     let output = format!("{}", func.display(&st));
-    assert!(output.contains(":dc32"), "should display :dc32 annotation");
+    assert!(output.contains(":i32"), "should display :i32 annotation");
 }
 
 #[test]

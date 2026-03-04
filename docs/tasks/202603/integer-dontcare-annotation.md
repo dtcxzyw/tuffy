@@ -58,10 +58,10 @@ Add corresponding semantics in `lean/TuffyLean/IR/Semantics.lean` (or a new
 Add `DontCare(u32)` to the `Annotation` enum:
 
 ```rust
-DontCare(u32),  // :dc<N> — only low N bits are meaningful
+DontCare(u32),  // :i<N> — only low N bits are meaningful
 ```
 
-Display format: `:dc<N>` (e.g., `:dc32`).
+Display format: `:i<N>` (e.g., `:i32`).
 
 Update all match arms on `Annotation` throughout `tuffy_ir`.
 
@@ -84,7 +84,7 @@ Document (in code comments and/or a follow-up RFC) the rewrite rules enabled by 
 1. Add `dontCare` variant to `Annotation` in `lean/TuffyLean/IR/Types.lean`
 2. Add validity predicate and semantics for `dontCare` in the Lean IR semantics
 3. Add `DontCare(u32)` variant to `Annotation` in `tuffy_ir/src/types.rs`
-4. Update display formatting (`:dc<N>`) in `tuffy_ir/src/display.rs`
+4. Update display formatting (`:i<N>`) in `tuffy_ir/src/display.rs`
 5. Update verifier checks for `DontCare` in `tuffy_ir/src/verifier.rs`
 6. Update all other `Annotation` match arms in `tuffy_ir` (instruction.rs, etc.)
 7. Add tests covering `DontCare` construction, display, and verifier rejection cases
@@ -94,7 +94,7 @@ Document (in code comments and/or a follow-up RFC) the rewrite rules enabled by 
 - `lean/TuffyLean/IR/Types.lean` — add `dontCare` variant (source of truth)
 - `lean/TuffyLean/IR/Semantics.lean` — add validity predicate and interaction rules
 - `tuffy_ir/src/types.rs` — add `DontCare(u32)` variant
-- `tuffy_ir/src/display.rs` — format `:dc<N>`
+- `tuffy_ir/src/display.rs` — format `:i<N>`
 - `tuffy_ir/src/verifier.rs` — validate `DontCare` constraints
 - `tuffy_ir/src/instruction.rs` — update `Annotation` match arms if present
 - `tuffy_ir/src/tests.rs` — add tests
