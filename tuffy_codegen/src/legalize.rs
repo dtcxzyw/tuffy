@@ -142,6 +142,11 @@ fn has_wide_values<M: AbiMetadata>(
                 return true;
             }
             Op::Const(v) if needs_wide_const(v) => return true,
+            // A call with any 128-bit annotated argument needs legalization to
+            // split it into (lo, hi) even when the value fits in 64 bits.
+            Op::Call(_, args, _) if args.iter().any(|a| is_128(a.annotation.as_ref())) => {
+                return true;
+            }
             _ => {}
         }
     }
@@ -1723,7 +1728,32 @@ fn leg_call<M: AbiMetadata + Clone>(
             new_args.push(Operand::annotated(hi, Annotation::Unsigned(64)));
         } else if is_128(arg.annotation.as_ref()) {
             let lo = remap_op(s, arg);
-            let hi = b.iconst(0i64, o());
+            // Compute hi (upper 64 bits of the 128-bit value).
+            // For a constant, derive hi from the original BigInt to handle
+            // values in [2^63, 2^64) correctly (positive i128 with bit 63 set).
+            // For non-constant Signed(128) values, sign-extend lo; for
+            // Unsigned(128) values, hi is always 0.
+            let hi = if !arg.value.is_block_arg()
+                && !arg.value.is_secondary_result()
+                && matches!(_old.inst(arg.value.index()).op, Op::Const(_))
+            {
+                let Op::Const(val) = &_old.inst(arg.value.index()).op else {
+                    unreachable!()
+                };
+                let mask64 = (BigInt::from(1u64) << 64u32) - BigInt::from(1u32);
+                let hi_big = (val >> 64u32) & &mask64;
+                b.iconst(hi_big, o())
+            } else if is_signed_128(arg.annotation.as_ref()) {
+                let c63 = b.iconst(63i64, o());
+                b.shr(
+                    Operand::annotated(lo.value, Annotation::Signed(64)),
+                    Operand::new(c63),
+                    None,
+                    o(),
+                )
+            } else {
+                b.iconst(0i64, o())
+            };
             new_args.push(Operand::annotated(lo.value, Annotation::Unsigned(64)));
             new_args.push(Operand::annotated(hi, Annotation::Unsigned(64)));
         } else {

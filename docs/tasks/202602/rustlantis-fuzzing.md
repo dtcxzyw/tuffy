@@ -321,10 +321,29 @@ Seeds 0–5000 (unoptimized builds):
 
 All 5001 seeds (0–5000) pass. 0 crashes, 0 mismatches.
 
+### Run 13 (2026-03-05) - i128 call argument legalization fixes (optimized builds)
+
+Seeds 0–1000 with `-Zmir-opt-level=3 -C opt-level=3` (optimized builds) found two bugs:
+
+| Bug | Affected Seeds | Root cause | Fix |
+|-----|---------------|-----------|-----|
+| `has_wide_values` misses call operand annotations | 391, 669 | `has_wide_values()` in `legalize.rs` did not scan call instruction argument annotations. When an i128/u128 constant fitting in u64 was passed directly to a call with `:s128`/`:u128` annotation, legalization was skipped entirely. isel then passed only one argument in RDI instead of two (lo in RDI, hi in RSI) | Added `Op::Call(_, args, _) if args.iter().any(|a| is_128(a.annotation))` match arm to return true early |
+| `leg_call` uses wrong hi for i128 constants | 266, 490, 731, 922, 944, 125, 970 | In the `else if is_128(arg.annotation)` branch of `leg_call`, hi was computed by sign-extending the 64-bit lo value (`lo >> 63`). For positive i128 values in [2^63, 2^64) (e.g. `18236369148602607032_i128`), bit 63 of lo is set but hi should be 0, giving wrong output | For constant arguments, look up the original BigInt via `_old.inst(arg.value.index())` and compute hi as `(val >> 64) & mask64` directly; fall back to sign-extension only for non-constant Signed(128) values |
+
+Seeds 0–1000 (optimized builds, `-Zmir-opt-level=3 -C opt-level=3`):
+
+| Category | Count | % of total |
+|----------|------:|-----:|
+| Pass | 1001 | 100.0 |
+| Crash | 0 | 0.0 |
+| Mismatch | 0 | 0.0 |
+
+All 1001 seeds (0–1000) pass. 0 crashes, 0 mismatches.
+
 ## Affected Modules
 
 - `rustc_codegen_tuffy` — codegen backend under test
-- `tuffy_codegen/src/legalize.rs` — u128 to float conversion legalization; secondary return move remapping
+- `tuffy_codegen/src/legalize.rs` — u128 to float conversion legalization; secondary return move remapping; i128 call argument legalization
 - `rustc_codegen_tuffy/src/mir_to_ir/terminator.rs` — uninitialized float return handling
 - `rustc_codegen_tuffy/src/mir_to_ir/mod.rs` — address-taken prescan stack slot allocation
 - `tuffy_target_x86/src/isel.rs` — partial store for non-power-of-2 byte sizes
