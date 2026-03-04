@@ -244,6 +244,8 @@ pub enum MInst<R: RegType> {
     CvtIntToFp { dst: R, src: R, double: bool },
     /// Pseudo-instruction: move XMM to GPR (for external float-returning calls).
     MoveXmmToGpr { dst: R, src: R, double: bool },
+    /// Pseudo-instruction: GPR → XMM bit-reinterpretation (movd for f32, movq for f64).
+    GprToXmm { dst: R, src: R, double: bool },
     /// Pseudo-instruction: convert between float formats (f32↔f64).
     ///
     /// Uses cvtss2sd (src_double=false) or cvtsd2ss (src_double=true).

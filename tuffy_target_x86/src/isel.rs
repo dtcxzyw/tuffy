@@ -556,14 +556,25 @@ fn select_inst(
         }
 
         Op::FpToSi(val) | Op::FpToUi(val) => {
-            let src = ctx.ensure_in_reg(val.value)?;
+            let src_gpr = ctx.ensure_in_reg(val.value)?;
             let dst = ctx.alloc.alloc();
             // Determine f32 vs f64 from the source value's type
             let double = !matches!(
                 func.instructions.get(val.value.index() as usize),
                 Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
             );
-            ctx.out.push(MInst::CvtFpToInt { dst, src, double });
+            // Float values live in GPRs as bit-patterns; move to XMM for conversion.
+            let src_xmm = ctx.alloc.alloc_class(1);
+            ctx.out.push(MInst::GprToXmm {
+                dst: src_xmm,
+                src: src_gpr,
+                double,
+            });
+            ctx.out.push(MInst::CvtFpToInt {
+                dst,
+                src: src_xmm,
+                double,
+            });
             ctx.regs.assign(vref, dst);
         }
 
@@ -577,29 +588,141 @@ fn select_inst(
                 // i128 to float: not yet fully implemented
                 // TODO: implement i128 to float conversion
                 return None;
-            } else {
-                let src = ctx.ensure_in_reg(val.value)?;
-                let dst = ctx.alloc.alloc_class(1);
-                let double = !matches!(ft, tuffy_ir::types::FloatType::F32);
-                ctx.out.push(MInst::CvtIntToFp { dst, src, double });
-                ctx.regs.assign(vref, dst);
             }
+
+            let src = ctx.ensure_in_reg(val.value)?;
+            let double = !matches!(ft, tuffy_ir::types::FloatType::F32);
+            let gpr_dst = ctx.alloc.alloc();
+
+            let is_u64 = matches!(op, Op::UiToFp(..))
+                && matches!(val.annotation, Some(Annotation::Unsigned(64)) | None);
+
+            if is_u64 {
+                // u64 → float: values > i64::MAX need special handling.
+                // If top bit is clear (value fits in i64), cvtsi2ss/cvtsi2sd works.
+                // Otherwise: halve (preserving bit 0), convert, then double.
+                let done_label = ctx.next_label;
+                ctx.next_label += 1;
+                let large_label = ctx.next_label;
+                ctx.next_label += 1;
+
+                let xmm_dst = ctx.alloc.alloc_class(1);
+
+                // test src, src — check if top bit is set (signed interpretation < 0)
+                ctx.out.push(MInst::TestRR {
+                    size: OpSize::S64,
+                    src1: src,
+                    src2: src,
+                });
+                // js large_label (sign bit set → top bit set → value > i64::MAX)
+                ctx.out.push(MInst::Jcc {
+                    cc: CondCode::L,
+                    target: large_label,
+                });
+
+                // Small case: fits in i64, convert directly
+                ctx.out.push(MInst::CvtIntToFp {
+                    dst: xmm_dst,
+                    src,
+                    double,
+                });
+                ctx.out.push(MInst::Jmp { target: done_label });
+
+                // Large case: halve + preserve bit0 + convert + double
+                ctx.out.push(MInst::Label { id: large_label });
+                let halved = ctx.alloc.alloc();
+                let bit0 = ctx.alloc.alloc();
+                let xmm_halved = ctx.alloc.alloc_class(1);
+                ctx.out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst: halved,
+                    src,
+                });
+                ctx.out.push(MInst::ShrImm {
+                    size: OpSize::S64,
+                    dst: halved,
+                    imm: 1,
+                });
+                ctx.out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst: bit0,
+                    src,
+                });
+                ctx.out.push(MInst::AndRI {
+                    size: OpSize::S64,
+                    dst: bit0,
+                    imm: 1,
+                });
+                ctx.out.push(MInst::OrRR {
+                    size: OpSize::S64,
+                    dst: halved,
+                    src: bit0,
+                });
+                ctx.out.push(MInst::CvtIntToFp {
+                    dst: xmm_halved,
+                    src: halved,
+                    double,
+                });
+                // double the result: addss/addsd xmm_dst, xmm_halved, xmm_halved
+                ctx.out.push(MInst::FpBinOp {
+                    op: FpBinOpKind::Add,
+                    dst: xmm_dst,
+                    lhs: xmm_halved,
+                    rhs: xmm_halved,
+                    double,
+                });
+
+                ctx.out.push(MInst::Label { id: done_label });
+                ctx.out.push(MInst::MoveXmmToGpr {
+                    dst: gpr_dst,
+                    src: xmm_dst,
+                    double,
+                });
+            } else {
+                let xmm_dst = ctx.alloc.alloc_class(1);
+                ctx.out.push(MInst::CvtIntToFp {
+                    dst: xmm_dst,
+                    src,
+                    double,
+                });
+                ctx.out.push(MInst::MoveXmmToGpr {
+                    dst: gpr_dst,
+                    src: xmm_dst,
+                    double,
+                });
+            }
+
+            ctx.regs.assign(vref, gpr_dst);
         }
 
         Op::FpConvert(val) => {
-            let src = ctx.ensure_in_reg(val.value)?;
-            let dst = ctx.alloc.alloc_class(1);
+            let src_gpr = ctx.ensure_in_reg(val.value)?;
             // Determine source float type from the operand's instruction type
             let src_double = !matches!(
                 func.instructions.get(val.value.index() as usize),
                 Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
             );
+            // Float values live in GPRs; move to XMM, convert, move result back to GPR.
+            let src_xmm = ctx.alloc.alloc_class(1);
+            ctx.out.push(MInst::GprToXmm {
+                dst: src_xmm,
+                src: src_gpr,
+                double: src_double,
+            });
+            let dst_xmm = ctx.alloc.alloc_class(1);
             ctx.out.push(MInst::CvtFpToFp {
-                dst,
-                src,
+                dst: dst_xmm,
+                src: src_xmm,
                 src_double,
             });
-            ctx.regs.assign(vref, dst);
+            let dst_double = !src_double; // output type is the opposite of input
+            let gpr_dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::MoveXmmToGpr {
+                dst: gpr_dst,
+                src: dst_xmm,
+                double: dst_double,
+            });
+            ctx.regs.assign(vref, gpr_dst);
         }
 
         Op::Div(lhs, rhs) => {
@@ -610,85 +733,169 @@ fn select_inst(
         }
 
         Op::FAdd(lhs, rhs, _) => {
-            let l = ctx.ensure_in_reg(lhs.value)?;
-            let r = ctx.ensure_in_reg(rhs.value)?;
+            let l_gpr = ctx.ensure_in_reg(lhs.value)?;
+            let r_gpr = ctx.ensure_in_reg(rhs.value)?;
             let double = !matches!(
                 func.instructions.get(lhs.value.index() as usize),
                 Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
             );
-            let dst = ctx.alloc.alloc_class(1);
+            let l_xmm = ctx.alloc.alloc_class(1);
+            let r_xmm = ctx.alloc.alloc_class(1);
+            let dst_xmm = ctx.alloc.alloc_class(1);
+            let gpr_dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::GprToXmm {
+                dst: l_xmm,
+                src: l_gpr,
+                double,
+            });
+            ctx.out.push(MInst::GprToXmm {
+                dst: r_xmm,
+                src: r_gpr,
+                double,
+            });
             ctx.out.push(MInst::FpBinOp {
                 op: FpBinOpKind::Add,
-                dst,
-                lhs: l,
-                rhs: r,
+                dst: dst_xmm,
+                lhs: l_xmm,
+                rhs: r_xmm,
                 double,
             });
-            ctx.regs.assign(vref, dst);
+            ctx.out.push(MInst::MoveXmmToGpr {
+                dst: gpr_dst,
+                src: dst_xmm,
+                double,
+            });
+            ctx.regs.assign(vref, gpr_dst);
         }
         Op::FSub(lhs, rhs, _) => {
-            let l = ctx.ensure_in_reg(lhs.value)?;
-            let r = ctx.ensure_in_reg(rhs.value)?;
+            let l_gpr = ctx.ensure_in_reg(lhs.value)?;
+            let r_gpr = ctx.ensure_in_reg(rhs.value)?;
             let double = !matches!(
                 func.instructions.get(lhs.value.index() as usize),
                 Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
             );
-            let dst = ctx.alloc.alloc_class(1);
+            let l_xmm = ctx.alloc.alloc_class(1);
+            let r_xmm = ctx.alloc.alloc_class(1);
+            let dst_xmm = ctx.alloc.alloc_class(1);
+            let gpr_dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::GprToXmm {
+                dst: l_xmm,
+                src: l_gpr,
+                double,
+            });
+            ctx.out.push(MInst::GprToXmm {
+                dst: r_xmm,
+                src: r_gpr,
+                double,
+            });
             ctx.out.push(MInst::FpBinOp {
                 op: FpBinOpKind::Sub,
-                dst,
-                lhs: l,
-                rhs: r,
+                dst: dst_xmm,
+                lhs: l_xmm,
+                rhs: r_xmm,
                 double,
             });
-            ctx.regs.assign(vref, dst);
+            ctx.out.push(MInst::MoveXmmToGpr {
+                dst: gpr_dst,
+                src: dst_xmm,
+                double,
+            });
+            ctx.regs.assign(vref, gpr_dst);
         }
         Op::FMul(lhs, rhs, _) => {
-            let l = ctx.ensure_in_reg(lhs.value)?;
-            let r = ctx.ensure_in_reg(rhs.value)?;
+            let l_gpr = ctx.ensure_in_reg(lhs.value)?;
+            let r_gpr = ctx.ensure_in_reg(rhs.value)?;
             let double = !matches!(
                 func.instructions.get(lhs.value.index() as usize),
                 Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
             );
-            let dst = ctx.alloc.alloc_class(1);
+            let l_xmm = ctx.alloc.alloc_class(1);
+            let r_xmm = ctx.alloc.alloc_class(1);
+            let dst_xmm = ctx.alloc.alloc_class(1);
+            let gpr_dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::GprToXmm {
+                dst: l_xmm,
+                src: l_gpr,
+                double,
+            });
+            ctx.out.push(MInst::GprToXmm {
+                dst: r_xmm,
+                src: r_gpr,
+                double,
+            });
             ctx.out.push(MInst::FpBinOp {
                 op: FpBinOpKind::Mul,
-                dst,
-                lhs: l,
-                rhs: r,
+                dst: dst_xmm,
+                lhs: l_xmm,
+                rhs: r_xmm,
                 double,
             });
-            ctx.regs.assign(vref, dst);
+            ctx.out.push(MInst::MoveXmmToGpr {
+                dst: gpr_dst,
+                src: dst_xmm,
+                double,
+            });
+            ctx.regs.assign(vref, gpr_dst);
         }
         Op::FDiv(lhs, rhs, _) => {
-            let l = ctx.ensure_in_reg(lhs.value)?;
-            let r = ctx.ensure_in_reg(rhs.value)?;
+            let l_gpr = ctx.ensure_in_reg(lhs.value)?;
+            let r_gpr = ctx.ensure_in_reg(rhs.value)?;
             let double = !matches!(
                 func.instructions.get(lhs.value.index() as usize),
                 Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
             );
-            let dst = ctx.alloc.alloc_class(1);
-            ctx.out.push(MInst::FpBinOp {
-                op: FpBinOpKind::Div,
-                dst,
-                lhs: l,
-                rhs: r,
+            let l_xmm = ctx.alloc.alloc_class(1);
+            let r_xmm = ctx.alloc.alloc_class(1);
+            let dst_xmm = ctx.alloc.alloc_class(1);
+            let gpr_dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::GprToXmm {
+                dst: l_xmm,
+                src: l_gpr,
                 double,
             });
-            ctx.regs.assign(vref, dst);
+            ctx.out.push(MInst::GprToXmm {
+                dst: r_xmm,
+                src: r_gpr,
+                double,
+            });
+            ctx.out.push(MInst::FpBinOp {
+                op: FpBinOpKind::Div,
+                dst: dst_xmm,
+                lhs: l_xmm,
+                rhs: r_xmm,
+                double,
+            });
+            ctx.out.push(MInst::MoveXmmToGpr {
+                dst: gpr_dst,
+                src: dst_xmm,
+                double,
+            });
+            ctx.regs.assign(vref, gpr_dst);
         }
         Op::FCmp(kind, lhs, rhs) => {
-            let l = ctx.ensure_in_reg(lhs.value)?;
-            let r = ctx.ensure_in_reg(rhs.value)?;
+            let l_gpr = ctx.ensure_in_reg(lhs.value)?;
+            let r_gpr = ctx.ensure_in_reg(rhs.value)?;
             let double = !matches!(
                 func.instructions.get(lhs.value.index() as usize),
                 Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
             );
+            let l_xmm = ctx.alloc.alloc_class(1);
+            let r_xmm = ctx.alloc.alloc_class(1);
+            ctx.out.push(MInst::GprToXmm {
+                dst: l_xmm,
+                src: l_gpr,
+                double,
+            });
+            ctx.out.push(MInst::GprToXmm {
+                dst: r_xmm,
+                src: r_gpr,
+                double,
+            });
             let dst = ctx.alloc.alloc();
             ctx.out.push(MInst::FpCmp {
                 dst,
-                lhs: l,
-                rhs: r,
+                lhs: l_xmm,
+                rhs: r_xmm,
                 kind: *kind as u8,
                 double,
             });
@@ -696,8 +903,8 @@ fn select_inst(
         }
         Op::FNeg(val) => {
             let src = ctx.ensure_in_reg(val.value)?;
-            let dst = ctx.alloc.alloc_class(1);
-            // Determine f32 vs f64 from source type
+            // Float values live in GPRs as bit-patterns; XOR the sign bit directly.
+            let dst = ctx.alloc.alloc();
             let is_f32 = matches!(
                 func.instructions.get(val.value.index() as usize),
                 Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
@@ -707,7 +914,7 @@ fn select_inst(
             } else {
                 i64::MIN // 0x8000000000000000
             };
-            let mask_reg = ctx.alloc.alloc_class(1);
+            let mask_reg = ctx.alloc.alloc();
             ctx.out.push(MInst::MovRI64 {
                 dst: mask_reg,
                 imm: sign_mask,
