@@ -301,8 +301,30 @@ Seeds 0–2000 (unoptimized builds):
 
 All 2001 seeds (0–2000) pass. 0 crashes, 0 mismatches.
 
+### Run 12 (2026-03-04) - Struct return legalization and partial store overflow fixes
+
+Seeds 2001–5000 found two bugs:
+
+| Bug | Affected Seeds | Root cause | Fix |
+|-----|---------------|-----------|-----|
+| Secondary return move dropped by legalization | 2306 | Default `Op::Ret` handler in `legalize.rs` creates a new ret instruction at a new index but does not remap the `secondary_return_move` metadata from old index to new. isel's Ret handler then finds no rdx_moves entry and leaves RDX stale, corrupting the upper half of multi-register struct returns | Added remapping in default `Op::Ret` handler: check `old_meta.get_secondary_return_move(old_vref.index())`, remap the source via vmap, and call `s.meta.mark_secondary_return_move(new_ret.index(), new_src.index())` |
+| Non-power-of-2 byte stores overflow into adjacent memory | 2306 | `bytes_to_opsize(3) = S64` caused 3-byte stores (e.g. `[u8;3]` fields) to emit 8-byte MOV instructions, overwriting adjacent stack memory including saved rbp | Added `emit_partial_store` helper in `isel.rs` that splits sizes 3,5,6,7 into multiple standard-size stores (3=2+1, 5=4+1, 6=4+2, 7=4+2+1) |
+| Address-taken non-param locals > 16 bytes get no stack slot | 2020 | Address-taken prescan in `mod.rs` had an early-return for `size > 16` that only called `stack_locals.mark()` without allocating a slot. This was intended for large parameters (already passed by pointer), but incorrectly applied to local variables. The `translate_rvalue` RawPtr handler then returned None (no slot address), leaving the destination pointer local uninitialized | Changed `if size > 16` to `if size > 16 && local.as_usize() <= mir.arg_count` so only true parameters use the no-slot path; non-param locals > 16 bytes now get a proper stack slot |
+
+Seeds 0–5000 (unoptimized builds):
+
+| Category | Count | % of total |
+|----------|------:|-----:|
+| Pass | 5001 | 100.0 |
+| Crash | 0 | 0.0 |
+| Mismatch | 0 | 0.0 |
+
+All 5001 seeds (0–5000) pass. 0 crashes, 0 mismatches.
+
 ## Affected Modules
 
 - `rustc_codegen_tuffy` — codegen backend under test
-- `tuffy_codegen/src/legalize.rs` — u128 to float conversion legalization
+- `tuffy_codegen/src/legalize.rs` — u128 to float conversion legalization; secondary return move remapping
 - `rustc_codegen_tuffy/src/mir_to_ir/terminator.rs` — uninitialized float return handling
+- `rustc_codegen_tuffy/src/mir_to_ir/mod.rs` — address-taken prescan stack slot allocation
+- `tuffy_target_x86/src/isel.rs` — partial store for non-power-of-2 byte sizes
