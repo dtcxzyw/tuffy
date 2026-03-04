@@ -185,13 +185,29 @@ Remaining mismatches in unoptimized builds:
 
 Both seeds pass when compiled with optimizations. Seed 52 is now fixed.
 
+### Run 8 (2026-03-04) - i128 struct field store fix
+
+Fixed i128/u128 field assignment bug affecting both constants and operations:
+
+| Seed | Root cause | Fix |
+|------|-----------|-----|
+| 29 (partial) | i128 field stores checked only MIR type size, not actual IR value width. Constants like 42_i128 return iconst (8 bytes) but code did store.16, writing garbage. Operations like i128*i128 produce true 128-bit values but annotation was lost in ValueRef, causing incorrect scalar extension. | Check rvalue type to distinguish true 128-bit operations (BinaryOp/UnaryOp on i128/u128) from constants. Constants use scalar extension path, operations use full-width store for legalization. |
+
+After the fix:
+- Simple i128 constant test now produces correct output (42 instead of garbage)
+- Seed 29 IR improved from store.8 to store.16 for multiplication, but still crashes at runtime
+- Seed 7 now produces output (wrong hash) instead of crashing
+
+The fix resolves the i128 constant assignment issue but seeds 7 and 29 have additional bugs causing runtime failures.
+
 - [x] Run initial fuzzing campaign (seeds 0..1000) and triage results
 - [x] Classify failures into compile crashes vs output mismatches
 - [x] Minimize reproduction cases for each distinct bug
 - [x] Fix identified codegen bugs in rustc_codegen_tuffy
 - [x] Fix u128/i128 to float conversion (seed 347, seed 52)
 - [x] Fix uninitialized float return IR verification
-- [ ] Fix remaining unoptimized build segfaults (seeds 7, 29)
+- [x] Fix i128 struct field store bug (partial - constants fixed, seeds 7/29 have additional issues)
+- [ ] Fix remaining unoptimized build failures (seeds 7, 29)
 - [ ] Increase config complexity as pass rate improves
 
 ## Affected Modules
