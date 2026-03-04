@@ -1315,21 +1315,30 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         };
                         // For 128-bit targets, fp_to_ui/fp_to_si only produce 64-bit results.
                         // Convert to 64-bit first, then extend.
-                        let (raw, needs_extend) = if bit_width > 64 {
-                            let raw64 = if signed {
-                                self.builder.fp_to_si(float_val.into(), Origin::synthetic())
-                            } else {
-                                self.builder.fp_to_ui(float_val.into(), Origin::synthetic())
-                            };
-                            (raw64, true)
+                        let needs_extend = bit_width > 64;
+                        let raw = if signed {
+                            self.builder.fp_to_si(float_val.into(), Origin::synthetic())
                         } else {
-                            let raw = if signed {
-                                self.builder.fp_to_si(float_val.into(), Origin::synthetic())
-                            } else {
-                                self.builder.fp_to_ui(float_val.into(), Origin::synthetic())
-                            };
-                            (raw, false)
+                            self.builder.fp_to_ui(float_val.into(), Origin::synthetic())
                         };
+
+                        // Float constants for saturation checks.
+                        // cvttss2si returns INT64_MIN for out-of-range and NaN, so we must
+                        // detect these cases using float comparisons and apply correct Rust
+                        // saturating semantics:
+                        //   NaN → 0, positive overflow → MAX, negative overflow → MIN (or 0 for unsigned)
+                        let (two63_bits, two64_bits) = match ft {
+                            FloatType::F32 => (0x5F00_0000_i64, 0x5F80_0000_i64),
+                            // F64/others: 2^63 and 2^64 as f64 bit patterns
+                            _ => (0x43E0_0000_0000_0000_i64, 0x43F0_0000_0000_0000_i64),
+                        };
+                        let two63_int = self.builder.iconst(two63_bits, Origin::synthetic());
+                        let two63_float = self.builder.bitcast(
+                            two63_int.into(),
+                            Type::Float(ft),
+                            None,
+                            Origin::synthetic(),
+                        );
 
                         // Rust's FloatToInt is saturating: clamp to target range.
                         let result = if needs_extend {
@@ -1340,94 +1349,154 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             } else {
                                 self.builder.zext(raw.into(), 128, Origin::synthetic())
                             }
-                        } else if bit_width < 64 {
-                            let ann_s = Some(Annotation::Signed(64));
-                            if signed {
-                                let lo = -(1i64 << (bit_width - 1));
-                                let hi = (1i64 << (bit_width - 1)) - 1;
-                                let lo_c = self.builder.iconst(lo, Origin::synthetic());
-                                let hi_c = self.builder.iconst(hi, Origin::synthetic());
-                                // clamp: max(min(raw, hi), lo)
-                                let clamped_hi = self.builder.min(
-                                    raw.into(),
-                                    hi_c.into(),
-                                    ann_s,
-                                    Origin::synthetic(),
-                                );
-                                self.builder.max(
-                                    clamped_hi.into(),
-                                    lo_c.into(),
-                                    ann_s,
-                                    Origin::synthetic(),
-                                )
-                            } else {
-                                let hi = (1i64 << bit_width) - 1;
-                                let hi_c = self.builder.iconst(hi, Origin::synthetic());
-                                let zero = self.builder.iconst(0, Origin::synthetic());
-                                // clamp: max(min(raw, hi), 0)
-                                let clamped_hi = self.builder.min(
-                                    raw.into(),
-                                    hi_c.into(),
-                                    ann_s,
-                                    Origin::synthetic(),
-                                );
-                                self.builder.max(
-                                    clamped_hi.into(),
-                                    zero.into(),
-                                    ann_s,
-                                    Origin::synthetic(),
-                                )
-                            }
-                        } else if !signed {
-                            // Check for NaN using Uno (unordered comparison).
+                        } else if signed {
+                            // Signed: fix cvttss2si sentinel for NaN and positive overflow.
+                            // For negative overflow, cvttss2si returns i64::MIN which is correct.
                             let is_nan = self.builder.fcmp(
                                 FCmpOp::Uno,
                                 float_val.into(),
                                 float_val.into(),
                                 Origin::synthetic(),
                             );
+                            let is_large = self.builder.fcmp(
+                                FCmpOp::OGe,
+                                float_val.into(),
+                                two63_float.into(),
+                                Origin::synthetic(),
+                            );
                             let zero = self.builder.iconst(0, Origin::synthetic());
-                            let sign_bit_pos: u32 = match ft {
-                                FloatType::F16 => 15,
-                                FloatType::BF16 => 15,
-                                FloatType::F32 => 31,
-                                FloatType::F64 => 63,
-                            };
-                            let shift_c = self
-                                .builder
-                                .iconst(sign_bit_pos as i64, Origin::synthetic());
-                            let sign = self.builder.shr(
-                                int_bits_val.into(),
-                                shift_c.into(),
-                                None,
-                                Origin::synthetic(),
-                            );
-                            let one = self.builder.iconst(1, Origin::synthetic());
-                            let sign_masked = self.builder.and(
-                                sign.into(),
-                                one.into(),
-                                None,
-                                Origin::synthetic(),
-                            );
-                            let is_neg = self
-                                .builder
-                                .int_to_bool(sign_masked.into(), Origin::synthetic());
-                            let result_if_not_nan = self.builder.select(
-                                is_neg.into(),
-                                zero.into(),
-                                raw.into(),
-                                Type::Int,
-                                Origin::synthetic(),
-                            );
-                            self.builder.select(
-                                is_nan.into(),
-                                zero.into(),
-                                result_if_not_nan.into(),
-                                Type::Int,
-                                Origin::synthetic(),
-                            )
+                            let i64_max = self.builder.iconst(i64::MAX, Origin::synthetic());
+                            // Apply corrections: NaN → 0, then positive overflow → i64::MAX
+                            let corrected =
+                                self.builder.select(is_nan.into(), zero.into(), raw.into(),
+                                    Type::Int, Origin::synthetic());
+                            let corrected = self.builder.select(is_large.into(), i64_max.into(),
+                                corrected.into(), Type::Int, Origin::synthetic());
+                            if bit_width < 64 {
+                                // Clamp to [INT_MIN_of_width, INT_MAX_of_width].
+                                // After corrections, corrected ∈ {0, i64::MAX, or cvttss2si result
+                                // which is in [-2^63, 2^63-1]}.  Signed min/max works correctly.
+                                let lo = -(1i64 << (bit_width - 1));
+                                let hi = (1i64 << (bit_width - 1)) - 1;
+                                let lo_c = self.builder.iconst(lo, Origin::synthetic());
+                                let hi_c = self.builder.iconst(hi, Origin::synthetic());
+                                let ann_s = Some(Annotation::Signed(64));
+                                let clamped_hi = self.builder.min(
+                                    corrected.into(), hi_c.into(), ann_s, Origin::synthetic());
+                                self.builder.max(
+                                    clamped_hi.into(), lo_c.into(), ann_s, Origin::synthetic())
+                            } else {
+                                corrected
+                            }
                         } else {
-                            raw
+                            // Unsigned: full saturating conversion.
+                            // NaN → 0, negative → 0, [0, 2^63) → direct, [2^63, 2^64) → two-range,
+                            // >= 2^64 → UINT64_MAX (for 64-bit) or UINT_MAX_of_width (for narrower).
+                            let is_nan = self.builder.fcmp(
+                                FCmpOp::Uno,
+                                float_val.into(),
+                                float_val.into(),
+                                Origin::synthetic(),
+                            );
+                            // Detect float >= 2^63 (overflow for u32/u16/u8 and start of large range
+                            // for u64).
+                            let is_large = self.builder.fcmp(
+                                FCmpOp::OGe,
+                                float_val.into(),
+                                two63_float.into(),
+                                Origin::synthetic(),
+                            );
+                            let zero = self.builder.iconst(0, Origin::synthetic());
+                            if bit_width < 64 {
+                                // For u32/u16/u8: float >= 2^63 is always an overflow (> UINT_MAX).
+                                // cvttss2si is correct for float in [-2^63, 2^63): negative → negative
+                                // i64, clamped to 0; in-range → correct; overflow beyond hi → large
+                                // positive i64, clamped to hi.
+                                let hi = (1i64 << bit_width) - 1;
+                                let hi_c = self.builder.iconst(hi, Origin::synthetic());
+                                let ann_s = Some(Annotation::Signed(64));
+                                let clamped = self.builder.min(
+                                    raw.into(), hi_c.into(), ann_s, Origin::synthetic());
+                                let clamped = self.builder.max(
+                                    clamped.into(), zero.into(), ann_s, Origin::synthetic());
+                                // Override: float >= 2^63 → hi (overflow), NaN → 0.
+                                let clamped = self.builder.select(
+                                    is_large.into(), hi_c.into(), clamped.into(),
+                                    Type::Int, Origin::synthetic());
+                                self.builder.select(
+                                    is_nan.into(), zero.into(), clamped.into(),
+                                    Type::Int, Origin::synthetic())
+                            } else {
+                                // u64: two-range implementation.
+                                // [0, 2^63):   cvttss2si gives correct result.
+                                // [2^63, 2^64): subtract 2^63, convert, add 2^63 via bitwise OR.
+                                // >= 2^64:      saturate to UINT64_MAX.
+                                let two64_int =
+                                    self.builder.iconst(two64_bits, Origin::synthetic());
+                                let two64_float = self.builder.bitcast(
+                                    two64_int.into(),
+                                    Type::Float(ft),
+                                    None,
+                                    Origin::synthetic(),
+                                );
+                                let is_huge = self.builder.fcmp(
+                                    FCmpOp::OGe,
+                                    float_val.into(),
+                                    two64_float.into(),
+                                    Origin::synthetic(),
+                                );
+                                // Large range [2^63, 2^64): shift float down, convert, shift back.
+                                let flags = FpRewriteFlags::default();
+                                let float_shifted = self.builder.fsub(
+                                    float_val.into(),
+                                    two63_float.into(),
+                                    flags,
+                                    Type::Float(ft),
+                                    Origin::synthetic(),
+                                );
+                                let raw_shifted = self.builder.fp_to_ui(
+                                    float_shifted.into(),
+                                    Origin::synthetic(),
+                                );
+                                let sign_bit = self.builder.iconst(i64::MIN, Origin::synthetic());
+                                let result_large = self.builder.or(
+                                    raw_shifted.into(),
+                                    sign_bit.into(),
+                                    None,
+                                    Origin::synthetic(),
+                                );
+                                let max_u64 =
+                                    self.builder.iconst(-1_i64, Origin::synthetic());
+                                // Select in order: normal → large → huge → nan_or_neg
+                                let tentative = self.builder.select(
+                                    is_large.into(), result_large.into(), raw.into(),
+                                    Type::Int, Origin::synthetic());
+                                let tentative = self.builder.select(
+                                    is_huge.into(), max_u64.into(), tentative.into(),
+                                    Type::Int, Origin::synthetic());
+                                // NaN or negative → 0 (NaN check must come after is_huge
+                                // so that positive NaN doesn't get UINT64_MAX).
+                                let sign_bit_pos: u32 = match ft {
+                                    FloatType::F32 => 31,
+                                    _ => 63,
+                                };
+                                let shift_c = self.builder.iconst(
+                                    sign_bit_pos as i64, Origin::synthetic());
+                                let sign = self.builder.shr(
+                                    int_bits_val.into(), shift_c.into(), None,
+                                    Origin::synthetic());
+                                let one = self.builder.iconst(1, Origin::synthetic());
+                                let sign_masked = self.builder.and(
+                                    sign.into(), one.into(), None, Origin::synthetic());
+                                let is_neg = self.builder.int_to_bool(
+                                    sign_masked.into(), Origin::synthetic());
+                                let tentative = self.builder.select(
+                                    is_neg.into(), zero.into(), tentative.into(),
+                                    Type::Int, Origin::synthetic());
+                                self.builder.select(
+                                    is_nan.into(), zero.into(), tentative.into(),
+                                    Type::Int, Origin::synthetic())
+                            }
                         };
                         Some(result)
                     }
