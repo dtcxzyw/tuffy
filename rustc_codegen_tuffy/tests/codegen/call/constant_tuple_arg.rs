@@ -17,7 +17,7 @@
 // CHECK:
 // CHECK: fn test_constant_tuple() -> i32 {
 // CHECK:     bb0: {
-// CHECK:         call
+// CHECK:         _0 = consume_tuple(const (42_i32,)) -> [return: bb1, unwind continue]
 // CHECK:     }
 // CHECK:     bb1: {
 // CHECK:         return
