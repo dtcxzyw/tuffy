@@ -25,7 +25,7 @@ use std::collections::HashSet;
 use std::fs;
 
 use rustc_codegen_ssa::traits::CodegenBackend;
-use rustc_codegen_ssa::{CodegenResults, CompiledModule, CrateInfo, ModuleKind, TargetConfig};
+use rustc_codegen_ssa::{CompiledModule, CompiledModules, CrateInfo, ModuleKind, TargetConfig};
 use rustc_data_structures::fx::FxIndexMap;
 use rustc_middle::dep_graph::{WorkProduct, WorkProductId};
 use rustc_middle::mir::interpret::GlobalAlloc;
@@ -70,7 +70,11 @@ impl CodegenBackend for TuffyCodegenBackend {
         }
     }
 
-    fn codegen_crate<'tcx>(&self, tcx: TyCtxt<'tcx>) -> Box<dyn Any> {
+    fn target_cpu(&self, sess: &Session) -> String {
+        sess.target.cpu.to_string()
+    }
+
+    fn codegen_crate<'tcx>(&self, tcx: TyCtxt<'tcx>, _crate_info: &CrateInfo) -> Box<dyn Any> {
         let target_triple = tcx.sess.target.llvm_target.as_ref();
         let session = CodegenSession::new(target_triple);
         let dump_ir = tcx.sess.opts.cg.llvm_args.iter().any(|a| a == "dump-ir");
@@ -470,10 +474,9 @@ impl CodegenBackend for TuffyCodegenBackend {
             modules.push(entry_module);
         }
 
-        Box::new(CodegenResults {
+        Box::new(CompiledModules {
             modules,
             allocator_module,
-            crate_info: CrateInfo::new(tcx, "none".to_string()),
         })
     }
 
@@ -482,11 +485,11 @@ impl CodegenBackend for TuffyCodegenBackend {
         ongoing_codegen: Box<dyn Any>,
         _sess: &Session,
         _outputs: &OutputFilenames,
-    ) -> (CodegenResults, FxIndexMap<WorkProductId, WorkProduct>) {
-        let codegen_results = *ongoing_codegen
-            .downcast::<CodegenResults>()
-            .expect("expected CodegenResults");
-        (codegen_results, FxIndexMap::default())
+    ) -> (CompiledModules, FxIndexMap<WorkProductId, WorkProduct>) {
+        let compiled_modules = *ongoing_codegen
+            .downcast::<CompiledModules>()
+            .expect("expected CompiledModules");
+        (compiled_modules, FxIndexMap::default())
     }
 
     // `link` uses the default implementation from CodegenBackend,
