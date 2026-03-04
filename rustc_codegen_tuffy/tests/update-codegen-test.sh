@@ -77,18 +77,14 @@ done < "$ir_output" > "$check_lines"
 updated_file=$(mktemp)
 trap "rm -f $ir_output $check_lines $updated_file" EXIT
 
-# Copy lines before first CHECK or all lines if no CHECK exists
-awk '/^\/\/ CHECK:/ {exit} {print}' "$TEST_FILE" > "$updated_file"
+# Copy only leading comment lines (compile-flags, etc.)
+awk '/^\/\// {print; next} {exit}' "$TEST_FILE" > "$updated_file"
 
 # Add generated CHECK lines
 cat "$check_lines" >> "$updated_file"
 
-# Add code section (everything after the last CHECK line in original file)
-awk '
-    /^\/\/ CHECK:/ {in_check=1; next}
-    in_check && !/^\/\/ CHECK:/ {in_check=0; code_start=1}
-    code_start {print}
-' "$TEST_FILE" >> "$updated_file"
+# Add code section (non-comment, non-CHECK lines)
+awk '/^\/\/ CHECK:/ {next} /^\/\// {next} {print}' "$TEST_FILE" >> "$updated_file"
 
 # Replace original file
 mv "$updated_file" "$TEST_FILE"
