@@ -1,4 +1,4 @@
-//@ compile-flags: -Zmir-opt-level=3
+//@ compile-flags: -Zmir-opt-level=3 -C debug-assertions=off
 
 // Test that constant tuple arguments are loaded correctly in optimized MIR.
 // This is a regression test for a bug where constant tuples were passed as
