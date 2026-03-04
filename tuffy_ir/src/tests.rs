@@ -1783,3 +1783,66 @@ fn test_insertvalue_array() {
     assert!(matches!(func.instructions[2].op, Op::InsertValue(_, _, _)));
     assert_eq!(func.instructions[2].ty, array_ty);
 }
+
+#[test]
+fn test_dontcare_annotation_display() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("test_dc");
+    let dc32 = Some(Annotation::DontCare(32));
+    let mut func = Function::new(
+        name,
+        vec![Type::Int],
+        vec![dc32],
+        vec![],
+        Some(Type::Int),
+        dc32,
+    );
+    let mut b = Builder::new(&mut func);
+
+    let root = b.create_region(RegionKind::Function);
+    b.enter_region(root);
+    let bb = b.create_block();
+    b.switch_to_block(bb);
+    let mem0 = b.add_block_arg(bb, Type::Mem);
+    let a = b.param(0, Type::Int, dc32, Origin::synthetic());
+    b.ret(Some(a.into()), mem0.into(), Origin::synthetic());
+    b.exit_region();
+
+    let output = format!("{}", func.display(&st));
+    assert!(output.contains(":dc32"), "should display :dc32 annotation");
+}
+
+#[test]
+fn verify_detects_dontcare_zero() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("bad_dc");
+    let dc0 = Some(Annotation::DontCare(0));
+    let mut func = Function::new(
+        name,
+        vec![Type::Int],
+        vec![dc0],
+        vec![],
+        Some(Type::Int),
+        None,
+    );
+    let mut b = Builder::new(&mut func);
+
+    let root = b.create_region(RegionKind::Function);
+    b.enter_region(root);
+    let bb = b.create_block();
+    b.switch_to_block(bb);
+    let mem0 = b.add_block_arg(bb, Type::Mem);
+    let a = b.param(0, Type::Int, None, Origin::synthetic());
+    b.ret(Some(a.into()), mem0.into(), Origin::synthetic());
+    b.exit_region();
+
+    let result = verify_function(&func, &st);
+    assert!(!result.is_ok(), "expected errors");
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|e| e.message.contains("DontCare(0)")),
+        "should reject DontCare(0)"
+    );
+}

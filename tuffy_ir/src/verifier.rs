@@ -282,7 +282,7 @@ impl<'a> FuncVerifier<'a> {
 
     fn check_annotation(&mut self, ann: &Annotation, ty: &Type, ctx: &str, loc: &Location) {
         match ann {
-            Annotation::Signed(_) | Annotation::Unsigned(_) => {
+            Annotation::Signed(_) | Annotation::Unsigned(_) | Annotation::DontCare(_) => {
                 if *ty != Type::Int {
                     self.result.error(
                         loc.clone(),
@@ -290,6 +290,15 @@ impl<'a> FuncVerifier<'a> {
                     );
                 }
             }
+        }
+
+        if let Annotation::DontCare(bits) = ann
+            && *bits == 0
+        {
+            self.result.error(
+                loc.clone(),
+                format!("{ctx}: DontCare(0) is invalid: zero meaningful bits"),
+            );
         }
     }
 }

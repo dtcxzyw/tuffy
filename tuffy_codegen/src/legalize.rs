@@ -68,7 +68,7 @@ impl VMap {
 
 fn annotation_width(ann: Option<&Annotation>) -> Option<u32> {
     match ann {
-        Some(Annotation::Signed(w)) | Some(Annotation::Unsigned(w)) => Some(*w),
+        Some(Annotation::Signed(w) | Annotation::Unsigned(w) | Annotation::DontCare(w)) => Some(*w),
         None => None,
     }
 }
@@ -83,7 +83,7 @@ fn is_wide_width(width: Option<u32>, legality: &impl LegalityInfo) -> bool {
 fn is_128(ann: Option<&Annotation>) -> bool {
     matches!(
         ann,
-        Some(Annotation::Signed(128) | Annotation::Unsigned(128))
+        Some(Annotation::Signed(128) | Annotation::Unsigned(128) | Annotation::DontCare(128))
     )
 }
 

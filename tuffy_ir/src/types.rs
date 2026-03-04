@@ -168,4 +168,6 @@ pub enum Annotation {
     Signed(u32),
     /// `:u<N>` — value must be in unsigned N-bit range `[0, 2^N-1]`.
     Unsigned(u32),
+    /// `:dc<N>` — only low N bits meaningful, high bits undef.
+    DontCare(u32),
 }
