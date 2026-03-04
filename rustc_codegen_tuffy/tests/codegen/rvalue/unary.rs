@@ -1,11 +1,13 @@
 // compile-flags: -Zmir-opt-level=3 -C debug-assertions=off
 // CHECK: fn neg_i32(_1: i32) -> i32 {
+// CHECK:     debug a => _1;
+// CHECK:     let mut _0: i32;
+// CHECK:
 // CHECK:     bb0: {
-// CHECK:         _0 = Neg(copy _1)
-// CHECK:         return
+// CHECK:         _0 = Neg(copy _1);
+// CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK:
 // CHECK: func @neg_i32(%a: int:s32) -> int:s32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1:s32 = param %a
@@ -15,12 +17,14 @@
 // CHECK: }
 // CHECK:
 // CHECK: fn not_bool(_1: bool) -> bool {
+// CHECK:     debug a => _1;
+// CHECK:     let mut _0: bool;
+// CHECK:
 // CHECK:     bb0: {
-// CHECK:         _0 = Not(copy _1)
-// CHECK:         return
+// CHECK:         _0 = Not(copy _1);
+// CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK:
 // CHECK: func @not_bool(%a: bool) -> bool {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1 = param %a
@@ -32,12 +36,14 @@
 // CHECK: }
 // CHECK:
 // CHECK: fn not_u32(_1: u32) -> u32 {
+// CHECK:     debug a => _1;
+// CHECK:     let mut _0: u32;
+// CHECK:
 // CHECK:     bb0: {
-// CHECK:         _0 = Not(copy _1)
-// CHECK:         return
+// CHECK:         _0 = Not(copy _1);
+// CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK:
 // CHECK: func @not_u32(%a: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1:u32 = param %a

@@ -1,11 +1,14 @@
 // compile-flags: -Zmir-opt-level=3 -C debug-assertions=off
 // CHECK: fn mul_i32(_1: i32, _2: i32) -> i32 {
+// CHECK:     debug a => _1;
+// CHECK:     debug b => _2;
+// CHECK:     let mut _0: i32;
+// CHECK:
 // CHECK:     bb0: {
-// CHECK:         _0 = Mul(copy _1, copy _2)
-// CHECK:         return
+// CHECK:         _0 = Mul(copy _1, copy _2);
+// CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK:
 // CHECK: func @mul_i32(%a: int:s32, %b: int:s32) -> int:s32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1:s32 = param %a
@@ -15,12 +18,15 @@
 // CHECK: }
 // CHECK:
 // CHECK: fn mul_u64(_1: u64, _2: u64) -> u64 {
+// CHECK:     debug a => _1;
+// CHECK:     debug b => _2;
+// CHECK:     let mut _0: u64;
+// CHECK:
 // CHECK:     bb0: {
-// CHECK:         _0 = Mul(copy _1, copy _2)
-// CHECK:         return
+// CHECK:         _0 = Mul(copy _1, copy _2);
+// CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK:
 // CHECK: func @mul_u64(%a: int:u64, %b: int:u64) -> int:u64 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1:u64 = param %a
@@ -30,12 +36,15 @@
 // CHECK: }
 // CHECK:
 // CHECK: fn sub_i32(_1: i32, _2: i32) -> i32 {
+// CHECK:     debug a => _1;
+// CHECK:     debug b => _2;
+// CHECK:     let mut _0: i32;
+// CHECK:
 // CHECK:     bb0: {
-// CHECK:         _0 = Sub(copy _1, copy _2)
-// CHECK:         return
+// CHECK:         _0 = Sub(copy _1, copy _2);
+// CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK:
 // CHECK: func @sub_i32(%a: int:s32, %b: int:s32) -> int:s32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1:s32 = param %a
@@ -45,12 +54,15 @@
 // CHECK: }
 // CHECK:
 // CHECK: fn sub_u64(_1: u64, _2: u64) -> u64 {
+// CHECK:     debug a => _1;
+// CHECK:     debug b => _2;
+// CHECK:     let mut _0: u64;
+// CHECK:
 // CHECK:     bb0: {
-// CHECK:         _0 = Sub(copy _1, copy _2)
-// CHECK:         return
+// CHECK:         _0 = Sub(copy _1, copy _2);
+// CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK:
 // CHECK: func @sub_u64(%a: int:u64, %b: int:u64) -> int:u64 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1:u64 = param %a

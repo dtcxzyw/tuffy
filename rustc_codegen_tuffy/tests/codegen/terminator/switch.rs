@@ -1,25 +1,31 @@
 // compile-flags: -Zmir-opt-level=3 -C debug-assertions=off
 // CHECK: fn switch_three(_1: u32) -> u32 {
+// CHECK:     debug x => _1;
+// CHECK:     let mut _0: u32;
+// CHECK:
 // CHECK:     bb0: {
-// CHECK:         switchInt(copy _1) -> [0: bb3, 1: bb2, otherwise: bb1]
+// CHECK:         switchInt(copy _1) -> [0: bb3, 1: bb2, otherwise: bb1];
 // CHECK:     }
+// CHECK:
 // CHECK:     bb1: {
-// CHECK:         _0 = const 30_u32
-// CHECK:         goto -> bb4
+// CHECK:         _0 = const 30_u32;
+// CHECK:         goto -> bb4;
 // CHECK:     }
+// CHECK:
 // CHECK:     bb2: {
-// CHECK:         _0 = const 20_u32
-// CHECK:         goto -> bb4
+// CHECK:         _0 = const 20_u32;
+// CHECK:         goto -> bb4;
 // CHECK:     }
+// CHECK:
 // CHECK:     bb3: {
-// CHECK:         _0 = const 10_u32
-// CHECK:         goto -> bb4
+// CHECK:         _0 = const 10_u32;
+// CHECK:         goto -> bb4;
 // CHECK:     }
+// CHECK:
 // CHECK:     bb4: {
-// CHECK:         return
+// CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK:
 // CHECK: func @switch_three(%x: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1:u32 = param %x

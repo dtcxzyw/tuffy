@@ -1,11 +1,13 @@
 // compile-flags: -Zmir-opt-level=3 -C debug-assertions=off
 // CHECK: fn consume_tuple(_1: (i32,)) -> i32 {
+// CHECK:     debug x => _1;
+// CHECK:     let mut _0: i32;
+// CHECK:
 // CHECK:     bb0: {
-// CHECK:         _0 = copy (_1.0: i32)
-// CHECK:         return
+// CHECK:         _0 = copy (_1.0: i32);
+// CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK:
 // CHECK: func @consume_tuple(%x: int) -> int:s32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1 = param %x
@@ -16,14 +18,16 @@
 // CHECK: }
 // CHECK:
 // CHECK: fn test_constant_tuple() -> i32 {
+// CHECK:     let mut _0: i32;
+// CHECK:
 // CHECK:     bb0: {
-// CHECK:         _0 = consume_tuple(const (42_i32,)) -> [return: bb1, unwind continue]
+// CHECK:         _0 = consume_tuple(const (42_i32,)) -> [return: bb1, unwind continue];
 // CHECK:     }
+// CHECK:
 // CHECK:     bb1: {
-// CHECK:         return
+// CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK:
 // CHECK: func @test_constant_tuple() -> int:s32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1 = iconst 42

@@ -1,11 +1,14 @@
 // compile-flags: -Zmir-opt-level=3 -C debug-assertions=off -C opt-level=3
 // CHECK: fn add(_1: i32, _2: i32) -> i32 {
+// CHECK:     debug a => _1;
+// CHECK:     debug b => _2;
+// CHECK:     let mut _0: i32;
+// CHECK:
 // CHECK:     bb0: {
-// CHECK:         _0 = Add(copy _1, copy _2)
-// CHECK:         return
+// CHECK:         _0 = Add(copy _1, copy _2);
+// CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK:
 // CHECK: func @add(%a: int:s32, %b: int:s32) -> int:s32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1:s32 = param %a
@@ -15,12 +18,15 @@
 // CHECK: }
 // CHECK:
 // CHECK: fn add128(_1: u128, _2: u128) -> u128 {
+// CHECK:     debug a => _1;
+// CHECK:     debug b => _2;
+// CHECK:     let mut _0: u128;
+// CHECK:
 // CHECK:     bb0: {
-// CHECK:         _0 = Add(copy _1, copy _2)
-// CHECK:         return
+// CHECK:         _0 = Add(copy _1, copy _2);
+// CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK:
 // CHECK: func @add128(%a: int:u128, %b: int:u128) -> int:u128 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1:u128 = param %a

@@ -1,11 +1,14 @@
 // compile-flags: -Zmir-opt-level=3 -C debug-assertions=off
 // CHECK: fn bitand_u32(_1: u32, _2: u32) -> u32 {
+// CHECK:     debug a => _1;
+// CHECK:     debug b => _2;
+// CHECK:     let mut _0: u32;
+// CHECK:
 // CHECK:     bb0: {
-// CHECK:         _0 = BitAnd(copy _1, copy _2)
-// CHECK:         return
+// CHECK:         _0 = BitAnd(copy _1, copy _2);
+// CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK:
 // CHECK: func @bitand_u32(%a: int:u32, %b: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1:u32 = param %a
@@ -15,12 +18,15 @@
 // CHECK: }
 // CHECK:
 // CHECK: fn bitor_u32(_1: u32, _2: u32) -> u32 {
+// CHECK:     debug a => _1;
+// CHECK:     debug b => _2;
+// CHECK:     let mut _0: u32;
+// CHECK:
 // CHECK:     bb0: {
-// CHECK:         _0 = BitOr(copy _1, copy _2)
-// CHECK:         return
+// CHECK:         _0 = BitOr(copy _1, copy _2);
+// CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK:
 // CHECK: func @bitor_u32(%a: int:u32, %b: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1:u32 = param %a
@@ -30,12 +36,15 @@
 // CHECK: }
 // CHECK:
 // CHECK: fn bitxor_u32(_1: u32, _2: u32) -> u32 {
+// CHECK:     debug a => _1;
+// CHECK:     debug b => _2;
+// CHECK:     let mut _0: u32;
+// CHECK:
 // CHECK:     bb0: {
-// CHECK:         _0 = BitXor(copy _1, copy _2)
-// CHECK:         return
+// CHECK:         _0 = BitXor(copy _1, copy _2);
+// CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK:
 // CHECK: func @bitxor_u32(%a: int:u32, %b: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1:u32 = param %a

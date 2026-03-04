@@ -104,32 +104,10 @@ impl CodegenBackend for TuffyCodegenBackend {
                         use rustc_middle::ty::print::with_no_trimmed_paths;
                         with_no_trimmed_paths!({
                             let mir = tcx.instance_mir(instance.def);
-                            let fn_name = tcx.symbol_name(*instance).name;
-
-                            eprint!("fn {}(", fn_name);
-                            for (idx, local) in mir.local_decls.iter_enumerated().skip(1).take(mir.arg_count) {
-                                if idx.as_usize() > 1 { eprint!(", "); }
-                                eprint!("{:?}: {:?}", idx, local.ty);
-                            }
-                            eprintln!(") -> {:?} {{", mir.local_decls[rustc_middle::mir::RETURN_PLACE].ty);
-
-                            for (local, decl) in mir.local_decls.iter_enumerated().skip(mir.arg_count + 1) {
-                                eprintln!("    let mut {:?}: {:?};", local, decl.ty);
-                            }
-                            if mir.local_decls.len() > mir.arg_count + 1 { eprintln!(); }
-
-                            for (bb, bb_data) in mir.basic_blocks.iter_enumerated() {
-                                eprintln!("    {:?}: {{", bb);
-                                for stmt in &bb_data.statements {
-                                    eprintln!("        {:?}", stmt);
-                                }
-                                if let Some(ref term) = bb_data.terminator {
-                                    eprintln!("        {:?}", term.kind);
-                                }
-                                eprintln!("    }}");
-                            }
-                            eprintln!("}}");
-                            eprintln!();
+                            let mut buf = Vec::new();
+                            let writer = rustc_middle::mir::pretty::MirWriter::new(tcx);
+                            writer.write_mir_fn(mir, &mut buf).unwrap();
+                            eprint!("{}", String::from_utf8_lossy(&buf));
                         });
                     }
                     let result_opt =
