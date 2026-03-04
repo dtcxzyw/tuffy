@@ -283,6 +283,24 @@ Seeds 0–1000 (unoptimized builds):
 
 All 1001 seeds (0–1000) now pass. 0 crashes, 0 mismatches.
 
+### Run 11 (2026-03-04) - i128/u128 to float libcall fix
+
+Seeds 1001–2000 found one mismatch:
+
+| Seed | Root cause | Fix |
+|------|-----------|-----|
+| 1379 | Two bugs in `__floattidf`/`__floattisf` libcall emission: (1) `select_call` always allocated RAX for the return value, but C ABI returns floats in XMM0; (2) `leg_int128_to_fp` used `vmap.pair` which returns `(v, v)` for small 128-bit values (Mapped::One), so both lo and hi were set to the same value instead of hi being sign-extended/zero | In `select_call`: detect float return type and use `alloc_fixed(PReg(0x20))` (XMM0) + `MoveXmmToGpr` for the return; in `leg_int128_to_fp`: if not wide, compute hi as `SAR(lo, 63)` for i128 or `iconst(0)` for u128 |
+
+Seeds 0–2000 (unoptimized builds):
+
+| Category | Count | % of total |
+|----------|------:|-----:|
+| Pass | 2001 | 100.0 |
+| Crash | 0 | 0.0 |
+| Mismatch | 0 | 0.0 |
+
+All 2001 seeds (0–2000) pass. 0 crashes, 0 mismatches.
+
 ## Affected Modules
 
 - `rustc_codegen_tuffy` — codegen backend under test
