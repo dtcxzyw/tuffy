@@ -772,7 +772,14 @@ fn copy_inst<M: AbiMetadata + Clone>(
         }
         Op::Ret(val, mem) => {
             let rv = val.as_ref().map(|v| remap_op(s, v));
-            b.ret(rv, remap_op(s, mem), o())
+            let new_ret = b.ret(rv, remap_op(s, mem), o());
+            // Remap secondary-return move (non-i128 struct returns via RAX+RDX).
+            if let Some(src_idx) = s.old_meta.get_secondary_return_move(old_vref.index()) {
+                let new_src = s.vmap.one(ValueRef::inst_result(src_idx));
+                s.meta
+                    .mark_secondary_return_move(new_ret.index(), new_src.index());
+            }
+            new_ret
         }
         Op::Unreachable => b.unreachable(o()),
         Op::Trap => b.trap(o()),
