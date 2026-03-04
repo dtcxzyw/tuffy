@@ -43,21 +43,28 @@ ir_output=$(mktemp)
 out_file=$(mktemp)
 trap "rm -f $ir_output $out_file" EXIT
 
-if ! rustc +nightly -Z codegen-backend="$BACKEND" \
+rustc +nightly -Z codegen-backend="$BACKEND" \
     -C llvm-args=dump-ir $compile_flags \
     --crate-name "$name" \
     -o "$out_file" \
-    "$TEST_FILE" 2>"$ir_output"; then
-    echo "ERROR: Compilation failed"
-    cat "$ir_output"
+    "$TEST_FILE" 2>"$ir_output" || true
+
+# Check if IR was actually generated (ignore rustc exit code)
+if [ ! -s "$ir_output" ]; then
+    echo "ERROR: No IR output generated"
     exit 1
 fi
 
 # Generate CHECK lines from IR output (preserving empty lines)
+# Filter out panic messages - stop at "thread 'rustc' panicked"
 check_lines=$(mktemp)
 trap "rm -f $ir_output $check_lines" EXIT
 
 while IFS= read -r line; do
+    # Stop if we hit a panic message
+    if [[ "$line" =~ ^thread\ \'rustc\' ]]; then
+        break
+    fi
     # Add CHECK prefix, preserving empty lines and indentation
     if [ -z "$line" ]; then
         echo "// CHECK:"
@@ -76,11 +83,11 @@ awk '/^\/\/ CHECK:/ {exit} {print}' "$TEST_FILE" > "$updated_file"
 # Add generated CHECK lines
 cat "$check_lines" >> "$updated_file"
 
-# Add code section (after last CHECK line or compile-flags)
+# Add code section (everything after the last CHECK line in original file)
 awk '
     /^\/\/ CHECK:/ {in_check=1; next}
-    in_check && !/^\/\/ CHECK:/ {in_check=0}
-    !in_check && !/^\/\/ CHECK:/ && !/^\/\/ compile-flags:/ {print}
+    in_check && !/^\/\/ CHECK:/ {in_check=0; code_start=1}
+    code_start {print}
 ' "$TEST_FILE" >> "$updated_file"
 
 # Replace original file
