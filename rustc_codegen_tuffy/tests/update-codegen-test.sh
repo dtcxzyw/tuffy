@@ -77,8 +77,8 @@ done < "$ir_output" > "$check_lines"
 updated_file=$(mktemp)
 trap "rm -f $ir_output $check_lines $updated_file" EXIT
 
-# Copy only leading comment lines (compile-flags, etc.)
-awk '/^\/\// {print; next} {exit}' "$TEST_FILE" > "$updated_file"
+# Copy only leading comment lines (compile-flags, etc.), skip CHECK lines
+awk '/^\/\/ CHECK:/ {next} /^\/\// {print; next} {exit}' "$TEST_FILE" > "$updated_file"
 
 # Add generated CHECK lines
 cat "$check_lines" >> "$updated_file"
