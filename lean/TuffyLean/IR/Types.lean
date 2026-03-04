@@ -127,6 +127,7 @@ structure FpRewriteFlags where
 inductive Annotation where
   | signed (bits : Nat)    -- :s<N> — value in [-2^(N-1), 2^(N-1)-1]
   | unsigned (bits : Nat)  -- :u<N> — value in [0, 2^N-1]
+  | dontCare (bits : Nat)  -- :dc<N> — only low N bits meaningful, high bits undef
   deriving DecidableEq, Repr
 
 /-- Abstract allocation identifier for pointer provenance -/

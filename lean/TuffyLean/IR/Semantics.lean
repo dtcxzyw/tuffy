@@ -6,6 +6,11 @@ import Mathlib.Data.Int.Bitwise
 
 namespace TuffyLean.IR
 
+-- DontCare(N) annotation semantics:
+-- - Definition-side: only the lower N bits are authoritative; bits ≥ N may hold any value
+-- - Use-side: consumer promises to only inspect lower N bits
+-- - Violating the annotation produces poison
+
 /-- Integer arithmetic semantics (infinite precision) -/
 def evalAdd (a b : Int) : Int := a + b
 def evalSub (a b : Int) : Int := a - b
@@ -257,6 +262,7 @@ def applyAnnotation (v : Int) (ann : Annotation) : Value :=
   match ann with
   | .signed n => checkSignedRange v n
   | .unsigned n => checkUnsignedRange v n
+  | .dontCare n => .int (v % (2 ^ n))
 
 -- Memory load/store semantics
 
