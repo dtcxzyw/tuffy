@@ -309,20 +309,37 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // pre-compute the projected address before the intrinsic overwrites
             // the local.  We also save the original local value to restore it.
             let has_dest_projection = !destination.projection.is_empty();
-            let (proj_addr, proj_size, saved_local_for_proj) = if has_dest_projection {
-                let saved = self.locals.get(destination.local);
-                let info = self.translate_place_to_addr(destination).map(|(a, ty)| {
-                    let a = self.coerce_to_ptr(a);
-                    let sz = type_size(self.tcx, ty).unwrap_or(8) as u32;
-                    (a, sz)
-                });
-                match info {
-                    Some((a, sz)) => (Some(a), sz, saved),
-                    None => (None, 0, saved),
-                }
-            } else {
-                (None, 0, None)
-            };
+            // For Deref-based projections (e.g. `(*ptr).field`), the base
+            // pointer must not change.  For Field/Index projections on a
+            // non-stack local, we must persist the spill so future reads (in
+            // subsequent blocks) see the mutated slot instead of the original
+            // read-only constant.
+            let dest_is_deref_projection = has_dest_projection
+                && matches!(destination.projection.first(), Some(mir::PlaceElem::Deref));
+            let (proj_addr, proj_size, saved_local_for_proj, spilled_local_for_proj) =
+                if has_dest_projection {
+                    let saved = self.locals.get(destination.local);
+                    let info = if dest_is_deref_projection {
+                        self.translate_place_to_addr(destination)
+                    } else {
+                        // Non-deref: persist the spill so future reads via
+                        // `locals` see the mutated slot.
+                        self.translate_place_to_addr_inner(destination, true)
+                    }
+                    .map(|(a, ty)| {
+                        let a = self.coerce_to_ptr(a);
+                        let sz = type_size(self.tcx, ty).unwrap_or(8) as u32;
+                        (a, sz)
+                    });
+                    // Capture the local *after* the potential spill.
+                    let spilled = self.locals.get(destination.local);
+                    match info {
+                        Some((a, sz)) => (Some(a), sz, saved, spilled),
+                        None => (None, 0, saved, spilled),
+                    }
+                } else {
+                    (None, 0, None, None)
+                };
             let handled = translate_intrinsic(
                 self.tcx,
                 &intrinsic_name,
@@ -342,9 +359,18 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 if has_dest_projection {
                     // Destination has projections (e.g. `(*RET) = bswap(...)`).
                     // Store the result through the pre-computed projected
-                    // address and restore the original local value.
-                    if let Some(orig) = saved_local_for_proj {
-                        self.locals.set(destination.local, orig);
+                    // address and restore the local to its correct slot.
+                    // For Deref projections the base pointer is unchanged
+                    // (restore to original).  For Field/Index projections on a
+                    // non-stack local we restore to the newly spilled slot so
+                    // subsequent reads see the mutation.
+                    let restore_target = if dest_is_deref_projection {
+                        saved_local_for_proj
+                    } else {
+                        spilled_local_for_proj
+                    };
+                    if let Some(slot) = restore_target {
+                        self.locals.set(destination.local, slot);
                     }
                     // If the intrinsic didn't change the local (e.g. i128
                     // bswap writes directly through the pointer obtained from
@@ -682,16 +708,27 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         // (which may modify locals).  We also save the original local value
         // so we can restore it after storing the call result.
         let has_call_dest_proj = !destination.projection.is_empty();
-        let (call_proj_addr, call_proj_size, _call_saved_local) = if has_call_dest_proj {
-            let saved = self.locals.get(destination.local);
-            let info = self.translate_place_to_addr(destination).map(|(a, ty)| {
+        // For Deref-based projections the base pointer must not change.
+        // For Field/Index projections on a non-stack local we persist the
+        // spill so that subsequent reads see the mutated slot.
+        let call_dest_is_deref = has_call_dest_proj
+            && matches!(destination.projection.first(), Some(mir::PlaceElem::Deref));
+        let (call_proj_addr, call_proj_size, call_spilled_local) = if has_call_dest_proj {
+            let info = if call_dest_is_deref {
+                self.translate_place_to_addr(destination)
+            } else {
+                self.translate_place_to_addr_inner(destination, true)
+            }
+            .map(|(a, ty)| {
                 let a = self.coerce_to_ptr(a);
                 let sz = type_size(self.tcx, ty).unwrap_or(8) as u32;
                 (a, sz)
             });
+            // Capture the (possibly newly spilled) local AFTER translate_place_to_addr_inner.
+            let spilled = self.locals.get(destination.local);
             match info {
-                Some((a, sz)) => (Some(a), sz, saved),
-                None => (None, 0, saved),
+                Some((a, sz)) => (Some(a), sz, spilled),
+                None => (None, 0, spilled),
             }
         } else {
             (None, 0, None)
@@ -940,6 +977,38 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             let ann = translate_annotation(arg_ty).unwrap_or(Annotation::Unsigned(128));
                             ir_args.push(IrOperand::annotated(v, ann));
                         }
+                    } else if arg_size == 16
+                        && matches!(repr_kind(self.tcx, arg_ty), ReprKind::Scalar)
+                        && matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
+                    {
+                        // Newtype wrapper over u128/i128 (e.g. `(u128,)`) with
+                        // 16-byte Scalar representation. The value is a pointer to
+                        // its 16-byte storage; load lo+hi and pass as two registers.
+                        let w0 = self.builder.load(
+                            v.into(),
+                            8,
+                            Type::Int,
+                            self.current_mem.into(),
+                            None,
+                            Origin::synthetic(),
+                        );
+                        ir_args.push(w0.into());
+                        let off8 = self.builder.iconst(8, Origin::synthetic());
+                        let hi_addr = self.builder.ptradd(
+                            v.into(),
+                            off8.into(),
+                            0,
+                            Origin::synthetic(),
+                        );
+                        let w1 = self.builder.load(
+                            hi_addr.into(),
+                            8,
+                            Type::Int,
+                            self.current_mem.into(),
+                            None,
+                            Origin::synthetic(),
+                        );
+                        ir_args.push(w1.into());
                     } else {
                         ir_args.push(v.into());
                     }
@@ -1077,8 +1146,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
         if has_call_dest_proj {
             // Destination has projections (e.g. `_5.fld0 = fn1()`).
-            // Store the call result through the pre-computed projected
-            // address and leave the base local unchanged.
+            // Store the call result through the pre-computed projected address.
+            // For non-Deref projections, also update the base local to point at
+            // the newly spilled slot so subsequent reads see the mutation.
             if let Some(addr) = call_proj_addr {
                 if call_proj_size > 0 {
                     self.current_mem = self.builder.store(
@@ -1088,6 +1158,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         self.current_mem.into(),
                         Origin::synthetic(),
                     );
+                }
+            }
+            // For non-Deref projections restore local to spilled slot.
+            if !call_dest_is_deref {
+                if let Some(slot) = call_spilled_local {
+                    self.locals.set(destination.local, slot);
+                    self.stack_locals.mark(destination.local);
                 }
             }
         } else if let Some(slot) = sret_slot {

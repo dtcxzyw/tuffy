@@ -2112,8 +2112,30 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     }
                 }
                 let neg_ann = op_ty.and_then(translate_annotation);
-                // Coerce Bool/Ptr to Int for integer negation.
-                let v = self.coerce_to_int(v);
+                // For large integral types (>8 bytes, e.g. i128) stored in memory,
+                // translate_place_to_value returns a Ptr to the stack slot.
+                // Load the value before negating.
+                let v = if matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
+                    && op_ty.is_some_and(|t| t.is_integral())
+                    && op_ty
+                        .and_then(|t| type_size(self.tcx, t))
+                        .is_some_and(|sz| sz > 8)
+                {
+                    let sz = op_ty
+                        .and_then(|t| type_size(self.tcx, t))
+                        .unwrap_or(16) as u32;
+                    self.builder.load(
+                        v.into(),
+                        sz,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
+                    )
+                } else {
+                    // Coerce Bool/Ptr to Int for integer negation.
+                    self.coerce_to_int(v)
+                };
                 if !matches!(self.builder.value_type(v), Some(Type::Int)) {
                     return Some(self.builder.iconst(0, Origin::synthetic()));
                 }
@@ -2152,6 +2174,34 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 int_v.into(),
                                 one.into(),
                                 None,
+                                Origin::synthetic(),
+                            ))
+                        }
+                        Some(Type::Ptr(_))
+                            if mir_ty.is_some_and(|t| t.is_integral())
+                                && mir_ty
+                                    .and_then(|t| type_size(self.tcx, t))
+                                    .is_some_and(|sz| sz > 8) =>
+                        {
+                            // The operand is a >8-byte integer (e.g. u128) stored in memory;
+                            // translate_place_to_value returned a Ptr to the stack slot.
+                            // Load the value as a 16-byte Int before bitwise NOT.
+                            let sz = mir_ty
+                                .and_then(|t| type_size(self.tcx, t))
+                                .unwrap_or(16) as u32;
+                            let loaded = self.builder.load(
+                                v.into(),
+                                sz,
+                                Type::Int,
+                                self.current_mem.into(),
+                                None,
+                                Origin::synthetic(),
+                            );
+                            let ones = self.builder.iconst(-1, Origin::synthetic());
+                            Some(self.builder.xor(
+                                loaded.into(),
+                                ones.into(),
+                                not_ann,
                                 Origin::synthetic(),
                             ))
                         }

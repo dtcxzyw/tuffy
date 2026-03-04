@@ -676,12 +676,20 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         self.current_mem.into(),
                                         Origin::synthetic(),
                                     );
-                                } else if bytes > 8 || matches!(rvalue, Rvalue::Aggregate(..)) {
+                                } else if bytes > 8
+                                    || matches!(rvalue, Rvalue::Aggregate(..))
+                                    || !matches!(
+                                        projected_ty.kind(),
+                                        ty::RawPtr(..) | ty::Ref(..) | ty::FnPtr(..)
+                                    )
+                                {
                                     // val is a pointer to multi-word data (e.g.
                                     // symbol_addr of an Indirect constant like a
                                     // slice reference, or a stack slot from an
-                                    // Aggregate rvalue).  Copy word-by-word from
-                                    // the source address.
+                                    // Aggregate rvalue).  Also applies to 8-byte
+                                    // non-pointer types (e.g. (char, bool)) where
+                                    // the pointer points to the actual data bytes.
+                                    // Copy word-by-word from the source address.
                                     let src_base = match rvalue {
                                         Rvalue::Use(
                                             Operand::Copy(src_place) | Operand::Move(src_place),
