@@ -16,7 +16,7 @@ use tuffy_ir::instruction::{ICmpOp, Op, Operand};
 use tuffy_ir::module::SymbolTable;
 use tuffy_ir::types::{Annotation, Type};
 use tuffy_ir::value::ValueRef;
-use tuffy_regalloc::VReg;
+use tuffy_regalloc::{PReg, VReg};
 use tuffy_target::isel::{CmpMap, IselResult, StackMap, VRegAlloc, VRegMap};
 
 /// Mutable instruction selection state, bundled to reduce parameter counts.
@@ -1607,9 +1607,29 @@ fn select_call(
     // inserted as the first argument and the callee does not return a value
     // in RAX. In this case we suppress the primary return handling.
     let is_sret = ctx.stack.get(vref).is_some();
+
+    // Detect float return: C ABI returns f32/f64 in XMM0, not RAX.
+    // Our internal ABI keeps float values as bit-patterns in GPRs, so we
+    // must read XMM0 and move the bits into a GPR after the call.
+    let call_idx = vref.index();
+    let return_float_type = func.inst(call_idx).secondary_ty.as_ref().and_then(|ty| {
+        if let Type::Float(ft) = ty {
+            Some(*ft)
+        } else {
+            None
+        }
+    });
+    let return_is_float = return_float_type.is_some();
+
     let ret_vreg = if abi.has_primary_return && !is_sret {
-        let rax = ctx.alloc.alloc_fixed(Gpr::Rax.to_preg());
-        Some(rax)
+        if return_is_float {
+            // XMM0 = class 1, register 0 → PReg(0x20)
+            let xmm0 = ctx.alloc.alloc_fixed(PReg(0x20));
+            Some(xmm0)
+        } else {
+            let rax = ctx.alloc.alloc_fixed(Gpr::Rax.to_preg());
+            Some(rax)
+        }
     } else {
         None
     };
@@ -1658,6 +1678,20 @@ fn select_call(
             ctx.rdx_captured.insert(vref.index(), dst_rdx);
             let secondary = ValueRef::inst_secondary_result(vref.index());
             ctx.regs.assign(secondary, dst_rax);
+        }
+        (Some(xmm_or_rax), None) if return_is_float => {
+            // Float return: C ABI puts the value in XMM0. Move bits to GPR
+            // to maintain our invariant that float values live in GPRs.
+            let ft = return_float_type.unwrap();
+            let double = matches!(ft, tuffy_ir::types::FloatType::F64);
+            let gpr_dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::MoveXmmToGpr {
+                dst: gpr_dst,
+                src: xmm_or_rax,
+                double,
+            });
+            let secondary = ValueRef::inst_secondary_result(vref.index());
+            ctx.regs.assign(secondary, gpr_dst);
         }
         (Some(rax), None) => {
             let dst = ctx.alloc.alloc();

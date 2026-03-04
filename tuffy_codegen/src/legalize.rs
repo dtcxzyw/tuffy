@@ -1604,7 +1604,25 @@ fn leg_int128_to_fp<M: AbiMetadata + Clone>(
     let sym_id = symbols.intern(name);
     let callee = b.symbol_addr(sym_id, o());
 
-    let (a_lo, a_hi) = s.vmap.pair(a.value);
+    let (a_lo, a_hi) = if is_wide(s, a.value) {
+        s.vmap.pair(a.value)
+    } else {
+        // Small 128-bit value mapped to a single 64-bit word.
+        // Compute the hi word: sign-extend for i128, zero for u128.
+        let lo = s.vmap.one(a.value);
+        let hi = if signed {
+            let c63 = b.iconst(63i64, o());
+            b.shr(
+                Operand::annotated(lo, Annotation::Signed(64)),
+                Operand::new(c63),
+                None,
+                o(),
+            )
+        } else {
+            b.iconst(0i64, o())
+        };
+        (lo, hi)
+    };
     let ann64 = Annotation::Unsigned(64);
     let args = vec![
         Operand::annotated(a_lo, ann64),
