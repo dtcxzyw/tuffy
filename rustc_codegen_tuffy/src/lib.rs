@@ -129,34 +129,9 @@ impl CodegenBackend for TuffyCodegenBackend {
                                 eprintln!("        {:?}", stmt);
                             }
                             if let Some(ref term) = bb_data.terminator {
-                                use rustc_middle::mir::TerminatorKind;
-                                match &term.kind {
-                                    TerminatorKind::Call { func, args, target, .. } => {
-                                        eprint!("        _0 = ");
-                                        // Print function name
-                                        match func {
-                                            rustc_middle::mir::Operand::Constant(c) => {
-                                                if let rustc_middle::ty::TyKind::FnDef(def_id, _) = c.const_.ty().kind() {
-                                                    eprint!("{}", tcx.item_name(*def_id));
-                                                } else {
-                                                    eprint!("fn");
-                                                }
-                                            }
-                                            _ => eprint!("fn"),
-                                        }
-                                        eprint!("(");
-                                        for (i, _arg) in args.iter().enumerate() {
-                                            if i > 0 { eprint!(", "); }
-                                            eprint!("const (42_i32,)");
-                                        }
-                                        eprint!(")");
-                                        if let Some(bb) = target {
-                                            eprint!(" -> [return: {:?}, unwind continue]", bb);
-                                        }
-                                        eprintln!();
-                                    }
-                                    _ => eprintln!("        {:?}", term.kind),
-                                }
+                                use rustc_middle::ty::print::with_no_trimmed_paths;
+                                let s = with_no_trimmed_paths!(format!("{:?}", term.kind));
+                                eprintln!("        {}", s);
                             }
                             eprintln!("    }}");
                         }
