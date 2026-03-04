@@ -305,6 +305,14 @@ pub fn translate_function<'tcx>(
             for stmt in &bb_data.statements {
                 if let StatementKind::Assign(box (place, _)) = &stmt.kind
                     && !place.projection.is_empty()
+                    // A leading Deref means we write *through* the local (e.g.
+                    // `(*_0).1 = ...`).  The local itself is a pointer — it must
+                    // NOT be turned into a stack slot; doing so would create a
+                    // fresh 8-byte slot while the pointer value is never stored.
+                    && !matches!(
+                        place.projection.first(),
+                        Some(mir::PlaceElem::Deref)
+                    )
                     && !ctx.stack_locals.is_stack(place.local)
                 {
                     let local = place.local;
@@ -438,7 +446,9 @@ pub fn translate_function<'tcx>(
                         // a new slot and only copying 8 bytes (the pointer itself) would
                         // lose the indirection, so just mark the local as stack-allocated
                         // without allocating a new slot.
-                        if size > 16 {
+                        // This optimization only applies to parameters, not to local
+                        // variables — locals with size > 16 bytes need a real slot.
+                        if size > 16 && local.as_usize() <= mir.arg_count {
                             ctx.stack_locals.mark(local);
                             continue;
                         }
