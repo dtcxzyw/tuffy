@@ -200,6 +200,40 @@ After the fix:
 
 The fix resolves the i128 constant assignment issue but seeds 7 and 29 have additional bugs causing runtime failures.
 
+#### Seed 7 Investigation
+
+Seed 7 minimizes to a u128 multiplication being hashed:
+```rust
+_2 = 127205287323746125276397411379526629301_u128 * 334158389699225244992710105631410377972_u128;
+Call(_6 = dump_var(Move(_1), Move(_2), _7, _7), ReturnTo(bb7), UnwindUnreachable())
+```
+
+Findings:
+- Tuffy produces hash: 799248379550295712
+- LLVM produces hash: 370434447370778688
+- u128 multiplication works correctly in isolation (verified with standalone test)
+- u128 constants are stored correctly (verified with standalone test)
+- Issue appears to be in how u128 values are passed to functions or how they're hashed
+- IR shows: `v8:u128 = mul v6:u128, v7:u128` followed by `call v9(v5, v8:u128)`
+
+The bug is likely in the calling convention or ABI handling for u128 arguments.
+
+#### Seed 29 Investigation
+
+Seed 29 minimizes to a transmute from u128 to i128 stored in a struct field:
+```rust
+RET.fld1 = 74045951570396969358155043307167018649_i128 * (-84426674019192898531552418757191699584_i128);
+Call(RET.fld1 = core::intrinsics::transmute(_3), ReturnTo(bb1), UnwindUnreachable())
+```
+
+Findings:
+- Still crashes with SIGSEGV (exit code 139) at runtime
+- IR improved from `store.8` to `store.16` after the fix
+- The crash happens during execution, not compilation
+- Issue is likely in the transmute handling or subsequent code
+
+Both seeds require further investigation into calling conventions and intrinsics handling.
+
 - [x] Run initial fuzzing campaign (seeds 0..1000) and triage results
 - [x] Classify failures into compile crashes vs output mismatches
 - [x] Minimize reproduction cases for each distinct bug
