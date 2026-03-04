@@ -264,6 +264,25 @@ All seeds 0–100 now pass in both optimized and unoptimized builds.
 - [x] Fix i128 struct field store bug (partial - constants fixed, seeds 7/29 have additional issues)
 - [x] Fix u128 return hi-word and regalloc class-filter bugs (seeds 7, 29)
 
+### Run 10 (2026-03-05) - Float GPR/XMM class fixes and large u128 constant stores
+
+Fixed two remaining bug classes found in seeds 0–1000:
+
+| Bug | Affected Seeds | Root cause | Fix |
+|-----|---------------|-----------|-----|
+| Float register class mismatch | 168, 489 | Float IR values were allocated to XMM VRegs (class 1). When returned or passed in GPRs, `MovRR` emitted a no-op `mov rax,rax`. Float ops that received GPR values used `xmm_to_iced(src)` mapping GPR index to wrong XMM register. | Added `GprToXmm` pseudo-instruction (mov to `[rsp-8]` + movss/movsd from `[rsp-8]`); all float ops now keep results in GPR class; XMM used only as scratch within ops |
+| Large 128-bit constant wide-store | 495, 543, 767, 929 | `val_is_wide` returned `false` for `Rvalue::Use(Operand::Constant(_))`, forcing large 128-bit constants through scalar extension path where hi word was always `iconst(0)` | Evaluate constant and check if bits fit in i64/u64; return `true` (wide path via `leg_wide_const`) only for values exceeding 64-bit range |
+
+Seeds 0–1000 (unoptimized builds):
+
+| Category | Count | % of total |
+|----------|------:|-----:|
+| Pass | 1001 | 100.0 |
+| Crash | 0 | 0.0 |
+| Mismatch | 0 | 0.0 |
+
+All 1001 seeds (0–1000) now pass. 0 crashes, 0 mismatches.
+
 ## Affected Modules
 
 - `rustc_codegen_tuffy` — codegen backend under test
