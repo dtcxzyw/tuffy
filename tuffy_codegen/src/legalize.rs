@@ -14,7 +14,7 @@ use tuffy_ir::builder::Builder;
 use tuffy_ir::function::{CfgNode, Function};
 use tuffy_ir::instruction::{ICmpOp, Op, Operand, Origin};
 use tuffy_ir::module::SymbolTable;
-use tuffy_ir::types::{Annotation, Type};
+use tuffy_ir::types::{Annotation, FloatType, Type};
 use tuffy_ir::value::{BlockRef, ValueRef};
 
 use tuffy_target::backend::AbiMetadata;
@@ -380,7 +380,30 @@ fn collect_wide_values<M: AbiMetadata>(
 }
 
 fn is_wide<M>(s: &State<M>, v: ValueRef) -> bool {
-    s.wide.contains(&v.raw())
+    s.wide.contains(&v.raw()) || matches!(s.vmap.get(v), Mapped::Pair(_, _))
+}
+
+/// Returns the (lo, hi) pair for a 128-bit operand, correctly handling non-wide
+/// values. Unlike `vmap.pair()`, which returns `(v, v)` for a non-wide value,
+/// this emits hi = 0 for unsigned or hi = lo >> 63 for signed operands.
+fn wide_pair<M>(s: &State<M>, b: &mut Builder, op: &Operand) -> (ValueRef, ValueRef) {
+    if is_wide(s, op.value) {
+        s.vmap.pair(op.value)
+    } else {
+        let lo = s.vmap.one(op.value);
+        let hi = if is_signed_128(op.annotation.as_ref()) {
+            let c63 = b.iconst(63i64, o());
+            b.shr(
+                Operand::annotated(lo, Annotation::Signed(64)),
+                Operand::new(c63),
+                None,
+                o(),
+            )
+        } else {
+            b.iconst(0i64, o())
+        };
+        (lo, hi)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -556,13 +579,25 @@ fn legalize_inst<M: AbiMetadata + Clone>(
             leg_load_128(s, b, old_vref, ptr, mem);
         }
         Op::Store(val, ptr, 16, mem) => {
-            leg_store_128(s, b, old_vref, val, ptr, mem);
+            leg_store_128(old, s, b, old_vref, val, ptr, mem);
         }
         Op::Sext(val, 128) => {
-            leg_sext_128(s, b, old_vref, val);
+            // If the source is FpToSi, use the proper saturating compiler-rt call.
+            let ft = get_fp_to_int_float_type(val.value, old);
+            if let Some(ft) = ft {
+                leg_fp_to_int128(s, b, old_vref, val, true, ft, old, symbols);
+            } else {
+                leg_sext_128(s, b, old_vref, val);
+            }
         }
         Op::Zext(val, 128) => {
-            leg_zext_128(s, b, old_vref, val);
+            // If the source is FpToUi, use the proper saturating compiler-rt call.
+            let ft = get_fp_to_int_float_type(val.value, old);
+            if let Some(ft) = ft {
+                leg_fp_to_int128(s, b, old_vref, val, false, ft, old, symbols);
+            } else {
+                leg_zext_128(s, b, old_vref, val);
+            }
         }
         Op::Bswap(val, 16) => {
             leg_bswap_128(s, b, old_vref, val);
@@ -1225,7 +1260,7 @@ fn leg_shr<M>(
 ) {
     let signed = is_signed_128(a.annotation.as_ref());
     let ann64 = Some(Annotation::Unsigned(64));
-    let (a_lo, a_hi) = s.vmap.pair(a.value);
+    let (a_lo, a_hi) = wide_pair(s, b, a);
     let amt = s.vmap.one(op_b.value);
 
     let c0 = b.iconst(0i64, o());
@@ -1415,6 +1450,7 @@ fn leg_load_128<M>(
 // ---------------------------------------------------------------------------
 
 fn leg_store_128<M>(
+    old: &Function,
     s: &mut State<M>,
     b: &mut Builder,
     old_vref: ValueRef,
@@ -1422,7 +1458,26 @@ fn leg_store_128<M>(
     ptr: &Operand,
     mem: &Operand,
 ) {
-    let (v_lo, v_hi) = s.vmap.pair(val.value);
+    // Split the 128-bit stored value into (lo, hi).
+    let (v_lo, v_hi) = if is_wide(s, val.value) {
+        // Value is in the wide set: vmap holds a proper (lo, hi) pair.
+        s.vmap.pair(val.value)
+    } else {
+        // Value is not wide (e.g. a small iconst that fits in 64 bits).
+        // Compute hi from the original constant BigInt; fall back to 0.
+        let lo = s.vmap.one(val.value);
+        let hi = if !val.value.is_block_arg()
+            && !val.value.is_secondary_result()
+            && let Op::Const(bigval) = &old.inst(val.value.index()).op
+        {
+            let mask64 = (BigInt::from(1u64) << 64u32) - BigInt::from(1u32);
+            let hi_big = (bigval >> 64u32) & &mask64;
+            b.iconst(hi_big, o())
+        } else {
+            b.iconst(0i64, o())
+        };
+        (lo, hi)
+    };
     let p = s.vmap.one(ptr.value);
     let m = s.vmap.one(mem.value);
 
@@ -1463,6 +1518,116 @@ fn leg_zext_128<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, val: &
     let lo = s.vmap.one(val.value);
     let hi = b.iconst(0i64, o());
     s.vmap.set(old_vref, Mapped::Pair(lo, hi));
+}
+
+/// If `vref` is the result of a `FpToUi` or `FpToSi` instruction in `old`,
+/// return the float type of the input operand.  Returns `None` otherwise.
+fn get_fp_to_int_float_type(vref: ValueRef, old: &Function) -> Option<FloatType> {
+    let fp_operand = match old.instructions.get(vref.index() as usize) {
+        Some(inst) => match &inst.op {
+            Op::FpToUi(a) | Op::FpToSi(a) => a.value,
+            _ => return None,
+        },
+        None => return None,
+    };
+    old.instructions
+        .get(fp_operand.index() as usize)
+        .and_then(|i| match &i.ty {
+            Type::Float(ft) => Some(*ft),
+            _ => None,
+        })
+}
+
+// ---------------------------------------------------------------------------
+// float → i128/u128: lower to compiler-rt libcall
+//   f32 → u128: __fixunssfti(f32) → u128   (lo=rax, hi=rdx)
+//   f64 → u128: __fixunsdfti(f64) → u128
+//   f32 → i128: __fixsfti(f32)    → i128
+//   f64 → i128: __fixdfti(f64)    → i128
+// Called from the Zext(fp_to_ui, 128) and Sext(fp_to_si, 128) handlers
+// to provide correct saturation semantics for overflow/infinity/NaN.
+// ---------------------------------------------------------------------------
+
+#[allow(clippy::too_many_arguments)]
+fn leg_fp_to_int128<M: AbiMetadata + Clone>(
+    s: &mut State<M>,
+    b: &mut Builder,
+    old_vref: ValueRef,
+    // Operand of the outer Zext/Sext — its value is the FpToUi/FpToSi result.
+    zext_val: &Operand,
+    signed: bool,
+    ft: FloatType,
+    old: &Function,
+    symbols: &mut SymbolTable,
+) {
+    // Retrieve the float input to the FpToUi/FpToSi instruction.
+    let fp_input_vref = match old.instructions.get(zext_val.value.index() as usize) {
+        Some(inst) => match &inst.op {
+            Op::FpToUi(a) | Op::FpToSi(a) => a.value,
+            _ => {
+                // Not the expected pattern; fall back to simple extend.
+                let lo = s.vmap.one(zext_val.value);
+                let hi = if signed {
+                    let c63 = b.iconst(63i64, o());
+                    b.shr(
+                        Operand::annotated(lo, Annotation::Signed(64)),
+                        Operand::new(c63),
+                        None,
+                        o(),
+                    )
+                } else {
+                    b.iconst(0i64, o())
+                };
+                s.vmap.set(old_vref, Mapped::Pair(lo, hi));
+                return;
+            }
+        },
+        None => {
+            let lo = s.vmap.one(zext_val.value);
+            let hi = b.iconst(0i64, o());
+            s.vmap.set(old_vref, Mapped::Pair(lo, hi));
+            return;
+        }
+    };
+
+    let name = match (signed, ft) {
+        (false, FloatType::F32) => "__fixunssfti",
+        (false, FloatType::F64) => "__fixunsdfti",
+        (true, FloatType::F32) => "__fixsfti",
+        (true, FloatType::F64) => "__fixdfti",
+        _ => panic!("unsupported float-to-i128: signed={signed} ft={ft:?}"),
+    };
+    let sym_id = symbols.intern(name);
+    let callee = b.symbol_addr(sym_id, o());
+
+    // The float value in the remapped IR.
+    let float_val = s.vmap.one(fp_input_vref);
+
+    let old_mem = s
+        .current_old_mem
+        .expect("float-to-i128 requires a mem token in scope");
+    let new_mem = s.vmap.one(old_mem);
+
+    let (call_mem, data) = b.call(
+        Operand::new(callee),
+        vec![Operand::new(float_val)],
+        Type::Int,
+        Operand::new(new_mem),
+        Some(Annotation::Unsigned(64)),
+        o(),
+    );
+    let data = data.unwrap();
+
+    s.vmap.set(old_mem, Mapped::One(call_mem));
+
+    // Record wide return: hi arrives in RDX.
+    let call_idx = call_mem.index();
+    s.meta.mark_call_secondary_return(call_idx);
+    let hi_capture = b.iconst(0i64, o());
+    s.meta
+        .mark_secondary_return_capture(hi_capture.index(), call_idx);
+
+    s.vmap.set(old_vref, Mapped::Pair(data, hi_capture));
 }
 
 // ---------------------------------------------------------------------------
