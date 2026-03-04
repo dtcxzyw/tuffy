@@ -163,6 +163,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let dummy = if matches!(ret_ir_ty, Some(Type::Ptr(_))) {
                             let zero = self.builder.iconst(0, Origin::synthetic());
                             self.builder.inttoptr(zero.into(), 0, Origin::synthetic())
+                        } else if let Some(Type::Float(ft)) = ret_ir_ty {
+                            let zero = self.builder.iconst(0, Origin::synthetic());
+                            self.builder.bitcast(zero.into(), Type::Float(ft), None, Origin::synthetic())
                         } else {
                             self.builder.iconst(0, Origin::synthetic())
                         };
