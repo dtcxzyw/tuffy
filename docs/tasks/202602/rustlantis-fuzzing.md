@@ -135,12 +135,42 @@ Mismatching seeds: 266, 347, 391, 490, 669, 731, 922, 944, 993
 - Seed 347: runtime crash (core dump)
 - Seeds 266, 391, 490, 669, 731, 922, 944, 993: wrong code (different hash output)
 
+### Run 6 (2026-03-04) - u128 to f32 conversion fix
+
+Seed 347 investigation revealed missing u128/i128 to float conversion support. The conversion was failing in isel because legalization splits u128 values into (lo, hi) pairs, but SiToFp/UiToFp weren't being legalized for 128-bit operands.
+
+| Seed | Root cause | Fix |
+|------|-----------|-----|
+| 347 | u128/i128 to f32/f64 conversions not implemented in legalization | Add leg_int128_to_fp function to emit libcalls to compiler_builtins (__floatuntisf, __floatuntidf, __floattisf, __floattidf) |
+
+After the fix, seed 347 passes with optimizations enabled.
+
+**Important discovery**: Previous fuzzing campaigns (Runs 1-5) used optimized builds (`-Zmir-opt-level=3 -C opt-level=3`), but the fuzz_campaign.sh script uses unoptimized builds (no opt-level flags). Testing with unoptimized builds reveals different bugs.
+
+Seeds 0–100 (unoptimized builds, parallel execution with 48 jobs):
+
+| Category | Count | % of total |
+|----------|------:|-----:|
+| Pass | 98 | 97.0 |
+| Crash | 0 | 0.0 |
+| Mismatch | 3 | 3.0 |
+
+Remaining mismatches in unoptimized builds:
+- Seed 7: produces different hash (tuffy: 4739852885392749089, llvm: 8704362819882979984)
+- Seed 29: exit code 139 (SIGSEGV)
+- Seed 52: exit code 132 (SIGILL)
+
+All three seeds pass when compiled with optimizations, indicating bugs specific to unoptimized code generation.
+
 - [x] Run initial fuzzing campaign (seeds 0..1000) and triage results
 - [x] Classify failures into compile crashes vs output mismatches
 - [x] Minimize reproduction cases for each distinct bug
 - [x] Fix identified codegen bugs in rustc_codegen_tuffy
+- [x] Fix u128/i128 to float conversion (seed 347)
+- [ ] Fix remaining unoptimized build bugs (seeds 7, 29, 52)
 - [ ] Increase config complexity as pass rate improves
 
 ## Affected Modules
 
 - `rustc_codegen_tuffy` — codegen backend under test
+- `tuffy_codegen/src/legalize.rs` — u128 to float conversion legalization

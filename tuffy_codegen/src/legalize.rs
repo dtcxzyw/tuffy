@@ -628,7 +628,7 @@ fn legalize_inst<M: AbiMetadata + Clone>(
             if s.rdx_capture_remap.contains_key(&old_vref.index()) {
                 return;
             }
-            copy_inst(s, b, old_vref, inst);
+            copy_inst(s, b, old_vref, inst, symbols);
         }
     }
 }
@@ -651,6 +651,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
     b: &mut Builder,
     old_vref: ValueRef,
     inst: &tuffy_ir::instruction::Instruction,
+    symbols: &mut SymbolTable,
 ) {
     let ann = inst.result_annotation;
     let v = match &inst.op {
@@ -721,8 +722,20 @@ fn copy_inst<M: AbiMetadata + Clone>(
         Op::Zext(a, bits) => b.zext(remap_op(s, a), *bits, o()),
         Op::FpToSi(a) => b.fp_to_si(remap_op(s, a), o()),
         Op::FpToUi(a) => b.fp_to_ui(remap_op(s, a), o()),
-        Op::SiToFp(a, ft) => b.si_to_fp(remap_op(s, a), *ft, o()),
-        Op::UiToFp(a, ft) => b.ui_to_fp(remap_op(s, a), *ft, o()),
+        Op::SiToFp(a, ft) => {
+            if s.wide.contains(&a.value.raw()) {
+                leg_int128_to_fp(s, b, old_vref, a, *ft, true, symbols);
+                return;
+            }
+            b.si_to_fp(remap_op(s, a), *ft, o())
+        }
+        Op::UiToFp(a, ft) => {
+            if s.wide.contains(&a.value.raw()) {
+                leg_int128_to_fp(s, b, old_vref, a, *ft, false, symbols);
+                return;
+            }
+            b.ui_to_fp(remap_op(s, a), *ft, o())
+        }
         Op::FpConvert(a) => {
             let ft = match &inst.ty {
                 Type::Float(ft) => *ft,
@@ -1558,6 +1571,58 @@ fn leg_div_rem_128<M: AbiMetadata + Clone>(
 
     // Map the old wide Div/Rem result to (lo, hi).
     s.vmap.set(old_vref, Mapped::Pair(data, hi_capture));
+}
+
+// ---------------------------------------------------------------------------
+// 128-bit integer to float: lower to compiler-rt libcall
+//   u128 -> f32: __floatuntisf(lo, hi) -> f32
+//   u128 -> f64: __floatuntidf(lo, hi) -> f64
+//   i128 -> f32: __floattisf(lo, hi) -> f32
+//   i128 -> f64: __floattidf(lo, hi) -> f64
+// ---------------------------------------------------------------------------
+
+fn leg_int128_to_fp<M: AbiMetadata + Clone>(
+    s: &mut State<M>,
+    b: &mut Builder,
+    old_vref: ValueRef,
+    a: &Operand,
+    ft: tuffy_ir::types::FloatType,
+    signed: bool,
+    symbols: &mut SymbolTable,
+) {
+    let name = match (signed, ft) {
+        (false, tuffy_ir::types::FloatType::F32) => "__floatuntisf",
+        (false, tuffy_ir::types::FloatType::F64) => "__floatuntidf",
+        (true, tuffy_ir::types::FloatType::F32) => "__floattisf",
+        (true, tuffy_ir::types::FloatType::F64) => "__floattidf",
+        _ => panic!("u128/i128 to f16/bf16 conversion not supported"),
+    };
+    let sym_id = symbols.intern(name);
+    let callee = b.symbol_addr(sym_id, o());
+
+    let (a_lo, a_hi) = s.vmap.pair(a.value);
+    let ann64 = Annotation::Unsigned(64);
+    let args = vec![
+        Operand::annotated(a_lo, ann64),
+        Operand::annotated(a_hi, ann64),
+    ];
+
+    let old_mem = s
+        .current_old_mem
+        .expect("128-bit to float requires a mem token in scope");
+    let new_mem = s.vmap.one(old_mem);
+    let (call_mem, data) = b.call(
+        Operand::new(callee),
+        args,
+        Type::Float(ft),
+        Operand::new(new_mem),
+        None,
+        o(),
+    );
+    let data = data.unwrap();
+
+    s.vmap.set(old_mem, Mapped::One(call_mem));
+    s.vmap.set(old_vref, Mapped::One(data));
 }
 
 // ---------------------------------------------------------------------------
