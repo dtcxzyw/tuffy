@@ -864,11 +864,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             if let Some(mut v) = self.translate_operand(&arg.node) {
                 let arg_size = type_size(self.tcx, arg_ty).unwrap_or(0);
 
-                // For constant aggregates (tuples, structs) ≤8 bytes, translate_operand
+                // For constant aggregates (tuples, structs, arrays) ≤8 bytes, translate_operand
                 // returns a pointer to the constant data. Load the value so it's passed
                 // by value in a register, not by reference.
                 if matches!(&arg.node, Operand::Constant(_))
-                    && matches!(arg_ty.kind(), ty::Tuple(_))
+                    && matches!(arg_ty.kind(), ty::Tuple(_) | ty::Adt(..) | ty::Array(..))
                     && arg_size > 0 && arg_size <= 8
                 {
                     if matches!(self.builder.value_type(v), Some(Type::Ptr(_))) {

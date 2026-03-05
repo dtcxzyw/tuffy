@@ -1832,9 +1832,59 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     if bytes == 0 {
                         continue;
                     }
-                    let val = self
+                    let mut val = self
                         .translate_operand(op)
                         .unwrap_or_else(|| self.builder.iconst(0, Origin::synthetic()));
+
+                    // For large i128/u128 constants (>64 bits) in aggregates, iconst creates
+                    // a 64-bit value that gets incorrectly stored as 16 bytes. Emit as static
+                    // data and return a pointer so the word-by-word copy path handles it.
+                    let is_i128_const = bytes == 16
+                        && matches!(op, Operand::Constant(_))
+                        && matches!(self.builder.value_type(val), Some(Type::Int))
+                        && field_ty.map_or(false, |t| matches!(t.kind(), ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)));
+                    if is_i128_const {
+                        if let Operand::Constant(c) = op {
+                            let mono_const = self.tcx.instantiate_and_normalize_erasing_regions(
+                                self.instance.args,
+                                ty::TypingEnv::fully_monomorphized(),
+                                ty::EarlyBinder::bind(c.const_),
+                            );
+                            let const_val = match mono_const {
+                                mir::Const::Val(v, _) => Some(v),
+                                _ => {
+                                    let typing_env = ty::TypingEnv::fully_monomorphized();
+                                    mono_const.eval(self.tcx, typing_env, c.span).ok()
+                                }
+                            };
+                            if let Some(mir::ConstValue::Scalar(mir::interpret::Scalar::Int(int))) = const_val {
+                                let bits = int.to_bits(int.size());
+                                // Only emit as static data if value doesn't fit in 64 bits
+                                let is_signed = field_ty.map_or(false, |t| matches!(t.kind(), ty::Int(ty::IntTy::I128)));
+                                let needs_static = if is_signed {
+                                    // Signed: check if sign-extended 64-bit value differs
+                                    let as_i64 = bits as i64;
+                                    let sign_ext = as_i64 as i128;
+                                    sign_ext != bits as i128
+                                } else {
+                                    // Unsigned: check if value > u64::MAX
+                                    bits > u64::MAX as u128
+                                };
+                                if needs_static {
+                                    let bytes_vec = bits.to_le_bytes().to_vec();
+                                    let sym = format!(".Lconst.{}", {
+                                        let id = *self.data_counter;
+                                        *self.data_counter += 1;
+                                        id
+                                    });
+                                    let sym_id = self.symbols.intern(&sym);
+                                    self.static_data.push((sym_id, bytes_vec, vec![]));
+                                    val = self.builder.symbol_addr(sym_id, Origin::synthetic());
+                                }
+                            }
+                        }
+                    }
+
                     let offset = if let Some(variant_idx) = enum_variant_idx {
                         variant_field_offset(self.tcx, agg_ty, variant_idx, i)
                             .unwrap_or(i as u64 * 8)
