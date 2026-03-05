@@ -842,7 +842,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     }
                 };
 
-                // Float arithmetic: bitcast Int→Float, dispatch to fadd/fsub/fmul/fdiv, bitcast back.
+                // Float arithmetic: dispatch directly to fadd/fsub/fmul/fdiv.
+                // Operands are always Float-typed at this point.
                 if let Some(ref fty) = float_ty {
                     if matches!(
                         op,
@@ -856,18 +857,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             | BinOp::Rem
                     ) {
                         let flags = FpRewriteFlags::default();
-                        let l_f = self.builder.bitcast(
-                            l_raw.into(),
-                            fty.clone(),
-                            None,
-                            Origin::synthetic(),
-                        );
-                        let r_f = self.builder.bitcast(
-                            r_raw.into(),
-                            fty.clone(),
-                            None,
-                            Origin::synthetic(),
-                        );
+                        let l_f = l_raw;
+                        let r_f = r_raw;
                         let res = match op {
                             BinOp::Add | BinOp::AddUnchecked => self.builder.fadd(
                                 l_f.into(),
@@ -905,12 +896,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 Origin::synthetic(),
                             ),
                         };
-                        return Some(self.builder.bitcast(
-                            res.into(),
-                            Type::Int,
-                            None,
-                            Origin::synthetic(),
-                        ));
+                        return Some(res);
                     }
                 }
 
@@ -1029,10 +1015,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     }
                     BinOp::Eq => {
                         if is_float_cmp {
-                            let fty = float_ty.unwrap();
-                            let l_f = self.builder.bitcast(l.into(), fty.clone(), None, Origin::synthetic());
-                            let r_f = self.builder.bitcast(r.into(), fty, None, Origin::synthetic());
-                            let cmp = self.builder.fcmp(FCmpOp::OEq, l_f.into(), r_f.into(), Origin::synthetic());
+                            let cmp = self.builder.fcmp(FCmpOp::OEq, l_raw.into(), r_raw.into(), Origin::synthetic());
                             self.builder.bool_to_int(cmp.into(), Origin::synthetic())
                         } else {
                             let cmp = self.builder.icmp(ICmpOp::Eq, l_op, r_op, Origin::synthetic());
@@ -1041,10 +1024,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     }
                     BinOp::Ne => {
                         if is_float_cmp {
-                            let fty = float_ty.unwrap();
-                            let l_f = self.builder.bitcast(l.into(), fty.clone(), None, Origin::synthetic());
-                            let r_f = self.builder.bitcast(r.into(), fty, None, Origin::synthetic());
-                            let cmp = self.builder.fcmp(FCmpOp::UNe, l_f.into(), r_f.into(), Origin::synthetic());
+                            let cmp = self.builder.fcmp(FCmpOp::UNe, l_raw.into(), r_raw.into(), Origin::synthetic());
                             self.builder.bool_to_int(cmp.into(), Origin::synthetic())
                         } else {
                             let cmp = self.builder.icmp(ICmpOp::Ne, l_op, r_op, Origin::synthetic());
@@ -1053,16 +1033,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     }
                     BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
                         if is_float_cmp {
-                            let fty = float_ty.unwrap();
-                            let l_f = self.builder.bitcast(l.into(), fty.clone(), None, Origin::synthetic());
-                            let r_f = self.builder.bitcast(r.into(), fty, None, Origin::synthetic());
                             let fcmp_op = match op {
                                 BinOp::Lt => FCmpOp::OLt,
                                 BinOp::Le => FCmpOp::OLe,
                                 BinOp::Gt => FCmpOp::OGt,
                                 _ => FCmpOp::OGe,
                             };
-                            let cmp = self.builder.fcmp(fcmp_op, l_f.into(), r_f.into(), Origin::synthetic());
+                            let cmp = self.builder.fcmp(fcmp_op, l_raw.into(), r_raw.into(), Origin::synthetic());
                             self.builder.bool_to_int(cmp.into(), Origin::synthetic())
                         } else {
                             let icmp_op = match op {
