@@ -1012,20 +1012,27 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             ) => n,
                             None => 64,
                         };
-                        let dont_care = res_ann.map(|_| Annotation::DontCare(bits));
-                        let sum = self.builder.add(l_op, r_op, dont_care, Origin::synthetic());
-                        match res_ann {
-                            Some(Annotation::Signed(_)) => self.builder.sext(
-                                IrOperand::annotated(sum, Annotation::DontCare(bits)),
-                                bits,
-                                Origin::synthetic(),
-                            ),
-                            Some(Annotation::Unsigned(_)) => self.builder.zext(
-                                IrOperand::annotated(sum, Annotation::DontCare(bits)),
-                                bits,
-                                Origin::synthetic(),
-                            ),
-                            _ => sum,
+                        // For 128-bit types, legalization already computes the
+                        // correct 128-bit result; Sext(DontCare(128), 128) would
+                        // incorrectly sign-extend from only the lo 64 bits.
+                        if bits > 64 {
+                            self.builder.add(l_op, r_op, res_ann, Origin::synthetic())
+                        } else {
+                            let dont_care = res_ann.map(|_| Annotation::DontCare(bits));
+                            let sum = self.builder.add(l_op, r_op, dont_care, Origin::synthetic());
+                            match res_ann {
+                                Some(Annotation::Signed(_)) => self.builder.sext(
+                                    IrOperand::annotated(sum, Annotation::DontCare(bits)),
+                                    bits,
+                                    Origin::synthetic(),
+                                ),
+                                Some(Annotation::Unsigned(_)) => self.builder.zext(
+                                    IrOperand::annotated(sum, Annotation::DontCare(bits)),
+                                    bits,
+                                    Origin::synthetic(),
+                                ),
+                                _ => sum,
+                            }
                         }
                     }
                     BinOp::Sub => {
@@ -1037,20 +1044,27 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             ) => n,
                             None => 64,
                         };
-                        let dont_care = res_ann.map(|_| Annotation::DontCare(bits));
-                        let diff = self.builder.sub(l_op, r_op, dont_care, Origin::synthetic());
-                        match res_ann {
-                            Some(Annotation::Signed(_)) => self.builder.sext(
-                                IrOperand::annotated(diff, Annotation::DontCare(bits)),
-                                bits,
-                                Origin::synthetic(),
-                            ),
-                            Some(Annotation::Unsigned(_)) => self.builder.zext(
-                                IrOperand::annotated(diff, Annotation::DontCare(bits)),
-                                bits,
-                                Origin::synthetic(),
-                            ),
-                            _ => diff,
+                        // For 128-bit types, legalization already computes the
+                        // correct 128-bit result; Sext(DontCare(128), 128) would
+                        // incorrectly sign-extend from only the lo 64 bits.
+                        if bits > 64 {
+                            self.builder.sub(l_op, r_op, res_ann, Origin::synthetic())
+                        } else {
+                            let dont_care = res_ann.map(|_| Annotation::DontCare(bits));
+                            let diff = self.builder.sub(l_op, r_op, dont_care, Origin::synthetic());
+                            match res_ann {
+                                Some(Annotation::Signed(_)) => self.builder.sext(
+                                    IrOperand::annotated(diff, Annotation::DontCare(bits)),
+                                    bits,
+                                    Origin::synthetic(),
+                                ),
+                                Some(Annotation::Unsigned(_)) => self.builder.zext(
+                                    IrOperand::annotated(diff, Annotation::DontCare(bits)),
+                                    bits,
+                                    Origin::synthetic(),
+                                ),
+                                _ => diff,
+                            }
                         }
                     }
                     BinOp::Mul => {
@@ -1062,20 +1076,27 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             ) => n,
                             None => 64,
                         };
-                        let dont_care = res_ann.map(|_| Annotation::DontCare(bits));
-                        let prod = self.builder.mul(l_op, r_op, dont_care, Origin::synthetic());
-                        match res_ann {
-                            Some(Annotation::Signed(_)) => self.builder.sext(
-                                IrOperand::annotated(prod, Annotation::DontCare(bits)),
-                                bits,
-                                Origin::synthetic(),
-                            ),
-                            Some(Annotation::Unsigned(_)) => self.builder.zext(
-                                IrOperand::annotated(prod, Annotation::DontCare(bits)),
-                                bits,
-                                Origin::synthetic(),
-                            ),
-                            _ => prod,
+                        // For 128-bit types, legalization already computes the
+                        // correct 128-bit result; Sext(DontCare(128), 128) would
+                        // incorrectly sign-extend from only the lo 64 bits.
+                        if bits > 64 {
+                            self.builder.mul(l_op, r_op, res_ann, Origin::synthetic())
+                        } else {
+                            let dont_care = res_ann.map(|_| Annotation::DontCare(bits));
+                            let prod = self.builder.mul(l_op, r_op, dont_care, Origin::synthetic());
+                            match res_ann {
+                                Some(Annotation::Signed(_)) => self.builder.sext(
+                                    IrOperand::annotated(prod, Annotation::DontCare(bits)),
+                                    bits,
+                                    Origin::synthetic(),
+                                ),
+                                Some(Annotation::Unsigned(_)) => self.builder.zext(
+                                    IrOperand::annotated(prod, Annotation::DontCare(bits)),
+                                    bits,
+                                    Origin::synthetic(),
+                                ),
+                                _ => prod,
+                            }
                         }
                     }
                     // Unchecked variants: the caller guarantees no overflow so the
