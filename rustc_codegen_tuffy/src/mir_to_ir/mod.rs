@@ -339,13 +339,13 @@ pub fn translate_function<'tcx>(
             }
         }
 
-        // Allocate stack slots for all >16 byte locals (arrays, large structs).
-        // These must be stored in memory, not treated as SSA values.
+        // Allocate stack slots for all >8 byte composite locals (arrays, structs).
+        // These must be stored in memory for proper argument decomposition.
         for local in mir.local_decls.indices() {
             if !ctx.stack_locals.is_stack(local) {
                 let ty = monomorphize(mir.local_decls[local].ty);
                 let size = type_size(tcx, ty).unwrap_or(0);
-                if size > 16 {
+                if size > 8 && matches!(ty.kind(), ty::Array(..) | ty::Adt(..)) {
                     let slot = ctx.builder.stack_slot(size as u32, Origin::synthetic());
                     if let Some(old_val) = ctx.locals.get(local) {
                         ctx.current_mem = ctx.builder.store(
