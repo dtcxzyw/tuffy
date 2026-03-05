@@ -6,6 +6,18 @@ use rustc_middle::ty::{self, TyCtxt};
 
 use tuffy_ir::types::{Annotation, FloatType, Type};
 
+/// Look up the fully-monomorphized layout for a type, or return `None` on failure.
+///
+/// All layout queries in this module use fully-monomorphized types, so this
+/// helper avoids repeating the same `TypingEnv::fully_monomorphized()` boilerplate.
+#[inline]
+fn mono_layout_of<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    ty: ty::Ty<'tcx>,
+) -> Option<rustc_abi::TyAndLayout<'tcx, ty::Ty<'tcx>>> {
+    tcx.layout_of(ty::TypingEnv::fully_monomorphized().as_query_input(ty)).ok()
+}
+
 /// Coarse-grained ABI representation of a Rust type, mirroring BackendRepr.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ReprKind {
@@ -21,8 +33,7 @@ pub(super) enum ReprKind {
 
 
 pub(super) fn repr_kind<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> ReprKind {
-    let typing_env = ty::TypingEnv::fully_monomorphized();
-    let Ok(layout) = tcx.layout_of(typing_env.as_query_input(ty)) else {
+    let Some(layout) = mono_layout_of(tcx, ty) else {
         return ReprKind::Memory;
     };
     if layout.is_zst() {
@@ -103,8 +114,7 @@ pub(super) fn field_offset<'tcx>(
     ty: ty::Ty<'tcx>,
     field_idx: usize,
 ) -> Option<u64> {
-    let typing_env = ty::TypingEnv::fully_monomorphized();
-    let layout = tcx.layout_of(typing_env.as_query_input(ty)).ok()?;
+    let layout = mono_layout_of(tcx, ty)?;
     if field_idx >= layout.fields.count() {
         return None;
     }
@@ -118,8 +128,7 @@ pub(super) fn variant_field_offset<'tcx>(
     variant_idx: rustc_abi::VariantIdx,
     field_idx: usize,
 ) -> Option<u64> {
-    let typing_env = ty::TypingEnv::fully_monomorphized();
-    let layout = tcx.layout_of(typing_env.as_query_input(ty)).ok()?;
+    let layout = mono_layout_of(tcx, ty)?;
     match &layout.variants {
         rustc_abi::Variants::Multiple { variants, .. } => {
             let variant_layout = &variants[variant_idx];
@@ -142,17 +151,13 @@ pub(super) fn variant_field_offset<'tcx>(
 
 /// Query the total byte size of type `ty`.
 pub(super) fn type_size<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> Option<u64> {
-    let typing_env = ty::TypingEnv::fully_monomorphized();
-    let layout = tcx.layout_of(typing_env.as_query_input(ty)).ok()?;
-    Some(layout.size.bytes())
+    Some(mono_layout_of(tcx, ty)?.size.bytes())
 }
 
 /// Query the alignment of type `ty` in bytes.
 #[allow(dead_code)]
 pub(super) fn type_align<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> Option<u64> {
-    let typing_env = ty::TypingEnv::fully_monomorphized();
-    let layout = tcx.layout_of(typing_env.as_query_input(ty)).ok()?;
-    Some(layout.align.abi.bytes())
+    Some(mono_layout_of(tcx, ty)?.align.abi.bytes())
 }
 
 /// Check if a type is a signed integer type.
@@ -180,8 +185,7 @@ pub(super) fn int_bitwidth(ty: ty::Ty<'_>) -> Option<u32> {
 pub(super) fn is_fat_ptr<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> bool {
     match ty.kind() {
         ty::Ref(_, inner, _) | ty::RawPtr(inner, _) => {
-            let typing_env = ty::TypingEnv::fully_monomorphized();
-            let tail = tcx.struct_tail_for_codegen(*inner, typing_env);
+            let tail = tcx.struct_tail_for_codegen(*inner, ty::TypingEnv::fully_monomorphized());
             matches!(tail.kind(), ty::Str | ty::Slice(..) | ty::Dynamic(..))
         }
         _ => false,
@@ -200,12 +204,35 @@ pub(super) fn ty_contains_float<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> bo
             let typing_env = ty::TypingEnv::fully_monomorphized();
             def.variants().iter().any(|v| {
                 v.fields.iter().any(|f| {
-                    let fty = f.ty(tcx, args);
-                    let fty = tcx.normalize_erasing_regions(typing_env, fty);
+                    let fty = tcx.normalize_erasing_regions(typing_env, f.ty(tcx, args));
                     ty_contains_float(tcx, fty)
                 })
             })
         }
         _ => false,
+    }
+}
+
+/// Compute the ABI annotation for a by-value (non-indirect) parameter of type `ty`.
+///
+/// For 9–16 byte composite types containing no floats, returns `Unsigned(128)` so
+/// the legalizer splits the value into two 8-byte slots (x86-64 SysV ABI).
+/// Returns `None` for types wider than 16 bytes (passed indirectly by the caller).
+pub(super) fn composite_param_annotation<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    ty: ty::Ty<'tcx>,
+) -> Option<Annotation> {
+    let base = translate_annotation(ty);
+    if base.is_some() {
+        return base;
+    }
+    if !matches!(translate_ty(tcx, ty), Some(Type::Int)) {
+        return None;
+    }
+    let sz = type_size(tcx, ty).unwrap_or(0);
+    if sz > 8 && sz <= 16 && !ty_contains_float(tcx, ty) {
+        Some(Annotation::Unsigned(128))
+    } else {
+        None
     }
 }

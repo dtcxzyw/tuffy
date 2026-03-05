@@ -23,7 +23,7 @@ use tuffy_ir::builder::Builder;
 use tuffy_ir::function::{Function, RegionKind};
 use tuffy_ir::instruction::Origin;
 use tuffy_ir::module::{SymbolId, SymbolTable};
-use tuffy_ir::types::{Annotation, Type};
+use tuffy_ir::types::Type;
 
 /// Static data entry: (symbol_id, bytes, relocations).
 /// Relocations are (offset_in_bytes, target_symbol_name) for function pointers in vtables.
@@ -117,23 +117,14 @@ pub fn translate_function<'tcx>(
             Some(ir_ty) => {
                 let sz = type_size(tcx, ty).unwrap_or(0);
                 // For >16 byte parameters, the caller passes a pointer per x86-64 ABI.
-                let param_ty = if sz > 16 { Type::Ptr(0) } else { ir_ty.clone() };
-                params.push(param_ty);
+                let param_ty = if sz > 16 { Type::Ptr(0) } else { ir_ty };
                 // For composite types of 9–16 bytes that contain no floats
                 // and are passed as an integer (not a pointer), annotate as
                 // Unsigned(128) so the legalizer splits the param into two
                 // 8-byte slots — matching the x86-64 SysV ABI which passes
                 // such values in two integer registers.
-                let base_ann = translate_annotation(ty);
-                let param_ann = if base_ann.is_none() && ir_ty == Type::Int && sz <= 16 {
-                    if sz > 8 && sz <= 16 && !ty_contains_float(tcx, ty) {
-                        Some(Annotation::Unsigned(128))
-                    } else {
-                        None
-                    }
-                } else {
-                    base_ann
-                };
+                let param_ann = if sz > 16 { None } else { composite_param_annotation(tcx, ty) };
+                params.push(param_ty);
                 param_anns.push(param_ann);
                 param_names.push(all_names.get(i).copied().flatten());
                 // Fat pointer types (&str, &[T], &dyn Trait) are passed
@@ -232,31 +223,14 @@ pub fn translate_function<'tcx>(
                     if local.as_usize() == 0 && ctx.stack_locals.is_stack(local) {
                         continue;
                     }
-                    let ty = monomorphize(mir.local_decls[local].ty);
-                    let size = type_size(tcx, ty).unwrap_or(0);
+                    let ty = ctx.monomorphize(mir.local_decls[local].ty);
+                    let size = type_size(ctx.tcx, ty).unwrap_or(0);
                     if size == 0 {
                         continue;
                     }
                     if let Some(prev_bb) = assign_bb[local.as_usize()] {
                         if prev_bb != bb && !ctx.stack_locals.is_stack(local) {
-                            let slot = ctx
-                                .builder
-                                .stack_slot(std::cmp::max(size as u32, 1), Origin::synthetic());
-                            // If the local already holds a value (e.g. a
-                            // function parameter from translate_params),
-                            // store it into the new stack slot so it isn't
-                            // lost.
-                            if let Some(old_val) = ctx.locals.get(local) {
-                                ctx.current_mem = ctx.builder.store(
-                                    old_val.into(),
-                                    slot.into(),
-                                    std::cmp::max(size as u32, 1),
-                                    ctx.current_mem.into(),
-                                    Origin::synthetic(),
-                                );
-                            }
-                            ctx.locals.set(local, slot);
-                            ctx.stack_locals.mark(local);
+                            ctx.promote_local_to_stack(local, size);
                         }
                     } else {
                         assign_bb[local.as_usize()] = Some(bb);
@@ -272,25 +246,12 @@ pub fn translate_function<'tcx>(
                 if local.as_usize() == 0 && ctx.stack_locals.is_stack(local) {
                     // _0 with sret already has a stack slot — skip.
                 } else {
-                    let ty = monomorphize(mir.local_decls[local].ty);
-                    let size = type_size(tcx, ty).unwrap_or(0);
+                    let ty = ctx.monomorphize(mir.local_decls[local].ty);
+                    let size = type_size(ctx.tcx, ty).unwrap_or(0);
                     if size > 0 {
                         if let Some(prev_bb) = assign_bb[local.as_usize()] {
                             if prev_bb != bb && !ctx.stack_locals.is_stack(local) {
-                                let slot = ctx
-                                    .builder
-                                    .stack_slot(std::cmp::max(size as u32, 1), Origin::synthetic());
-                                if let Some(old_val) = ctx.locals.get(local) {
-                                    ctx.current_mem = ctx.builder.store(
-                                        old_val.into(),
-                                        slot.into(),
-                                        std::cmp::max(size as u32, 1),
-                                        ctx.current_mem.into(),
-                                        Origin::synthetic(),
-                                    );
-                                }
-                                ctx.locals.set(local, slot);
-                                ctx.stack_locals.mark(local);
+                                ctx.promote_local_to_stack(local, size);
                             }
                         } else {
                             assign_bb[local.as_usize()] = Some(bb);
@@ -317,23 +278,10 @@ pub fn translate_function<'tcx>(
                     && !ctx.stack_locals.is_stack(place.local)
                 {
                     let local = place.local;
-                    let ty = monomorphize(mir.local_decls[local].ty);
-                    let size = type_size(tcx, ty).unwrap_or(0);
+                    let ty = ctx.monomorphize(mir.local_decls[local].ty);
+                    let size = type_size(ctx.tcx, ty).unwrap_or(0);
                     if size > 0 {
-                        let slot = ctx
-                            .builder
-                            .stack_slot(std::cmp::max(size as u32, 1), Origin::synthetic());
-                        if let Some(old_val) = ctx.locals.get(local) {
-                            ctx.current_mem = ctx.builder.store(
-                                old_val.into(),
-                                slot.into(),
-                                std::cmp::max(size as u32, 1),
-                                ctx.current_mem.into(),
-                                Origin::synthetic(),
-                            );
-                        }
-                        ctx.locals.set(local, slot);
-                        ctx.stack_locals.mark(local);
+                        ctx.promote_local_to_stack(local, size);
                     }
                 }
             }
@@ -343,21 +291,10 @@ pub fn translate_function<'tcx>(
         // These must be stored in memory for proper argument decomposition.
         for local in mir.local_decls.indices() {
             if !ctx.stack_locals.is_stack(local) {
-                let ty = monomorphize(mir.local_decls[local].ty);
-                let size = type_size(tcx, ty).unwrap_or(0);
+                let ty = ctx.monomorphize(mir.local_decls[local].ty);
+                let size = type_size(ctx.tcx, ty).unwrap_or(0);
                 if size > 8 && matches!(ty.kind(), ty::Array(..) | ty::Adt(..)) {
-                    let slot = ctx.builder.stack_slot(size as u32, Origin::synthetic());
-                    if let Some(old_val) = ctx.locals.get(local) {
-                        ctx.current_mem = ctx.builder.store(
-                            old_val.into(),
-                            slot.into(),
-                            size as u32,
-                            ctx.current_mem.into(),
-                            Origin::synthetic(),
-                        );
-                    }
-                    ctx.locals.set(local, slot);
-                    ctx.stack_locals.mark(local);
+                    ctx.promote_local_to_stack(local, size);
                 }
             }
         }
@@ -424,12 +361,11 @@ pub fn translate_function<'tcx>(
                 if let Some(def_bb) = assign_bb[local.as_usize()]
                     && bb < def_bb
                 {
-                    let ty = monomorphize(mir.local_decls[local].ty);
-                    let size = type_size(tcx, ty).unwrap_or(0);
+                    let ty = ctx.monomorphize(mir.local_decls[local].ty);
+                    let size = type_size(ctx.tcx, ty).unwrap_or(0);
                     if size > 0 {
-                        let slot = ctx
-                            .builder
-                            .stack_slot(std::cmp::max(size as u32, 1), Origin::synthetic());
+                        let slot_size = (size as u32).max(1);
+                        let slot = ctx.builder.stack_slot(slot_size, Origin::synthetic());
                         ctx.locals.set(local, slot);
                         ctx.stack_locals.mark(local);
                     }
@@ -443,7 +379,6 @@ pub fn translate_function<'tcx>(
     // the current value into a *new* temporary each iteration, losing
     // mutations made through the reference on previous iterations.
     {
-        use rustc_middle::mir::Rvalue;
         for bb_data in mir.basic_blocks.iter() {
             for stmt in &bb_data.statements {
                 if let StatementKind::Assign(box (_, rvalue)) = &stmt.kind {
@@ -458,8 +393,8 @@ pub fn translate_function<'tcx>(
                         if ctx.stack_locals.is_stack(local) {
                             continue;
                         }
-                        let ty = monomorphize(mir.local_decls[local].ty);
-                        let size = type_size(tcx, ty).unwrap_or(0);
+                        let ty = ctx.monomorphize(mir.local_decls[local].ty);
+                        let size = type_size(ctx.tcx, ty).unwrap_or(0);
                         if size == 0 {
                             continue;
                         }
@@ -478,7 +413,7 @@ pub fn translate_function<'tcx>(
                         }
                         let slot = ctx
                             .builder
-                            .stack_slot(std::cmp::max(size as u32, 1), Origin::synthetic());
+                            .stack_slot((size as u32).max(1), Origin::synthetic());
                         if let Some(prev) = ctx.locals.get(local) {
                             // For fat pointer ScalarPairs (&str, &[T], &dyn Trait), only
                             // store the first word (data pointer); the second word
@@ -486,7 +421,7 @@ pub fn translate_function<'tcx>(
                             // For non-fat-ptr ScalarPairs (e.g. (char, i64)), store the
                             // full size so the legalizer can emit both lo and hi stores.
                             // Scalar and Memory types store the full size.
-                            let store_bytes = if is_fat_ptr(tcx, ty) { 8 } else { size as u32 };
+                            let store_bytes = if is_fat_ptr(ctx.tcx, ty) { 8 } else { size as u32 };
                             ctx.current_mem = ctx.builder.store(
                                 prev.into(),
                                 slot.into(),
@@ -523,12 +458,12 @@ pub fn translate_function<'tcx>(
     // multi-word type (9-16 bytes, e.g. &str, &[T]).
     {
         let ret_local = mir::Local::from_usize(0);
-        let ret_ty = monomorphize(mir.local_decls[ret_local].ty);
-        let ret_size = type_size(tcx, ret_ty).unwrap_or(0);
+        let ret_ty = ctx.monomorphize(mir.local_decls[ret_local].ty);
+        let ret_size = type_size(ctx.tcx, ret_ty).unwrap_or(0);
         if ret_size > 8
             && ret_size <= 16
             && !ctx.stack_locals.is_stack(ret_local)
-            && !matches!(repr_kind(tcx, ret_ty), ReprKind::Scalar)
+            && !matches!(repr_kind(ctx.tcx, ret_ty), ReprKind::Scalar)
         {
             let slot = ctx.builder.stack_slot(ret_size as u32, Origin::synthetic());
             ctx.locals.set(ret_local, slot);

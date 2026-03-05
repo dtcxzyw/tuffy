@@ -1,48 +1,36 @@
 //! Intrinsic handling for MIR → IR translation.
 
 use rustc_middle::mir::{self, Operand};
-use rustc_middle::ty::{self, Instance, TyCtxt};
+use rustc_middle::ty;
 
-use tuffy_ir::builder::Builder;
 use tuffy_ir::instruction::{ICmpOp, Operand as IrOperand, Origin};
-use tuffy_ir::module::SymbolTable;
 use tuffy_ir::types::{Annotation, Type};
 use tuffy_ir::value::ValueRef;
 
-use super::ctx::LocalMap;
+use super::ctx::TranslationCtx;
 use super::types::{type_align, type_size};
 
-/// Handle compiler intrinsics inline during MIR translation.
-/// Returns true if the intrinsic was handled, false to fall through to normal call.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn translate_intrinsic<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    name: &str,
-    substs: &'tcx ty::List<ty::GenericArg<'tcx>>,
-    ir_args: &[ValueRef],
-    destination_local: mir::Local,
-    builder: &mut Builder<'_>,
-    locals: &mut LocalMap,
-    symbols: &mut SymbolTable,
-    current_mem: ValueRef,
-    _dest_override: Option<ValueRef>,
-) -> bool {
-    // Helper: coerce an Int value to Ptr (needed when NonNull<T> or similar
-    // #[repr(transparent)] pointer wrappers are loaded as Int).
-    let ensure_ptr = |builder: &mut Builder<'_>, val: ValueRef| -> ValueRef {
-        if matches!(builder.value_type(val), Some(Type::Int)) {
-            builder.inttoptr(val.into(), 0, Origin::synthetic())
-        } else {
-            val
-        }
-    };
+impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
+
+    /// Handle compiler intrinsics inline during MIR translation.
+    /// Returns `true` if the intrinsic was handled, `false` to fall through to normal call.
+    pub(super) fn translate_intrinsic(
+        &mut self,
+        name: &str,
+        substs: &'tcx ty::List<ty::GenericArg<'tcx>>,
+        ir_args: &[ValueRef],
+        destination_local: mir::Local,
+        _dest_override: Option<ValueRef>,
+    ) -> bool {
+        let current_mem = self.current_mem;
+        let tcx = self.tcx;
 
     match name {
         // black_box: identity function, prevents optimizations.
         // Just copy the argument to the destination.
         "black_box" => {
             if let Some(&v) = ir_args.first() {
-                locals.set(destination_local, v);
+                self.locals.set(destination_local, v);
             }
             true
         }
@@ -57,8 +45,8 @@ pub(super) fn translate_intrinsic<'tcx>(
         // ctpop: population count (count set bits).
         "ctpop" => {
             if let Some(&v) = ir_args.first() {
-                let result = builder.count_ones(v.into(), Origin::synthetic());
-                locals.set(destination_local, result);
+                let result = self.builder.count_ones(v.into(), Origin::synthetic());
+                self.locals.set(destination_local, result);
             }
             true
         }
@@ -72,8 +60,8 @@ pub(super) fn translate_intrinsic<'tcx>(
                     .and_then(|t| type_size(tcx, t))
                     .map(|sz| (sz * 8) as u32)
                     .unwrap_or(64);
-                let result = builder.count_leading_zeros(v.into(), bits, Origin::synthetic());
-                locals.set(destination_local, result);
+                let result = self.builder.count_leading_zeros(v.into(), bits, Origin::synthetic());
+                self.locals.set(destination_local, result);
             }
             true
         }
@@ -81,8 +69,8 @@ pub(super) fn translate_intrinsic<'tcx>(
         // cttz / cttz_nonzero: count trailing zeros.
         "cttz" | "cttz_nonzero" => {
             if let Some(&v) = ir_args.first() {
-                let result = builder.count_trailing_zeros(v.into(), Origin::synthetic());
-                locals.set(destination_local, result);
+                let result = self.builder.count_trailing_zeros(v.into(), Origin::synthetic());
+                self.locals.set(destination_local, result);
             }
             true
         }
@@ -96,11 +84,11 @@ pub(super) fn translate_intrinsic<'tcx>(
                     .and_then(|t| type_size(tcx, t))
                     .unwrap_or(8);
                 if byte_size <= 1 {
-                    locals.set(destination_local, v);
+                    self.locals.set(destination_local, v);
                 } else {
                     let result =
-                        builder.bswap(v.into(), byte_size as u32, Origin::synthetic());
-                    locals.set(destination_local, result);
+                        self.builder.bswap(v.into(), byte_size as u32, Origin::synthetic());
+                    self.locals.set(destination_local, result);
                 }
             }
             true
@@ -116,11 +104,11 @@ pub(super) fn translate_intrinsic<'tcx>(
                     .map(|sz| (sz * 8) as u32)
                     .unwrap_or(64);
                 if bit_size <= 1 {
-                    locals.set(destination_local, v);
+                    self.locals.set(destination_local, v);
                 } else {
                     let result =
-                        builder.bit_reverse(v.into(), bit_size, Origin::synthetic());
-                    locals.set(destination_local, result);
+                        self.builder.bit_reverse(v.into(), bit_size, Origin::synthetic());
+                    self.locals.set(destination_local, result);
                 }
             }
             true
@@ -138,19 +126,19 @@ pub(super) fn translate_intrinsic<'tcx>(
                     .map(|sz| (sz * 8) as u32)
                     .unwrap_or(64);
                 let result = if name == "rotate_left" {
-                    builder.rotate_left(x.into(), n.into(), bits, Origin::synthetic())
+                    self.builder.rotate_left(x.into(), n.into(), bits, Origin::synthetic())
                 } else {
-                    builder.rotate_right(x.into(), n.into(), bits, Origin::synthetic())
+                    self.builder.rotate_right(x.into(), n.into(), bits, Origin::synthetic())
                 };
-                locals.set(destination_local, result);
+                self.locals.set(destination_local, result);
             }
             true
         }
 
         // is_val_statically_known: always false in a non-optimizing backend.
         "is_val_statically_known" => {
-            let result = builder.bconst(false, Origin::synthetic());
-            locals.set(destination_local, result);
+            let result = self.builder.bconst(false, Origin::synthetic());
+            self.locals.set(destination_local, result);
             true
         }
 
@@ -158,8 +146,8 @@ pub(super) fn translate_intrinsic<'tcx>(
         "size_of" => {
             if let Some(t) = substs.first().and_then(|a| a.as_type()) {
                 let sz = type_size(tcx, t).unwrap_or(0);
-                let result = builder.iconst(sz as i64, Origin::synthetic());
-                locals.set(destination_local, result);
+                let result = self.builder.iconst(sz as i64, Origin::synthetic());
+                self.locals.set(destination_local, result);
             }
             true
         }
@@ -168,8 +156,8 @@ pub(super) fn translate_intrinsic<'tcx>(
         "min_align_of" | "pref_align_of" => {
             if let Some(t) = substs.first().and_then(|a| a.as_type()) {
                 let align = type_align(tcx, t).unwrap_or(1);
-                let result = builder.iconst(align as i64, Origin::synthetic());
-                locals.set(destination_local, result);
+                let result = self.builder.iconst(align as i64, Origin::synthetic());
+                self.locals.set(destination_local, result);
             }
             true
         }
@@ -183,7 +171,7 @@ pub(super) fn translate_intrinsic<'tcx>(
                 // Some(0) for unsized types like [T] (zero-element slice),
                 // so we can't rely on type_size alone.
                 let typing_env = ty::TypingEnv::fully_monomorphized();
-                let tail = tcx.struct_tail_for_codegen(t, typing_env);
+                let tail = self.tcx.struct_tail_for_codegen(t, typing_env);
                 if matches!(tail.kind(), ty::Slice(..) | ty::Str | ty::Dynamic(..)) {
                     // Unsized type: compute size at runtime from metadata.
                     if let ty::Slice(elem_ty) = tail.kind() {
@@ -191,39 +179,39 @@ pub(super) fn translate_intrinsic<'tcx>(
                         if ir_args.len() >= 2 {
                             let len = ir_args[1];
                             if elem_sz == 1 {
-                                locals.set(destination_local, len);
+                                self.locals.set(destination_local, len);
                             } else {
-                                let esz = builder.iconst(elem_sz as i64, Origin::synthetic());
+                                let esz = self.builder.iconst(elem_sz as i64, Origin::synthetic());
                                 let result =
-                                    builder.mul(len.into(), esz.into(), None, Origin::synthetic());
-                                locals.set(destination_local, result);
+                                    self.builder.mul(len.into(), esz.into(), None, Origin::synthetic());
+                                self.locals.set(destination_local, result);
                             }
                         } else {
-                            let result = builder.iconst(0, Origin::synthetic());
-                            locals.set(destination_local, result);
+                            let result = self.builder.iconst(0, Origin::synthetic());
+                            self.locals.set(destination_local, result);
                         }
                     } else {
                         // str: size = len (metadata is byte length).
                         if let ty::Str = tail.kind() {
                             if ir_args.len() >= 2 {
-                                locals.set(destination_local, ir_args[1]);
+                                self.locals.set(destination_local, ir_args[1]);
                             } else {
-                                let result = builder.iconst(0, Origin::synthetic());
-                                locals.set(destination_local, result);
+                                let result = self.builder.iconst(0, Origin::synthetic());
+                                self.locals.set(destination_local, result);
                             }
                         } else {
                             // dyn Trait: read size from vtable (fallback to 0 for now).
-                            let result = builder.iconst(0, Origin::synthetic());
-                            locals.set(destination_local, result);
+                            let result = self.builder.iconst(0, Origin::synthetic());
+                            self.locals.set(destination_local, result);
                         }
                     }
                 } else if let Some(sz) = type_size(tcx, t) {
                     // Sized type: compile-time constant.
-                    let result = builder.iconst(sz as i64, Origin::synthetic());
-                    locals.set(destination_local, result);
+                    let result = self.builder.iconst(sz as i64, Origin::synthetic());
+                    self.locals.set(destination_local, result);
                 } else {
-                    let result = builder.iconst(0, Origin::synthetic());
-                    locals.set(destination_local, result);
+                    let result = self.builder.iconst(0, Origin::synthetic());
+                    self.locals.set(destination_local, result);
                 }
             }
             true
@@ -233,8 +221,8 @@ pub(super) fn translate_intrinsic<'tcx>(
         "min_align_of_val" | "align_of_val" => {
             if let Some(t) = substs.first().and_then(|a| a.as_type()) {
                 let align = type_align(tcx, t).unwrap_or(1);
-                let result = builder.iconst(align as i64, Origin::synthetic());
-                locals.set(destination_local, result);
+                let result = self.builder.iconst(align as i64, Origin::synthetic());
+                self.locals.set(destination_local, result);
             }
             true
         }
@@ -242,7 +230,7 @@ pub(super) fn translate_intrinsic<'tcx>(
         // arith_offset<T>(ptr, offset) → ptr + offset * sizeof(T)
         "arith_offset" => {
             if ir_args.len() >= 2 {
-                let ptr = ensure_ptr(builder, ir_args[0]);
+                let ptr = self.coerce_to_ptr(ir_args[0]);
                 let offset = ir_args[1];
                 let elem_size = substs
                     .first()
@@ -252,11 +240,11 @@ pub(super) fn translate_intrinsic<'tcx>(
                 let byte_offset = if elem_size == 1 {
                     offset
                 } else {
-                    let sz = builder.iconst(elem_size as i64, Origin::synthetic());
-                    builder.mul(offset.into(), sz.into(), None, Origin::synthetic())
+                    let sz = self.builder.iconst(elem_size as i64, Origin::synthetic());
+                    self.builder.mul(offset.into(), sz.into(), None, Origin::synthetic())
                 };
-                let result = builder.ptradd(ptr.into(), byte_offset.into(), 0, Origin::synthetic());
-                locals.set(destination_local, result);
+                let result = self.builder.ptradd(ptr.into(), byte_offset.into(), 0, Origin::synthetic());
+                self.locals.set(destination_local, result);
             }
             true
         }
@@ -264,9 +252,9 @@ pub(super) fn translate_intrinsic<'tcx>(
         // ptr_offset_from_unsigned<T>(ptr1, ptr2) → (ptr1 - ptr2) / sizeof(T)
         "ptr_offset_from_unsigned" | "ptr_offset_from" => {
             if ir_args.len() >= 2 {
-                let ptr1 = ensure_ptr(builder, ir_args[0]);
-                let ptr2 = ensure_ptr(builder, ir_args[1]);
-                let diff = builder.ptrdiff(ptr1.into(), ptr2.into(), Origin::synthetic());
+                let ptr1 = self.coerce_to_ptr(ir_args[0]);
+                let ptr2 = self.coerce_to_ptr(ir_args[1]);
+                let diff = self.builder.ptrdiff(ptr1.into(), ptr2.into(), Origin::synthetic());
                 let elem_size = substs
                     .first()
                     .and_then(|a| a.as_type())
@@ -275,10 +263,10 @@ pub(super) fn translate_intrinsic<'tcx>(
                 let result = if elem_size <= 1 {
                     diff
                 } else {
-                    let sz = builder.iconst(elem_size as i64, Origin::synthetic());
-                    builder.div(diff.into(), sz.into(), None, Origin::synthetic())
+                    let sz = self.builder.iconst(elem_size as i64, Origin::synthetic());
+                    self.builder.div(diff.into(), sz.into(), None, Origin::synthetic())
                 };
-                locals.set(destination_local, result);
+                self.locals.set(destination_local, result);
             }
             true
         }
@@ -292,13 +280,13 @@ pub(super) fn translate_intrinsic<'tcx>(
                     .and_then(|t| type_size(tcx, t))
                     .map(|sz| (sz * 8) as u32)
                     .unwrap_or(64);
-                let result = builder.saturating_add(
+                let result = self.builder.saturating_add(
                     ir_args[0].into(),
                     ir_args[1].into(),
                     bits,
                     Origin::synthetic(),
                 );
-                locals.set(destination_local, result);
+                self.locals.set(destination_local, result);
             }
             true
         }
@@ -312,22 +300,22 @@ pub(super) fn translate_intrinsic<'tcx>(
                     .and_then(|t| type_size(tcx, t))
                     .map(|sz| (sz * 8) as u32)
                     .unwrap_or(64);
-                let result = builder.saturating_sub(
+                let result = self.builder.saturating_sub(
                     ir_args[0].into(),
                     ir_args[1].into(),
                     bits,
                     Origin::synthetic(),
                 );
-                locals.set(destination_local, result);
+                self.locals.set(destination_local, result);
             }
             true
         }
 
         // abort: call libc abort().
         "abort" => {
-            let sym_id = symbols.intern("abort");
-            let callee = builder.symbol_addr(sym_id, Origin::synthetic());
-            builder.call(
+            let sym_id = self.symbols.intern("abort");
+            let callee = self.builder.symbol_addr(sym_id, Origin::synthetic());
+            self.builder.call(
                 callee.into(),
                 vec![],
                 Type::Unit,
@@ -341,61 +329,61 @@ pub(super) fn translate_intrinsic<'tcx>(
         // unchecked arithmetic: same as wrapping ops (no overflow check).
         "unchecked_add" => {
             if ir_args.len() >= 2 {
-                let result = builder.add(
+                let result = self.builder.add(
                     ir_args[0].into(),
                     ir_args[1].into(),
                     None,
                     Origin::synthetic(),
                 );
-                locals.set(destination_local, result);
+                self.locals.set(destination_local, result);
             }
             true
         }
         "unchecked_sub" => {
             if ir_args.len() >= 2 {
-                let result = builder.sub(
+                let result = self.builder.sub(
                     ir_args[0].into(),
                     ir_args[1].into(),
                     None,
                     Origin::synthetic(),
                 );
-                locals.set(destination_local, result);
+                self.locals.set(destination_local, result);
             }
             true
         }
         "unchecked_mul" => {
             if ir_args.len() >= 2 {
-                let result = builder.mul(
+                let result = self.builder.mul(
                     ir_args[0].into(),
                     ir_args[1].into(),
                     None,
                     Origin::synthetic(),
                 );
-                locals.set(destination_local, result);
+                self.locals.set(destination_local, result);
             }
             true
         }
         "unchecked_shl" => {
             if ir_args.len() >= 2 {
-                let result = builder.shl(
+                let result = self.builder.shl(
                     ir_args[0].into(),
                     ir_args[1].into(),
                     None,
                     Origin::synthetic(),
                 );
-                locals.set(destination_local, result);
+                self.locals.set(destination_local, result);
             }
             true
         }
         "unchecked_shr" => {
             if ir_args.len() >= 2 {
-                let result = builder.shr(
+                let result = self.builder.shr(
                     ir_args[0].into(),
                     ir_args[1].into(),
                     None,
                     Origin::synthetic(),
                 );
-                locals.set(destination_local, result);
+                self.locals.set(destination_local, result);
             }
             true
         }
@@ -413,21 +401,21 @@ pub(super) fn translate_intrinsic<'tcx>(
                     .and_then(|t| type_size(tcx, t))
                     .map(|sz| (sz * 8) as i64)
                     .unwrap_or(64);
-                let bits_val = builder.iconst(bits, Origin::synthetic());
-                let complement = builder.sub(bits_val.into(), c.into(), None, Origin::synthetic());
+                let bits_val = self.builder.iconst(bits, Origin::synthetic());
+                let complement = self.builder.sub(bits_val.into(), c.into(), None, Origin::synthetic());
                 let (hi, lo) = if name == "unchecked_funnel_shl" {
                     (
-                        builder.shl(a.into(), c.into(), None, Origin::synthetic()),
-                        builder.shr(b.into(), complement.into(), None, Origin::synthetic()),
+                        self.builder.shl(a.into(), c.into(), None, Origin::synthetic()),
+                        self.builder.shr(b.into(), complement.into(), None, Origin::synthetic()),
                     )
                 } else {
                     (
-                        builder.shl(a.into(), complement.into(), None, Origin::synthetic()),
-                        builder.shr(b.into(), c.into(), None, Origin::synthetic()),
+                        self.builder.shl(a.into(), complement.into(), None, Origin::synthetic()),
+                        self.builder.shr(b.into(), c.into(), None, Origin::synthetic()),
                     )
                 };
-                let result = builder.or(hi.into(), lo.into(), None, Origin::synthetic());
-                locals.set(destination_local, result);
+                let result = self.builder.or(hi.into(), lo.into(), None, Origin::synthetic());
+                self.locals.set(destination_local, result);
             }
             true
         }
@@ -437,21 +425,18 @@ pub(super) fn translate_intrinsic<'tcx>(
     }
 }
 
-/// Lower memory intrinsics to IR memory operations.
-/// Handles write_bytes, copy_nonoverlapping, copy, and raw_eq.
-/// Returns `Some(new_mem)` if the intrinsic was handled, `None` to fall through.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn translate_memory_intrinsic<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    name: &str,
-    substs: &'tcx ty::List<ty::GenericArg<'tcx>>,
-    ir_args: &[ValueRef],
-    destination_local: mir::Local,
-    builder: &mut Builder<'_>,
-    locals: &mut LocalMap,
-    symbols: &mut SymbolTable,
-    current_mem: ValueRef,
-) -> Option<ValueRef> {
+    /// Lower memory intrinsics to IR memory operations.
+    /// Handles write_bytes, copy_nonoverlapping, copy, and raw_eq.
+    /// Returns `Some(new_mem)` if the intrinsic was handled, `None` to fall through.
+    pub(super) fn translate_memory_intrinsic(
+        &mut self,
+        name: &str,
+        substs: &'tcx ty::List<ty::GenericArg<'tcx>>,
+        ir_args: &[ValueRef],
+        destination_local: mir::Local,
+    ) -> Option<ValueRef> {
+        let current_mem = self.current_mem;
+        let tcx = self.tcx;
     // Extract the type parameter T and compute its size and alignment.
     let (elem_size, elem_align) = match substs.first().and_then(|a| a.as_type()) {
         Some(t) => (
@@ -473,10 +458,10 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
             let byte_count = if elem_size == 1 {
                 count
             } else {
-                let sz = builder.iconst(elem_size as i64, Origin::synthetic());
-                builder.mul(count.into(), sz.into(), None, Origin::synthetic())
+                let sz = self.builder.iconst(elem_size as i64, Origin::synthetic());
+                self.builder.mul(count.into(), sz.into(), None, Origin::synthetic())
             };
-            let mem_out = builder.mem_set(
+            let mem_out = self.builder.mem_set(
                 dst.into(),
                 val.into(),
                 byte_count.into(),
@@ -498,10 +483,10 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
             let byte_count = if elem_size == 1 {
                 count
             } else {
-                let sz = builder.iconst(elem_size as i64, Origin::synthetic());
-                builder.mul(count.into(), sz.into(), None, Origin::synthetic())
+                let sz = self.builder.iconst(elem_size as i64, Origin::synthetic());
+                self.builder.mul(count.into(), sz.into(), None, Origin::synthetic())
             };
-            let mem_out = builder.mem_copy(
+            let mem_out = self.builder.mem_copy(
                 dst.into(),
                 src.into(),
                 byte_count.into(),
@@ -523,10 +508,10 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
             let byte_count = if elem_size == 1 {
                 count
             } else {
-                let sz = builder.iconst(elem_size as i64, Origin::synthetic());
-                builder.mul(count.into(), sz.into(), None, Origin::synthetic())
+                let sz = self.builder.iconst(elem_size as i64, Origin::synthetic());
+                self.builder.mul(count.into(), sz.into(), None, Origin::synthetic())
             };
-            let mem_out = builder.mem_move(
+            let mem_out = self.builder.mem_move(
                 dst.into(),
                 src.into(),
                 byte_count.into(),
@@ -544,10 +529,10 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
             }
             let a = ir_args[0];
             let b = ir_args[1];
-            let sz = builder.iconst(elem_size as i64, Origin::synthetic());
-            let sym_id = symbols.intern("memcmp");
-            let callee = builder.symbol_addr(sym_id, Origin::synthetic());
-            let (mem_out, data) = builder.call(
+            let sz = self.builder.iconst(elem_size as i64, Origin::synthetic());
+            let sym_id = self.symbols.intern("memcmp");
+            let callee = self.builder.symbol_addr(sym_id, Origin::synthetic());
+            let (mem_out, data) = self.builder.call(
                 callee.into(),
                 vec![a.into(), b.into(), sz.into()],
                 Type::Int,
@@ -556,15 +541,15 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
                 Origin::synthetic(),
             );
             // raw_eq returns bool (0 or 1): true when memcmp returns 0.
-            let cmp_result = data.unwrap_or_else(|| builder.iconst(0, Origin::synthetic()));
-            let zero = builder.iconst(0, Origin::synthetic());
-            let eq = builder.icmp(
+            let cmp_result = data.unwrap_or_else(|| self.builder.iconst(0, Origin::synthetic()));
+            let zero = self.builder.iconst(0, Origin::synthetic());
+            let eq = self.builder.icmp(
                 tuffy_ir::instruction::ICmpOp::Eq,
                 cmp_result.into(),
                 zero.into(),
                 Origin::synthetic(),
             );
-            locals.set(destination_local, eq);
+            self.locals.set(destination_local, eq);
             Some(mem_out)
         }
 
@@ -573,16 +558,8 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
             if ir_args.len() < 2 {
                 return None;
             }
-            let x = if matches!(builder.value_type(ir_args[0]), Some(Type::Int)) {
-                builder.inttoptr(ir_args[0].into(), 0, Origin::synthetic())
-            } else {
-                ir_args[0]
-            };
-            let y = if matches!(builder.value_type(ir_args[1]), Some(Type::Int)) {
-                builder.inttoptr(ir_args[1].into(), 0, Origin::synthetic())
-            } else {
-                ir_args[1]
-            };
+            let x = self.coerce_to_ptr(ir_args[0]);
+            let y = self.coerce_to_ptr(ir_args[1]);
             let mut mem = current_mem;
             let num_words = (elem_size as u64).div_ceil(8);
             for i in 0..num_words {
@@ -591,13 +568,13 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
                 let (xa, ya) = if off == 0 {
                     (x, y)
                 } else {
-                    let o = builder.iconst(off as i64, Origin::synthetic());
+                    let o = self.builder.iconst(off as i64, Origin::synthetic());
                     (
-                        builder.ptradd(x.into(), o.into(), 0, Origin::synthetic()),
-                        builder.ptradd(y.into(), o.into(), 0, Origin::synthetic()),
+                        self.builder.ptradd(x.into(), o.into(), 0, Origin::synthetic()),
+                        self.builder.ptradd(y.into(), o.into(), 0, Origin::synthetic()),
                     )
                 };
-                let vx = builder.load(
+                let vx = self.builder.load(
                     xa.into(),
                     chunk,
                     Type::Int,
@@ -605,7 +582,7 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
                     None,
                     Origin::synthetic(),
                 );
-                let vy = builder.load(
+                let vy = self.builder.load(
                     ya.into(),
                     chunk,
                     Type::Int,
@@ -613,8 +590,8 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
                     None,
                     Origin::synthetic(),
                 );
-                mem = builder.store(vy.into(), xa.into(), chunk, mem.into(), Origin::synthetic());
-                mem = builder.store(vx.into(), ya.into(), chunk, mem.into(), Origin::synthetic());
+                mem = self.builder.store(vy.into(), xa.into(), chunk, mem.into(), Origin::synthetic());
+                mem = self.builder.store(vx.into(), ya.into(), chunk, mem.into(), Origin::synthetic());
             }
             Some(mem)
         }
@@ -630,7 +607,7 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
             }
             let ptr = ir_args[0];
             let size = elem_size as u32;
-            let val = builder.load(
+            let val = self.builder.load(
                 ptr.into(),
                 size,
                 Type::Int,
@@ -638,7 +615,7 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
                 None,
                 Origin::synthetic(),
             );
-            locals.set(destination_local, val);
+            self.locals.set(destination_local, val);
             Some(current_mem)
         }
 
@@ -650,7 +627,7 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
             let ptr = ir_args[0];
             let val = ir_args[1];
             let size = elem_size as u32;
-            let new_mem = builder.store(
+            let new_mem = self.builder.store(
                 val.into(),
                 ptr.into(),
                 size,
@@ -671,7 +648,7 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
             let size = elem_size as u32;
 
             // Load current value.
-            let old = builder.load(
+            let old = self.builder.load(
                 ptr.into(),
                 size,
                 Type::Int,
@@ -682,7 +659,7 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
             let mem = current_mem;
 
             // Compare old == expected.
-            let eq = builder.icmp(
+            let eq = self.builder.icmp(
                 tuffy_ir::instruction::ICmpOp::Eq,
                 old.into(),
                 expected.into(),
@@ -690,14 +667,14 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
             );
 
             // Conditionally store: new_val if equal, else old (no-op store).
-            let store_val = builder.select(
+            let store_val = self.builder.select(
                 eq.into(),
                 new_val.into(),
                 old.into(),
                 Type::Int,
                 Origin::synthetic(),
             );
-            let new_mem = builder.store(
+            let new_mem = self.builder.store(
                 store_val.into(),
                 ptr.into(),
                 size,
@@ -706,17 +683,17 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
             );
 
             // Write (old, eq) into the destination stack slot.
-            if let Some(slot) = locals.get(destination_local) {
-                let mem2 = builder.store(
+            if let Some(slot) = self.locals.get(destination_local) {
+                let mem2 = self.builder.store(
                     old.into(),
                     slot.into(),
                     size,
                     new_mem.into(),
                     Origin::synthetic(),
                 );
-                let bool_off = builder.iconst(elem_size as i64, Origin::synthetic());
-                let bool_ptr = builder.ptradd(slot.into(), bool_off.into(), 0, Origin::synthetic());
-                let mem3 = builder.store(
+                let bool_off = self.builder.iconst(elem_size as i64, Origin::synthetic());
+                let bool_ptr = self.builder.ptradd(slot.into(), bool_off.into(), 0, Origin::synthetic());
+                let mem3 = self.builder.store(
                     eq.into(),
                     bool_ptr.into(),
                     1,
@@ -727,7 +704,7 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
             } else {
                 // Destination not yet allocated — just set the scalar
                 // (field projection will handle it like checked ops).
-                locals.set(destination_local, old);
+                self.locals.set(destination_local, old);
                 Some(new_mem)
             }
         }
@@ -740,7 +717,7 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
             let ptr = ir_args[0];
             let new_val = ir_args[1];
             let size = elem_size as u32;
-            let old = builder.load(
+            let old = self.builder.load(
                 ptr.into(),
                 size,
                 Type::Int,
@@ -748,14 +725,14 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
                 None,
                 Origin::synthetic(),
             );
-            let new_mem = builder.store(
+            let new_mem = self.builder.store(
                 new_val.into(),
                 ptr.into(),
                 size,
                 current_mem.into(),
                 Origin::synthetic(),
             );
-            locals.set(destination_local, old);
+            self.locals.set(destination_local, old);
             Some(new_mem)
         }
 
@@ -785,7 +762,7 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
             let operand = ir_args[1];
             let size = elem_size as u32;
 
-            let old = builder.load(
+            let old = self.builder.load(
                 ptr.into(),
                 size,
                 Type::Int,
@@ -797,28 +774,28 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
 
             // Compute new value based on the operation.
             let new_val = if name.starts_with("atomic_and") {
-                builder.and(old.into(), operand.into(), None, Origin::synthetic())
+                self.builder.and(old.into(), operand.into(), None, Origin::synthetic())
             } else if name.starts_with("atomic_or") {
-                builder.or(old.into(), operand.into(), None, Origin::synthetic())
+                self.builder.or(old.into(), operand.into(), None, Origin::synthetic())
             } else if name.starts_with("atomic_xor") {
-                builder.xor(old.into(), operand.into(), None, Origin::synthetic())
+                self.builder.xor(old.into(), operand.into(), None, Origin::synthetic())
             } else if name.starts_with("atomic_nand") {
-                let a = builder.and(old.into(), operand.into(), None, Origin::synthetic());
-                let all_ones = builder.iconst(-1, Origin::synthetic());
-                builder.xor(a.into(), all_ones.into(), None, Origin::synthetic())
+                let a = self.builder.and(old.into(), operand.into(), None, Origin::synthetic());
+                let all_ones = self.builder.iconst(-1, Origin::synthetic());
+                self.builder.xor(a.into(), all_ones.into(), None, Origin::synthetic())
             } else if name.starts_with("atomic_xadd") {
-                builder.add(old.into(), operand.into(), None, Origin::synthetic())
+                self.builder.add(old.into(), operand.into(), None, Origin::synthetic())
             } else if name.starts_with("atomic_xsub") {
-                builder.sub(old.into(), operand.into(), None, Origin::synthetic())
+                self.builder.sub(old.into(), operand.into(), None, Origin::synthetic())
             } else if name.starts_with("atomic_umax") {
                 let bits = (elem_size * 8) as u32;
-                let gt = builder.icmp(
+                let gt = self.builder.icmp(
                     ICmpOp::Gt,
                     IrOperand::annotated(old, Annotation::Unsigned(bits)),
                     IrOperand::annotated(operand, Annotation::Unsigned(bits)),
                     Origin::synthetic(),
                 );
-                builder.select(
+                self.builder.select(
                     gt.into(),
                     old.into(),
                     operand.into(),
@@ -827,13 +804,13 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
                 )
             } else if name.starts_with("atomic_umin") {
                 let bits = (elem_size * 8) as u32;
-                let lt = builder.icmp(
+                let lt = self.builder.icmp(
                     ICmpOp::Lt,
                     IrOperand::annotated(old, Annotation::Unsigned(bits)),
                     IrOperand::annotated(operand, Annotation::Unsigned(bits)),
                     Origin::synthetic(),
                 );
-                builder.select(
+                self.builder.select(
                     lt.into(),
                     old.into(),
                     operand.into(),
@@ -842,13 +819,13 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
                 )
             } else if name.starts_with("atomic_max") {
                 let bits = (elem_size * 8) as u32;
-                let gt = builder.icmp(
+                let gt = self.builder.icmp(
                     ICmpOp::Gt,
                     IrOperand::annotated(old, Annotation::Signed(bits)),
                     IrOperand::annotated(operand, Annotation::Signed(bits)),
                     Origin::synthetic(),
                 );
-                builder.select(
+                self.builder.select(
                     gt.into(),
                     old.into(),
                     operand.into(),
@@ -858,13 +835,13 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
             } else {
                 // atomic_min
                 let bits = (elem_size * 8) as u32;
-                let lt = builder.icmp(
+                let lt = self.builder.icmp(
                     ICmpOp::Lt,
                     IrOperand::annotated(old, Annotation::Signed(bits)),
                     IrOperand::annotated(operand, Annotation::Signed(bits)),
                     Origin::synthetic(),
                 );
-                builder.select(
+                self.builder.select(
                     lt.into(),
                     old.into(),
                     operand.into(),
@@ -873,14 +850,14 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
                 )
             };
 
-            let new_mem = builder.store(
+            let new_mem = self.builder.store(
                 new_val.into(),
                 ptr.into(),
                 size,
                 mem.into(),
                 Origin::synthetic(),
             );
-            locals.set(destination_local, old);
+            self.locals.set(destination_local, old);
             Some(new_mem)
         }
 
@@ -888,29 +865,27 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
     }
 }
 
-/// Check if a Call terminator's callee is a known intrinsic.
-/// Returns the intrinsic name and the generic args (for extracting type parameters).
-pub(super) fn detect_intrinsic<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    func_op: &Operand<'tcx>,
-    caller: Instance<'tcx>,
-) -> Option<(String, &'tcx ty::List<ty::GenericArg<'tcx>>)> {
-    let ty = match func_op {
-        Operand::Constant(c) => c.ty(),
-        _ => return None,
-    };
-    let ty = tcx.instantiate_and_normalize_erasing_regions(
-        caller.args,
-        ty::TypingEnv::fully_monomorphized(),
-        ty::EarlyBinder::bind(ty),
-    );
-    if let ty::FnDef(def_id, args) = ty.kind()
-        && let Some(intrinsic) = tcx.intrinsic(*def_id)
-    {
-        return Some((intrinsic.name.as_str().to_string(), args));
+    /// Check if the given function operand is a compiler intrinsic.
+    /// Returns the intrinsic name and generic args (for extracting type parameters).
+    pub(super) fn detect_intrinsic(&self, func_op: &Operand<'tcx>) -> Option<(String, &'tcx ty::List<ty::GenericArg<'tcx>>)> {
+        let ty = match func_op {
+            Operand::Constant(c) => c.ty(),
+            _ => return None,
+        };
+        let ty = self.tcx.instantiate_and_normalize_erasing_regions(
+            self.instance.args,
+            ty::TypingEnv::fully_monomorphized(),
+            ty::EarlyBinder::bind(ty),
+        );
+        if let ty::FnDef(def_id, args) = ty.kind()
+            && let Some(intrinsic) = self.tcx.intrinsic(*def_id)
+        {
+            return Some((intrinsic.name.as_str().to_string(), args));
+        }
+        None
     }
-    None
 }
+
 
 /// Map compiler intrinsics to libc/compiler-rt symbol names.
 /// Returns None for intrinsics that need inline handling or aren't supported.

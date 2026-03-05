@@ -6,7 +6,7 @@ use tuffy_codegen::AbiMetadataBox;
 use tuffy_ir::builder::Builder;
 use tuffy_ir::instruction::Origin;
 use tuffy_ir::module::{SymbolId, SymbolTable};
-use tuffy_ir::types::{Annotation, Type};
+use tuffy_ir::types::Type;
 use tuffy_ir::value::{BlockRef, ValueRef};
 
 use super::StaticDataVec;
@@ -173,6 +173,27 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         )
     }
 
+    /// Spill a scalar local to a new stack slot of the given byte size.
+    ///
+    /// Creates a slot of `max(size, 1)` bytes, optionally stores the current
+    /// value of `local` into it (if already assigned), then updates the local
+    /// to point at the slot and marks it as stack-allocated.
+    pub(super) fn promote_local_to_stack(&mut self, local: mir::Local, size: u64) {
+        let slot_size = (size as u32).max(1);
+        let slot = self.builder.stack_slot(slot_size, Origin::synthetic());
+        if let Some(old_val) = self.locals.get(local) {
+            self.current_mem = self.builder.store(
+                old_val.into(),
+                slot.into(),
+                slot_size,
+                self.current_mem.into(),
+                Origin::synthetic(),
+            );
+        }
+        self.locals.set(local, slot);
+        self.stack_locals.mark(local);
+    }
+
     /// If `val` is a Ptr or Bool, coerce it to Int.
     pub(super) fn coerce_to_int(&mut self, val: ValueRef) -> ValueRef {
         match self.builder.value_type(val) {
@@ -283,27 +304,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
                 // For >16 byte parameters, the caller passes a pointer per x86-64 ABI.
                 // The parameter receives this pointer, so create it as Ptr type.
-                let (param_ty, is_indirect) = if sz > 16 {
-                    (Type::Ptr(0), true)
-                } else {
-                    (ir_ty_val, false)
-                };
+                let is_indirect = sz > 16;
+                let param_ty = if is_indirect { Type::Ptr(0) } else { ir_ty_val };
 
                 // For composite types of 9–16 bytes that contain no floats
                 // and passed as an integer, annotate the parameter as
                 // Unsigned(128) so the legalizer treats it as a two-slot
                 // (lo, hi) value — matching the caller's ABI which passes
                 // such values in two registers.
-                let base_ann = translate_annotation(ty);
-                let ann = if !is_indirect && base_ann.is_none() && param_ty == Type::Int {
-                    if sz > 8 && sz <= 16 && !ty_contains_float(self.tcx, ty) {
-                        Some(Annotation::Unsigned(128))
-                    } else {
-                        None
-                    }
-                } else {
-                    base_ann
-                };
+                let ann = if is_indirect { None } else { composite_param_annotation(self.tcx, ty) };
 
                 let val = self.builder.param(
                     param_idx,

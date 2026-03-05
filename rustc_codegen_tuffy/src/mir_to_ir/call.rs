@@ -10,7 +10,7 @@ use tuffy_ir::value::ValueRef;
 
 use super::ctx::TranslationCtx;
 use super::intrinsic::{
-    detect_intrinsic, intrinsic_to_libc, translate_intrinsic, translate_memory_intrinsic,
+    intrinsic_to_libc,
 };
 use super::types::*;
 
@@ -242,7 +242,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     ) {
         // Check for compiler intrinsics and handle them inline.
         if let Some((intrinsic_name, intrinsic_substs)) =
-            detect_intrinsic(self.tcx, func, self.instance)
+            self.detect_intrinsic(func)
         {
             // Translate intrinsic arguments to IR values.
             let mut intrinsic_args: Vec<ValueRef> = Vec::new();
@@ -340,16 +340,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 } else {
                     (None, 0, None, None)
                 };
-            let handled = translate_intrinsic(
-                self.tcx,
+            let handled = self.translate_intrinsic(
                 &intrinsic_name,
                 intrinsic_substs,
                 &intrinsic_args,
                 destination.local,
-                &mut self.builder,
-                &mut self.locals,
-                &mut self.symbols,
-                self.current_mem,
                 if has_dest_projection { proj_addr } else { None },
             );
             if handled {
@@ -480,16 +475,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             }
 
             // Try lowering memory intrinsics to libc calls.
-            let mem_handled = translate_memory_intrinsic(
-                self.tcx,
+            let mem_handled = self.translate_memory_intrinsic(
                 &intrinsic_name,
                 intrinsic_substs,
                 &intrinsic_args,
                 destination.local,
-                &mut self.builder,
-                &mut self.locals,
-                &mut self.symbols,
-                self.current_mem,
             );
             if let Some(new_mem) = mem_handled {
                 self.current_mem = new_mem;
