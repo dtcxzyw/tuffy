@@ -5,6 +5,8 @@
 
 # Extraction bugs (prose/grammar extracted as Rust code)
 core_src_num_dec2flt_mod_0
+core_src_num_uint_macros_22
+core_src_num_uint_macros_24
 core_src_num_uint_macros_26
 core_src_num_uint_macros_28
 std_src_keyword_docs_69

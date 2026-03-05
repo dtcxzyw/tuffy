@@ -623,6 +623,63 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::StackSlot(bytes), Type::Ptr(0), None, origin, None)
     }
 
+    /// Memory copy (non-overlapping): memcpy semantics.
+    pub fn mem_copy(
+        &mut self,
+        dst: Operand,
+        src: Operand,
+        count: Operand,
+        align: u32,
+        mem: Operand,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(
+            Op::MemCopy(dst, src, count, align, mem),
+            Type::Mem,
+            None,
+            origin,
+            None,
+        )
+    }
+
+    /// Memory move (may overlap): memmove semantics.
+    pub fn mem_move(
+        &mut self,
+        dst: Operand,
+        src: Operand,
+        count: Operand,
+        align: u32,
+        mem: Operand,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(
+            Op::MemMove(dst, src, count, align, mem),
+            Type::Mem,
+            None,
+            origin,
+            None,
+        )
+    }
+
+    /// Memory set: memset semantics.
+    pub fn mem_set(
+        &mut self,
+        dst: Operand,
+        val: Operand,
+        count: Operand,
+        align: u32,
+        mem: Operand,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(
+            Op::MemSet(dst, val, count, align, mem),
+            Type::Mem,
+            None,
+            origin,
+            None,
+        )
+    }
+
     // ── Atomic memory operations ──
 
     /// Atomic load from pointer. Returns (mem_out, data_value).

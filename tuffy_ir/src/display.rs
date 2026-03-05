@@ -398,6 +398,36 @@ fn fmt_inst(
             )
         }
         Op::StackSlot(bytes) => format!("{v} = stack_slot {bytes}"),
+        Op::MemCopy(dst, src, count, align, mem) => {
+            format!(
+                "{v} = memcopy {}, {}, {}, align={}, {}",
+                ctx.fmt_operand(dst),
+                ctx.fmt_operand(src),
+                ctx.fmt_operand(count),
+                align,
+                ctx.fmt_operand(mem)
+            )
+        }
+        Op::MemMove(dst, src, count, align, mem) => {
+            format!(
+                "{v} = memmove {}, {}, {}, align={}, {}",
+                ctx.fmt_operand(dst),
+                ctx.fmt_operand(src),
+                ctx.fmt_operand(count),
+                align,
+                ctx.fmt_operand(mem)
+            )
+        }
+        Op::MemSet(dst, val, count, align, mem) => {
+            format!(
+                "{v} = memset {}, {}, {}, align={}, {}",
+                ctx.fmt_operand(dst),
+                ctx.fmt_operand(val),
+                ctx.fmt_operand(count),
+                align,
+                ctx.fmt_operand(mem)
+            )
+        }
         Op::LoadAtomic(ptr, ord, mem) => {
             format!(
                 "{multi_v} = load.atomic.{} {}, {}",

@@ -641,6 +641,18 @@ fn select_inst(
             emit_partial_store(ctx, base, base_offset, val_vreg, *bytes);
         }
 
+        Op::MemCopy(dst, src, count, _align, _mem) => {
+            select_memcopy(ctx, dst, src, count)?;
+        }
+
+        Op::MemMove(dst, src, count, _align, _mem) => {
+            select_memmove(ctx, dst, src, count)?;
+        }
+
+        Op::MemSet(dst, val, count, _align, _mem) => {
+            select_memset(ctx, dst, val, count)?;
+        }
+
         Op::Unreachable | Op::Trap => {
             ctx.out.push(MInst::Ud2);
         }
@@ -2066,4 +2078,35 @@ fn icmp_to_cc(op: ICmpOp, ann: Option<Annotation>) -> CondCode {
             }
         }
     }
+}
+
+fn select_memcopy(ctx: &mut IselCtx, dst: &Operand, src: &Operand, count: &Operand) -> Option<()> {
+    emit_libc_call(ctx, "memcpy", &[dst, src, count])
+}
+
+fn select_memmove(ctx: &mut IselCtx, dst: &Operand, src: &Operand, count: &Operand) -> Option<()> {
+    emit_libc_call(ctx, "memmove", &[dst, src, count])
+}
+
+fn select_memset(ctx: &mut IselCtx, dst: &Operand, val: &Operand, count: &Operand) -> Option<()> {
+    emit_libc_call(ctx, "memset", &[dst, val, count])
+}
+
+fn emit_libc_call(ctx: &mut IselCtx, name: &str, args: &[&Operand]) -> Option<()> {
+    let arg_regs = [Gpr::Rdi, Gpr::Rsi, Gpr::Rdx];
+    for (i, arg) in args.iter().enumerate() {
+        let src = ctx.ensure_in_reg(arg.value)?;
+        let dst = ctx.alloc.alloc_fixed(arg_regs[i].to_preg());
+        ctx.out.push(MInst::MovRR {
+            size: OpSize::S64,
+            dst,
+            src,
+        });
+    }
+    ctx.out.push(MInst::CallSym {
+        name: name.to_string(),
+        ret: None,
+        ret2: None,
+    });
+    Some(())
 }

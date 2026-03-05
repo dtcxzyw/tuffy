@@ -437,7 +437,7 @@ pub(super) fn translate_intrinsic<'tcx>(
     }
 }
 
-/// Lower memory intrinsics to libc calls with adjusted arguments.
+/// Lower memory intrinsics to IR memory operations.
 /// Handles write_bytes, copy_nonoverlapping, copy, and raw_eq.
 /// Returns `Some(new_mem)` if the intrinsic was handled, `None` to fall through.
 #[allow(clippy::too_many_arguments)]
@@ -452,14 +452,17 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
     symbols: &mut SymbolTable,
     current_mem: ValueRef,
 ) -> Option<ValueRef> {
-    // Extract the type parameter T and compute its size.
-    let elem_size = match substs.first().and_then(|a| a.as_type()) {
-        Some(t) => type_size(tcx, t).unwrap_or(0),
+    // Extract the type parameter T and compute its size and alignment.
+    let (elem_size, elem_align) = match substs.first().and_then(|a| a.as_type()) {
+        Some(t) => (
+            type_size(tcx, t).unwrap_or(0),
+            type_align(tcx, t).unwrap_or(1),
+        ),
         None => return None,
     };
 
     match name {
-        // write_bytes<T>(dst, val, count) → memset(dst, val, count * sizeof(T))
+        // write_bytes<T>(dst, val, count) → MemSet(dst, val, count * sizeof(T), align)
         "write_bytes" | "volatile_set_memory" => {
             if ir_args.len() < 3 {
                 return None;
@@ -473,23 +476,18 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
                 let sz = builder.iconst(elem_size as i64, Origin::synthetic());
                 builder.mul(count.into(), sz.into(), None, Origin::synthetic())
             };
-            let sym_id = symbols.intern("memset");
-            let callee = builder.symbol_addr(sym_id, Origin::synthetic());
-            let (mem_out, data) = builder.call(
-                callee.into(),
-                vec![dst.into(), val.into(), byte_count.into()],
-                Type::Int,
+            let mem_out = builder.mem_set(
+                dst.into(),
+                val.into(),
+                byte_count.into(),
+                elem_align as u32,
                 current_mem.into(),
-                None,
                 Origin::synthetic(),
             );
-            if let Some(d) = data {
-                locals.set(destination_local, d);
-            }
             Some(mem_out)
         }
 
-        // copy_nonoverlapping<T>(src, dst, count) → memcpy(dst, src, count * sizeof(T))
+        // copy_nonoverlapping<T>(src, dst, count) → MemCopy(dst, src, count * sizeof(T), align)
         "copy_nonoverlapping" | "volatile_copy_nonoverlapping_memory" => {
             if ir_args.len() < 3 {
                 return None;
@@ -503,24 +501,18 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
                 let sz = builder.iconst(elem_size as i64, Origin::synthetic());
                 builder.mul(count.into(), sz.into(), None, Origin::synthetic())
             };
-            // memcpy(dst, src, n) — note swapped argument order.
-            let sym_id = symbols.intern("memcpy");
-            let callee = builder.symbol_addr(sym_id, Origin::synthetic());
-            let (mem_out, data) = builder.call(
-                callee.into(),
-                vec![dst.into(), src.into(), byte_count.into()],
-                Type::Int,
+            let mem_out = builder.mem_copy(
+                dst.into(),
+                src.into(),
+                byte_count.into(),
+                elem_align as u32,
                 current_mem.into(),
-                None,
                 Origin::synthetic(),
             );
-            if let Some(d) = data {
-                locals.set(destination_local, d);
-            }
             Some(mem_out)
         }
 
-        // copy<T>(src, dst, count) → memmove(dst, src, count * sizeof(T))
+        // copy<T>(src, dst, count) → MemMove(dst, src, count * sizeof(T), align)
         "copy" | "volatile_copy_memory" => {
             if ir_args.len() < 3 {
                 return None;
@@ -534,19 +526,14 @@ pub(super) fn translate_memory_intrinsic<'tcx>(
                 let sz = builder.iconst(elem_size as i64, Origin::synthetic());
                 builder.mul(count.into(), sz.into(), None, Origin::synthetic())
             };
-            let sym_id = symbols.intern("memmove");
-            let callee = builder.symbol_addr(sym_id, Origin::synthetic());
-            let (mem_out, data) = builder.call(
-                callee.into(),
-                vec![dst.into(), src.into(), byte_count.into()],
-                Type::Int,
+            let mem_out = builder.mem_move(
+                dst.into(),
+                src.into(),
+                byte_count.into(),
+                elem_align as u32,
                 current_mem.into(),
-                None,
                 Origin::synthetic(),
             );
-            if let Some(d) = data {
-                locals.set(destination_local, d);
-            }
             Some(mem_out)
         }
 
