@@ -214,6 +214,30 @@ pub enum Op {
     SaturatingAdd(Operand, Operand, u32),
     /// Unsigned saturating subtraction in n bits. n = 0 produces poison.
     SaturatingSub(Operand, Operand, u32),
+    /// Signed saturating addition in n bits. n = 0 produces poison.
+    /// Result is clamped to [-(2^(n-1)), 2^(n-1)-1].
+    SignedSaturatingAdd(Operand, Operand, u32),
+    /// Signed saturating subtraction in n bits. n = 0 produces poison.
+    /// Result is clamped to [-(2^(n-1)), 2^(n-1)-1].
+    SignedSaturatingSub(Operand, Operand, u32),
+    /// Signed addition with overflow detection in n bits. n = 0 produces poison.
+    /// Multi-result: primary = wrapping sum (Int), secondary = overflow flag (Bool).
+    SAddWithOverflow(Operand, Operand, u32),
+    /// Unsigned addition with overflow detection in n bits. n = 0 produces poison.
+    /// Multi-result: primary = wrapping sum (Int), secondary = overflow flag (Bool).
+    UAddWithOverflow(Operand, Operand, u32),
+    /// Signed subtraction with overflow detection in n bits. n = 0 produces poison.
+    /// Multi-result: primary = wrapping difference (Int), secondary = overflow flag (Bool).
+    SSubWithOverflow(Operand, Operand, u32),
+    /// Unsigned subtraction with overflow detection in n bits. n = 0 produces poison.
+    /// Multi-result: primary = wrapping difference (Int), secondary = overflow flag (Bool).
+    USubWithOverflow(Operand, Operand, u32),
+    /// Signed multiplication with overflow detection in n bits. n = 0 produces poison.
+    /// Multi-result: primary = wrapping product (Int), secondary = overflow flag (Bool).
+    SMulWithOverflow(Operand, Operand, u32),
+    /// Unsigned multiplication with overflow detection in n bits. n = 0 produces poison.
+    /// Multi-result: primary = wrapping product (Int), secondary = overflow flag (Bool).
+    UMulWithOverflow(Operand, Operand, u32),
     /// Integer constant (arbitrary precision, matching Lean `Int`).
     Const(BigInt),
     /// Boolean constant: true or false.

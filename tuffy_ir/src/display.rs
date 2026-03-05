@@ -640,6 +640,62 @@ fn fmt_inst(
                 ctx.fmt_operand(b)
             )
         }
+        Op::SignedSaturatingAdd(a, b, bits) => {
+            format!(
+                "{v} = ssaturating_add.{bits} {}, {}",
+                ctx.fmt_operand(a),
+                ctx.fmt_operand(b)
+            )
+        }
+        Op::SignedSaturatingSub(a, b, bits) => {
+            format!(
+                "{v} = ssaturating_sub.{bits} {}, {}",
+                ctx.fmt_operand(a),
+                ctx.fmt_operand(b)
+            )
+        }
+        Op::SAddWithOverflow(a, b, bits) => {
+            format!(
+                "{v} = sadd_overflow.{bits} {}, {}",
+                ctx.fmt_operand(a),
+                ctx.fmt_operand(b)
+            )
+        }
+        Op::UAddWithOverflow(a, b, bits) => {
+            format!(
+                "{v} = uadd_overflow.{bits} {}, {}",
+                ctx.fmt_operand(a),
+                ctx.fmt_operand(b)
+            )
+        }
+        Op::SSubWithOverflow(a, b, bits) => {
+            format!(
+                "{v} = ssub_overflow.{bits} {}, {}",
+                ctx.fmt_operand(a),
+                ctx.fmt_operand(b)
+            )
+        }
+        Op::USubWithOverflow(a, b, bits) => {
+            format!(
+                "{v} = usub_overflow.{bits} {}, {}",
+                ctx.fmt_operand(a),
+                ctx.fmt_operand(b)
+            )
+        }
+        Op::SMulWithOverflow(a, b, bits) => {
+            format!(
+                "{v} = smul_overflow.{bits} {}, {}",
+                ctx.fmt_operand(a),
+                ctx.fmt_operand(b)
+            )
+        }
+        Op::UMulWithOverflow(a, b, bits) => {
+            format!(
+                "{v} = umul_overflow.{bits} {}, {}",
+                ctx.fmt_operand(a),
+                ctx.fmt_operand(b)
+            )
+        }
         Op::Unreachable => "unreachable".to_string(),
         Op::Trap => "trap".to_string(),
     }

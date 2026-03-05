@@ -447,7 +447,10 @@ impl FuncVerifier<'_> {
                 }
             }
 
-            Op::SaturatingAdd(a, b, bits) | Op::SaturatingSub(a, b, bits) => {
+            Op::SaturatingAdd(a, b, bits)
+            | Op::SaturatingSub(a, b, bits)
+            | Op::SignedSaturatingAdd(a, b, bits)
+            | Op::SignedSaturatingSub(a, b, bits) => {
                 self.check_operand(a, &loc);
                 self.check_operand(b, &loc);
                 self.expect_int(a, "saturating arith lhs", &loc);
@@ -460,6 +463,40 @@ impl FuncVerifier<'_> {
                     self.result.error(
                         loc,
                         format!("saturating arith result must be Int, got {:?}", inst.ty),
+                    );
+                }
+            }
+
+            Op::SAddWithOverflow(a, b, bits)
+            | Op::UAddWithOverflow(a, b, bits)
+            | Op::SSubWithOverflow(a, b, bits)
+            | Op::USubWithOverflow(a, b, bits)
+            | Op::SMulWithOverflow(a, b, bits)
+            | Op::UMulWithOverflow(a, b, bits) => {
+                self.check_operand(a, &loc);
+                self.check_operand(b, &loc);
+                self.expect_int(a, "overflow arith lhs", &loc);
+                self.expect_int(b, "overflow arith rhs", &loc);
+                if *bits == 0 {
+                    self.result
+                        .error(loc.clone(), "overflow arith bit width must be > 0");
+                }
+                if inst.ty != Type::Int {
+                    self.result.error(
+                        loc.clone(),
+                        format!(
+                            "overflow arith primary result must be Int, got {:?}",
+                            inst.ty
+                        ),
+                    );
+                }
+                if inst.secondary_ty != Some(Type::Bool) {
+                    self.result.error(
+                        loc,
+                        format!(
+                            "overflow arith secondary result must be Bool, got {:?}",
+                            inst.secondary_ty
+                        ),
                     );
                 }
             }

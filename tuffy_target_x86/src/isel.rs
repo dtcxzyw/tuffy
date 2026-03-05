@@ -1553,6 +1553,598 @@ fn select_inst(
             ctx.regs.assign(vref, dst);
         }
 
+        Op::SignedSaturatingAdd(lhs, rhs, bits) => {
+            let l = ctx.ensure_in_reg(lhs.value)?;
+            let r = ctx.ensure_in_reg(rhs.value)?;
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst,
+                src: l,
+            });
+            ctx.out.push(MInst::AddRR {
+                size: OpSize::S64,
+                dst,
+                src: r,
+            });
+            if *bits < 64 {
+                let max_val = (1i64 << (bits - 1)) - 1;
+                let min_val = -(1i64 << (bits - 1));
+                let sat_hi = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRI64 {
+                    dst: sat_hi,
+                    imm: max_val,
+                });
+                ctx.out.push(MInst::CmpRR {
+                    size: OpSize::S64,
+                    src1: dst,
+                    src2: sat_hi,
+                });
+                ctx.out.push(MInst::CMOVcc {
+                    size: OpSize::S64,
+                    cc: CondCode::G,
+                    dst,
+                    src: sat_hi,
+                });
+                let sat_lo = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRI64 {
+                    dst: sat_lo,
+                    imm: min_val,
+                });
+                ctx.out.push(MInst::CmpRR {
+                    size: OpSize::S64,
+                    src1: dst,
+                    src2: sat_lo,
+                });
+                ctx.out.push(MInst::CMOVcc {
+                    size: OpSize::S64,
+                    cc: CondCode::L,
+                    dst,
+                    src: sat_lo,
+                });
+            } else {
+                // 64-bit: use overflow flag. sat = (a >> 63) XOR I64_MAX = I64_MAX if a>=0, I64_MIN if a<0.
+                let sat = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst: sat,
+                    src: l,
+                });
+                ctx.out.push(MInst::SarImm {
+                    size: OpSize::S64,
+                    dst: sat,
+                    imm: 63,
+                });
+                let imax = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRI64 {
+                    dst: imax,
+                    imm: i64::MAX,
+                });
+                ctx.out.push(MInst::XorRR {
+                    size: OpSize::S64,
+                    dst: sat,
+                    src: imax,
+                });
+                ctx.out.push(MInst::CMOVcc {
+                    size: OpSize::S64,
+                    cc: CondCode::O,
+                    dst,
+                    src: sat,
+                });
+            }
+            ctx.regs.assign(vref, dst);
+        }
+
+        Op::SignedSaturatingSub(lhs, rhs, bits) => {
+            let l = ctx.ensure_in_reg(lhs.value)?;
+            let r = ctx.ensure_in_reg(rhs.value)?;
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst,
+                src: l,
+            });
+            ctx.out.push(MInst::SubRR {
+                size: OpSize::S64,
+                dst,
+                src: r,
+            });
+            if *bits < 64 {
+                let max_val = (1i64 << (bits - 1)) - 1;
+                let min_val = -(1i64 << (bits - 1));
+                let sat_hi = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRI64 {
+                    dst: sat_hi,
+                    imm: max_val,
+                });
+                ctx.out.push(MInst::CmpRR {
+                    size: OpSize::S64,
+                    src1: dst,
+                    src2: sat_hi,
+                });
+                ctx.out.push(MInst::CMOVcc {
+                    size: OpSize::S64,
+                    cc: CondCode::G,
+                    dst,
+                    src: sat_hi,
+                });
+                let sat_lo = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRI64 {
+                    dst: sat_lo,
+                    imm: min_val,
+                });
+                ctx.out.push(MInst::CmpRR {
+                    size: OpSize::S64,
+                    src1: dst,
+                    src2: sat_lo,
+                });
+                ctx.out.push(MInst::CMOVcc {
+                    size: OpSize::S64,
+                    cc: CondCode::L,
+                    dst,
+                    src: sat_lo,
+                });
+            } else {
+                // 64-bit: use overflow flag. sat = (a >> 63) XOR I64_MAX.
+                let sat = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst: sat,
+                    src: l,
+                });
+                ctx.out.push(MInst::SarImm {
+                    size: OpSize::S64,
+                    dst: sat,
+                    imm: 63,
+                });
+                let imax = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRI64 {
+                    dst: imax,
+                    imm: i64::MAX,
+                });
+                ctx.out.push(MInst::XorRR {
+                    size: OpSize::S64,
+                    dst: sat,
+                    src: imax,
+                });
+                ctx.out.push(MInst::CMOVcc {
+                    size: OpSize::S64,
+                    cc: CondCode::O,
+                    dst,
+                    src: sat,
+                });
+            }
+            ctx.regs.assign(vref, dst);
+        }
+
+        Op::SAddWithOverflow(lhs, rhs, bits) => {
+            let l = ctx.ensure_in_reg(lhs.value)?;
+            let r = ctx.ensure_in_reg(rhs.value)?;
+            let result = ctx.alloc.alloc();
+            let overflow = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst: result,
+                src: l,
+            });
+            ctx.out.push(MInst::AddRR {
+                size: OpSize::S64,
+                dst: result,
+                src: r,
+            });
+            if *bits == 64 {
+                ctx.out.push(MInst::SetCC {
+                    cc: CondCode::O,
+                    dst: overflow,
+                });
+                ctx.out.push(MInst::MovzxB {
+                    dst: overflow,
+                    src: overflow,
+                });
+            } else {
+                let max_val = (1i64 << (bits - 1)) - 1;
+                let min_val = -(1i64 << (bits - 1));
+                let hi = ctx.alloc.alloc();
+                let max_reg = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRI64 {
+                    dst: max_reg,
+                    imm: max_val,
+                });
+                ctx.out.push(MInst::CmpRR {
+                    size: OpSize::S64,
+                    src1: result,
+                    src2: max_reg,
+                });
+                ctx.out.push(MInst::SetCC {
+                    cc: CondCode::G,
+                    dst: hi,
+                });
+                let lo = ctx.alloc.alloc();
+                let min_reg = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRI64 {
+                    dst: min_reg,
+                    imm: min_val,
+                });
+                ctx.out.push(MInst::CmpRR {
+                    size: OpSize::S64,
+                    src1: result,
+                    src2: min_reg,
+                });
+                ctx.out.push(MInst::SetCC {
+                    cc: CondCode::L,
+                    dst: lo,
+                });
+                ctx.out.push(MInst::MovzxB { dst: hi, src: hi });
+                ctx.out.push(MInst::MovzxB { dst: lo, src: lo });
+                ctx.out.push(MInst::OrRR {
+                    size: OpSize::S64,
+                    dst: hi,
+                    src: lo,
+                });
+                ctx.out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst: overflow,
+                    src: hi,
+                });
+                let shift = 64u8 - *bits as u8;
+                ctx.out.push(MInst::ShlImm {
+                    size: OpSize::S64,
+                    dst: result,
+                    imm: shift,
+                });
+                ctx.out.push(MInst::SarImm {
+                    size: OpSize::S64,
+                    dst: result,
+                    imm: shift,
+                });
+            }
+            ctx.regs.assign(vref, result);
+            let secondary = ValueRef::inst_secondary_result(vref.index());
+            ctx.regs.assign(secondary, overflow);
+        }
+
+        Op::UAddWithOverflow(lhs, rhs, bits) => {
+            let l = ctx.ensure_in_reg(lhs.value)?;
+            let r = ctx.ensure_in_reg(rhs.value)?;
+            let result = ctx.alloc.alloc();
+            let overflow = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst: result,
+                src: l,
+            });
+            ctx.out.push(MInst::AddRR {
+                size: OpSize::S64,
+                dst: result,
+                src: r,
+            });
+            if *bits == 64 {
+                ctx.out.push(MInst::SetCC {
+                    cc: CondCode::B,
+                    dst: overflow,
+                });
+                ctx.out.push(MInst::MovzxB {
+                    dst: overflow,
+                    src: overflow,
+                });
+            } else {
+                let tmp = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst: tmp,
+                    src: result,
+                });
+                ctx.out.push(MInst::ShrImm {
+                    size: OpSize::S64,
+                    dst: tmp,
+                    imm: *bits as u8,
+                });
+                ctx.out.push(MInst::TestRR {
+                    size: OpSize::S64,
+                    src1: tmp,
+                    src2: tmp,
+                });
+                ctx.out.push(MInst::SetCC {
+                    cc: CondCode::Ne,
+                    dst: overflow,
+                });
+                ctx.out.push(MInst::MovzxB {
+                    dst: overflow,
+                    src: overflow,
+                });
+                let mask = (1u64 << bits) - 1;
+                ctx.out.push(MInst::AndRI {
+                    size: OpSize::S64,
+                    dst: result,
+                    imm: mask as i64,
+                });
+            }
+            ctx.regs.assign(vref, result);
+            let secondary = ValueRef::inst_secondary_result(vref.index());
+            ctx.regs.assign(secondary, overflow);
+        }
+
+        Op::SSubWithOverflow(lhs, rhs, bits) => {
+            let l = ctx.ensure_in_reg(lhs.value)?;
+            let r = ctx.ensure_in_reg(rhs.value)?;
+            let result = ctx.alloc.alloc();
+            let overflow = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst: result,
+                src: l,
+            });
+            ctx.out.push(MInst::SubRR {
+                size: OpSize::S64,
+                dst: result,
+                src: r,
+            });
+            if *bits == 64 {
+                ctx.out.push(MInst::SetCC {
+                    cc: CondCode::O,
+                    dst: overflow,
+                });
+                ctx.out.push(MInst::MovzxB {
+                    dst: overflow,
+                    src: overflow,
+                });
+            } else {
+                let max_val = (1i64 << (bits - 1)) - 1;
+                let min_val = -(1i64 << (bits - 1));
+                let hi = ctx.alloc.alloc();
+                let max_reg = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRI64 {
+                    dst: max_reg,
+                    imm: max_val,
+                });
+                ctx.out.push(MInst::CmpRR {
+                    size: OpSize::S64,
+                    src1: result,
+                    src2: max_reg,
+                });
+                ctx.out.push(MInst::SetCC {
+                    cc: CondCode::G,
+                    dst: hi,
+                });
+                let lo = ctx.alloc.alloc();
+                let min_reg = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRI64 {
+                    dst: min_reg,
+                    imm: min_val,
+                });
+                ctx.out.push(MInst::CmpRR {
+                    size: OpSize::S64,
+                    src1: result,
+                    src2: min_reg,
+                });
+                ctx.out.push(MInst::SetCC {
+                    cc: CondCode::L,
+                    dst: lo,
+                });
+                ctx.out.push(MInst::MovzxB { dst: hi, src: hi });
+                ctx.out.push(MInst::MovzxB { dst: lo, src: lo });
+                ctx.out.push(MInst::OrRR {
+                    size: OpSize::S64,
+                    dst: hi,
+                    src: lo,
+                });
+                ctx.out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst: overflow,
+                    src: hi,
+                });
+                let shift = 64u8 - *bits as u8;
+                ctx.out.push(MInst::ShlImm {
+                    size: OpSize::S64,
+                    dst: result,
+                    imm: shift,
+                });
+                ctx.out.push(MInst::SarImm {
+                    size: OpSize::S64,
+                    dst: result,
+                    imm: shift,
+                });
+            }
+            ctx.regs.assign(vref, result);
+            let secondary = ValueRef::inst_secondary_result(vref.index());
+            ctx.regs.assign(secondary, overflow);
+        }
+
+        Op::USubWithOverflow(lhs, rhs, bits) => {
+            let l = ctx.ensure_in_reg(lhs.value)?;
+            let r = ctx.ensure_in_reg(rhs.value)?;
+            let result = ctx.alloc.alloc();
+            let overflow = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst: result,
+                src: l,
+            });
+            ctx.out.push(MInst::SubRR {
+                size: OpSize::S64,
+                dst: result,
+                src: r,
+            });
+            if *bits == 64 {
+                ctx.out.push(MInst::SetCC {
+                    cc: CondCode::B,
+                    dst: overflow,
+                });
+                ctx.out.push(MInst::MovzxB {
+                    dst: overflow,
+                    src: overflow,
+                });
+            } else {
+                ctx.out.push(MInst::TestRR {
+                    size: OpSize::S64,
+                    src1: result,
+                    src2: result,
+                });
+                ctx.out.push(MInst::SetCC {
+                    cc: CondCode::L,
+                    dst: overflow,
+                });
+                ctx.out.push(MInst::MovzxB {
+                    dst: overflow,
+                    src: overflow,
+                });
+                let mask = (1u64 << bits) - 1;
+                ctx.out.push(MInst::AndRI {
+                    size: OpSize::S64,
+                    dst: result,
+                    imm: mask as i64,
+                });
+            }
+            ctx.regs.assign(vref, result);
+            let secondary = ValueRef::inst_secondary_result(vref.index());
+            ctx.regs.assign(secondary, overflow);
+        }
+
+        Op::SMulWithOverflow(lhs, rhs, bits) => {
+            let l = ctx.ensure_in_reg(lhs.value)?;
+            let r = ctx.ensure_in_reg(rhs.value)?;
+            let result = ctx.alloc.alloc();
+            let overflow = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst: result,
+                src: l,
+            });
+            ctx.out.push(MInst::ImulRR {
+                size: OpSize::S64,
+                dst: result,
+                src: r,
+            });
+            if *bits == 64 {
+                ctx.out.push(MInst::SetCC {
+                    cc: CondCode::O,
+                    dst: overflow,
+                });
+                ctx.out.push(MInst::MovzxB {
+                    dst: overflow,
+                    src: overflow,
+                });
+            } else {
+                let max_val = (1i64 << (bits - 1)) - 1;
+                let min_val = -(1i64 << (bits - 1));
+                let hi = ctx.alloc.alloc();
+                let max_reg = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRI64 {
+                    dst: max_reg,
+                    imm: max_val,
+                });
+                ctx.out.push(MInst::CmpRR {
+                    size: OpSize::S64,
+                    src1: result,
+                    src2: max_reg,
+                });
+                ctx.out.push(MInst::SetCC {
+                    cc: CondCode::G,
+                    dst: hi,
+                });
+                let lo = ctx.alloc.alloc();
+                let min_reg = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRI64 {
+                    dst: min_reg,
+                    imm: min_val,
+                });
+                ctx.out.push(MInst::CmpRR {
+                    size: OpSize::S64,
+                    src1: result,
+                    src2: min_reg,
+                });
+                ctx.out.push(MInst::SetCC {
+                    cc: CondCode::L,
+                    dst: lo,
+                });
+                ctx.out.push(MInst::MovzxB { dst: hi, src: hi });
+                ctx.out.push(MInst::MovzxB { dst: lo, src: lo });
+                ctx.out.push(MInst::OrRR {
+                    size: OpSize::S64,
+                    dst: hi,
+                    src: lo,
+                });
+                ctx.out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst: overflow,
+                    src: hi,
+                });
+                let shift = 64u8 - *bits as u8;
+                ctx.out.push(MInst::ShlImm {
+                    size: OpSize::S64,
+                    dst: result,
+                    imm: shift,
+                });
+                ctx.out.push(MInst::SarImm {
+                    size: OpSize::S64,
+                    dst: result,
+                    imm: shift,
+                });
+            }
+            ctx.regs.assign(vref, result);
+            let secondary = ValueRef::inst_secondary_result(vref.index());
+            ctx.regs.assign(secondary, overflow);
+        }
+
+        Op::UMulWithOverflow(lhs, rhs, bits) => {
+            let l = ctx.ensure_in_reg(lhs.value)?;
+            let r = ctx.ensure_in_reg(rhs.value)?;
+            let result = ctx.alloc.alloc();
+            let overflow = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst: result,
+                src: l,
+            });
+            ctx.out.push(MInst::ImulRR {
+                size: OpSize::S64,
+                dst: result,
+                src: r,
+            });
+            if *bits == 64 {
+                // 64-bit unsigned mul overflow not detectable with IMUL — conservatively report 0.
+                ctx.out.push(MInst::MovRI {
+                    size: OpSize::S32,
+                    dst: overflow,
+                    imm: 0,
+                });
+            } else {
+                let tmp = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst: tmp,
+                    src: result,
+                });
+                ctx.out.push(MInst::ShrImm {
+                    size: OpSize::S64,
+                    dst: tmp,
+                    imm: *bits as u8,
+                });
+                ctx.out.push(MInst::TestRR {
+                    size: OpSize::S64,
+                    src1: tmp,
+                    src2: tmp,
+                });
+                ctx.out.push(MInst::SetCC {
+                    cc: CondCode::Ne,
+                    dst: overflow,
+                });
+                ctx.out.push(MInst::MovzxB {
+                    dst: overflow,
+                    src: overflow,
+                });
+                let mask = (1u64 << bits) - 1;
+                ctx.out.push(MInst::AndRI {
+                    size: OpSize::S64,
+                    dst: result,
+                    imm: mask as i64,
+                });
+            }
+            ctx.regs.assign(vref, result);
+            let secondary = ValueRef::inst_secondary_result(vref.index());
+            ctx.regs.assign(secondary, overflow);
+        }
+
         Op::SymbolAddr(sym_id) => {
             // Defer LeaSymbol emission — only emit when ensure_in_reg is called.
             // This avoids dead code when the symbol is only used as a direct call callee
@@ -1923,16 +2515,22 @@ fn select_sext(ctx: &mut IselCtx, vref: ValueRef, val: &Operand) -> Option<()> {
     let src = ctx.ensure_in_reg(val.value)?;
     let dst = ctx.alloc.alloc();
     match val.annotation {
-        Some(Annotation::Signed(8)) | Some(Annotation::Unsigned(8)) => {
+        Some(Annotation::Signed(8))
+        | Some(Annotation::Unsigned(8))
+        | Some(Annotation::DontCare(8)) => {
             ctx.out.push(MInst::MovsxB { dst, src });
         }
-        Some(Annotation::Signed(16)) | Some(Annotation::Unsigned(16)) => {
+        Some(Annotation::Signed(16))
+        | Some(Annotation::Unsigned(16))
+        | Some(Annotation::DontCare(16)) => {
             ctx.out.push(MInst::MovsxW { dst, src });
         }
-        Some(Annotation::Signed(32)) | Some(Annotation::Unsigned(32)) => {
+        Some(Annotation::Signed(32))
+        | Some(Annotation::Unsigned(32))
+        | Some(Annotation::DontCare(32)) => {
             ctx.out.push(MInst::MovsxD { dst, src });
         }
-        Some(Annotation::Signed(_)) => {
+        Some(Annotation::Signed(_)) | Some(Annotation::DontCare(_)) => {
             ctx.out.push(MInst::MovRR {
                 size: OpSize::S64,
                 dst,
@@ -1969,20 +2567,26 @@ fn select_zext(ctx: &mut IselCtx, vref: ValueRef, val: &Operand) -> Option<()> {
     let src = ctx.ensure_in_reg(val.value)?;
     let dst = ctx.alloc.alloc();
     match val.annotation {
-        Some(Annotation::Signed(8)) | Some(Annotation::Unsigned(8)) => {
+        Some(Annotation::Signed(8))
+        | Some(Annotation::Unsigned(8))
+        | Some(Annotation::DontCare(8)) => {
             ctx.out.push(MInst::MovzxB { dst, src });
         }
-        Some(Annotation::Signed(16)) | Some(Annotation::Unsigned(16)) => {
+        Some(Annotation::Signed(16))
+        | Some(Annotation::Unsigned(16))
+        | Some(Annotation::DontCare(16)) => {
             ctx.out.push(MInst::MovzxW { dst, src });
         }
-        Some(Annotation::Signed(32)) | Some(Annotation::Unsigned(32)) => {
+        Some(Annotation::Signed(32))
+        | Some(Annotation::Unsigned(32))
+        | Some(Annotation::DontCare(32)) => {
             ctx.out.push(MInst::MovRR {
                 size: OpSize::S32,
                 dst,
                 src,
             });
         }
-        Some(Annotation::Unsigned(_)) => {
+        Some(Annotation::Unsigned(_)) | Some(Annotation::DontCare(_)) => {
             ctx.out.push(MInst::MovRR {
                 size: OpSize::S64,
                 dst,

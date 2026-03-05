@@ -136,7 +136,20 @@ fn has_wide_values<M: AbiMetadata>(
             {
                 return true;
             }
-            Op::SaturatingAdd(_, _, bits) | Op::SaturatingSub(_, _, bits)
+            Op::SaturatingAdd(_, _, bits)
+            | Op::SaturatingSub(_, _, bits)
+            | Op::SignedSaturatingAdd(_, _, bits)
+            | Op::SignedSaturatingSub(_, _, bits)
+                if *bits > legality.max_int_width() =>
+            {
+                return true;
+            }
+            Op::SAddWithOverflow(_, _, bits)
+            | Op::UAddWithOverflow(_, _, bits)
+            | Op::SSubWithOverflow(_, _, bits)
+            | Op::USubWithOverflow(_, _, bits)
+            | Op::SMulWithOverflow(_, _, bits)
+            | Op::UMulWithOverflow(_, _, bits)
                 if *bits > legality.max_int_width() =>
             {
                 return true;
@@ -178,7 +191,16 @@ fn has_128bit_values(func: &Function) -> bool {
             Op::Sext(_, 128) | Op::Zext(_, 128) => return true,
             Op::Bswap(_, 16) => return true,
             Op::RotateLeft(_, _, 128) | Op::RotateRight(_, _, 128) => return true,
-            Op::SaturatingAdd(_, _, 128) | Op::SaturatingSub(_, _, 128) => return true,
+            Op::SaturatingAdd(_, _, 128)
+            | Op::SaturatingSub(_, _, 128)
+            | Op::SignedSaturatingAdd(_, _, 128)
+            | Op::SignedSaturatingSub(_, _, 128) => return true,
+            Op::SAddWithOverflow(_, _, 128)
+            | Op::UAddWithOverflow(_, _, 128)
+            | Op::SSubWithOverflow(_, _, 128)
+            | Op::USubWithOverflow(_, _, 128)
+            | Op::SMulWithOverflow(_, _, 128)
+            | Op::UMulWithOverflow(_, _, 128) => return true,
             Op::Const(v) if needs_wide_const(v) => return true,
             _ => {}
         }
@@ -336,7 +358,20 @@ fn collect_wide_values<M: AbiMetadata>(
             {
                 wide.insert(vref.raw());
             }
-            Op::SaturatingAdd(_, _, bits) | Op::SaturatingSub(_, _, bits)
+            Op::SaturatingAdd(_, _, bits)
+            | Op::SaturatingSub(_, _, bits)
+            | Op::SignedSaturatingAdd(_, _, bits)
+            | Op::SignedSaturatingSub(_, _, bits)
+                if *bits > legality.max_int_width() =>
+            {
+                wide.insert(vref.raw());
+            }
+            Op::SAddWithOverflow(_, _, bits)
+            | Op::UAddWithOverflow(_, _, bits)
+            | Op::SSubWithOverflow(_, _, bits)
+            | Op::USubWithOverflow(_, _, bits)
+            | Op::SMulWithOverflow(_, _, bits)
+            | Op::UMulWithOverflow(_, _, bits)
                 if *bits > legality.max_int_width() =>
             {
                 wide.insert(vref.raw());
@@ -724,6 +759,48 @@ fn copy_inst<M: AbiMetadata + Clone>(
         }
         Op::SaturatingSub(a, op_b, bits) => {
             b.saturating_sub(remap_op(s, a), remap_op(s, op_b), *bits, o())
+        }
+        Op::SignedSaturatingAdd(a, op_b, bits) => {
+            b.signed_saturating_add(remap_op(s, a), remap_op(s, op_b), *bits, o())
+        }
+        Op::SignedSaturatingSub(a, op_b, bits) => {
+            b.signed_saturating_sub(remap_op(s, a), remap_op(s, op_b), *bits, o())
+        }
+        Op::SAddWithOverflow(a, op_b, bits) => {
+            let (primary, _secondary) =
+                b.sadd_with_overflow(remap_op(s, a), remap_op(s, op_b), *bits, o());
+            s.vmap.set(old_vref, Mapped::One(primary));
+            return;
+        }
+        Op::UAddWithOverflow(a, op_b, bits) => {
+            let (primary, _secondary) =
+                b.uadd_with_overflow(remap_op(s, a), remap_op(s, op_b), *bits, o());
+            s.vmap.set(old_vref, Mapped::One(primary));
+            return;
+        }
+        Op::SSubWithOverflow(a, op_b, bits) => {
+            let (primary, _secondary) =
+                b.ssub_with_overflow(remap_op(s, a), remap_op(s, op_b), *bits, o());
+            s.vmap.set(old_vref, Mapped::One(primary));
+            return;
+        }
+        Op::USubWithOverflow(a, op_b, bits) => {
+            let (primary, _secondary) =
+                b.usub_with_overflow(remap_op(s, a), remap_op(s, op_b), *bits, o());
+            s.vmap.set(old_vref, Mapped::One(primary));
+            return;
+        }
+        Op::SMulWithOverflow(a, op_b, bits) => {
+            let (primary, _secondary) =
+                b.smul_with_overflow(remap_op(s, a), remap_op(s, op_b), *bits, o());
+            s.vmap.set(old_vref, Mapped::One(primary));
+            return;
+        }
+        Op::UMulWithOverflow(a, op_b, bits) => {
+            let (primary, _secondary) =
+                b.umul_with_overflow(remap_op(s, a), remap_op(s, op_b), *bits, o());
+            s.vmap.set(old_vref, Mapped::One(primary));
+            return;
         }
         Op::ICmp(cmp_op, a, op_b) => b.icmp(*cmp_op, remap_op(s, a), remap_op(s, op_b), o()),
         Op::FCmp(cmp_op, a, op_b) => b.fcmp(*cmp_op, remap_op(s, a), remap_op(s, op_b), o()),

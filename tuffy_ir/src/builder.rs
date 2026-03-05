@@ -584,6 +584,156 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::SaturatingSub(a, b, bits), Type::Int, None, origin, None)
     }
 
+    /// Signed saturating addition in `bits` bits.
+    /// Result is clamped to [-(2^(bits-1)), 2^(bits-1)-1].
+    pub fn signed_saturating_add(
+        &mut self,
+        a: Operand,
+        b: Operand,
+        bits: u32,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(
+            Op::SignedSaturatingAdd(a, b, bits),
+            Type::Int,
+            None,
+            origin,
+            None,
+        )
+    }
+
+    /// Signed saturating subtraction in `bits` bits.
+    /// Result is clamped to [-(2^(bits-1)), 2^(bits-1)-1].
+    pub fn signed_saturating_sub(
+        &mut self,
+        a: Operand,
+        b: Operand,
+        bits: u32,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(
+            Op::SignedSaturatingSub(a, b, bits),
+            Type::Int,
+            None,
+            origin,
+            None,
+        )
+    }
+
+    /// Signed addition with overflow detection. Returns (wrapping_sum: Int, overflow: Bool).
+    pub fn sadd_with_overflow(
+        &mut self,
+        a: Operand,
+        b: Operand,
+        bits: u32,
+        origin: Origin,
+    ) -> (ValueRef, ValueRef) {
+        let primary = self.push_inst(
+            Op::SAddWithOverflow(a, b, bits),
+            Type::Int,
+            Some(Type::Bool),
+            origin,
+            None,
+        );
+        let secondary = ValueRef::inst_secondary_result(primary.index());
+        (primary, secondary)
+    }
+
+    /// Unsigned addition with overflow detection. Returns (wrapping_sum: Int, overflow: Bool).
+    pub fn uadd_with_overflow(
+        &mut self,
+        a: Operand,
+        b: Operand,
+        bits: u32,
+        origin: Origin,
+    ) -> (ValueRef, ValueRef) {
+        let primary = self.push_inst(
+            Op::UAddWithOverflow(a, b, bits),
+            Type::Int,
+            Some(Type::Bool),
+            origin,
+            None,
+        );
+        let secondary = ValueRef::inst_secondary_result(primary.index());
+        (primary, secondary)
+    }
+
+    /// Signed subtraction with overflow detection. Returns (wrapping_diff: Int, overflow: Bool).
+    pub fn ssub_with_overflow(
+        &mut self,
+        a: Operand,
+        b: Operand,
+        bits: u32,
+        origin: Origin,
+    ) -> (ValueRef, ValueRef) {
+        let primary = self.push_inst(
+            Op::SSubWithOverflow(a, b, bits),
+            Type::Int,
+            Some(Type::Bool),
+            origin,
+            None,
+        );
+        let secondary = ValueRef::inst_secondary_result(primary.index());
+        (primary, secondary)
+    }
+
+    /// Unsigned subtraction with overflow detection. Returns (wrapping_diff: Int, overflow: Bool).
+    pub fn usub_with_overflow(
+        &mut self,
+        a: Operand,
+        b: Operand,
+        bits: u32,
+        origin: Origin,
+    ) -> (ValueRef, ValueRef) {
+        let primary = self.push_inst(
+            Op::USubWithOverflow(a, b, bits),
+            Type::Int,
+            Some(Type::Bool),
+            origin,
+            None,
+        );
+        let secondary = ValueRef::inst_secondary_result(primary.index());
+        (primary, secondary)
+    }
+
+    /// Signed multiplication with overflow detection. Returns (wrapping_product: Int, overflow: Bool).
+    pub fn smul_with_overflow(
+        &mut self,
+        a: Operand,
+        b: Operand,
+        bits: u32,
+        origin: Origin,
+    ) -> (ValueRef, ValueRef) {
+        let primary = self.push_inst(
+            Op::SMulWithOverflow(a, b, bits),
+            Type::Int,
+            Some(Type::Bool),
+            origin,
+            None,
+        );
+        let secondary = ValueRef::inst_secondary_result(primary.index());
+        (primary, secondary)
+    }
+
+    /// Unsigned multiplication with overflow detection. Returns (wrapping_product: Int, overflow: Bool).
+    pub fn umul_with_overflow(
+        &mut self,
+        a: Operand,
+        b: Operand,
+        bits: u32,
+        origin: Origin,
+    ) -> (ValueRef, ValueRef) {
+        let primary = self.push_inst(
+            Op::UMulWithOverflow(a, b, bits),
+            Type::Int,
+            Some(Type::Bool),
+            origin,
+            None,
+        );
+        let secondary = ValueRef::inst_secondary_result(primary.index());
+        (primary, secondary)
+    }
+
     // ── Memory ──
 
     /// Load from pointer. `bytes` is the access width in bytes. Takes mem token input.

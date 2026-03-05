@@ -328,6 +328,8 @@ fn jcc_code(cc: CondCode) -> Code {
         CondCode::Be => Code::Jbe_rel32_64,
         CondCode::A => Code::Ja_rel32_64,
         CondCode::Ae => Code::Jae_rel32_64,
+        CondCode::O => Code::Jo_rel32_64,
+        CondCode::No => Code::Jno_rel32_64,
     }
 }
 
@@ -363,6 +365,12 @@ fn cmovcc_code(cc: CondCode, size: OpSize) -> Code {
         (CondCode::Ae, OpSize::S64) => Code::Cmovae_r64_rm64,
         (CondCode::Ae, OpSize::S32) => Code::Cmovae_r32_rm32,
         (CondCode::Ae, OpSize::S16) => Code::Cmovae_r16_rm16,
+        (CondCode::O, OpSize::S64) => Code::Cmovo_r64_rm64,
+        (CondCode::O, OpSize::S32) => Code::Cmovo_r32_rm32,
+        (CondCode::O, OpSize::S16) => Code::Cmovo_r16_rm16,
+        (CondCode::No, OpSize::S64) => Code::Cmovno_r64_rm64,
+        (CondCode::No, OpSize::S32) => Code::Cmovno_r32_rm32,
+        (CondCode::No, OpSize::S16) => Code::Cmovno_r16_rm16,
         (_, OpSize::S8) => unreachable!("cmovcc not supported for 8-bit"),
     }
 }
@@ -379,6 +387,8 @@ fn setcc_code(cc: CondCode) -> Code {
         CondCode::Be => Code::Setbe_rm8,
         CondCode::A => Code::Seta_rm8,
         CondCode::Ae => Code::Setae_rm8,
+        CondCode::O => Code::Seto_rm8,
+        CondCode::No => Code::Setno_rm8,
     }
 }
 

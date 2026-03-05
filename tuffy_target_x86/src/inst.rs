@@ -47,6 +47,10 @@ pub enum CondCode {
     A,
     /// Unsigned above or equal (CF=0)
     Ae,
+    /// Overflow (OF=1)
+    O,
+    /// Not overflow (OF=0)
+    No,
 }
 
 impl CondCode {
@@ -63,6 +67,8 @@ impl CondCode {
             CondCode::Be => 0x6,
             CondCode::A => 0x7,
             CondCode::Ae => 0x3,
+            CondCode::O => 0x0,
+            CondCode::No => 0x1,
         }
     }
 }
