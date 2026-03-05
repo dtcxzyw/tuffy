@@ -432,6 +432,45 @@ vN = stack_slot <bytes>
 
 Allocate `bytes` bytes on the stack. Returns a `ptr(0)` to the allocated memory.
 
+### `memcpy`
+
+```
+vN = memcpy vDst, vSrc, vCount, align=<N>, vMem
+```
+
+Copy `vCount` bytes from `vSrc` to `vDst`. The source and destination regions must
+not overlap (non-overlapping memcpy semantics). `align` is the minimum alignment hint
+for both pointers (must be a power of two). Takes a `mem` token as input (MemoryDef)
+and produces a new `mem` token.
+
+**Semantics**: `evalMemCopy(mem, dst, src, count) = evalStore(mem, dst, readBytes(mem, src, count))`
+
+### `memmove`
+
+```
+vN = memmove vDst, vSrc, vCount, align=<N>, vMem
+```
+
+Copy `vCount` bytes from `vSrc` to `vDst`. Unlike `memcpy`, overlapping regions are
+handled correctly: all source bytes are read before any destination bytes are written.
+`align` is the minimum alignment hint for both pointers. Takes a `mem` token as input
+(MemoryDef) and produces a new `mem` token.
+
+**Semantics**: `evalMemMove(mem, dst, src, count) = evalStore(mem, dst, readBytes(mem, src, count))`
+(bytes are captured from `mem` before the store, making overlap safe)
+
+### `memset`
+
+```
+vN = memset vDst, vVal, vCount, align=<N>, vMem
+```
+
+Fill `vCount` bytes at `vDst` with the byte value `vVal` (low 8 bits). `align` is
+the minimum alignment hint for the destination pointer. Takes a `mem` token as input
+(MemoryDef) and produces a new `mem` token.
+
+**Semantics**: `evalMemSet(mem, dst, val, count) = evalStore(mem, dst, replicate(count, val & 0xFF))`
+
 ## Atomic Operations
 
 Atomic operations provide thread-safe memory access with explicit memory ordering
