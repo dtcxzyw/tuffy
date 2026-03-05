@@ -2359,12 +2359,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             } else {
                                 ir_ty.unwrap_or(Type::Int)
                             };
+                            let ann = translate_annotation(ty);
                             let loaded = self.builder.load(
                                 slot.into(),
                                 size as u32,
                                 load_ty,
                                 self.current_mem.into(),
-                                None,
+                                ann,
                                 Origin::synthetic(),
                             );
                             return Some(loaded);
@@ -2386,12 +2387,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         if matches!(translate_ty(self.tcx, ty), Some(Type::Int))
                             && (size <= 8 || ty.is_integral())
                         {
+                            let ann = translate_annotation(ty);
                             let loaded = self.builder.load(
                                 v.into(),
                                 size as u32,
                                 Type::Int,
                                 self.current_mem.into(),
-                                None,
+                                ann,
                                 Origin::synthetic(),
                             );
                             return Some(loaded);
