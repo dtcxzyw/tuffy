@@ -326,6 +326,28 @@ def evalSelect (cond : Bool) (tv fv : Value) : Value :=
 def evalBoolToInt (b : Bool) : Value :=
   .int (if b then 1 else 0)
 
+-- Memory bulk operation semantics
+
+/-- MemCopy: copy `count` bytes from `src` to `dst` (non-overlapping, memcpy semantics).
+    Reads `count` bytes starting at `src` and writes them to `dst`.
+    The regions must not overlap; behavior on overlapping regions is undefined. -/
+def evalMemCopy (mem : Memory) (dst src : Int) (count : Nat) : Memory :=
+  let bs := List.ofFn (fun (i : Fin count) => mem.bytes (src + i.val))
+  evalStore mem dst bs
+
+/-- MemMove: copy `count` bytes from `src` to `dst` (may overlap, memmove semantics).
+    Semantically equivalent to reading all source bytes first, then writing them to dst.
+    Correctly handles overlapping regions. -/
+def evalMemMove (mem : Memory) (dst src : Int) (count : Nat) : Memory :=
+  let bs := List.ofFn (fun (i : Fin count) => mem.bytes (src + i.val))
+  evalStore mem dst bs
+
+/-- MemSet: fill `count` bytes starting at `dst` with `val` (low 8 bits).
+    Writes the same byte value to each address in [dst, dst+count). -/
+def evalMemSet (mem : Memory) (dst : Int) (val : UInt8) (count : Nat) : Memory :=
+  let bs := List.replicate count (.bits val)
+  evalStore mem dst bs
+
 -- Atomic operation semantics (sequential model)
 -- NOTE: These define sequential semantics only. A formal concurrency model
 -- (e.g., based on C11 or a custom weak memory model) is TBD. Memory ordering
