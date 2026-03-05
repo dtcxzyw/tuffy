@@ -339,6 +339,29 @@ pub fn translate_function<'tcx>(
             }
         }
 
+        // Allocate stack slots for all >16 byte locals (arrays, large structs).
+        // These must be stored in memory, not treated as SSA values.
+        for local in mir.local_decls.indices() {
+            if !ctx.stack_locals.is_stack(local) {
+                let ty = monomorphize(mir.local_decls[local].ty);
+                let size = type_size(tcx, ty).unwrap_or(0);
+                if size > 16 {
+                    let slot = ctx.builder.stack_slot(size as u32, Origin::synthetic());
+                    if let Some(old_val) = ctx.locals.get(local) {
+                        ctx.current_mem = ctx.builder.store(
+                            old_val.into(),
+                            slot.into(),
+                            size as u32,
+                            ctx.current_mem.into(),
+                            Origin::synthetic(),
+                        );
+                    }
+                    ctx.locals.set(local, slot);
+                    ctx.stack_locals.mark(local);
+                }
+            }
+        }
+
         // Promote locals used in a block that precedes their assignment
         // block in declaration order.
         let collect_used_locals = |op: &Operand<'tcx>| -> Option<mir::Local> {
