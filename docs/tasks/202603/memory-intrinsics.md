@@ -1,8 +1,8 @@
 # Introduce memcpy/memset/memmove Intrinsics
 
-- Status: Draft
+- Status: Completed
 - Created: 2026-03-05
-- Completed: N/A
+- Completed: 2026-03-05
 - Parent: N/A
 
 ## Description
