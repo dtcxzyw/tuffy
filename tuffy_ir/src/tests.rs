@@ -1846,3 +1846,144 @@ fn verify_detects_dontcare_zero() {
         "should reject DontCare(0)"
     );
 }
+
+#[test]
+fn mem_copy_builder_and_display() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("test_memcpy");
+    let mut func = Function::new(
+        name,
+        vec![Type::Ptr(0), Type::Ptr(0), Type::Int],
+        vec![],
+        vec![],
+        None,
+        None,
+    );
+    let mut b = Builder::new(&mut func);
+
+    let root = b.create_region(RegionKind::Function);
+    b.enter_region(root);
+    let bb = b.create_block();
+    b.switch_to_block(bb);
+
+    let mem0 = b.add_block_arg(bb, Type::Mem);
+    let dst = b.param(0, Type::Ptr(0), None, Origin::synthetic());
+    let src = b.param(1, Type::Ptr(0), None, Origin::synthetic());
+    let count = b.param(2, Type::Int, None, Origin::synthetic());
+    let mem1 = b.mem_copy(
+        dst.into(),
+        src.into(),
+        count.into(),
+        1,
+        mem0.into(),
+        Origin::synthetic(),
+    );
+    b.ret(None, mem1.into(), Origin::synthetic());
+    b.exit_region();
+
+    assert!(matches!(
+        func.instructions[3].op,
+        Op::MemCopy(_, _, _, 1, _)
+    ));
+    assert_eq!(func.instructions[3].ty, Type::Mem);
+
+    let output = format!("{}", func.display(&st));
+    assert!(
+        output.contains("memcpy"),
+        "should display 'memcpy': {output}"
+    );
+    assert!(output.contains("align=1"), "should display align: {output}");
+}
+
+#[test]
+fn mem_move_builder_and_display() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("test_memmove");
+    let mut func = Function::new(
+        name,
+        vec![Type::Ptr(0), Type::Ptr(0), Type::Int],
+        vec![],
+        vec![],
+        None,
+        None,
+    );
+    let mut b = Builder::new(&mut func);
+
+    let root = b.create_region(RegionKind::Function);
+    b.enter_region(root);
+    let bb = b.create_block();
+    b.switch_to_block(bb);
+
+    let mem0 = b.add_block_arg(bb, Type::Mem);
+    let dst = b.param(0, Type::Ptr(0), None, Origin::synthetic());
+    let src = b.param(1, Type::Ptr(0), None, Origin::synthetic());
+    let count = b.param(2, Type::Int, None, Origin::synthetic());
+    let mem1 = b.mem_move(
+        dst.into(),
+        src.into(),
+        count.into(),
+        8,
+        mem0.into(),
+        Origin::synthetic(),
+    );
+    b.ret(None, mem1.into(), Origin::synthetic());
+    b.exit_region();
+
+    assert!(matches!(
+        func.instructions[3].op,
+        Op::MemMove(_, _, _, 8, _)
+    ));
+    assert_eq!(func.instructions[3].ty, Type::Mem);
+
+    let output = format!("{}", func.display(&st));
+    assert!(
+        output.contains("memmove"),
+        "should display 'memmove': {output}"
+    );
+    assert!(output.contains("align=8"), "should display align: {output}");
+}
+
+#[test]
+fn mem_set_builder_and_display() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("test_memset");
+    let mut func = Function::new(
+        name,
+        vec![Type::Ptr(0), Type::Int, Type::Int],
+        vec![],
+        vec![],
+        None,
+        None,
+    );
+    let mut b = Builder::new(&mut func);
+
+    let root = b.create_region(RegionKind::Function);
+    b.enter_region(root);
+    let bb = b.create_block();
+    b.switch_to_block(bb);
+
+    let mem0 = b.add_block_arg(bb, Type::Mem);
+    let dst = b.param(0, Type::Ptr(0), None, Origin::synthetic());
+    let val = b.param(1, Type::Int, None, Origin::synthetic());
+    let count = b.param(2, Type::Int, None, Origin::synthetic());
+    let mem1 = b.mem_set(
+        dst.into(),
+        val.into(),
+        count.into(),
+        4,
+        mem0.into(),
+        Origin::synthetic(),
+    );
+    b.ret(None, mem1.into(), Origin::synthetic());
+    b.exit_region();
+
+    assert!(matches!(func.instructions[3].op, Op::MemSet(_, _, _, 4, _)));
+    assert_eq!(func.instructions[3].ty, Type::Mem);
+
+    let output = format!("{}", func.display(&st));
+    assert!(
+        output.contains("memset"),
+        "should display 'memset': {output}"
+    );
+    assert!(output.contains("align=4"), "should display align: {output}");
+}
