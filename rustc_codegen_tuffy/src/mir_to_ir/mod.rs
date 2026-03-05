@@ -115,16 +115,17 @@ pub fn translate_function<'tcx>(
         match translate_ty(tcx, ty) {
             Some(Type::Unit) | None => continue,
             Some(ir_ty) => {
-                // Keep MIR→IR parameters semantic; target ABI lowering happens in backend/codegen.
-                params.push(ir_ty.clone());
+                let sz = type_size(tcx, ty).unwrap_or(0);
+                // For >16 byte parameters, the caller passes a pointer per x86-64 ABI.
+                let param_ty = if sz > 16 { Type::Ptr(0) } else { ir_ty.clone() };
+                params.push(param_ty);
                 // For composite types of 9–16 bytes that contain no floats
                 // and are passed as an integer (not a pointer), annotate as
                 // Unsigned(128) so the legalizer splits the param into two
                 // 8-byte slots — matching the x86-64 SysV ABI which passes
                 // such values in two integer registers.
                 let base_ann = translate_annotation(ty);
-                let param_ann = if base_ann.is_none() && ir_ty == Type::Int {
-                    let sz = type_size(tcx, ty).unwrap_or(0);
+                let param_ann = if base_ann.is_none() && ir_ty == Type::Int && sz <= 16 {
                     if sz > 8 && sz <= 16 && !ty_contains_float(tcx, ty) {
                         Some(Annotation::Unsigned(128))
                     } else {

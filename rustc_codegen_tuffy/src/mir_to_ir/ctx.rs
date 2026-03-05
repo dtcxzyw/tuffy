@@ -279,14 +279,23 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 self.fat_locals.set(local, metadata);
             } else {
                 let ir_ty_val = ir_ty.expect("checked above");
+                let sz = type_size(self.tcx, ty).unwrap_or(0);
+
+                // For >16 byte parameters, the caller passes a pointer per x86-64 ABI.
+                // The parameter receives this pointer, so create it as Ptr type.
+                let (param_ty, is_indirect) = if sz > 16 {
+                    (Type::Ptr(0), true)
+                } else {
+                    (ir_ty_val, false)
+                };
+
                 // For composite types of 9–16 bytes that contain no floats
                 // and passed as an integer, annotate the parameter as
                 // Unsigned(128) so the legalizer treats it as a two-slot
                 // (lo, hi) value — matching the caller's ABI which passes
                 // such values in two registers.
                 let base_ann = translate_annotation(ty);
-                let ann = if base_ann.is_none() && ir_ty_val == Type::Int {
-                    let sz = type_size(self.tcx, ty).unwrap_or(0);
+                let ann = if !is_indirect && base_ann.is_none() && param_ty == Type::Int {
                     if sz > 8 && sz <= 16 && !ty_contains_float(self.tcx, ty) {
                         Some(Annotation::Unsigned(128))
                     } else {
@@ -295,13 +304,21 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 } else {
                     base_ann
                 };
+
                 let val = self.builder.param(
                     param_idx,
-                    ir_ty_val,
+                    param_ty,
                     ann,
                     Origin::synthetic(),
                 );
                 self.locals.set(local, val);
+
+                // Mark >16 byte parameters as stack locals so element access
+                // knows to dereference the pointer.
+                if is_indirect {
+                    self.stack_locals.mark(local);
+                }
+
                 param_idx += 1;
             }
         }
