@@ -175,6 +175,15 @@ fn fmt_memory_ordering(ord: &MemoryOrdering) -> &'static str {
     }
 }
 
+fn fmt_float_type(ft: &FloatType) -> &'static str {
+    match ft {
+        FloatType::F32 => "f32",
+        FloatType::F64 => "f64",
+        FloatType::F16 => "f16",
+        FloatType::BF16 => "bf16",
+    }
+}
+
 fn fmt_atomic_rmw_op(op: &AtomicRmwOp) -> &'static str {
     match op {
         AtomicRmwOp::Xchg => "xchg",
@@ -351,6 +360,7 @@ fn fmt_inst(
             )
         }
         Op::Const(imm) => format!("{v} = iconst {imm}"),
+        Op::FConst(ft, bits) => format!("{v} = fconst.{} {:#x}", fmt_float_type(ft), bits),
         Op::BConst(val) => format!("{v} = bconst {val}"),
         Op::ICmp(cmp, a, b) => {
             format!(

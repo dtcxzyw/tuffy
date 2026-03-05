@@ -242,6 +242,8 @@ pub enum Op {
     Const(BigInt),
     /// Boolean constant: true or false.
     BConst(bool),
+    /// Float constant stored as IEEE 754 bit pattern.
+    FConst(FloatType, u64),
 
     // -- Comparison --
     /// Integer comparison. Returns Bool.

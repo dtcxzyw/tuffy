@@ -53,6 +53,8 @@ impl RegAllocInst for VInst {
             // dst op= src (read-modify-write)
             MInst::AddRR { dst, src, .. }
             | MInst::SubRR { dst, src, .. }
+            | MInst::AdcRR { dst, src, .. }
+            | MInst::SbbRR { dst, src, .. }
             | MInst::ImulRR { dst, src, .. }
             | MInst::OrRR { dst, src, .. }
             | MInst::AndRR { dst, src, .. }

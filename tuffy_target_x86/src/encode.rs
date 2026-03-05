@@ -159,6 +159,24 @@ fn sub_code(size: OpSize) -> Code {
     }
 }
 
+fn adc_code(size: OpSize) -> Code {
+    match size {
+        OpSize::S64 => Code::Adc_rm64_r64,
+        OpSize::S32 => Code::Adc_rm32_r32,
+        OpSize::S16 => Code::Adc_rm16_r16,
+        OpSize::S8 => Code::Adc_rm8_r8,
+    }
+}
+
+fn sbb_code(size: OpSize) -> Code {
+    match size {
+        OpSize::S64 => Code::Sbb_rm64_r64,
+        OpSize::S32 => Code::Sbb_rm32_r32,
+        OpSize::S16 => Code::Sbb_rm16_r16,
+        OpSize::S8 => Code::Sbb_rm8_r8,
+    }
+}
+
 fn or_code(size: OpSize) -> Code {
     match size {
         OpSize::S64 => Code::Or_rm64_r64,
@@ -544,6 +562,26 @@ fn encode_inst(inst: &PInst, ctx: &mut EncodeContext) {
             ctx.emit(
                 Instruction::with2(
                     sub_code(*size),
+                    gpr_to_iced(*dst, *size),
+                    gpr_to_iced(*src, *size),
+                )
+                .unwrap(),
+            );
+        }
+        MInst::AdcRR { size, dst, src } => {
+            ctx.emit(
+                Instruction::with2(
+                    adc_code(*size),
+                    gpr_to_iced(*dst, *size),
+                    gpr_to_iced(*src, *size),
+                )
+                .unwrap(),
+            );
+        }
+        MInst::SbbRR { size, dst, src } => {
+            ctx.emit(
+                Instruction::with2(
+                    sbb_code(*size),
                     gpr_to_iced(*dst, *size),
                     gpr_to_iced(*src, *size),
                 )

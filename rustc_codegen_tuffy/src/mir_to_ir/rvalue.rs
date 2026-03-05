@@ -1750,13 +1750,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         } else {
                             self.builder.ui_to_fp(operand, ft, Origin::synthetic())
                         };
-                        // Bitcast Float → Int (bit pattern)
-                        Some(self.builder.bitcast(
-                            float_res.into(),
-                            Type::Int,
-                            None,
-                            Origin::synthetic(),
-                        ))
+                        Some(float_res)
                     }
                     CastKind::FloatToFloat => {
                         let src_ty = match operand {
@@ -1780,24 +1774,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         if src_ft == dst_ft {
                             return Some(val);
                         }
-                        // Bitcast Int (bit pattern) → source Float
-                        let float_val = self.builder.bitcast(
-                            val.into(),
-                            Type::Float(src_ft),
-                            None,
-                            Origin::synthetic(),
-                        );
-                        // Convert between float formats
+                        // Convert between float formats; val is already Float(src_ft).
                         let converted =
                             self.builder
-                                .fp_convert(float_val.into(), dst_ft, Origin::synthetic());
-                        // Bitcast result Float → Int (bit pattern)
-                        Some(self.builder.bitcast(
-                            converted.into(),
-                            Type::Int,
-                            None,
-                            Origin::synthetic(),
-                        ))
+                                .fp_convert(val.into(), dst_ft, Origin::synthetic());
+                        Some(converted)
                     }
                     // PLACEHOLDER_CATCH_ALL_CAST
                     // Pointer casts and transmutes are bitwise moves.
@@ -1866,17 +1847,58 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     let target_size =
                                         type_size(self.tcx, target_ty_mono).unwrap_or(0);
                                     let target_ir_ty = translate_ty(self.tcx, target_ty_mono);
-                                    if target_size > 0 && matches!(target_ir_ty, Some(Type::Int)) {
+                                    if target_size > 0
+                                        && matches!(
+                                            target_ir_ty,
+                                            Some(Type::Int | Type::Float(_))
+                                        )
+                                    {
+                                        let load_ty = target_ir_ty.unwrap();
                                         let loaded = self.builder.load(
                                             val.into(),
                                             target_size as u32,
-                                            Type::Int,
+                                            load_ty,
                                             self.current_mem.into(),
                                             None,
                                             Origin::synthetic(),
                                         );
                                         return Some(loaded);
                                     }
+                                }
+                            }
+                        }
+                        // Transmute from an Int register value to a Float type: reinterpret
+                        // the bit pattern via a temporary stack slot (no bitcast in IR).
+                        if matches!(kind, CastKind::Transmute)
+                            && matches!(
+                                self.builder.value_type(val),
+                                Some(Type::Int | Type::Bool)
+                            )
+                        {
+                            if let Some(Type::Float(ft)) =
+                                translate_ty(self.tcx, target_ty_mono)
+                            {
+                                let size =
+                                    type_size(self.tcx, target_ty_mono).unwrap_or(0) as u32;
+                                if size > 0 && size <= 8 {
+                                    let slot =
+                                        self.builder.stack_slot(size, Origin::synthetic());
+                                    self.current_mem = self.builder.store(
+                                        val.into(),
+                                        slot.into(),
+                                        size,
+                                        self.current_mem.into(),
+                                        Origin::synthetic(),
+                                    );
+                                    let loaded = self.builder.load(
+                                        slot.into(),
+                                        size,
+                                        Type::Float(ft),
+                                        self.current_mem.into(),
+                                        None,
+                                        Origin::synthetic(),
+                                    );
+                                    return Some(loaded);
                                 }
                             }
                         }
@@ -2374,26 +2396,17 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     Operand::Constant(c) => Some(self.monomorphize(c.ty())),
                     _ => None,
                 };
-                // Float negation: XOR the sign bit in the integer bit pattern.
+                // Float negation: use FNeg IR op, which keeps the result Float-typed.
                 if let Some(ty) = op_ty {
                     if ty.is_floating_point() {
-                        // Bitcast Float→Int so we can XOR the sign bit.
-                        let v = if matches!(self.builder.value_type(v), Some(Type::Float(_))) {
-                            self.builder
-                                .bitcast(v.into(), Type::Int, None, Origin::synthetic())
-                        } else {
-                            self.coerce_to_int(v)
+                        let ft = match ty.kind() {
+                            ty::Float(ty::FloatTy::F32) => FloatType::F32,
+                            ty::Float(ty::FloatTy::F64) => FloatType::F64,
+                            _ => return Some(v),
                         };
-                        let sign_mask = if type_size(self.tcx, ty) == Some(4) {
-                            0x80000000_u32 as i64
-                        } else {
-                            i64::MIN // 0x8000000000000000
-                        };
-                        let mask = self.builder.iconst(sign_mask, Origin::synthetic());
-                        return Some(self.builder.xor(
+                        return Some(self.builder.fneg(
                             v.into(),
-                            mask.into(),
-                            None,
+                            Type::Float(ft),
                             Origin::synthetic(),
                         ));
                     }

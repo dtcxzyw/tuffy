@@ -6,7 +6,7 @@ use rustc_middle::ty::{self, Instance, TyCtxt};
 use tuffy_ir::builder::Builder;
 use tuffy_ir::instruction::{Operand as IrOperand, Origin};
 use tuffy_ir::module::SymbolTable;
-use tuffy_ir::types::{Annotation, Type};
+use tuffy_ir::types::{Annotation, FloatType, Type};
 use tuffy_ir::value::ValueRef;
 
 pub(super) fn translate_int_to_int_cast(
@@ -407,10 +407,13 @@ pub(super) fn translate_scalar(
             let val = bits as i64;
             Some(builder.iconst(val, Origin::synthetic()))
         }
-        ty::Float(_) => {
-            // Store IEEE 754 bit pattern as an integer (no XMM support).
-            let val = BigInt::from(bits);
-            Some(builder.iconst(val, Origin::synthetic()))
+        ty::Float(float_ty) => {
+            let ft = match float_ty {
+                ty::FloatTy::F32 => FloatType::F32,
+                ty::FloatTy::F64 => FloatType::F64,
+                _ => return None,
+            };
+            Some(builder.fconst(ft, bits as u64, Origin::synthetic()))
         }
         ty::Adt(..) => {
             // Newtype structs (e.g., ExitCode(u8)) are represented as

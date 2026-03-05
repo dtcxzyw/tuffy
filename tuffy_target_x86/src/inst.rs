@@ -90,6 +90,10 @@ pub enum MInst<R: RegType> {
     AddRR { size: OpSize, dst: R, src: R },
     /// sub dst, src (dst -= src)
     SubRR { size: OpSize, dst: R, src: R },
+    /// adc dst, src — add with carry (dst += src + CF)
+    AdcRR { size: OpSize, dst: R, src: R },
+    /// sbb dst, src — subtract with borrow (dst -= src + CF)
+    SbbRR { size: OpSize, dst: R, src: R },
     /// imul dst, src (dst *= src)
     ImulRR { size: OpSize, dst: R, src: R },
     /// ret

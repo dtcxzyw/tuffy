@@ -508,6 +508,15 @@ impl FuncVerifier<'_> {
                 }
             }
 
+            Op::FConst(ft, _) => {
+                if inst.ty != Type::Float(*ft) {
+                    self.result.error(
+                        loc,
+                        format!("fconst result must be Float({ft:?}), got {:?}", inst.ty),
+                    );
+                }
+            }
+
             Op::BConst(_) => {
                 if inst.ty != Type::Bool {
                     self.result.error(
@@ -743,6 +752,8 @@ impl FuncVerifier<'_> {
     fn verify_instruction_final(&mut self, inst: &Instruction, loc: &Location) {
         match &inst.op {
             // -- Float binary --
+            // Operands may be Float (loaded from a stack slot) or Int (bit-pattern
+            // convention for scalars).  Accept both; only the result type is checked.
             Op::FAdd(a, b, _)
             | Op::FSub(a, b, _)
             | Op::FMul(a, b, _)

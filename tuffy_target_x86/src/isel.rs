@@ -242,6 +242,343 @@ fn emit_partial_store(ctx: &mut IselCtx, base: VReg, base_offset: i32, src: VReg
     }
 }
 
+/// Get the high 64 bits of a 128-bit value as a VReg.
+///
+/// First checks the secondary result register (set by previous 128-bit ops).
+/// If not available, derives hi from lo using sign- or zero-extension based on annotation.
+fn ensure_hi_in_reg(
+    ctx: &mut IselCtx,
+    val: ValueRef,
+    annotation: Option<Annotation>,
+) -> Option<VReg> {
+    let secondary = ValueRef::inst_secondary_result(val.index());
+    if let Some(vreg) = ctx.regs.get(secondary) {
+        return Some(vreg);
+    }
+    // Derive hi from lo half.
+    let lo = ctx.regs.get(val)?;
+    let hi = ctx.alloc.alloc();
+    match annotation {
+        Some(Annotation::Signed(_)) => {
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst: hi,
+                src: lo,
+            });
+            ctx.out.push(MInst::SarImm {
+                size: OpSize::S64,
+                dst: hi,
+                imm: 63,
+            });
+        }
+        _ => {
+            ctx.out.push(MInst::MovRI {
+                size: OpSize::S32,
+                dst: hi,
+                imm: 0,
+            });
+        }
+    }
+    Some(hi)
+}
+
+/// Handle integer operations with 128-bit result annotations (i128/u128).
+///
+/// Keeps lo half in the primary vreg and hi half in the secondary vreg.
+/// Returns Some(()) if the operation was handled, None to fall through.
+fn select_128bit_op(ctx: &mut IselCtx, vref: ValueRef, op: &Op, func: &Function) -> Option<()> {
+    let _ann = func.inst(vref.index()).result_annotation;
+    match op {
+        Op::Add(lhs, rhs)
+        | Op::Sub(lhs, rhs)
+        | Op::And(lhs, rhs)
+        | Op::Or(lhs, rhs)
+        | Op::Xor(lhs, rhs)
+        | Op::Mul(lhs, rhs) => {
+            let lo_l = ctx.ensure_in_reg(lhs.value)?;
+            let lo_r = ctx.ensure_in_reg(rhs.value)?;
+            let hi_l = ensure_hi_in_reg(ctx, lhs.value, lhs.annotation)?;
+            let hi_r = ensure_hi_in_reg(ctx, rhs.value, rhs.annotation)?;
+
+            let lo_result = ctx.alloc.alloc();
+            let hi_result = ctx.alloc.alloc();
+
+            match op {
+                Op::Add(_, _) => {
+                    ctx.out.push(MInst::MovRR {
+                        size: OpSize::S64,
+                        dst: lo_result,
+                        src: lo_l,
+                    });
+                    ctx.out.push(MInst::AddRR {
+                        size: OpSize::S64,
+                        dst: lo_result,
+                        src: lo_r,
+                    });
+                    ctx.out.push(MInst::MovRR {
+                        size: OpSize::S64,
+                        dst: hi_result,
+                        src: hi_l,
+                    });
+                    ctx.out.push(MInst::AdcRR {
+                        size: OpSize::S64,
+                        dst: hi_result,
+                        src: hi_r,
+                    });
+                }
+                Op::Sub(_, _) => {
+                    ctx.out.push(MInst::MovRR {
+                        size: OpSize::S64,
+                        dst: lo_result,
+                        src: lo_l,
+                    });
+                    ctx.out.push(MInst::SubRR {
+                        size: OpSize::S64,
+                        dst: lo_result,
+                        src: lo_r,
+                    });
+                    ctx.out.push(MInst::MovRR {
+                        size: OpSize::S64,
+                        dst: hi_result,
+                        src: hi_l,
+                    });
+                    ctx.out.push(MInst::SbbRR {
+                        size: OpSize::S64,
+                        dst: hi_result,
+                        src: hi_r,
+                    });
+                }
+                Op::Xor(_, _) => {
+                    ctx.out.push(MInst::MovRR {
+                        size: OpSize::S64,
+                        dst: lo_result,
+                        src: lo_l,
+                    });
+                    ctx.out.push(MInst::XorRR {
+                        size: OpSize::S64,
+                        dst: lo_result,
+                        src: lo_r,
+                    });
+                    ctx.out.push(MInst::MovRR {
+                        size: OpSize::S64,
+                        dst: hi_result,
+                        src: hi_l,
+                    });
+                    ctx.out.push(MInst::XorRR {
+                        size: OpSize::S64,
+                        dst: hi_result,
+                        src: hi_r,
+                    });
+                }
+                Op::Or(_, _) => {
+                    ctx.out.push(MInst::MovRR {
+                        size: OpSize::S64,
+                        dst: lo_result,
+                        src: lo_l,
+                    });
+                    ctx.out.push(MInst::OrRR {
+                        size: OpSize::S64,
+                        dst: lo_result,
+                        src: lo_r,
+                    });
+                    ctx.out.push(MInst::MovRR {
+                        size: OpSize::S64,
+                        dst: hi_result,
+                        src: hi_l,
+                    });
+                    ctx.out.push(MInst::OrRR {
+                        size: OpSize::S64,
+                        dst: hi_result,
+                        src: hi_r,
+                    });
+                }
+                Op::And(_, _) => {
+                    ctx.out.push(MInst::MovRR {
+                        size: OpSize::S64,
+                        dst: lo_result,
+                        src: lo_l,
+                    });
+                    ctx.out.push(MInst::AndRR {
+                        size: OpSize::S64,
+                        dst: lo_result,
+                        src: lo_r,
+                    });
+                    ctx.out.push(MInst::MovRR {
+                        size: OpSize::S64,
+                        dst: hi_result,
+                        src: hi_l,
+                    });
+                    ctx.out.push(MInst::AndRR {
+                        size: OpSize::S64,
+                        dst: hi_result,
+                        src: hi_r,
+                    });
+                }
+                Op::Mul(_, _) => {
+                    // 128-bit mul: lo = lo_l * lo_r (mod 2^64)
+                    // hi = lo_l*hi_r + hi_l*lo_r (partial; ignores carry from lo*lo)
+                    ctx.out.push(MInst::MovRR {
+                        size: OpSize::S64,
+                        dst: lo_result,
+                        src: lo_l,
+                    });
+                    ctx.out.push(MInst::ImulRR {
+                        size: OpSize::S64,
+                        dst: lo_result,
+                        src: lo_r,
+                    });
+                    let tmp1 = ctx.alloc.alloc();
+                    ctx.out.push(MInst::MovRR {
+                        size: OpSize::S64,
+                        dst: tmp1,
+                        src: lo_l,
+                    });
+                    ctx.out.push(MInst::ImulRR {
+                        size: OpSize::S64,
+                        dst: tmp1,
+                        src: hi_r,
+                    });
+                    let tmp2 = ctx.alloc.alloc();
+                    ctx.out.push(MInst::MovRR {
+                        size: OpSize::S64,
+                        dst: tmp2,
+                        src: hi_l,
+                    });
+                    ctx.out.push(MInst::ImulRR {
+                        size: OpSize::S64,
+                        dst: tmp2,
+                        src: lo_r,
+                    });
+                    ctx.out.push(MInst::MovRR {
+                        size: OpSize::S64,
+                        dst: hi_result,
+                        src: tmp1,
+                    });
+                    ctx.out.push(MInst::AddRR {
+                        size: OpSize::S64,
+                        dst: hi_result,
+                        src: tmp2,
+                    });
+                }
+                _ => unreachable!(),
+            }
+
+            ctx.regs.assign(vref, lo_result);
+            ctx.regs
+                .assign(ValueRef::inst_secondary_result(vref.index()), hi_result);
+            Some(())
+        }
+
+        Op::Sext(val, _) => {
+            let lo = ctx.ensure_in_reg(val.value)?;
+            let lo_result = ctx.alloc.alloc();
+            // Sign-extend lo based on source bit-width.
+            match val.annotation {
+                Some(Annotation::Signed(8))
+                | Some(Annotation::Unsigned(8))
+                | Some(Annotation::DontCare(8)) => {
+                    ctx.out.push(MInst::MovsxB {
+                        dst: lo_result,
+                        src: lo,
+                    });
+                }
+                Some(Annotation::Signed(16))
+                | Some(Annotation::Unsigned(16))
+                | Some(Annotation::DontCare(16)) => {
+                    ctx.out.push(MInst::MovsxW {
+                        dst: lo_result,
+                        src: lo,
+                    });
+                }
+                Some(Annotation::Signed(32))
+                | Some(Annotation::Unsigned(32))
+                | Some(Annotation::DontCare(32)) => {
+                    ctx.out.push(MInst::MovsxD {
+                        dst: lo_result,
+                        src: lo,
+                    });
+                }
+                _ => {
+                    ctx.out.push(MInst::MovRR {
+                        size: OpSize::S64,
+                        dst: lo_result,
+                        src: lo,
+                    });
+                }
+            }
+            // hi = sign extension of lo_result
+            let hi_result = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst: hi_result,
+                src: lo_result,
+            });
+            ctx.out.push(MInst::SarImm {
+                size: OpSize::S64,
+                dst: hi_result,
+                imm: 63,
+            });
+            ctx.regs.assign(vref, lo_result);
+            ctx.regs
+                .assign(ValueRef::inst_secondary_result(vref.index()), hi_result);
+            Some(())
+        }
+
+        Op::Zext(val, _) => {
+            let lo = ctx.ensure_in_reg(val.value)?;
+            let lo_result = ctx.alloc.alloc();
+            // Zero-extend lo based on source bit-width.
+            match val.annotation {
+                Some(Annotation::Signed(8))
+                | Some(Annotation::Unsigned(8))
+                | Some(Annotation::DontCare(8)) => {
+                    ctx.out.push(MInst::MovzxB {
+                        dst: lo_result,
+                        src: lo,
+                    });
+                }
+                Some(Annotation::Signed(16))
+                | Some(Annotation::Unsigned(16))
+                | Some(Annotation::DontCare(16)) => {
+                    ctx.out.push(MInst::MovzxW {
+                        dst: lo_result,
+                        src: lo,
+                    });
+                }
+                Some(Annotation::Signed(32))
+                | Some(Annotation::Unsigned(32))
+                | Some(Annotation::DontCare(32)) => {
+                    ctx.out.push(MInst::MovRR {
+                        size: OpSize::S32,
+                        dst: lo_result,
+                        src: lo,
+                    });
+                }
+                _ => {
+                    ctx.out.push(MInst::MovRR {
+                        size: OpSize::S64,
+                        dst: lo_result,
+                        src: lo,
+                    });
+                }
+            }
+            // hi = 0
+            let hi_result = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRI {
+                size: OpSize::S32,
+                dst: hi_result,
+                imm: 0,
+            });
+            ctx.regs.assign(vref, lo_result);
+            ctx.regs
+                .assign(ValueRef::inst_secondary_result(vref.index()), hi_result);
+            Some(())
+        }
+
+        _ => None,
+    }
+}
+
 const ARG_REGS: [Gpr; 6] = [Gpr::Rdi, Gpr::Rsi, Gpr::Rdx, Gpr::Rcx, Gpr::R8, Gpr::R9];
 
 #[derive(Clone, Copy)]
@@ -311,6 +648,7 @@ pub fn isel(
                     &mut ctx,
                     vref,
                     &inst.op,
+                    &inst.ty,
                     func,
                     symbols,
                     rdx_captures,
@@ -375,12 +713,19 @@ fn select_inst(
     ctx: &mut IselCtx,
     vref: ValueRef,
     op: &Op,
+    inst_ty: &Type,
     func: &Function,
     symbols: &SymbolTable,
     rdx_captures: &HashMap<u32, u32>,
     rdx_moves: &HashMap<u32, u32>,
     call_has_ret2: &HashSet<u32>,
 ) -> Option<()> {
+    // Handle 128-bit integer operations before the generated rules.
+    if has_wide_scalar_annotation(func, vref.index())
+        && select_128bit_op(ctx, vref, op, func).is_some()
+    {
+        return Some(());
+    }
     // Try generated rules first (covers Add, Sub, Mul, Or, And, Xor,
     // Shl, Shr, Min, Max, CountOnes, CountLeadingZeros, CountTrailingZeros,
     // ICmp, PtrAdd, PtrDiff).
@@ -455,8 +800,8 @@ fn select_inst(
                     }
                     ctx.regs.assign(vref, dst);
                 } else {
-                    // i128 constant: allocate stack slot (24 bytes: 16 for i128 + 8 for temp)
-                    let offset = ctx.stack.alloc(vref, 24);
+                    // i128 constant: allocate stack slot (16 bytes for i128)
+                    let offset = ctx.stack.alloc(vref, 16);
                     let rbp = ctx.alloc.alloc_fixed(Gpr::Rbp.to_preg());
 
                     // Convert to two's complement u128 representation
@@ -500,14 +845,10 @@ fn select_inst(
                         src: hi_reg,
                     });
 
-                    // Compute stack slot address and assign to vref
-                    let addr = ctx.alloc.alloc();
-                    ctx.out.push(MInst::Lea {
-                        dst: addr,
-                        base: rbp,
-                        offset,
-                    });
-                    ctx.regs.assign(vref, addr);
+                    // Assign lo as primary, hi as secondary
+                    ctx.regs.assign(vref, lo_reg);
+                    let secondary = ValueRef::inst_secondary_result(vref.index());
+                    ctx.regs.assign(secondary, hi_reg);
                 }
             }
         }
@@ -518,6 +859,15 @@ fn select_inst(
                 size: OpSize::S32,
                 dst,
                 imm: if *val { 1 } else { 0 },
+            });
+            ctx.regs.assign(vref, dst);
+        }
+
+        Op::FConst(_, bits) => {
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRI64 {
+                dst,
+                imm: *bits as i64,
             });
             ctx.regs.assign(vref, dst);
         }
@@ -891,10 +1241,7 @@ fn select_inst(
         Op::FAdd(lhs, rhs, _) => {
             let l_gpr = ctx.ensure_in_reg(lhs.value)?;
             let r_gpr = ctx.ensure_in_reg(rhs.value)?;
-            let double = !matches!(
-                func.instructions.get(lhs.value.index() as usize),
-                Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
-            );
+            let double = !matches!(inst_ty, Type::Float(tuffy_ir::types::FloatType::F32));
             let l_xmm = ctx.alloc.alloc_class(1);
             let r_xmm = ctx.alloc.alloc_class(1);
             let dst_xmm = ctx.alloc.alloc_class(1);
@@ -926,10 +1273,7 @@ fn select_inst(
         Op::FSub(lhs, rhs, _) => {
             let l_gpr = ctx.ensure_in_reg(lhs.value)?;
             let r_gpr = ctx.ensure_in_reg(rhs.value)?;
-            let double = !matches!(
-                func.instructions.get(lhs.value.index() as usize),
-                Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
-            );
+            let double = !matches!(inst_ty, Type::Float(tuffy_ir::types::FloatType::F32));
             let l_xmm = ctx.alloc.alloc_class(1);
             let r_xmm = ctx.alloc.alloc_class(1);
             let dst_xmm = ctx.alloc.alloc_class(1);
@@ -961,10 +1305,7 @@ fn select_inst(
         Op::FMul(lhs, rhs, _) => {
             let l_gpr = ctx.ensure_in_reg(lhs.value)?;
             let r_gpr = ctx.ensure_in_reg(rhs.value)?;
-            let double = !matches!(
-                func.instructions.get(lhs.value.index() as usize),
-                Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
-            );
+            let double = !matches!(inst_ty, Type::Float(tuffy_ir::types::FloatType::F32));
             let l_xmm = ctx.alloc.alloc_class(1);
             let r_xmm = ctx.alloc.alloc_class(1);
             let dst_xmm = ctx.alloc.alloc_class(1);
@@ -996,10 +1337,7 @@ fn select_inst(
         Op::FDiv(lhs, rhs, _) => {
             let l_gpr = ctx.ensure_in_reg(lhs.value)?;
             let r_gpr = ctx.ensure_in_reg(rhs.value)?;
-            let double = !matches!(
-                func.instructions.get(lhs.value.index() as usize),
-                Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
-            );
+            let double = !matches!(inst_ty, Type::Float(tuffy_ir::types::FloatType::F32));
             let l_xmm = ctx.alloc.alloc_class(1);
             let r_xmm = ctx.alloc.alloc_class(1);
             let dst_xmm = ctx.alloc.alloc_class(1);
@@ -1061,10 +1399,7 @@ fn select_inst(
             let src = ctx.ensure_in_reg(val.value)?;
             // Float values live in GPRs as bit-patterns; XOR the sign bit directly.
             let dst = ctx.alloc.alloc();
-            let is_f32 = matches!(
-                func.instructions.get(val.value.index() as usize),
-                Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
-            );
+            let is_f32 = matches!(inst_ty, Type::Float(tuffy_ir::types::FloatType::F32));
             let sign_mask: i64 = if is_f32 {
                 0x80000000_u32 as i64
             } else {
@@ -1090,10 +1425,7 @@ fn select_inst(
         Op::FAbs(val) => {
             let src = ctx.ensure_in_reg(val.value)?;
             let dst = ctx.alloc.alloc();
-            let is_f32 = matches!(
-                func.instructions.get(val.value.index() as usize),
-                Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
-            );
+            let is_f32 = matches!(inst_ty, Type::Float(tuffy_ir::types::FloatType::F32));
             let clear_mask: i64 = if is_f32 {
                 0x7FFFFFFF_i64
             } else {
@@ -1120,10 +1452,7 @@ fn select_inst(
             let mag_r = ctx.ensure_in_reg(mag.value)?;
             let sign_r = ctx.ensure_in_reg(sign.value)?;
             let dst = ctx.alloc.alloc();
-            let is_f32 = matches!(
-                func.instructions.get(mag.value.index() as usize),
-                Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
-            );
+            let is_f32 = matches!(inst_ty, Type::Float(tuffy_ir::types::FloatType::F32));
             let sign_mask: i64 = if is_f32 {
                 0x80000000_u32 as i64
             } else {

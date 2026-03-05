@@ -208,6 +208,11 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::Const(val.into()), Type::Int, None, origin, None)
     }
 
+    /// Float constant. `bits` is the IEEE 754 bit pattern.
+    pub fn fconst(&mut self, ft: FloatType, bits: u64, origin: Origin) -> ValueRef {
+        self.push_inst(Op::FConst(ft, bits), Type::Float(ft), None, origin, None)
+    }
+
     /// Boolean constant.
     pub fn bconst(&mut self, val: bool, origin: Origin) -> ValueRef {
         self.push_inst(Op::BConst(val), Type::Bool, None, origin, None)

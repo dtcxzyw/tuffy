@@ -161,6 +161,16 @@ fn rewrite_inst(inst: &VInst, assignments: &[PReg]) -> PInst {
             dst: r(dst),
             src: r(src),
         },
+        MInst::AdcRR { size, dst, src } => MInst::AdcRR {
+            size: *size,
+            dst: r(dst),
+            src: r(src),
+        },
+        MInst::SbbRR { size, dst, src } => MInst::SbbRR {
+            size: *size,
+            dst: r(dst),
+            src: r(src),
+        },
         MInst::ImulRR { size, dst, src } => MInst::ImulRR {
             size: *size,
             dst: r(dst),
