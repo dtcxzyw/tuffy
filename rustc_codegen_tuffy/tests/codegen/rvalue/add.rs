@@ -32,8 +32,9 @@
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1:u128 = param %a
 // CHECK:     v2:u128 = param %b
-// CHECK:     v3:u128 = add v1:u128, v2:u128
-// CHECK:     ret v3, v0
+// CHECK:     v3:i128 = add v1:u128, v2:u128
+// CHECK:     v4 = zext v3:i128, 128
+// CHECK:     ret v4, v0
 // CHECK: }
 // CHECK:
 

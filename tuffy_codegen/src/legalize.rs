@@ -616,6 +616,16 @@ fn legalize_inst<M: AbiMetadata + Clone>(
         Op::Store(val, ptr, 16, mem) => {
             leg_store_128(old, s, b, old_vref, val, ptr, mem);
         }
+        Op::Sext(val, 128) if is_wide(s, val.value) => {
+            // Sext/Zext from 128-bit to 128-bit is an identity: the source
+            // already occupies a full (lo, hi) pair.
+            let (lo, hi) = s.vmap.pair(val.value);
+            s.vmap.set(old_vref, Mapped::Pair(lo, hi));
+        }
+        Op::Zext(val, 128) if is_wide(s, val.value) => {
+            let (lo, hi) = s.vmap.pair(val.value);
+            s.vmap.set(old_vref, Mapped::Pair(lo, hi));
+        }
         Op::Sext(val, 128) => {
             // If the source is FpToSi, use the proper saturating compiler-rt call.
             let ft = get_fp_to_int_float_type(val.value, old);
