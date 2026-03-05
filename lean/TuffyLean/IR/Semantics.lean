@@ -128,6 +128,103 @@ def evalSaturatingSub (a b : Int) (n : Nat) : Value :=
     let diff := a - b
     if diff < 0 then .int 0 else .int diff
 
+/-- Signed saturating addition in n bits. n = 0 produces poison.
+    Result is clamped to [-(2^(n-1)), 2^(n-1)-1]. -/
+def evalSignedSaturatingAdd (a b : Int) (n : Nat) : Value :=
+  if n = 0 then .poison
+  else
+    let minVal := -(2 : Int) ^ (n - 1)
+    let maxVal := (2 : Int) ^ (n - 1) - 1
+    let sum := a + b
+    if sum > maxVal then .int maxVal
+    else if sum < minVal then .int minVal
+    else .int sum
+
+/-- Signed saturating subtraction in n bits. n = 0 produces poison.
+    Result is clamped to [-(2^(n-1)), 2^(n-1)-1]. -/
+def evalSignedSaturatingSub (a b : Int) (n : Nat) : Value :=
+  if n = 0 then .poison
+  else
+    let minVal := -(2 : Int) ^ (n - 1)
+    let maxVal := (2 : Int) ^ (n - 1) - 1
+    let diff := a - b
+    if diff > maxVal then .int maxVal
+    else if diff < minVal then .int minVal
+    else .int diff
+
+/-- Signed addition with overflow detection in n bits. n = 0 produces poison.
+    Primary result: wrapping sum (low n bits, sign-extended). Secondary: overflow Bool. -/
+def evalSAddOverflow (a b : Int) (n : Nat) : Value × Value :=
+  if n = 0 then (.poison, .poison)
+  else
+    let sum := a + b
+    let minVal := -(2 : Int) ^ (n - 1)
+    let maxVal := (2 : Int) ^ (n - 1) - 1
+    let overflowed := sum > maxVal ∨ sum < minVal
+    -- Wrap: extract low n bits, then sign-extend
+    let wrapped := sum % (2 ^ n : Int)
+    let wrapped := if wrapped > maxVal then wrapped - (2 ^ n : Int) else wrapped
+    (.int wrapped, .bool overflowed)
+
+/-- Unsigned addition with overflow detection in n bits. n = 0 produces poison.
+    Primary result: wrapping sum (low n bits). Secondary: overflow Bool. -/
+def evalUAddOverflow (a b : Int) (n : Nat) : Value × Value :=
+  if n = 0 then (.poison, .poison)
+  else
+    let sum := a + b
+    let maxVal := (2 : Int) ^ n - 1
+    let overflowed := sum > maxVal
+    let wrapped := sum % (2 ^ n : Int)
+    (.int wrapped, .bool overflowed)
+
+/-- Signed subtraction with overflow detection in n bits. n = 0 produces poison.
+    Primary result: wrapping difference. Secondary: overflow Bool. -/
+def evalSSubOverflow (a b : Int) (n : Nat) : Value × Value :=
+  if n = 0 then (.poison, .poison)
+  else
+    let diff := a - b
+    let minVal := -(2 : Int) ^ (n - 1)
+    let maxVal := (2 : Int) ^ (n - 1) - 1
+    let overflowed := diff > maxVal ∨ diff < minVal
+    let wrapped := diff % (2 ^ n : Int)
+    let wrapped := if wrapped > maxVal then wrapped - (2 ^ n : Int) else wrapped
+    (.int wrapped, .bool overflowed)
+
+/-- Unsigned subtraction with overflow detection in n bits. n = 0 produces poison.
+    Primary result: wrapping difference. Secondary: overflow Bool. -/
+def evalUSubOverflow (a b : Int) (n : Nat) : Value × Value :=
+  if n = 0 then (.poison, .poison)
+  else
+    let diff := a - b
+    let overflowed := diff < 0
+    let wrapped := diff % (2 ^ n : Int)
+    let wrapped := if wrapped < 0 then wrapped + (2 ^ n : Int) else wrapped
+    (.int wrapped, .bool overflowed)
+
+/-- Signed multiplication with overflow detection in n bits. n = 0 produces poison.
+    Primary result: wrapping product. Secondary: overflow Bool. -/
+def evalSMulOverflow (a b : Int) (n : Nat) : Value × Value :=
+  if n = 0 then (.poison, .poison)
+  else
+    let prod := a * b
+    let minVal := -(2 : Int) ^ (n - 1)
+    let maxVal := (2 : Int) ^ (n - 1) - 1
+    let overflowed := prod > maxVal ∨ prod < minVal
+    let wrapped := prod % (2 ^ n : Int)
+    let wrapped := if wrapped > maxVal then wrapped - (2 ^ n : Int) else wrapped
+    (.int wrapped, .bool overflowed)
+
+/-- Unsigned multiplication with overflow detection in n bits. n = 0 produces poison.
+    Primary result: wrapping product. Secondary: overflow Bool. -/
+def evalUMulOverflow (a b : Int) (n : Nat) : Value × Value :=
+  if n = 0 then (.poison, .poison)
+  else
+    let prod := a * b
+    let maxVal := (2 : Int) ^ n - 1
+    let overflowed := prod > maxVal
+    let wrapped := prod % (2 ^ n : Int)
+    (.int wrapped, .bool overflowed)
+
 /-- Merge: replace the low `width` bits of `a` with the low `width` bits of `b`.
     width = 0 produces poison. -/
 def evalMerge (a b : Int) (width : Nat) : Value :=
