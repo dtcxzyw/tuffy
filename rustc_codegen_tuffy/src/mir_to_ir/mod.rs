@@ -12,7 +12,10 @@ mod statement;
 mod terminator;
 pub(crate) mod types;
 
-use ctx::{BlockMap, FatLocalMap, LocalMap, StackLocalSet, TranslationCtx, extract_param_names};
+use ctx::{
+    BlockMap, FatLocalMap, LocalMap, OverflowLocalMap, StackLocalSet, TranslationCtx,
+    extract_param_names,
+};
 use types::*;
 
 use rustc_middle::mir::{self, BasicBlock, Operand, Rvalue, StatementKind, TerminatorKind};
@@ -123,7 +126,11 @@ pub fn translate_function<'tcx>(
                 // Unsigned(128) so the legalizer splits the param into two
                 // 8-byte slots — matching the x86-64 SysV ABI which passes
                 // such values in two integer registers.
-                let param_ann = if sz > 16 { None } else { composite_param_annotation(tcx, ty) };
+                let param_ann = if sz > 16 {
+                    None
+                } else {
+                    composite_param_annotation(tcx, ty)
+                };
                 params.push(param_ty);
                 param_anns.push(param_ann);
                 param_names.push(all_names.get(i).copied().flatten());
@@ -170,6 +177,7 @@ pub fn translate_function<'tcx>(
         locals: LocalMap::new(mir.local_decls.len()),
         fat_locals: FatLocalMap::new(),
         stack_locals: StackLocalSet::new(mir.local_decls.len()),
+        overflow_locals: OverflowLocalMap::new(),
         symbols,
         static_data: Vec::new(),
         block_map,
@@ -186,7 +194,9 @@ pub fn translate_function<'tcx>(
     // Emit params into the entry block.
     if needs_sret {
         // Param 0 is the hidden SRET pointer. Capture it and assign to _0.
-        let sret = ctx.builder.param(0, Type::Ptr(0), None, Origin::synthetic());
+        let sret = ctx
+            .builder
+            .param(0, Type::Ptr(0), None, Origin::synthetic());
         ctx.sret_ptr = Some(sret);
         let ret_local = mir::Local::from_usize(0);
         ctx.locals.set(ret_local, sret);
@@ -421,7 +431,11 @@ pub fn translate_function<'tcx>(
                             // For non-fat-ptr ScalarPairs (e.g. (char, i64)), store the
                             // full size so the legalizer can emit both lo and hi stores.
                             // Scalar and Memory types store the full size.
-                            let store_bytes = if is_fat_ptr(ctx.tcx, ty) { 8 } else { size as u32 };
+                            let store_bytes = if is_fat_ptr(ctx.tcx, ty) {
+                                8
+                            } else {
+                                size as u32
+                            };
                             ctx.current_mem = ctx.builder.store(
                                 prev.into(),
                                 slot.into(),

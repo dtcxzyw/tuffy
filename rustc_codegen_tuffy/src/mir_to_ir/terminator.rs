@@ -85,12 +85,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         // Two-register return (9-16 bytes): load second word
                         // and mark it for RDX via ABI metadata.
                         let off8 = self.builder.iconst(8, Origin::synthetic());
-                        let hi_addr = self.builder.ptradd(
-                            slot.into(),
-                            off8.into(),
-                            0,
-                            Origin::synthetic(),
-                        );
+                        let hi_addr =
+                            self.builder
+                                .ptradd(slot.into(), off8.into(), 0, Origin::synthetic());
                         let word1 = self.builder.load(
                             hi_addr.into(),
                             8,
@@ -145,7 +142,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             }
                             (Some(Type::Float(ft)), Some(Type::Int)) => {
                                 // Float value was carried as Int bits — reinterpret.
-                                self.builder.bitcast(v.into(), Type::Float(ft), None, Origin::synthetic())
+                                self.builder.bitcast(
+                                    v.into(),
+                                    Type::Float(ft),
+                                    None,
+                                    Origin::synthetic(),
+                                )
                             }
                             _ => v,
                         };
@@ -165,7 +167,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             self.builder.inttoptr(zero.into(), 0, Origin::synthetic())
                         } else if let Some(Type::Float(ft)) = ret_ir_ty {
                             let zero = self.builder.iconst(0, Origin::synthetic());
-                            self.builder.bitcast(zero.into(), Type::Float(ft), None, Origin::synthetic())
+                            self.builder.bitcast(
+                                zero.into(),
+                                Type::Float(ft),
+                                None,
+                                Origin::synthetic(),
+                            )
                         } else if matches!(ret_ir_ty, Some(Type::Bool)) {
                             self.builder.bconst(false, Origin::synthetic())
                         } else {
@@ -464,9 +471,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         if matches!(self.builder.value_type(discr_val), Some(Type::Ptr(_))) {
             let is_integer_discr = discr_ty.is_some_and(|t| t.is_integral());
             if is_integer_discr {
-                let byte_size = discr_ty
-                    .and_then(|t| type_size(self.tcx, t))
-                    .unwrap_or(8) as u32;
+                let byte_size = discr_ty.and_then(|t| type_size(self.tcx, t)).unwrap_or(8) as u32;
                 discr_val = self.builder.load(
                     discr_val.into(),
                     byte_size,

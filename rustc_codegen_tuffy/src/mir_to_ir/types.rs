@@ -15,7 +15,8 @@ fn mono_layout_of<'tcx>(
     tcx: TyCtxt<'tcx>,
     ty: ty::Ty<'tcx>,
 ) -> Option<rustc_abi::TyAndLayout<'tcx, ty::Ty<'tcx>>> {
-    tcx.layout_of(ty::TypingEnv::fully_monomorphized().as_query_input(ty)).ok()
+    tcx.layout_of(ty::TypingEnv::fully_monomorphized().as_query_input(ty))
+        .ok()
 }
 
 /// Coarse-grained ABI representation of a Rust type, mirroring BackendRepr.
@@ -31,7 +32,6 @@ pub(super) enum ReprKind {
     Memory,
 }
 
-
 pub(super) fn repr_kind<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> ReprKind {
     let Some(layout) = mono_layout_of(tcx, ty) else {
         return ReprKind::Memory;
@@ -45,7 +45,6 @@ pub(super) fn repr_kind<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> ReprKind {
         _ => ReprKind::Memory,
     }
 }
-
 
 pub(super) fn translate_ty<'tcx>(_tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> Option<Type> {
     match ty.kind() {

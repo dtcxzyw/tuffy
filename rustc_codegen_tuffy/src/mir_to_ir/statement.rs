@@ -410,13 +410,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                         | BinOp::MulWithOverflow,
                                                         box (lhs, _),
                                                     ) => {
-                                                        let lhs_ty = lhs
-                                                            .ty(&self.mir.local_decls, self.tcx);
                                                         let lhs_ty =
-                                                            self.monomorphize(lhs_ty);
+                                                            lhs.ty(&self.mir.local_decls, self.tcx);
+                                                        let lhs_ty = self.monomorphize(lhs_ty);
                                                         let arith_bytes = type_size(
-                                                            self.tcx,
-                                                            lhs_ty,
+                                                            self.tcx, lhs_ty,
                                                         )
                                                         .unwrap_or(8)
                                                             as u32;
@@ -488,70 +486,72 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             // bytes (e.g. u128), val is an Int, not a Ptr — marking
                             // the dest as stack in that case corrupts later uses that
                             // call coerce_to_ptr on a non-pointer Int.
-                            let mark_as_stack = matches!(
-                                self.builder.value_type(val),
-                                Some(Type::Ptr(_))
-                            ) && match rvalue {
-                                // Direct copy/move from a stack local (no projections).
-                                // Only propagate when the source type is > 8 bytes,
-                                // because translate_operand loads small (≤8 byte)
-                                // values from the slot — the returned value is data,
-                                // not a slot pointer.
-                                Rvalue::Use(Operand::Copy(src) | Operand::Move(src))
-                                    if src.projection.is_empty()
-                                        && self.stack_locals.is_stack(src.local) =>
-                                {
-                                    let src_ty =
-                                        self.monomorphize(self.mir.local_decls[src.local].ty);
-                                    type_size(self.tcx, src_ty).unwrap_or(8) > 8
-                                }
-                                // Cast/Transmute from a stack local.
-                                // Exclude PtrToPtr from a large stack local: the
-                                // PtrToPtr handler in translate_rvalue already
-                                // loads the actual value from the slot, so val is
-                                // data (not a slot address) and the destination
-                                // must NOT be marked as stack.
-                                Rvalue::Cast(
-                                    kind,
-                                    Operand::Copy(src) | Operand::Move(src),
-                                    cast_ty,
-                                ) if src.projection.is_empty()
-                                    && self.stack_locals.is_stack(src.local) =>
-                                {
-                                    let src_ty =
-                                        self.monomorphize(self.mir.local_decls[src.local].ty);
-                                    let src_size = type_size(self.tcx, src_ty).unwrap_or(8);
-                                    if src_size > 8 {
-                                        // PtrToPtr with target ≤ 8 bytes already
-                                        // loaded the value — don't propagate.
-                                        let target_ty = self.monomorphize(*cast_ty);
-                                        let target_size =
-                                            type_size(self.tcx, target_ty).unwrap_or(0);
-                                        if matches!(kind, CastKind::PtrToPtr) && target_size <= 8 {
-                                            false
-                                        } else {
-                                            true
+                            let mark_as_stack =
+                                matches!(self.builder.value_type(val), Some(Type::Ptr(_)))
+                                    && match rvalue {
+                                        // Direct copy/move from a stack local (no projections).
+                                        // Only propagate when the source type is > 8 bytes,
+                                        // because translate_operand loads small (≤8 byte)
+                                        // values from the slot — the returned value is data,
+                                        // not a slot pointer.
+                                        Rvalue::Use(Operand::Copy(src) | Operand::Move(src))
+                                            if src.projection.is_empty()
+                                                && self.stack_locals.is_stack(src.local) =>
+                                        {
+                                            let src_ty = self
+                                                .monomorphize(self.mir.local_decls[src.local].ty);
+                                            type_size(self.tcx, src_ty).unwrap_or(8) > 8
                                         }
-                                    } else {
-                                        false
-                                    }
-                                }
-                                // Projected place where the projected type is
-                                // > 8 bytes.  translate_operand returns an
-                                // address for large projected types (either a
-                                // pointer into a stack slot, or a dereferenced
-                                // pointer), so the destination must also be
-                                // treated as a stack local.
-                                Rvalue::Use(Operand::Copy(src) | Operand::Move(src))
-                                    if !src.projection.is_empty() =>
-                                {
-                                    let projected_ty = src.ty(&self.mir.local_decls, self.tcx).ty;
-                                    let projected_ty = self.monomorphize(projected_ty);
-                                    type_size(self.tcx, projected_ty).unwrap_or(8) > 8
-                                        && !is_fat_ptr(self.tcx, projected_ty)
-                                }
-                                _ => false,
-                            };
+                                        // Cast/Transmute from a stack local.
+                                        // Exclude PtrToPtr from a large stack local: the
+                                        // PtrToPtr handler in translate_rvalue already
+                                        // loads the actual value from the slot, so val is
+                                        // data (not a slot address) and the destination
+                                        // must NOT be marked as stack.
+                                        Rvalue::Cast(
+                                            kind,
+                                            Operand::Copy(src) | Operand::Move(src),
+                                            cast_ty,
+                                        ) if src.projection.is_empty()
+                                            && self.stack_locals.is_stack(src.local) =>
+                                        {
+                                            let src_ty = self
+                                                .monomorphize(self.mir.local_decls[src.local].ty);
+                                            let src_size = type_size(self.tcx, src_ty).unwrap_or(8);
+                                            if src_size > 8 {
+                                                // PtrToPtr with target ≤ 8 bytes already
+                                                // loaded the value — don't propagate.
+                                                let target_ty = self.monomorphize(*cast_ty);
+                                                let target_size =
+                                                    type_size(self.tcx, target_ty).unwrap_or(0);
+                                                if matches!(kind, CastKind::PtrToPtr)
+                                                    && target_size <= 8
+                                                {
+                                                    false
+                                                } else {
+                                                    true
+                                                }
+                                            } else {
+                                                false
+                                            }
+                                        }
+                                        // Projected place where the projected type is
+                                        // > 8 bytes.  translate_operand returns an
+                                        // address for large projected types (either a
+                                        // pointer into a stack slot, or a dereferenced
+                                        // pointer), so the destination must also be
+                                        // treated as a stack local.
+                                        Rvalue::Use(Operand::Copy(src) | Operand::Move(src))
+                                            if !src.projection.is_empty() =>
+                                        {
+                                            let projected_ty =
+                                                src.ty(&self.mir.local_decls, self.tcx).ty;
+                                            let projected_ty = self.monomorphize(projected_ty);
+                                            type_size(self.tcx, projected_ty).unwrap_or(8) > 8
+                                                && !is_fat_ptr(self.tcx, projected_ty)
+                                        }
+                                        _ => false,
+                                    };
                             if mark_as_stack {
                                 self.stack_locals.mark(place.local);
                                 // When the source is a projected field (e.g.
@@ -565,29 +565,22 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         if !src.projection.is_empty()
                                 );
                                 if needs_copy {
-                                    let dest_ty = self.monomorphize(
-                                        self.mir.local_decls[place.local].ty,
-                                    );
-                                    let sz = type_size(self.tcx, dest_ty)
-                                        .unwrap_or(8) as u32;
-                                    let new_slot = self.builder.stack_slot(
-                                        std::cmp::max(sz, 1),
-                                        Origin::synthetic(),
-                                    );
+                                    let dest_ty =
+                                        self.monomorphize(self.mir.local_decls[place.local].ty);
+                                    let sz = type_size(self.tcx, dest_ty).unwrap_or(8) as u32;
+                                    let new_slot = self
+                                        .builder
+                                        .stack_slot(std::cmp::max(sz, 1), Origin::synthetic());
                                     let num_words = (sz as u64).div_ceil(8);
                                     for i in 0..num_words {
                                         let off = i * 8;
-                                        let chunk = std::cmp::min(
-                                            8,
-                                            sz as u64 - off,
-                                        ) as u32;
+                                        let chunk = std::cmp::min(8, sz as u64 - off) as u32;
                                         let src_addr = if off == 0 {
                                             val
                                         } else {
-                                            let o = self.builder.iconst(
-                                                off as i64,
-                                                Origin::synthetic(),
-                                            );
+                                            let o = self
+                                                .builder
+                                                .iconst(off as i64, Origin::synthetic());
                                             self.builder.ptradd(
                                                 val.into(),
                                                 o.into(),
@@ -606,10 +599,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         let dst_addr = if off == 0 {
                                             new_slot
                                         } else {
-                                            let o = self.builder.iconst(
-                                                off as i64,
-                                                Origin::synthetic(),
-                                            );
+                                            let o = self
+                                                .builder
+                                                .iconst(off as i64, Origin::synthetic());
                                             self.builder.ptradd(
                                                 new_slot.into(),
                                                 o.into(),
@@ -795,15 +787,20 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                             // For 128-bit constants: use wide store only when
                                             // the value doesn't fit in i64/u64. Small constants
                                             // (e.g. 42_u128) use the scalar extension below.
-                                            let mono_c = self.tcx.instantiate_and_normalize_erasing_regions(
-                                                self.instance.args,
-                                                ty::TypingEnv::fully_monomorphized(),
-                                                ty::EarlyBinder::bind(c.const_),
-                                            );
+                                            let mono_c =
+                                                self.tcx.instantiate_and_normalize_erasing_regions(
+                                                    self.instance.args,
+                                                    ty::TypingEnv::fully_monomorphized(),
+                                                    ty::EarlyBinder::bind(c.const_),
+                                                );
                                             let resolved = match mono_c {
                                                 mir::Const::Val(v, _) => Some(v),
                                                 _ => mono_c
-                                                    .eval(self.tcx, ty::TypingEnv::fully_monomorphized(), c.span)
+                                                    .eval(
+                                                        self.tcx,
+                                                        ty::TypingEnv::fully_monomorphized(),
+                                                        c.span,
+                                                    )
                                                     .ok(),
                                             };
                                             let bits = resolved.and_then(|cv| {
@@ -838,57 +835,59 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         Origin::synthetic(),
                                     );
                                 } else {
-                                // Scalar Int value being stored to a >8-byte
-                                // projected field (e.g. u16 as u128 → _2.0).
-                                // Store low word, then compute and store high word.
-                                self.current_mem = self.builder.store(
-                                    val.into(),
-                                    addr.into(),
-                                    8,
-                                    self.current_mem.into(),
-                                    Origin::synthetic(),
-                                );
-                                let src_is_signed = match rvalue {
-                                    Rvalue::Cast(CastKind::IntToInt, op, _) => {
-                                        let src_ty = match op {
-                                            Operand::Copy(p) | Operand::Move(p) => self
-                                                .monomorphize(
-                                                    p.ty(&self.mir.local_decls, self.tcx).ty,
-                                                ),
-                                            Operand::Constant(c) => self.monomorphize(c.ty()),
-                                            _ => projected_ty,
-                                        };
-                                        is_signed_int(src_ty)
-                                    }
-                                    _ => matches!(projected_ty.kind(), ty::Int(ty::IntTy::I128)),
-                                };
-                                let hi_word = if src_is_signed {
-                                    let c63 = self.builder.iconst(63, Origin::synthetic());
-                                    let signed_op =
-                                        IrOperand::annotated(val, Annotation::Signed(64));
-                                    self.builder.shr(
-                                        signed_op,
-                                        c63.into(),
-                                        None,
+                                    // Scalar Int value being stored to a >8-byte
+                                    // projected field (e.g. u16 as u128 → _2.0).
+                                    // Store low word, then compute and store high word.
+                                    self.current_mem = self.builder.store(
+                                        val.into(),
+                                        addr.into(),
+                                        8,
+                                        self.current_mem.into(),
                                         Origin::synthetic(),
-                                    )
-                                } else {
-                                    self.builder.iconst(0, Origin::synthetic())
-                                };
-                                let off8 = self.builder.iconst(8, Origin::synthetic());
-                                let hi_addr = self.builder.ptradd(
-                                    addr.into(),
-                                    off8.into(),
-                                    0,
-                                    Origin::synthetic(),
-                                );
-                                self.current_mem = self.builder.store(
-                                    hi_word.into(),
-                                    hi_addr.into(),
-                                    8,
-                                    self.current_mem.into(),
-                                    Origin::synthetic(),
-                                );
+                                    );
+                                    let src_is_signed = match rvalue {
+                                        Rvalue::Cast(CastKind::IntToInt, op, _) => {
+                                            let src_ty = match op {
+                                                Operand::Copy(p) | Operand::Move(p) => self
+                                                    .monomorphize(
+                                                        p.ty(&self.mir.local_decls, self.tcx).ty,
+                                                    ),
+                                                Operand::Constant(c) => self.monomorphize(c.ty()),
+                                                _ => projected_ty,
+                                            };
+                                            is_signed_int(src_ty)
+                                        }
+                                        _ => {
+                                            matches!(projected_ty.kind(), ty::Int(ty::IntTy::I128))
+                                        }
+                                    };
+                                    let hi_word = if src_is_signed {
+                                        let c63 = self.builder.iconst(63, Origin::synthetic());
+                                        let signed_op =
+                                            IrOperand::annotated(val, Annotation::Signed(64));
+                                        self.builder.shr(
+                                            signed_op,
+                                            c63.into(),
+                                            None,
+                                            Origin::synthetic(),
+                                        )
+                                    } else {
+                                        self.builder.iconst(0, Origin::synthetic())
+                                    };
+                                    let off8 = self.builder.iconst(8, Origin::synthetic());
+                                    let hi_addr = self.builder.ptradd(
+                                        addr.into(),
+                                        off8.into(),
+                                        0,
+                                        Origin::synthetic(),
+                                    );
+                                    self.current_mem = self.builder.store(
+                                        hi_word.into(),
+                                        hi_addr.into(),
+                                        8,
+                                        self.current_mem.into(),
+                                        Origin::synthetic(),
+                                    );
                                 }
                             } else if bytes > 0 {
                                 self.current_mem = self.builder.store(

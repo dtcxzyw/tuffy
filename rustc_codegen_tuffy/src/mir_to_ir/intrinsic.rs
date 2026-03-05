@@ -11,7 +11,6 @@ use super::ctx::TranslationCtx;
 use super::types::{type_align, type_size};
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
-
     /// Handle compiler intrinsics inline during MIR translation.
     /// Returns `true` if the intrinsic was handled, `false` to fall through to normal call.
     pub(super) fn translate_intrinsic(
@@ -25,405 +24,460 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let current_mem = self.current_mem;
         let tcx = self.tcx;
 
-    match name {
-        // black_box: identity function, prevents optimizations.
-        // Just copy the argument to the destination.
-        "black_box" => {
-            if let Some(&v) = ir_args.first() {
-                self.locals.set(destination_local, v);
-            }
-            true
-        }
-
-        // assume: optimizer hint, no runtime effect. Treat as no-op.
-        "assume" => true,
-
-        // assert_inhabited / assert_zero_valid / assert_mem_uninitialized_valid:
-        // compile-time checks, no runtime effect.
-        "assert_inhabited" | "assert_zero_valid" | "assert_mem_uninitialized_valid" => true,
-
-        // ctpop: population count (count set bits).
-        "ctpop" => {
-            if let Some(&v) = ir_args.first() {
-                let result = self.builder.count_ones(v.into(), Origin::synthetic());
-                self.locals.set(destination_local, result);
-            }
-            true
-        }
-
-        // ctlz / ctlz_nonzero: count leading zeros.
-        "ctlz" | "ctlz_nonzero" => {
-            if let Some(&v) = ir_args.first() {
-                let bits = substs
-                    .first()
-                    .and_then(|a| a.as_type())
-                    .and_then(|t| type_size(tcx, t))
-                    .map(|sz| (sz * 8) as u32)
-                    .unwrap_or(64);
-                let result = self.builder.count_leading_zeros(v.into(), bits, Origin::synthetic());
-                self.locals.set(destination_local, result);
-            }
-            true
-        }
-
-        // cttz / cttz_nonzero: count trailing zeros.
-        "cttz" | "cttz_nonzero" => {
-            if let Some(&v) = ir_args.first() {
-                let result = self.builder.count_trailing_zeros(v.into(), Origin::synthetic());
-                self.locals.set(destination_local, result);
-            }
-            true
-        }
-
-        // bswap: byte-swap an integer value.
-        "bswap" => {
-            if let Some(&v) = ir_args.first() {
-                let byte_size = substs
-                    .first()
-                    .and_then(|a| a.as_type())
-                    .and_then(|t| type_size(tcx, t))
-                    .unwrap_or(8);
-                if byte_size <= 1 {
+        match name {
+            // black_box: identity function, prevents optimizations.
+            // Just copy the argument to the destination.
+            "black_box" => {
+                if let Some(&v) = ir_args.first() {
                     self.locals.set(destination_local, v);
-                } else {
-                    let result =
-                        self.builder.bswap(v.into(), byte_size as u32, Origin::synthetic());
+                }
+                true
+            }
+
+            // assume: optimizer hint, no runtime effect. Treat as no-op.
+            "assume" => true,
+
+            // assert_inhabited / assert_zero_valid / assert_mem_uninitialized_valid:
+            // compile-time checks, no runtime effect.
+            "assert_inhabited" | "assert_zero_valid" | "assert_mem_uninitialized_valid" => true,
+
+            // ctpop: population count (count set bits).
+            "ctpop" => {
+                if let Some(&v) = ir_args.first() {
+                    let result = self.builder.count_ones(v.into(), Origin::synthetic());
                     self.locals.set(destination_local, result);
                 }
+                true
             }
-            true
-        }
 
-        // bitreverse: reverse bit order of an integer value.
-        "bitreverse" => {
-            if let Some(&v) = ir_args.first() {
-                let bit_size = substs
-                    .first()
-                    .and_then(|a| a.as_type())
-                    .and_then(|t| type_size(tcx, t))
-                    .map(|sz| (sz * 8) as u32)
-                    .unwrap_or(64);
-                if bit_size <= 1 {
-                    self.locals.set(destination_local, v);
-                } else {
+            // ctlz / ctlz_nonzero: count leading zeros.
+            "ctlz" | "ctlz_nonzero" => {
+                if let Some(&v) = ir_args.first() {
+                    let bits = substs
+                        .first()
+                        .and_then(|a| a.as_type())
+                        .and_then(|t| type_size(tcx, t))
+                        .map(|sz| (sz * 8) as u32)
+                        .unwrap_or(64);
                     let result =
-                        self.builder.bit_reverse(v.into(), bit_size, Origin::synthetic());
+                        self.builder
+                            .count_leading_zeros(v.into(), bits, Origin::synthetic());
                     self.locals.set(destination_local, result);
                 }
+                true
             }
-            true
-        }
 
-        // rotate_left / rotate_right: bitwise rotation.
-        "rotate_left" | "rotate_right" => {
-            if ir_args.len() >= 2 {
-                let x = ir_args[0];
-                let n = ir_args[1];
-                let bits = substs
-                    .first()
-                    .and_then(|a| a.as_type())
-                    .and_then(|t| type_size(tcx, t))
-                    .map(|sz| (sz * 8) as u32)
-                    .unwrap_or(64);
-                let result = if name == "rotate_left" {
-                    self.builder.rotate_left(x.into(), n.into(), bits, Origin::synthetic())
-                } else {
-                    self.builder.rotate_right(x.into(), n.into(), bits, Origin::synthetic())
-                };
-                self.locals.set(destination_local, result);
+            // cttz / cttz_nonzero: count trailing zeros.
+            "cttz" | "cttz_nonzero" => {
+                if let Some(&v) = ir_args.first() {
+                    let result = self
+                        .builder
+                        .count_trailing_zeros(v.into(), Origin::synthetic());
+                    self.locals.set(destination_local, result);
+                }
+                true
             }
-            true
-        }
 
-        // is_val_statically_known: always false in a non-optimizing backend.
-        "is_val_statically_known" => {
-            let result = self.builder.bconst(false, Origin::synthetic());
-            self.locals.set(destination_local, result);
-            true
-        }
-
-        // size_of<T>: return the size of type T as a compile-time constant.
-        "size_of" => {
-            if let Some(t) = substs.first().and_then(|a| a.as_type()) {
-                let sz = type_size(tcx, t).unwrap_or(0);
-                let result = self.builder.iconst(sz as i64, Origin::synthetic());
-                self.locals.set(destination_local, result);
-            }
-            true
-        }
-
-        // min_align_of / align_of: return the alignment of type T.
-        "min_align_of" | "pref_align_of" => {
-            if let Some(t) = substs.first().and_then(|a| a.as_type()) {
-                let align = type_align(tcx, t).unwrap_or(1);
-                let result = self.builder.iconst(align as i64, Origin::synthetic());
-                self.locals.set(destination_local, result);
-            }
-            true
-        }
-
-        // size_of_val: return the size of the pointed-to type.
-        // For sized types this is a compile-time constant.
-        // For unsized types (slices), compute len * elem_size at runtime.
-        "size_of_val" => {
-            if let Some(t) = substs.first().and_then(|a| a.as_type()) {
-                // Check if the type is unsized first — type_size returns
-                // Some(0) for unsized types like [T] (zero-element slice),
-                // so we can't rely on type_size alone.
-                let typing_env = ty::TypingEnv::fully_monomorphized();
-                let tail = self.tcx.struct_tail_for_codegen(t, typing_env);
-                if matches!(tail.kind(), ty::Slice(..) | ty::Str | ty::Dynamic(..)) {
-                    // Unsized type: compute size at runtime from metadata.
-                    if let ty::Slice(elem_ty) = tail.kind() {
-                        let elem_sz = type_size(tcx, *elem_ty).unwrap_or(0);
-                        if ir_args.len() >= 2 {
-                            let len = ir_args[1];
-                            if elem_sz == 1 {
-                                self.locals.set(destination_local, len);
-                            } else {
-                                let esz = self.builder.iconst(elem_sz as i64, Origin::synthetic());
-                                let result =
-                                    self.builder.mul(len.into(), esz.into(), None, Origin::synthetic());
-                                self.locals.set(destination_local, result);
-                            }
-                        } else {
-                            let result = self.builder.iconst(0, Origin::synthetic());
-                            self.locals.set(destination_local, result);
-                        }
+            // bswap: byte-swap an integer value.
+            "bswap" => {
+                if let Some(&v) = ir_args.first() {
+                    let byte_size = substs
+                        .first()
+                        .and_then(|a| a.as_type())
+                        .and_then(|t| type_size(tcx, t))
+                        .unwrap_or(8);
+                    if byte_size <= 1 {
+                        self.locals.set(destination_local, v);
                     } else {
-                        // str: size = len (metadata is byte length).
-                        if let ty::Str = tail.kind() {
+                        let result =
+                            self.builder
+                                .bswap(v.into(), byte_size as u32, Origin::synthetic());
+                        self.locals.set(destination_local, result);
+                    }
+                }
+                true
+            }
+
+            // bitreverse: reverse bit order of an integer value.
+            "bitreverse" => {
+                if let Some(&v) = ir_args.first() {
+                    let bit_size = substs
+                        .first()
+                        .and_then(|a| a.as_type())
+                        .and_then(|t| type_size(tcx, t))
+                        .map(|sz| (sz * 8) as u32)
+                        .unwrap_or(64);
+                    if bit_size <= 1 {
+                        self.locals.set(destination_local, v);
+                    } else {
+                        let result =
+                            self.builder
+                                .bit_reverse(v.into(), bit_size, Origin::synthetic());
+                        self.locals.set(destination_local, result);
+                    }
+                }
+                true
+            }
+
+            // rotate_left / rotate_right: bitwise rotation.
+            "rotate_left" | "rotate_right" => {
+                if ir_args.len() >= 2 {
+                    let x = ir_args[0];
+                    let n = ir_args[1];
+                    let bits = substs
+                        .first()
+                        .and_then(|a| a.as_type())
+                        .and_then(|t| type_size(tcx, t))
+                        .map(|sz| (sz * 8) as u32)
+                        .unwrap_or(64);
+                    let result = if name == "rotate_left" {
+                        self.builder
+                            .rotate_left(x.into(), n.into(), bits, Origin::synthetic())
+                    } else {
+                        self.builder
+                            .rotate_right(x.into(), n.into(), bits, Origin::synthetic())
+                    };
+                    self.locals.set(destination_local, result);
+                }
+                true
+            }
+
+            // is_val_statically_known: always false in a non-optimizing backend.
+            "is_val_statically_known" => {
+                let result = self.builder.bconst(false, Origin::synthetic());
+                self.locals.set(destination_local, result);
+                true
+            }
+
+            // size_of<T>: return the size of type T as a compile-time constant.
+            "size_of" => {
+                if let Some(t) = substs.first().and_then(|a| a.as_type()) {
+                    let sz = type_size(tcx, t).unwrap_or(0);
+                    let result = self.builder.iconst(sz as i64, Origin::synthetic());
+                    self.locals.set(destination_local, result);
+                }
+                true
+            }
+
+            // min_align_of / align_of: return the alignment of type T.
+            "min_align_of" | "pref_align_of" => {
+                if let Some(t) = substs.first().and_then(|a| a.as_type()) {
+                    let align = type_align(tcx, t).unwrap_or(1);
+                    let result = self.builder.iconst(align as i64, Origin::synthetic());
+                    self.locals.set(destination_local, result);
+                }
+                true
+            }
+
+            // size_of_val: return the size of the pointed-to type.
+            // For sized types this is a compile-time constant.
+            // For unsized types (slices), compute len * elem_size at runtime.
+            "size_of_val" => {
+                if let Some(t) = substs.first().and_then(|a| a.as_type()) {
+                    // Check if the type is unsized first — type_size returns
+                    // Some(0) for unsized types like [T] (zero-element slice),
+                    // so we can't rely on type_size alone.
+                    let typing_env = ty::TypingEnv::fully_monomorphized();
+                    let tail = self.tcx.struct_tail_for_codegen(t, typing_env);
+                    if matches!(tail.kind(), ty::Slice(..) | ty::Str | ty::Dynamic(..)) {
+                        // Unsized type: compute size at runtime from metadata.
+                        if let ty::Slice(elem_ty) = tail.kind() {
+                            let elem_sz = type_size(tcx, *elem_ty).unwrap_or(0);
                             if ir_args.len() >= 2 {
-                                self.locals.set(destination_local, ir_args[1]);
+                                let len = ir_args[1];
+                                if elem_sz == 1 {
+                                    self.locals.set(destination_local, len);
+                                } else {
+                                    let esz =
+                                        self.builder.iconst(elem_sz as i64, Origin::synthetic());
+                                    let result = self.builder.mul(
+                                        len.into(),
+                                        esz.into(),
+                                        None,
+                                        Origin::synthetic(),
+                                    );
+                                    self.locals.set(destination_local, result);
+                                }
                             } else {
                                 let result = self.builder.iconst(0, Origin::synthetic());
                                 self.locals.set(destination_local, result);
                             }
                         } else {
-                            // dyn Trait: read size from vtable (fallback to 0 for now).
-                            let result = self.builder.iconst(0, Origin::synthetic());
-                            self.locals.set(destination_local, result);
+                            // str: size = len (metadata is byte length).
+                            if let ty::Str = tail.kind() {
+                                if ir_args.len() >= 2 {
+                                    self.locals.set(destination_local, ir_args[1]);
+                                } else {
+                                    let result = self.builder.iconst(0, Origin::synthetic());
+                                    self.locals.set(destination_local, result);
+                                }
+                            } else {
+                                // dyn Trait: read size from vtable (fallback to 0 for now).
+                                let result = self.builder.iconst(0, Origin::synthetic());
+                                self.locals.set(destination_local, result);
+                            }
                         }
+                    } else if let Some(sz) = type_size(tcx, t) {
+                        // Sized type: compile-time constant.
+                        let result = self.builder.iconst(sz as i64, Origin::synthetic());
+                        self.locals.set(destination_local, result);
+                    } else {
+                        let result = self.builder.iconst(0, Origin::synthetic());
+                        self.locals.set(destination_local, result);
                     }
-                } else if let Some(sz) = type_size(tcx, t) {
-                    // Sized type: compile-time constant.
-                    let result = self.builder.iconst(sz as i64, Origin::synthetic());
-                    self.locals.set(destination_local, result);
-                } else {
-                    let result = self.builder.iconst(0, Origin::synthetic());
+                }
+                true
+            }
+
+            // min_align_of_val / align_of_val: return the alignment of the type.
+            "min_align_of_val" | "align_of_val" => {
+                if let Some(t) = substs.first().and_then(|a| a.as_type()) {
+                    let align = type_align(tcx, t).unwrap_or(1);
+                    let result = self.builder.iconst(align as i64, Origin::synthetic());
                     self.locals.set(destination_local, result);
                 }
+                true
             }
-            true
-        }
 
-        // min_align_of_val / align_of_val: return the alignment of the type.
-        "min_align_of_val" | "align_of_val" => {
-            if let Some(t) = substs.first().and_then(|a| a.as_type()) {
-                let align = type_align(tcx, t).unwrap_or(1);
-                let result = self.builder.iconst(align as i64, Origin::synthetic());
-                self.locals.set(destination_local, result);
+            // arith_offset<T>(ptr, offset) → ptr + offset * sizeof(T)
+            "arith_offset" => {
+                if ir_args.len() >= 2 {
+                    let ptr = self.coerce_to_ptr(ir_args[0]);
+                    let offset = ir_args[1];
+                    let elem_size = substs
+                        .first()
+                        .and_then(|a| a.as_type())
+                        .and_then(|t| type_size(tcx, t))
+                        .unwrap_or(1);
+                    let byte_offset = if elem_size == 1 {
+                        offset
+                    } else {
+                        let sz = self.builder.iconst(elem_size as i64, Origin::synthetic());
+                        self.builder
+                            .mul(offset.into(), sz.into(), None, Origin::synthetic())
+                    };
+                    let result =
+                        self.builder
+                            .ptradd(ptr.into(), byte_offset.into(), 0, Origin::synthetic());
+                    self.locals.set(destination_local, result);
+                }
+                true
             }
-            true
-        }
 
-        // arith_offset<T>(ptr, offset) → ptr + offset * sizeof(T)
-        "arith_offset" => {
-            if ir_args.len() >= 2 {
-                let ptr = self.coerce_to_ptr(ir_args[0]);
-                let offset = ir_args[1];
-                let elem_size = substs
-                    .first()
-                    .and_then(|a| a.as_type())
-                    .and_then(|t| type_size(tcx, t))
-                    .unwrap_or(1);
-                let byte_offset = if elem_size == 1 {
-                    offset
-                } else {
-                    let sz = self.builder.iconst(elem_size as i64, Origin::synthetic());
-                    self.builder.mul(offset.into(), sz.into(), None, Origin::synthetic())
-                };
-                let result = self.builder.ptradd(ptr.into(), byte_offset.into(), 0, Origin::synthetic());
-                self.locals.set(destination_local, result);
+            // ptr_offset_from_unsigned<T>(ptr1, ptr2) → (ptr1 - ptr2) / sizeof(T)
+            "ptr_offset_from_unsigned" | "ptr_offset_from" => {
+                if ir_args.len() >= 2 {
+                    let ptr1 = self.coerce_to_ptr(ir_args[0]);
+                    let ptr2 = self.coerce_to_ptr(ir_args[1]);
+                    let diff = self
+                        .builder
+                        .ptrdiff(ptr1.into(), ptr2.into(), Origin::synthetic());
+                    let elem_size = substs
+                        .first()
+                        .and_then(|a| a.as_type())
+                        .and_then(|t| type_size(tcx, t))
+                        .unwrap_or(1);
+                    let result = if elem_size <= 1 {
+                        diff
+                    } else {
+                        let sz = self.builder.iconst(elem_size as i64, Origin::synthetic());
+                        self.builder
+                            .div(diff.into(), sz.into(), None, Origin::synthetic())
+                    };
+                    self.locals.set(destination_local, result);
+                }
+                true
             }
-            true
-        }
 
-        // ptr_offset_from_unsigned<T>(ptr1, ptr2) → (ptr1 - ptr2) / sizeof(T)
-        "ptr_offset_from_unsigned" | "ptr_offset_from" => {
-            if ir_args.len() >= 2 {
-                let ptr1 = self.coerce_to_ptr(ir_args[0]);
-                let ptr2 = self.coerce_to_ptr(ir_args[1]);
-                let diff = self.builder.ptrdiff(ptr1.into(), ptr2.into(), Origin::synthetic());
-                let elem_size = substs
-                    .first()
-                    .and_then(|a| a.as_type())
-                    .and_then(|t| type_size(tcx, t))
-                    .unwrap_or(1);
-                let result = if elem_size <= 1 {
-                    diff
-                } else {
-                    let sz = self.builder.iconst(elem_size as i64, Origin::synthetic());
-                    self.builder.div(diff.into(), sz.into(), None, Origin::synthetic())
-                };
-                self.locals.set(destination_local, result);
+            // saturating_add<T>(a, b): add with saturation at max value.
+            "saturating_add" => {
+                if ir_args.len() >= 2 {
+                    let ty = substs.first().and_then(|a| a.as_type());
+                    let bits = ty
+                        .and_then(|t| type_size(tcx, t))
+                        .map(|sz| (sz * 8) as u32)
+                        .unwrap_or(64);
+                    let is_signed =
+                        ty.map_or(false, |t| matches!(t.kind(), rustc_middle::ty::Int(_)));
+                    let result = if is_signed {
+                        self.builder.signed_saturating_add(
+                            ir_args[0].into(),
+                            ir_args[1].into(),
+                            bits,
+                            Origin::synthetic(),
+                        )
+                    } else {
+                        self.builder.saturating_add(
+                            ir_args[0].into(),
+                            ir_args[1].into(),
+                            bits,
+                            Origin::synthetic(),
+                        )
+                    };
+                    self.locals.set(destination_local, result);
+                }
+                true
             }
-            true
-        }
 
-        // saturating_add<T>(a, b): add with saturation at max value.
-        "saturating_add" => {
-            if ir_args.len() >= 2 {
-                let bits = substs
-                    .first()
-                    .and_then(|a| a.as_type())
-                    .and_then(|t| type_size(tcx, t))
-                    .map(|sz| (sz * 8) as u32)
-                    .unwrap_or(64);
-                let result = self.builder.saturating_add(
-                    ir_args[0].into(),
-                    ir_args[1].into(),
-                    bits,
-                    Origin::synthetic(),
-                );
-                self.locals.set(destination_local, result);
+            // saturating_sub<T>(a, b): subtract with saturation at zero.
+            "saturating_sub" => {
+                if ir_args.len() >= 2 {
+                    let ty = substs.first().and_then(|a| a.as_type());
+                    let bits = ty
+                        .and_then(|t| type_size(tcx, t))
+                        .map(|sz| (sz * 8) as u32)
+                        .unwrap_or(64);
+                    let is_signed =
+                        ty.map_or(false, |t| matches!(t.kind(), rustc_middle::ty::Int(_)));
+                    let result = if is_signed {
+                        self.builder.signed_saturating_sub(
+                            ir_args[0].into(),
+                            ir_args[1].into(),
+                            bits,
+                            Origin::synthetic(),
+                        )
+                    } else {
+                        self.builder.saturating_sub(
+                            ir_args[0].into(),
+                            ir_args[1].into(),
+                            bits,
+                            Origin::synthetic(),
+                        )
+                    };
+                    self.locals.set(destination_local, result);
+                }
+                true
             }
-            true
-        }
 
-        // saturating_sub<T>(a, b): subtract with saturation at zero.
-        "saturating_sub" => {
-            if ir_args.len() >= 2 {
-                let bits = substs
-                    .first()
-                    .and_then(|a| a.as_type())
-                    .and_then(|t| type_size(tcx, t))
-                    .map(|sz| (sz * 8) as u32)
-                    .unwrap_or(64);
-                let result = self.builder.saturating_sub(
-                    ir_args[0].into(),
-                    ir_args[1].into(),
-                    bits,
-                    Origin::synthetic(),
-                );
-                self.locals.set(destination_local, result);
-            }
-            true
-        }
-
-        // abort: call libc abort().
-        "abort" => {
-            let sym_id = self.symbols.intern("abort");
-            let callee = self.builder.symbol_addr(sym_id, Origin::synthetic());
-            self.builder.call(
-                callee.into(),
-                vec![],
-                Type::Unit,
-                current_mem.into(),
-                None,
-                Origin::synthetic(),
-            );
-            true
-        }
-
-        // unchecked arithmetic: same as wrapping ops (no overflow check).
-        "unchecked_add" => {
-            if ir_args.len() >= 2 {
-                let result = self.builder.add(
-                    ir_args[0].into(),
-                    ir_args[1].into(),
+            // abort: call libc abort().
+            "abort" => {
+                let sym_id = self.symbols.intern("abort");
+                let callee = self.builder.symbol_addr(sym_id, Origin::synthetic());
+                self.builder.call(
+                    callee.into(),
+                    vec![],
+                    Type::Unit,
+                    current_mem.into(),
                     None,
                     Origin::synthetic(),
                 );
-                self.locals.set(destination_local, result);
+                true
             }
-            true
-        }
-        "unchecked_sub" => {
-            if ir_args.len() >= 2 {
-                let result = self.builder.sub(
-                    ir_args[0].into(),
-                    ir_args[1].into(),
-                    None,
-                    Origin::synthetic(),
-                );
-                self.locals.set(destination_local, result);
-            }
-            true
-        }
-        "unchecked_mul" => {
-            if ir_args.len() >= 2 {
-                let result = self.builder.mul(
-                    ir_args[0].into(),
-                    ir_args[1].into(),
-                    None,
-                    Origin::synthetic(),
-                );
-                self.locals.set(destination_local, result);
-            }
-            true
-        }
-        "unchecked_shl" => {
-            if ir_args.len() >= 2 {
-                let result = self.builder.shl(
-                    ir_args[0].into(),
-                    ir_args[1].into(),
-                    None,
-                    Origin::synthetic(),
-                );
-                self.locals.set(destination_local, result);
-            }
-            true
-        }
-        "unchecked_shr" => {
-            if ir_args.len() >= 2 {
-                let result = self.builder.shr(
-                    ir_args[0].into(),
-                    ir_args[1].into(),
-                    None,
-                    Origin::synthetic(),
-                );
-                self.locals.set(destination_local, result);
-            }
-            true
-        }
 
-        // Funnel shifts: fshl(a, b, c) = (a << c) | (b >> (bits - c))
-        //                fshr(a, b, c) = (a << (bits - c)) | (b >> c)
-        "unchecked_funnel_shl" | "unchecked_funnel_shr" => {
-            if ir_args.len() >= 3 {
-                let a = ir_args[0];
-                let b = ir_args[1];
-                let c = ir_args[2];
-                let bits = substs
-                    .first()
-                    .and_then(|arg| arg.as_type())
-                    .and_then(|t| type_size(tcx, t))
-                    .map(|sz| (sz * 8) as i64)
-                    .unwrap_or(64);
-                let bits_val = self.builder.iconst(bits, Origin::synthetic());
-                let complement = self.builder.sub(bits_val.into(), c.into(), None, Origin::synthetic());
-                let (hi, lo) = if name == "unchecked_funnel_shl" {
-                    (
-                        self.builder.shl(a.into(), c.into(), None, Origin::synthetic()),
-                        self.builder.shr(b.into(), complement.into(), None, Origin::synthetic()),
-                    )
-                } else {
-                    (
-                        self.builder.shl(a.into(), complement.into(), None, Origin::synthetic()),
-                        self.builder.shr(b.into(), c.into(), None, Origin::synthetic()),
-                    )
-                };
-                let result = self.builder.or(hi.into(), lo.into(), None, Origin::synthetic());
-                self.locals.set(destination_local, result);
+            // unchecked arithmetic: same as wrapping ops (no overflow check).
+            "unchecked_add" => {
+                if ir_args.len() >= 2 {
+                    let result = self.builder.add(
+                        ir_args[0].into(),
+                        ir_args[1].into(),
+                        None,
+                        Origin::synthetic(),
+                    );
+                    self.locals.set(destination_local, result);
+                }
+                true
             }
-            true
-        }
+            "unchecked_sub" => {
+                if ir_args.len() >= 2 {
+                    let result = self.builder.sub(
+                        ir_args[0].into(),
+                        ir_args[1].into(),
+                        None,
+                        Origin::synthetic(),
+                    );
+                    self.locals.set(destination_local, result);
+                }
+                true
+            }
+            "unchecked_mul" => {
+                if ir_args.len() >= 2 {
+                    let result = self.builder.mul(
+                        ir_args[0].into(),
+                        ir_args[1].into(),
+                        None,
+                        Origin::synthetic(),
+                    );
+                    self.locals.set(destination_local, result);
+                }
+                true
+            }
+            "unchecked_shl" => {
+                if ir_args.len() >= 2 {
+                    let result = self.builder.shl(
+                        ir_args[0].into(),
+                        ir_args[1].into(),
+                        None,
+                        Origin::synthetic(),
+                    );
+                    self.locals.set(destination_local, result);
+                }
+                true
+            }
+            "unchecked_shr" => {
+                if ir_args.len() >= 2 {
+                    let result = self.builder.shr(
+                        ir_args[0].into(),
+                        ir_args[1].into(),
+                        None,
+                        Origin::synthetic(),
+                    );
+                    self.locals.set(destination_local, result);
+                }
+                true
+            }
 
-        // Not handled here — fall through to translate_memory_intrinsic.
-        _ => false,
+            // Funnel shifts: fshl(a, b, c) = (a << c) | (b >> (bits - c))
+            //                fshr(a, b, c) = (a << (bits - c)) | (b >> c)
+            "unchecked_funnel_shl" | "unchecked_funnel_shr" => {
+                if ir_args.len() >= 3 {
+                    let a = ir_args[0];
+                    let b = ir_args[1];
+                    let c = ir_args[2];
+                    let bits = substs
+                        .first()
+                        .and_then(|arg| arg.as_type())
+                        .and_then(|t| type_size(tcx, t))
+                        .map(|sz| (sz * 8) as i64)
+                        .unwrap_or(64);
+                    let bits_val = self.builder.iconst(bits, Origin::synthetic());
+                    let complement =
+                        self.builder
+                            .sub(bits_val.into(), c.into(), None, Origin::synthetic());
+                    let (hi, lo) = if name == "unchecked_funnel_shl" {
+                        (
+                            self.builder
+                                .shl(a.into(), c.into(), None, Origin::synthetic()),
+                            self.builder.shr(
+                                b.into(),
+                                complement.into(),
+                                None,
+                                Origin::synthetic(),
+                            ),
+                        )
+                    } else {
+                        (
+                            self.builder.shl(
+                                a.into(),
+                                complement.into(),
+                                None,
+                                Origin::synthetic(),
+                            ),
+                            self.builder
+                                .shr(b.into(), c.into(), None, Origin::synthetic()),
+                        )
+                    };
+                    let result = self
+                        .builder
+                        .or(hi.into(), lo.into(), None, Origin::synthetic());
+                    self.locals.set(destination_local, result);
+                }
+                true
+            }
+
+            // Not handled here — fall through to translate_memory_intrinsic.
+            _ => false,
+        }
     }
-}
 
     /// Lower memory intrinsics to IR memory operations.
     /// Handles write_bytes, copy_nonoverlapping, copy, and raw_eq.
@@ -437,437 +491,470 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     ) -> Option<ValueRef> {
         let current_mem = self.current_mem;
         let tcx = self.tcx;
-    // Extract the type parameter T and compute its size and alignment.
-    let (elem_size, elem_align) = match substs.first().and_then(|a| a.as_type()) {
-        Some(t) => (
-            type_size(tcx, t).unwrap_or(0),
-            type_align(tcx, t).unwrap_or(1),
-        ),
-        None => return None,
-    };
+        // Extract the type parameter T and compute its size and alignment.
+        let (elem_size, elem_align) = match substs.first().and_then(|a| a.as_type()) {
+            Some(t) => (
+                type_size(tcx, t).unwrap_or(0),
+                type_align(tcx, t).unwrap_or(1),
+            ),
+            None => return None,
+        };
 
-    match name {
-        // write_bytes<T>(dst, val, count) → MemSet(dst, val, count * sizeof(T), align)
-        "write_bytes" | "volatile_set_memory" => {
-            if ir_args.len() < 3 {
-                return None;
-            }
-            let dst = ir_args[0];
-            let val = ir_args[1];
-            let count = ir_args[2];
-            let byte_count = if elem_size == 1 {
-                count
-            } else {
-                let sz = self.builder.iconst(elem_size as i64, Origin::synthetic());
-                self.builder.mul(count.into(), sz.into(), None, Origin::synthetic())
-            };
-            let mem_out = self.builder.mem_set(
-                dst.into(),
-                val.into(),
-                byte_count.into(),
-                elem_align as u32,
-                current_mem.into(),
-                Origin::synthetic(),
-            );
-            Some(mem_out)
-        }
-
-        // copy_nonoverlapping<T>(src, dst, count) → MemCopy(dst, src, count * sizeof(T), align)
-        "copy_nonoverlapping" | "volatile_copy_nonoverlapping_memory" => {
-            if ir_args.len() < 3 {
-                return None;
-            }
-            let src = ir_args[0];
-            let dst = ir_args[1];
-            let count = ir_args[2];
-            let byte_count = if elem_size == 1 {
-                count
-            } else {
-                let sz = self.builder.iconst(elem_size as i64, Origin::synthetic());
-                self.builder.mul(count.into(), sz.into(), None, Origin::synthetic())
-            };
-            let mem_out = self.builder.mem_copy(
-                dst.into(),
-                src.into(),
-                byte_count.into(),
-                elem_align as u32,
-                current_mem.into(),
-                Origin::synthetic(),
-            );
-            Some(mem_out)
-        }
-
-        // copy<T>(src, dst, count) → MemMove(dst, src, count * sizeof(T), align)
-        "copy" | "volatile_copy_memory" => {
-            if ir_args.len() < 3 {
-                return None;
-            }
-            let src = ir_args[0];
-            let dst = ir_args[1];
-            let count = ir_args[2];
-            let byte_count = if elem_size == 1 {
-                count
-            } else {
-                let sz = self.builder.iconst(elem_size as i64, Origin::synthetic());
-                self.builder.mul(count.into(), sz.into(), None, Origin::synthetic())
-            };
-            let mem_out = self.builder.mem_move(
-                dst.into(),
-                src.into(),
-                byte_count.into(),
-                elem_align as u32,
-                current_mem.into(),
-                Origin::synthetic(),
-            );
-            Some(mem_out)
-        }
-
-        // raw_eq<T>(a, b) → memcmp(a, b, sizeof(T)) == 0
-        "raw_eq" => {
-            if ir_args.len() < 2 {
-                return None;
-            }
-            let a = ir_args[0];
-            let b = ir_args[1];
-            let sz = self.builder.iconst(elem_size as i64, Origin::synthetic());
-            let sym_id = self.symbols.intern("memcmp");
-            let callee = self.builder.symbol_addr(sym_id, Origin::synthetic());
-            let (mem_out, data) = self.builder.call(
-                callee.into(),
-                vec![a.into(), b.into(), sz.into()],
-                Type::Int,
-                current_mem.into(),
-                None,
-                Origin::synthetic(),
-            );
-            // raw_eq returns bool (0 or 1): true when memcmp returns 0.
-            let cmp_result = data.unwrap_or_else(|| self.builder.iconst(0, Origin::synthetic()));
-            let zero = self.builder.iconst(0, Origin::synthetic());
-            let eq = self.builder.icmp(
-                tuffy_ir::instruction::ICmpOp::Eq,
-                cmp_result.into(),
-                zero.into(),
-                Origin::synthetic(),
-            );
-            self.locals.set(destination_local, eq);
-            Some(mem_out)
-        }
-
-        // typed_swap_nonoverlapping<T>(x, y) — swap values at two pointers.
-        "typed_swap_nonoverlapping" => {
-            if ir_args.len() < 2 {
-                return None;
-            }
-            let x = self.coerce_to_ptr(ir_args[0]);
-            let y = self.coerce_to_ptr(ir_args[1]);
-            let mut mem = current_mem;
-            let num_words = (elem_size as u64).div_ceil(8);
-            for i in 0..num_words {
-                let off = i * 8;
-                let chunk = std::cmp::min(8, elem_size as u64 - off) as u32;
-                let (xa, ya) = if off == 0 {
-                    (x, y)
+        match name {
+            // write_bytes<T>(dst, val, count) → MemSet(dst, val, count * sizeof(T), align)
+            "write_bytes" | "volatile_set_memory" => {
+                if ir_args.len() < 3 {
+                    return None;
+                }
+                let dst = ir_args[0];
+                let val = ir_args[1];
+                let count = ir_args[2];
+                let byte_count = if elem_size == 1 {
+                    count
                 } else {
-                    let o = self.builder.iconst(off as i64, Origin::synthetic());
-                    (
-                        self.builder.ptradd(x.into(), o.into(), 0, Origin::synthetic()),
-                        self.builder.ptradd(y.into(), o.into(), 0, Origin::synthetic()),
-                    )
+                    let sz = self.builder.iconst(elem_size as i64, Origin::synthetic());
+                    self.builder
+                        .mul(count.into(), sz.into(), None, Origin::synthetic())
                 };
-                let vx = self.builder.load(
-                    xa.into(),
-                    chunk,
+                let mem_out = self.builder.mem_set(
+                    dst.into(),
+                    val.into(),
+                    byte_count.into(),
+                    elem_align as u32,
+                    current_mem.into(),
+                    Origin::synthetic(),
+                );
+                Some(mem_out)
+            }
+
+            // copy_nonoverlapping<T>(src, dst, count) → MemCopy(dst, src, count * sizeof(T), align)
+            "copy_nonoverlapping" | "volatile_copy_nonoverlapping_memory" => {
+                if ir_args.len() < 3 {
+                    return None;
+                }
+                let src = ir_args[0];
+                let dst = ir_args[1];
+                let count = ir_args[2];
+                let byte_count = if elem_size == 1 {
+                    count
+                } else {
+                    let sz = self.builder.iconst(elem_size as i64, Origin::synthetic());
+                    self.builder
+                        .mul(count.into(), sz.into(), None, Origin::synthetic())
+                };
+                let mem_out = self.builder.mem_copy(
+                    dst.into(),
+                    src.into(),
+                    byte_count.into(),
+                    elem_align as u32,
+                    current_mem.into(),
+                    Origin::synthetic(),
+                );
+                Some(mem_out)
+            }
+
+            // copy<T>(src, dst, count) → MemMove(dst, src, count * sizeof(T), align)
+            "copy" | "volatile_copy_memory" => {
+                if ir_args.len() < 3 {
+                    return None;
+                }
+                let src = ir_args[0];
+                let dst = ir_args[1];
+                let count = ir_args[2];
+                let byte_count = if elem_size == 1 {
+                    count
+                } else {
+                    let sz = self.builder.iconst(elem_size as i64, Origin::synthetic());
+                    self.builder
+                        .mul(count.into(), sz.into(), None, Origin::synthetic())
+                };
+                let mem_out = self.builder.mem_move(
+                    dst.into(),
+                    src.into(),
+                    byte_count.into(),
+                    elem_align as u32,
+                    current_mem.into(),
+                    Origin::synthetic(),
+                );
+                Some(mem_out)
+            }
+
+            // raw_eq<T>(a, b) → memcmp(a, b, sizeof(T)) == 0
+            "raw_eq" => {
+                if ir_args.len() < 2 {
+                    return None;
+                }
+                let a = ir_args[0];
+                let b = ir_args[1];
+                let sz = self.builder.iconst(elem_size as i64, Origin::synthetic());
+                let sym_id = self.symbols.intern("memcmp");
+                let callee = self.builder.symbol_addr(sym_id, Origin::synthetic());
+                let (mem_out, data) = self.builder.call(
+                    callee.into(),
+                    vec![a.into(), b.into(), sz.into()],
                     Type::Int,
-                    mem.into(),
+                    current_mem.into(),
                     None,
                     Origin::synthetic(),
                 );
-                let vy = self.builder.load(
-                    ya.into(),
-                    chunk,
-                    Type::Int,
-                    mem.into(),
-                    None,
+                // raw_eq returns bool (0 or 1): true when memcmp returns 0.
+                let cmp_result =
+                    data.unwrap_or_else(|| self.builder.iconst(0, Origin::synthetic()));
+                let zero = self.builder.iconst(0, Origin::synthetic());
+                let eq = self.builder.icmp(
+                    tuffy_ir::instruction::ICmpOp::Eq,
+                    cmp_result.into(),
+                    zero.into(),
                     Origin::synthetic(),
                 );
-                mem = self.builder.store(vy.into(), xa.into(), chunk, mem.into(), Origin::synthetic());
-                mem = self.builder.store(vx.into(), ya.into(), chunk, mem.into(), Origin::synthetic());
+                self.locals.set(destination_local, eq);
+                Some(mem_out)
             }
-            Some(mem)
-        }
 
-        // ── Atomic intrinsics ──────────────────────────────────────────
-        // For single-threaded programs all atomics reduce to plain
-        // loads / stores / read-modify-write sequences.
-
-        // atomic_load_relaxed, atomic_load_acquire, atomic_load_seqcst
-        _ if name.starts_with("atomic_load") => {
-            if ir_args.is_empty() {
-                return None;
+            // typed_swap_nonoverlapping<T>(x, y) — swap values at two pointers.
+            "typed_swap_nonoverlapping" => {
+                if ir_args.len() < 2 {
+                    return None;
+                }
+                let x = self.coerce_to_ptr(ir_args[0]);
+                let y = self.coerce_to_ptr(ir_args[1]);
+                let mut mem = current_mem;
+                let num_words = (elem_size as u64).div_ceil(8);
+                for i in 0..num_words {
+                    let off = i * 8;
+                    let chunk = std::cmp::min(8, elem_size as u64 - off) as u32;
+                    let (xa, ya) = if off == 0 {
+                        (x, y)
+                    } else {
+                        let o = self.builder.iconst(off as i64, Origin::synthetic());
+                        (
+                            self.builder
+                                .ptradd(x.into(), o.into(), 0, Origin::synthetic()),
+                            self.builder
+                                .ptradd(y.into(), o.into(), 0, Origin::synthetic()),
+                        )
+                    };
+                    let vx = self.builder.load(
+                        xa.into(),
+                        chunk,
+                        Type::Int,
+                        mem.into(),
+                        None,
+                        Origin::synthetic(),
+                    );
+                    let vy = self.builder.load(
+                        ya.into(),
+                        chunk,
+                        Type::Int,
+                        mem.into(),
+                        None,
+                        Origin::synthetic(),
+                    );
+                    mem = self.builder.store(
+                        vy.into(),
+                        xa.into(),
+                        chunk,
+                        mem.into(),
+                        Origin::synthetic(),
+                    );
+                    mem = self.builder.store(
+                        vx.into(),
+                        ya.into(),
+                        chunk,
+                        mem.into(),
+                        Origin::synthetic(),
+                    );
+                }
+                Some(mem)
             }
-            let ptr = ir_args[0];
-            let size = elem_size as u32;
-            let val = self.builder.load(
-                ptr.into(),
-                size,
-                Type::Int,
-                current_mem.into(),
-                None,
-                Origin::synthetic(),
-            );
-            self.locals.set(destination_local, val);
-            Some(current_mem)
-        }
 
-        // atomic_store_relaxed, atomic_store_release, atomic_store_seqcst
-        _ if name.starts_with("atomic_store") => {
-            if ir_args.len() < 2 {
-                return None;
-            }
-            let ptr = ir_args[0];
-            let val = ir_args[1];
-            let size = elem_size as u32;
-            let new_mem = self.builder.store(
-                val.into(),
-                ptr.into(),
-                size,
-                current_mem.into(),
-                Origin::synthetic(),
-            );
-            Some(new_mem)
-        }
+            // ── Atomic intrinsics ──────────────────────────────────────────
+            // For single-threaded programs all atomics reduce to plain
+            // loads / stores / read-modify-write sequences.
 
-        // atomic_cxchg_*, atomic_cxchgweak_* → (old_val, success: bool)
-        _ if name.starts_with("atomic_cxchg") => {
-            if ir_args.len() < 3 {
-                return None;
-            }
-            let ptr = ir_args[0];
-            let expected = ir_args[1];
-            let new_val = ir_args[2];
-            let size = elem_size as u32;
-
-            // Load current value.
-            let old = self.builder.load(
-                ptr.into(),
-                size,
-                Type::Int,
-                current_mem.into(),
-                None,
-                Origin::synthetic(),
-            );
-            let mem = current_mem;
-
-            // Compare old == expected.
-            let eq = self.builder.icmp(
-                tuffy_ir::instruction::ICmpOp::Eq,
-                old.into(),
-                expected.into(),
-                Origin::synthetic(),
-            );
-
-            // Conditionally store: new_val if equal, else old (no-op store).
-            let store_val = self.builder.select(
-                eq.into(),
-                new_val.into(),
-                old.into(),
-                Type::Int,
-                Origin::synthetic(),
-            );
-            let new_mem = self.builder.store(
-                store_val.into(),
-                ptr.into(),
-                size,
-                mem.into(),
-                Origin::synthetic(),
-            );
-
-            // Write (old, eq) into the destination stack slot.
-            if let Some(slot) = self.locals.get(destination_local) {
-                let mem2 = self.builder.store(
-                    old.into(),
-                    slot.into(),
+            // atomic_load_relaxed, atomic_load_acquire, atomic_load_seqcst
+            _ if name.starts_with("atomic_load") => {
+                if ir_args.is_empty() {
+                    return None;
+                }
+                let ptr = ir_args[0];
+                let size = elem_size as u32;
+                let val = self.builder.load(
+                    ptr.into(),
                     size,
-                    new_mem.into(),
+                    Type::Int,
+                    current_mem.into(),
+                    None,
                     Origin::synthetic(),
                 );
-                let bool_off = self.builder.iconst(elem_size as i64, Origin::synthetic());
-                let bool_ptr = self.builder.ptradd(slot.into(), bool_off.into(), 0, Origin::synthetic());
-                let mem3 = self.builder.store(
+                self.locals.set(destination_local, val);
+                Some(current_mem)
+            }
+
+            // atomic_store_relaxed, atomic_store_release, atomic_store_seqcst
+            _ if name.starts_with("atomic_store") => {
+                if ir_args.len() < 2 {
+                    return None;
+                }
+                let ptr = ir_args[0];
+                let val = ir_args[1];
+                let size = elem_size as u32;
+                let new_mem = self.builder.store(
+                    val.into(),
+                    ptr.into(),
+                    size,
+                    current_mem.into(),
+                    Origin::synthetic(),
+                );
+                Some(new_mem)
+            }
+
+            // atomic_cxchg_*, atomic_cxchgweak_* → (old_val, success: bool)
+            _ if name.starts_with("atomic_cxchg") => {
+                if ir_args.len() < 3 {
+                    return None;
+                }
+                let ptr = ir_args[0];
+                let expected = ir_args[1];
+                let new_val = ir_args[2];
+                let size = elem_size as u32;
+
+                // Load current value.
+                let old = self.builder.load(
+                    ptr.into(),
+                    size,
+                    Type::Int,
+                    current_mem.into(),
+                    None,
+                    Origin::synthetic(),
+                );
+                let mem = current_mem;
+
+                // Compare old == expected.
+                let eq = self.builder.icmp(
+                    tuffy_ir::instruction::ICmpOp::Eq,
+                    old.into(),
+                    expected.into(),
+                    Origin::synthetic(),
+                );
+
+                // Conditionally store: new_val if equal, else old (no-op store).
+                let store_val = self.builder.select(
                     eq.into(),
-                    bool_ptr.into(),
-                    1,
-                    mem2.into(),
+                    new_val.into(),
+                    old.into(),
+                    Type::Int,
                     Origin::synthetic(),
                 );
-                Some(mem3)
-            } else {
-                // Destination not yet allocated — just set the scalar
-                // (field projection will handle it like checked ops).
+                let new_mem = self.builder.store(
+                    store_val.into(),
+                    ptr.into(),
+                    size,
+                    mem.into(),
+                    Origin::synthetic(),
+                );
+
+                // Write (old, eq) into the destination stack slot.
+                if let Some(slot) = self.locals.get(destination_local) {
+                    let mem2 = self.builder.store(
+                        old.into(),
+                        slot.into(),
+                        size,
+                        new_mem.into(),
+                        Origin::synthetic(),
+                    );
+                    let bool_off = self.builder.iconst(elem_size as i64, Origin::synthetic());
+                    let bool_ptr =
+                        self.builder
+                            .ptradd(slot.into(), bool_off.into(), 0, Origin::synthetic());
+                    let mem3 = self.builder.store(
+                        eq.into(),
+                        bool_ptr.into(),
+                        1,
+                        mem2.into(),
+                        Origin::synthetic(),
+                    );
+                    Some(mem3)
+                } else {
+                    // Destination not yet allocated — just set the scalar
+                    // (field projection will handle it like checked ops).
+                    self.locals.set(destination_local, old);
+                    Some(new_mem)
+                }
+            }
+
+            // atomic_xchg_* → returns old value
+            _ if name.starts_with("atomic_xchg") => {
+                if ir_args.len() < 2 {
+                    return None;
+                }
+                let ptr = ir_args[0];
+                let new_val = ir_args[1];
+                let size = elem_size as u32;
+                let old = self.builder.load(
+                    ptr.into(),
+                    size,
+                    Type::Int,
+                    current_mem.into(),
+                    None,
+                    Origin::synthetic(),
+                );
+                let new_mem = self.builder.store(
+                    new_val.into(),
+                    ptr.into(),
+                    size,
+                    current_mem.into(),
+                    Origin::synthetic(),
+                );
                 self.locals.set(destination_local, old);
                 Some(new_mem)
             }
-        }
 
-        // atomic_xchg_* → returns old value
-        _ if name.starts_with("atomic_xchg") => {
-            if ir_args.len() < 2 {
-                return None;
+            // atomic_fence_*, atomic_singlethreadfence_* → no-op
+            _ if name.starts_with("atomic_fence")
+                || name.starts_with("atomic_singlethreadfence") =>
+            {
+                Some(current_mem)
             }
-            let ptr = ir_args[0];
-            let new_val = ir_args[1];
-            let size = elem_size as u32;
-            let old = self.builder.load(
-                ptr.into(),
-                size,
-                Type::Int,
-                current_mem.into(),
-                None,
-                Origin::synthetic(),
-            );
-            let new_mem = self.builder.store(
-                new_val.into(),
-                ptr.into(),
-                size,
-                current_mem.into(),
-                Origin::synthetic(),
-            );
-            self.locals.set(destination_local, old);
-            Some(new_mem)
-        }
 
-        // atomic_fence_*, atomic_singlethreadfence_* → no-op
-        _ if name.starts_with("atomic_fence") || name.starts_with("atomic_singlethreadfence") => {
-            Some(current_mem)
-        }
+            // Read-modify-write: atomic_{and,or,xor,nand,xadd,xsub,
+            //                     max,min,umax,umin}_*
+            // All return the OLD value.
+            _ if name.starts_with("atomic_and")
+                || name.starts_with("atomic_or")
+                || name.starts_with("atomic_xor")
+                || name.starts_with("atomic_nand")
+                || name.starts_with("atomic_xadd")
+                || name.starts_with("atomic_xsub")
+                || name.starts_with("atomic_max")
+                || name.starts_with("atomic_min")
+                || name.starts_with("atomic_umax")
+                || name.starts_with("atomic_umin") =>
+            {
+                if ir_args.len() < 2 {
+                    return None;
+                }
+                let ptr = ir_args[0];
+                let operand = ir_args[1];
+                let size = elem_size as u32;
 
-        // Read-modify-write: atomic_{and,or,xor,nand,xadd,xsub,
-        //                     max,min,umax,umin}_*
-        // All return the OLD value.
-        _ if name.starts_with("atomic_and")
-            || name.starts_with("atomic_or")
-            || name.starts_with("atomic_xor")
-            || name.starts_with("atomic_nand")
-            || name.starts_with("atomic_xadd")
-            || name.starts_with("atomic_xsub")
-            || name.starts_with("atomic_max")
-            || name.starts_with("atomic_min")
-            || name.starts_with("atomic_umax")
-            || name.starts_with("atomic_umin") =>
-        {
-            if ir_args.len() < 2 {
-                return None;
+                let old = self.builder.load(
+                    ptr.into(),
+                    size,
+                    Type::Int,
+                    current_mem.into(),
+                    None,
+                    Origin::synthetic(),
+                );
+                let mem = current_mem;
+
+                // Compute new value based on the operation.
+                let new_val = if name.starts_with("atomic_and") {
+                    self.builder
+                        .and(old.into(), operand.into(), None, Origin::synthetic())
+                } else if name.starts_with("atomic_or") {
+                    self.builder
+                        .or(old.into(), operand.into(), None, Origin::synthetic())
+                } else if name.starts_with("atomic_xor") {
+                    self.builder
+                        .xor(old.into(), operand.into(), None, Origin::synthetic())
+                } else if name.starts_with("atomic_nand") {
+                    let a = self
+                        .builder
+                        .and(old.into(), operand.into(), None, Origin::synthetic());
+                    let all_ones = self.builder.iconst(-1, Origin::synthetic());
+                    self.builder
+                        .xor(a.into(), all_ones.into(), None, Origin::synthetic())
+                } else if name.starts_with("atomic_xadd") {
+                    self.builder
+                        .add(old.into(), operand.into(), None, Origin::synthetic())
+                } else if name.starts_with("atomic_xsub") {
+                    self.builder
+                        .sub(old.into(), operand.into(), None, Origin::synthetic())
+                } else if name.starts_with("atomic_umax") {
+                    let bits = (elem_size * 8) as u32;
+                    let gt = self.builder.icmp(
+                        ICmpOp::Gt,
+                        IrOperand::annotated(old, Annotation::Unsigned(bits)),
+                        IrOperand::annotated(operand, Annotation::Unsigned(bits)),
+                        Origin::synthetic(),
+                    );
+                    self.builder.select(
+                        gt.into(),
+                        old.into(),
+                        operand.into(),
+                        Type::Int,
+                        Origin::synthetic(),
+                    )
+                } else if name.starts_with("atomic_umin") {
+                    let bits = (elem_size * 8) as u32;
+                    let lt = self.builder.icmp(
+                        ICmpOp::Lt,
+                        IrOperand::annotated(old, Annotation::Unsigned(bits)),
+                        IrOperand::annotated(operand, Annotation::Unsigned(bits)),
+                        Origin::synthetic(),
+                    );
+                    self.builder.select(
+                        lt.into(),
+                        old.into(),
+                        operand.into(),
+                        Type::Int,
+                        Origin::synthetic(),
+                    )
+                } else if name.starts_with("atomic_max") {
+                    let bits = (elem_size * 8) as u32;
+                    let gt = self.builder.icmp(
+                        ICmpOp::Gt,
+                        IrOperand::annotated(old, Annotation::Signed(bits)),
+                        IrOperand::annotated(operand, Annotation::Signed(bits)),
+                        Origin::synthetic(),
+                    );
+                    self.builder.select(
+                        gt.into(),
+                        old.into(),
+                        operand.into(),
+                        Type::Int,
+                        Origin::synthetic(),
+                    )
+                } else {
+                    // atomic_min
+                    let bits = (elem_size * 8) as u32;
+                    let lt = self.builder.icmp(
+                        ICmpOp::Lt,
+                        IrOperand::annotated(old, Annotation::Signed(bits)),
+                        IrOperand::annotated(operand, Annotation::Signed(bits)),
+                        Origin::synthetic(),
+                    );
+                    self.builder.select(
+                        lt.into(),
+                        old.into(),
+                        operand.into(),
+                        Type::Int,
+                        Origin::synthetic(),
+                    )
+                };
+
+                let new_mem = self.builder.store(
+                    new_val.into(),
+                    ptr.into(),
+                    size,
+                    mem.into(),
+                    Origin::synthetic(),
+                );
+                self.locals.set(destination_local, old);
+                Some(new_mem)
             }
-            let ptr = ir_args[0];
-            let operand = ir_args[1];
-            let size = elem_size as u32;
 
-            let old = self.builder.load(
-                ptr.into(),
-                size,
-                Type::Int,
-                current_mem.into(),
-                None,
-                Origin::synthetic(),
-            );
-            let mem = current_mem;
-
-            // Compute new value based on the operation.
-            let new_val = if name.starts_with("atomic_and") {
-                self.builder.and(old.into(), operand.into(), None, Origin::synthetic())
-            } else if name.starts_with("atomic_or") {
-                self.builder.or(old.into(), operand.into(), None, Origin::synthetic())
-            } else if name.starts_with("atomic_xor") {
-                self.builder.xor(old.into(), operand.into(), None, Origin::synthetic())
-            } else if name.starts_with("atomic_nand") {
-                let a = self.builder.and(old.into(), operand.into(), None, Origin::synthetic());
-                let all_ones = self.builder.iconst(-1, Origin::synthetic());
-                self.builder.xor(a.into(), all_ones.into(), None, Origin::synthetic())
-            } else if name.starts_with("atomic_xadd") {
-                self.builder.add(old.into(), operand.into(), None, Origin::synthetic())
-            } else if name.starts_with("atomic_xsub") {
-                self.builder.sub(old.into(), operand.into(), None, Origin::synthetic())
-            } else if name.starts_with("atomic_umax") {
-                let bits = (elem_size * 8) as u32;
-                let gt = self.builder.icmp(
-                    ICmpOp::Gt,
-                    IrOperand::annotated(old, Annotation::Unsigned(bits)),
-                    IrOperand::annotated(operand, Annotation::Unsigned(bits)),
-                    Origin::synthetic(),
-                );
-                self.builder.select(
-                    gt.into(),
-                    old.into(),
-                    operand.into(),
-                    Type::Int,
-                    Origin::synthetic(),
-                )
-            } else if name.starts_with("atomic_umin") {
-                let bits = (elem_size * 8) as u32;
-                let lt = self.builder.icmp(
-                    ICmpOp::Lt,
-                    IrOperand::annotated(old, Annotation::Unsigned(bits)),
-                    IrOperand::annotated(operand, Annotation::Unsigned(bits)),
-                    Origin::synthetic(),
-                );
-                self.builder.select(
-                    lt.into(),
-                    old.into(),
-                    operand.into(),
-                    Type::Int,
-                    Origin::synthetic(),
-                )
-            } else if name.starts_with("atomic_max") {
-                let bits = (elem_size * 8) as u32;
-                let gt = self.builder.icmp(
-                    ICmpOp::Gt,
-                    IrOperand::annotated(old, Annotation::Signed(bits)),
-                    IrOperand::annotated(operand, Annotation::Signed(bits)),
-                    Origin::synthetic(),
-                );
-                self.builder.select(
-                    gt.into(),
-                    old.into(),
-                    operand.into(),
-                    Type::Int,
-                    Origin::synthetic(),
-                )
-            } else {
-                // atomic_min
-                let bits = (elem_size * 8) as u32;
-                let lt = self.builder.icmp(
-                    ICmpOp::Lt,
-                    IrOperand::annotated(old, Annotation::Signed(bits)),
-                    IrOperand::annotated(operand, Annotation::Signed(bits)),
-                    Origin::synthetic(),
-                );
-                self.builder.select(
-                    lt.into(),
-                    old.into(),
-                    operand.into(),
-                    Type::Int,
-                    Origin::synthetic(),
-                )
-            };
-
-            let new_mem = self.builder.store(
-                new_val.into(),
-                ptr.into(),
-                size,
-                mem.into(),
-                Origin::synthetic(),
-            );
-            self.locals.set(destination_local, old);
-            Some(new_mem)
+            _ => None,
         }
-
-        _ => None,
     }
-}
 
     /// Check if the given function operand is a compiler intrinsic.
     /// Returns the intrinsic name and generic args (for extracting type parameters).
-    pub(super) fn detect_intrinsic(&self, func_op: &Operand<'tcx>) -> Option<(String, &'tcx ty::List<ty::GenericArg<'tcx>>)> {
+    pub(super) fn detect_intrinsic(
+        &self,
+        func_op: &Operand<'tcx>,
+    ) -> Option<(String, &'tcx ty::List<ty::GenericArg<'tcx>>)> {
         let ty = match func_op {
             Operand::Constant(c) => c.ty(),
             _ => return None,
@@ -885,7 +972,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         None
     }
 }
-
 
 /// Map compiler intrinsics to libc/compiler-rt symbol names.
 /// Returns None for intrinsics that need inline handling or aren't supported.

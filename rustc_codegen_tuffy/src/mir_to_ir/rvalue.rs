@@ -9,7 +9,6 @@ use super::ctx::TranslationCtx;
 use super::types::*;
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
-
     pub(super) fn translate_place_to_addr(
         &mut self,
         place: &Place<'tcx>,
@@ -302,7 +301,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 if idx.as_usize() == 0 {
                     return self.locals.get(place.local);
                 } else {
-                    // Overflow flag — always false for now.
+                    // Overflow flag — from the secondary result of the WithOverflow IR op.
+                    if let Some(overflow) = self.overflow_locals.get(place.local) {
+                        return Some(overflow);
+                    }
+                    // Fallback: always false (no overflow).
                     return Some(self.builder.iconst(0, Origin::synthetic()));
                 }
             }
@@ -844,37 +847,31 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
                 // Float arithmetic: dispatch directly to fadd/fsub/fmul/fdiv.
                 // Operands are always Float-typed at this point.
+                // Floats have no "unchecked" variants — only the plain ops.
                 if let Some(ref fty) = float_ty {
                     if matches!(
                         op,
-                        BinOp::Add
-                            | BinOp::AddUnchecked
-                            | BinOp::Sub
-                            | BinOp::SubUnchecked
-                            | BinOp::Mul
-                            | BinOp::MulUnchecked
-                            | BinOp::Div
-                            | BinOp::Rem
+                        BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem
                     ) {
                         let flags = FpRewriteFlags::default();
                         let l_f = l_raw;
                         let r_f = r_raw;
                         let res = match op {
-                            BinOp::Add | BinOp::AddUnchecked => self.builder.fadd(
+                            BinOp::Add => self.builder.fadd(
                                 l_f.into(),
                                 r_f.into(),
                                 flags,
                                 fty.clone(),
                                 Origin::synthetic(),
                             ),
-                            BinOp::Sub | BinOp::SubUnchecked => self.builder.fsub(
+                            BinOp::Sub => self.builder.fsub(
                                 l_f.into(),
                                 r_f.into(),
                                 flags,
                                 fty.clone(),
                                 Origin::synthetic(),
                             ),
-                            BinOp::Mul | BinOp::MulUnchecked => self.builder.fmul(
+                            BinOp::Mul => self.builder.fmul(
                                 l_f.into(),
                                 r_f.into(),
                                 flags,
@@ -942,40 +939,38 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // For large integral types (>8 bytes, e.g. u128/i128),
                 // translate_place_to_value returns a Ptr to the stack slot.
                 // Load the integer value before coercing.
-                let l_raw =
-                    if matches!(self.builder.value_type(l_raw), Some(Type::Ptr(_)))
-                        && lhs_mir_ty.is_integral()
-                        && let Some(lhs_size) = type_size(self.tcx, lhs_mir_ty)
-                        && lhs_size > 8
-                    {
-                        self.builder.load(
-                            l_raw.into(),
-                            lhs_size as u32,
-                            Type::Int,
-                            self.current_mem.into(),
-                            None,
-                            Origin::synthetic(),
-                        )
-                    } else {
-                        l_raw
-                    };
-                let r_raw =
-                    if matches!(self.builder.value_type(r_raw), Some(Type::Ptr(_)))
-                        && rhs_mir_ty.is_integral()
-                        && let Some(rhs_size) = type_size(self.tcx, rhs_mir_ty)
-                        && rhs_size > 8
-                    {
-                        self.builder.load(
-                            r_raw.into(),
-                            rhs_size as u32,
-                            Type::Int,
-                            self.current_mem.into(),
-                            None,
-                            Origin::synthetic(),
-                        )
-                    } else {
-                        r_raw
-                    };
+                let l_raw = if matches!(self.builder.value_type(l_raw), Some(Type::Ptr(_)))
+                    && lhs_mir_ty.is_integral()
+                    && let Some(lhs_size) = type_size(self.tcx, lhs_mir_ty)
+                    && lhs_size > 8
+                {
+                    self.builder.load(
+                        l_raw.into(),
+                        lhs_size as u32,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
+                    )
+                } else {
+                    l_raw
+                };
+                let r_raw = if matches!(self.builder.value_type(r_raw), Some(Type::Ptr(_)))
+                    && rhs_mir_ty.is_integral()
+                    && let Some(rhs_size) = type_size(self.tcx, rhs_mir_ty)
+                    && rhs_size > 8
+                {
+                    self.builder.load(
+                        r_raw.into(),
+                        rhs_size as u32,
+                        Type::Int,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
+                    )
+                } else {
+                    r_raw
+                };
 
                 // Coerce pointer operands to integers — needed for both
                 // arithmetic/bitwise ops and comparisons.
@@ -1004,30 +999,213 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 ) && float_ty.is_some();
 
                 let val = match op {
-                    BinOp::Add | BinOp::AddWithOverflow | BinOp::AddUnchecked => {
+                    // Wrapping integer arithmetic: result annotation is DontCare(N),
+                    // then Sext (signed types) or Zext (unsigned types) to interpret
+                    // the low N bits correctly.  Without the extension, upper bits from
+                    // a 64-bit ADD can bleed through for sub-64-bit types.
+                    BinOp::Add => {
+                        let bits = match res_ann {
+                            Some(
+                                Annotation::Signed(n)
+                                | Annotation::Unsigned(n)
+                                | Annotation::DontCare(n),
+                            ) => n,
+                            None => 64,
+                        };
+                        let dont_care = res_ann.map(|_| Annotation::DontCare(bits));
+                        let sum = self.builder.add(l_op, r_op, dont_care, Origin::synthetic());
+                        match res_ann {
+                            Some(Annotation::Signed(_)) => self.builder.sext(
+                                IrOperand::annotated(sum, Annotation::DontCare(bits)),
+                                bits,
+                                Origin::synthetic(),
+                            ),
+                            Some(Annotation::Unsigned(_)) => self.builder.zext(
+                                IrOperand::annotated(sum, Annotation::DontCare(bits)),
+                                bits,
+                                Origin::synthetic(),
+                            ),
+                            _ => sum,
+                        }
+                    }
+                    BinOp::Sub => {
+                        let bits = match res_ann {
+                            Some(
+                                Annotation::Signed(n)
+                                | Annotation::Unsigned(n)
+                                | Annotation::DontCare(n),
+                            ) => n,
+                            None => 64,
+                        };
+                        let dont_care = res_ann.map(|_| Annotation::DontCare(bits));
+                        let diff = self.builder.sub(l_op, r_op, dont_care, Origin::synthetic());
+                        match res_ann {
+                            Some(Annotation::Signed(_)) => self.builder.sext(
+                                IrOperand::annotated(diff, Annotation::DontCare(bits)),
+                                bits,
+                                Origin::synthetic(),
+                            ),
+                            Some(Annotation::Unsigned(_)) => self.builder.zext(
+                                IrOperand::annotated(diff, Annotation::DontCare(bits)),
+                                bits,
+                                Origin::synthetic(),
+                            ),
+                            _ => diff,
+                        }
+                    }
+                    BinOp::Mul => {
+                        let bits = match res_ann {
+                            Some(
+                                Annotation::Signed(n)
+                                | Annotation::Unsigned(n)
+                                | Annotation::DontCare(n),
+                            ) => n,
+                            None => 64,
+                        };
+                        let dont_care = res_ann.map(|_| Annotation::DontCare(bits));
+                        let prod = self.builder.mul(l_op, r_op, dont_care, Origin::synthetic());
+                        match res_ann {
+                            Some(Annotation::Signed(_)) => self.builder.sext(
+                                IrOperand::annotated(prod, Annotation::DontCare(bits)),
+                                bits,
+                                Origin::synthetic(),
+                            ),
+                            Some(Annotation::Unsigned(_)) => self.builder.zext(
+                                IrOperand::annotated(prod, Annotation::DontCare(bits)),
+                                bits,
+                                Origin::synthetic(),
+                            ),
+                            _ => prod,
+                        }
+                    }
+                    // Unchecked variants: the caller guarantees no overflow so the
+                    // result can carry a full Signed/Unsigned annotation directly.
+                    BinOp::AddUnchecked => {
                         self.builder.add(l_op, r_op, res_ann, Origin::synthetic())
                     }
-                    BinOp::Sub | BinOp::SubWithOverflow | BinOp::SubUnchecked => {
+                    BinOp::SubUnchecked => {
                         self.builder.sub(l_op, r_op, res_ann, Origin::synthetic())
                     }
-                    BinOp::Mul | BinOp::MulWithOverflow | BinOp::MulUnchecked => {
+                    BinOp::MulUnchecked => {
                         self.builder.mul(l_op, r_op, res_ann, Origin::synthetic())
+                    }
+                    // Checked arithmetic: emit a multi-result IR intrinsic that
+                    // produces (wrapping_result: Int, overflow: Bool).  The primary
+                    // result is returned here and stored in `locals`; the secondary
+                    // overflow flag is saved in `overflow_locals` for Field(1) access.
+                    BinOp::AddWithOverflow => {
+                        let bits = match res_ann {
+                            Some(
+                                Annotation::Signed(n)
+                                | Annotation::Unsigned(n)
+                                | Annotation::DontCare(n),
+                            ) => n,
+                            None => 64,
+                        };
+                        let (primary, overflow) = if matches!(res_ann, Some(Annotation::Signed(_)))
+                        {
+                            self.builder.sadd_with_overflow(
+                                l_op.into(),
+                                r_op.into(),
+                                bits,
+                                Origin::synthetic(),
+                            )
+                        } else {
+                            self.builder.uadd_with_overflow(
+                                l_op.into(),
+                                r_op.into(),
+                                bits,
+                                Origin::synthetic(),
+                            )
+                        };
+                        self.overflow_locals.set(dest_place.local, overflow);
+                        primary
+                    }
+                    BinOp::SubWithOverflow => {
+                        let bits = match res_ann {
+                            Some(
+                                Annotation::Signed(n)
+                                | Annotation::Unsigned(n)
+                                | Annotation::DontCare(n),
+                            ) => n,
+                            None => 64,
+                        };
+                        let (primary, overflow) = if matches!(res_ann, Some(Annotation::Signed(_)))
+                        {
+                            self.builder.ssub_with_overflow(
+                                l_op.into(),
+                                r_op.into(),
+                                bits,
+                                Origin::synthetic(),
+                            )
+                        } else {
+                            self.builder.usub_with_overflow(
+                                l_op.into(),
+                                r_op.into(),
+                                bits,
+                                Origin::synthetic(),
+                            )
+                        };
+                        self.overflow_locals.set(dest_place.local, overflow);
+                        primary
+                    }
+                    BinOp::MulWithOverflow => {
+                        let bits = match res_ann {
+                            Some(
+                                Annotation::Signed(n)
+                                | Annotation::Unsigned(n)
+                                | Annotation::DontCare(n),
+                            ) => n,
+                            None => 64,
+                        };
+                        let (primary, overflow) = if matches!(res_ann, Some(Annotation::Signed(_)))
+                        {
+                            self.builder.smul_with_overflow(
+                                l_op.into(),
+                                r_op.into(),
+                                bits,
+                                Origin::synthetic(),
+                            )
+                        } else {
+                            self.builder.umul_with_overflow(
+                                l_op.into(),
+                                r_op.into(),
+                                bits,
+                                Origin::synthetic(),
+                            )
+                        };
+                        self.overflow_locals.set(dest_place.local, overflow);
+                        primary
                     }
                     BinOp::Eq => {
                         if is_float_cmp {
-                            let cmp = self.builder.fcmp(FCmpOp::OEq, l_raw.into(), r_raw.into(), Origin::synthetic());
+                            let cmp = self.builder.fcmp(
+                                FCmpOp::OEq,
+                                l_raw.into(),
+                                r_raw.into(),
+                                Origin::synthetic(),
+                            );
                             self.builder.bool_to_int(cmp.into(), Origin::synthetic())
                         } else {
-                            let cmp = self.builder.icmp(ICmpOp::Eq, l_op, r_op, Origin::synthetic());
+                            let cmp =
+                                self.builder
+                                    .icmp(ICmpOp::Eq, l_op, r_op, Origin::synthetic());
                             self.builder.bool_to_int(cmp.into(), Origin::synthetic())
                         }
                     }
                     BinOp::Ne => {
                         if is_float_cmp {
-                            let cmp = self.builder.fcmp(FCmpOp::UNe, l_raw.into(), r_raw.into(), Origin::synthetic());
+                            let cmp = self.builder.fcmp(
+                                FCmpOp::UNe,
+                                l_raw.into(),
+                                r_raw.into(),
+                                Origin::synthetic(),
+                            );
                             self.builder.bool_to_int(cmp.into(), Origin::synthetic())
                         } else {
-                            let cmp = self.builder.icmp(ICmpOp::Ne, l_op, r_op, Origin::synthetic());
+                            let cmp =
+                                self.builder
+                                    .icmp(ICmpOp::Ne, l_op, r_op, Origin::synthetic());
                             self.builder.bool_to_int(cmp.into(), Origin::synthetic())
                         }
                     }
@@ -1039,7 +1217,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 BinOp::Gt => FCmpOp::OGt,
                                 _ => FCmpOp::OGe,
                             };
-                            let cmp = self.builder.fcmp(fcmp_op, l_raw.into(), r_raw.into(), Origin::synthetic());
+                            let cmp = self.builder.fcmp(
+                                fcmp_op,
+                                l_raw.into(),
+                                r_raw.into(),
+                                Origin::synthetic(),
+                            );
                             self.builder.bool_to_int(cmp.into(), Origin::synthetic())
                         } else {
                             let icmp_op = match op {
@@ -1057,30 +1240,52 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         // Result = (l > r) as i8 - (l < r) as i8
                         if is_float_cmp {
                             let fty = float_ty.unwrap();
-                            let l_f = self.builder.bitcast(l.into(), fty.clone(), None, Origin::synthetic());
-                            let r_f = self.builder.bitcast(r.into(), fty, None, Origin::synthetic());
+                            let l_f = self.builder.bitcast(
+                                l.into(),
+                                fty.clone(),
+                                None,
+                                Origin::synthetic(),
+                            );
+                            let r_f =
+                                self.builder
+                                    .bitcast(r.into(), fty, None, Origin::synthetic());
                             let lt = self.builder.fcmp(
-                                FCmpOp::OLt, l_f.into(), r_f.into(), Origin::synthetic(),
+                                FCmpOp::OLt,
+                                l_f.into(),
+                                r_f.into(),
+                                Origin::synthetic(),
                             );
                             let lt_int = self.builder.bool_to_int(lt.into(), Origin::synthetic());
                             let gt = self.builder.fcmp(
-                                FCmpOp::OGt, l_f.into(), r_f.into(), Origin::synthetic(),
+                                FCmpOp::OGt,
+                                l_f.into(),
+                                r_f.into(),
+                                Origin::synthetic(),
                             );
                             let gt_int = self.builder.bool_to_int(gt.into(), Origin::synthetic());
                             self.builder.sub(
-                                gt_int.into(), lt_int.into(), res_ann, Origin::synthetic(),
+                                gt_int.into(),
+                                lt_int.into(),
+                                res_ann,
+                                Origin::synthetic(),
                             )
                         } else {
                             let lt = self.builder.icmp(
-                                ICmpOp::Lt, l_op.clone(), r_op.clone(), Origin::synthetic(),
+                                ICmpOp::Lt,
+                                l_op.clone(),
+                                r_op.clone(),
+                                Origin::synthetic(),
                             );
                             let lt_int = self.builder.bool_to_int(lt.into(), Origin::synthetic());
-                            let gt = self.builder.icmp(
-                                ICmpOp::Gt, l_op, r_op, Origin::synthetic(),
-                            );
+                            let gt = self
+                                .builder
+                                .icmp(ICmpOp::Gt, l_op, r_op, Origin::synthetic());
                             let gt_int = self.builder.bool_to_int(gt.into(), Origin::synthetic());
                             self.builder.sub(
-                                gt_int.into(), lt_int.into(), res_ann, Origin::synthetic(),
+                                gt_int.into(),
+                                lt_int.into(),
+                                res_ann,
+                                Origin::synthetic(),
                             )
                         }
                     }
@@ -1242,10 +1447,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         // `val` may be Float (when loaded from a struct field) or Int
                         // (the bit-pattern convention used for scalars). Normalise to
                         // both forms so we can use the right one below.
-                        let val_is_float = matches!(
-                            self.builder.value_type(val),
-                            Some(Type::Float(_))
-                        );
+                        let val_is_float =
+                            matches!(self.builder.value_type(val), Some(Type::Float(_)));
                         let float_val = if val_is_float {
                             val
                         } else {
@@ -1257,12 +1460,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             )
                         };
                         let int_bits_val = if val_is_float {
-                            self.builder.bitcast(
-                                val.into(),
-                                Type::Int,
-                                None,
-                                Origin::synthetic(),
-                            )
+                            self.builder
+                                .bitcast(val.into(), Type::Int, None, Origin::synthetic())
                         } else {
                             val
                         };
@@ -1320,11 +1519,20 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             let zero = self.builder.iconst(0, Origin::synthetic());
                             let i64_max = self.builder.iconst(i64::MAX, Origin::synthetic());
                             // Apply corrections: NaN → 0, then positive overflow → i64::MAX
-                            let corrected =
-                                self.builder.select(is_nan.into(), zero.into(), raw.into(),
-                                    Type::Int, Origin::synthetic());
-                            let corrected = self.builder.select(is_large.into(), i64_max.into(),
-                                corrected.into(), Type::Int, Origin::synthetic());
+                            let corrected = self.builder.select(
+                                is_nan.into(),
+                                zero.into(),
+                                raw.into(),
+                                Type::Int,
+                                Origin::synthetic(),
+                            );
+                            let corrected = self.builder.select(
+                                is_large.into(),
+                                i64_max.into(),
+                                corrected.into(),
+                                Type::Int,
+                                Origin::synthetic(),
+                            );
                             if bit_width < 64 {
                                 // Clamp to [INT_MIN_of_width, INT_MAX_of_width].
                                 // After corrections, corrected ∈ {0, i64::MAX, or cvttss2si result
@@ -1335,9 +1543,17 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 let hi_c = self.builder.iconst(hi, Origin::synthetic());
                                 let ann_s = Some(Annotation::Signed(64));
                                 let clamped_hi = self.builder.min(
-                                    corrected.into(), hi_c.into(), ann_s, Origin::synthetic());
+                                    corrected.into(),
+                                    hi_c.into(),
+                                    ann_s,
+                                    Origin::synthetic(),
+                                );
                                 self.builder.max(
-                                    clamped_hi.into(), lo_c.into(), ann_s, Origin::synthetic())
+                                    clamped_hi.into(),
+                                    lo_c.into(),
+                                    ann_s,
+                                    Origin::synthetic(),
+                                )
                             } else {
                                 corrected
                             }
@@ -1369,16 +1585,32 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 let hi_c = self.builder.iconst(hi, Origin::synthetic());
                                 let ann_s = Some(Annotation::Signed(64));
                                 let clamped = self.builder.min(
-                                    raw.into(), hi_c.into(), ann_s, Origin::synthetic());
+                                    raw.into(),
+                                    hi_c.into(),
+                                    ann_s,
+                                    Origin::synthetic(),
+                                );
                                 let clamped = self.builder.max(
-                                    clamped.into(), zero.into(), ann_s, Origin::synthetic());
+                                    clamped.into(),
+                                    zero.into(),
+                                    ann_s,
+                                    Origin::synthetic(),
+                                );
                                 // Override: float >= 2^63 → hi (overflow), NaN → 0.
                                 let clamped = self.builder.select(
-                                    is_large.into(), hi_c.into(), clamped.into(),
-                                    Type::Int, Origin::synthetic());
+                                    is_large.into(),
+                                    hi_c.into(),
+                                    clamped.into(),
+                                    Type::Int,
+                                    Origin::synthetic(),
+                                );
                                 self.builder.select(
-                                    is_nan.into(), zero.into(), clamped.into(),
-                                    Type::Int, Origin::synthetic())
+                                    is_nan.into(),
+                                    zero.into(),
+                                    clamped.into(),
+                                    Type::Int,
+                                    Origin::synthetic(),
+                                )
                             } else {
                                 // u64: two-range implementation.
                                 // [0, 2^63):   cvttss2si gives correct result.
@@ -1407,10 +1639,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     Type::Float(ft),
                                     Origin::synthetic(),
                                 );
-                                let raw_shifted = self.builder.fp_to_ui(
-                                    float_shifted.into(),
-                                    Origin::synthetic(),
-                                );
+                                let raw_shifted = self
+                                    .builder
+                                    .fp_to_ui(float_shifted.into(), Origin::synthetic());
                                 let sign_bit = self.builder.iconst(i64::MIN, Origin::synthetic());
                                 let result_large = self.builder.or(
                                     raw_shifted.into(),
@@ -1418,37 +1649,61 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     None,
                                     Origin::synthetic(),
                                 );
-                                let max_u64 =
-                                    self.builder.iconst(-1_i64, Origin::synthetic());
+                                let max_u64 = self.builder.iconst(-1_i64, Origin::synthetic());
                                 // Select in order: normal → large → huge → nan_or_neg
                                 let tentative = self.builder.select(
-                                    is_large.into(), result_large.into(), raw.into(),
-                                    Type::Int, Origin::synthetic());
+                                    is_large.into(),
+                                    result_large.into(),
+                                    raw.into(),
+                                    Type::Int,
+                                    Origin::synthetic(),
+                                );
                                 let tentative = self.builder.select(
-                                    is_huge.into(), max_u64.into(), tentative.into(),
-                                    Type::Int, Origin::synthetic());
+                                    is_huge.into(),
+                                    max_u64.into(),
+                                    tentative.into(),
+                                    Type::Int,
+                                    Origin::synthetic(),
+                                );
                                 // NaN or negative → 0 (NaN check must come after is_huge
                                 // so that positive NaN doesn't get UINT64_MAX).
                                 let sign_bit_pos: u32 = match ft {
                                     FloatType::F32 => 31,
                                     _ => 63,
                                 };
-                                let shift_c = self.builder.iconst(
-                                    sign_bit_pos as i64, Origin::synthetic());
+                                let shift_c = self
+                                    .builder
+                                    .iconst(sign_bit_pos as i64, Origin::synthetic());
                                 let sign = self.builder.shr(
-                                    int_bits_val.into(), shift_c.into(), None,
-                                    Origin::synthetic());
+                                    int_bits_val.into(),
+                                    shift_c.into(),
+                                    None,
+                                    Origin::synthetic(),
+                                );
                                 let one = self.builder.iconst(1, Origin::synthetic());
                                 let sign_masked = self.builder.and(
-                                    sign.into(), one.into(), None, Origin::synthetic());
-                                let is_neg = self.builder.int_to_bool(
-                                    sign_masked.into(), Origin::synthetic());
+                                    sign.into(),
+                                    one.into(),
+                                    None,
+                                    Origin::synthetic(),
+                                );
+                                let is_neg = self
+                                    .builder
+                                    .int_to_bool(sign_masked.into(), Origin::synthetic());
                                 let tentative = self.builder.select(
-                                    is_neg.into(), zero.into(), tentative.into(),
-                                    Type::Int, Origin::synthetic());
+                                    is_neg.into(),
+                                    zero.into(),
+                                    tentative.into(),
+                                    Type::Int,
+                                    Origin::synthetic(),
+                                );
                                 self.builder.select(
-                                    is_nan.into(), zero.into(), tentative.into(),
-                                    Type::Int, Origin::synthetic())
+                                    is_nan.into(),
+                                    zero.into(),
+                                    tentative.into(),
+                                    Type::Int,
+                                    Origin::synthetic(),
+                                )
                             }
                         };
                         Some(result)
@@ -1491,11 +1746,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             int_val.into()
                         };
                         let float_res = if signed {
-                            self.builder
-                                .si_to_fp(operand, ft, Origin::synthetic())
+                            self.builder.si_to_fp(operand, ft, Origin::synthetic())
                         } else {
-                            self.builder
-                                .ui_to_fp(operand, ft, Origin::synthetic())
+                            self.builder.ui_to_fp(operand, ft, Origin::synthetic())
                         };
                         // Bitcast Float → Int (bit pattern)
                         Some(self.builder.bitcast(
@@ -1584,7 +1837,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 let src_ty = self.monomorphize(self.mir.local_decls[src.local].ty);
                                 let src_size = type_size(self.tcx, src_ty).unwrap_or(0);
                                 if src_size > 8 {
-                                    let ir_ty = translate_ty(self.tcx, target_ty_mono).unwrap_or(Type::Int);
+                                    let ir_ty =
+                                        translate_ty(self.tcx, target_ty_mono).unwrap_or(Type::Int);
                                     let data = self.builder.load(
                                         val.into(),
                                         target_size as u32,
@@ -1612,9 +1866,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     let target_size =
                                         type_size(self.tcx, target_ty_mono).unwrap_or(0);
                                     let target_ir_ty = translate_ty(self.tcx, target_ty_mono);
-                                    if target_size > 0
-                                        && matches!(target_ir_ty, Some(Type::Int))
-                                    {
+                                    if target_size > 0 && matches!(target_ir_ty, Some(Type::Int)) {
                                         let loaded = self.builder.load(
                                             val.into(),
                                             target_size as u32,
@@ -1693,11 +1945,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         self.stack_locals.mark(place.local);
                         Some(slot)
                     } else {
-                        let local_ty =
-                            self.monomorphize(self.mir.local_decls[place.local].ty);
+                        let local_ty = self.monomorphize(self.mir.local_decls[place.local].ty);
                         let size = type_size(self.tcx, local_ty).unwrap_or(1) as u32;
-                        let slot =
-                            self.builder.stack_slot(size.max(1), Origin::synthetic());
+                        let slot = self.builder.stack_slot(size.max(1), Origin::synthetic());
                         self.locals.set(place.local, slot);
                         self.stack_locals.mark(place.local);
                         Some(slot)
@@ -1819,7 +2069,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let is_i128_const = bytes == 16
                         && matches!(op, Operand::Constant(_))
                         && matches!(self.builder.value_type(val), Some(Type::Int))
-                        && field_ty.map_or(false, |t| matches!(t.kind(), ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)));
+                        && field_ty.map_or(false, |t| {
+                            matches!(
+                                t.kind(),
+                                ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
+                            )
+                        });
                     if is_i128_const {
                         if let Operand::Constant(c) = op {
                             let mono_const = self.tcx.instantiate_and_normalize_erasing_regions(
@@ -1834,10 +2089,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     mono_const.eval(self.tcx, typing_env, c.span).ok()
                                 }
                             };
-                            if let Some(mir::ConstValue::Scalar(mir::interpret::Scalar::Int(int))) = const_val {
+                            if let Some(mir::ConstValue::Scalar(mir::interpret::Scalar::Int(int))) =
+                                const_val
+                            {
                                 let bits = int.to_bits(int.size());
                                 // Only emit as static data if value doesn't fit in 64 bits
-                                let is_signed = field_ty.map_or(false, |t| matches!(t.kind(), ty::Int(ty::IntTy::I128)));
+                                let is_signed = field_ty.map_or(false, |t| {
+                                    matches!(t.kind(), ty::Int(ty::IntTy::I128))
+                                });
                                 let needs_static = if is_signed {
                                     // Signed: check if sign-extended 64-bit value differs
                                     let as_i64 = bits as i64;
@@ -2120,7 +2379,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     if ty.is_floating_point() {
                         // Bitcast Float→Int so we can XOR the sign bit.
                         let v = if matches!(self.builder.value_type(v), Some(Type::Float(_))) {
-                            self.builder.bitcast(v.into(), Type::Int, None, Origin::synthetic())
+                            self.builder
+                                .bitcast(v.into(), Type::Int, None, Origin::synthetic())
                         } else {
                             self.coerce_to_int(v)
                         };
@@ -2148,9 +2408,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         .and_then(|t| type_size(self.tcx, t))
                         .is_some_and(|sz| sz > 8)
                 {
-                    let sz = op_ty
-                        .and_then(|t| type_size(self.tcx, t))
-                        .unwrap_or(16) as u32;
+                    let sz = op_ty.and_then(|t| type_size(self.tcx, t)).unwrap_or(16) as u32;
                     self.builder.load(
                         v.into(),
                         sz,
@@ -2213,9 +2471,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             // The operand is a >8-byte integer (e.g. u128) stored in memory;
                             // translate_place_to_value returned a Ptr to the stack slot.
                             // Load the value as a 16-byte Int before bitwise NOT.
-                            let sz = mir_ty
-                                .and_then(|t| type_size(self.tcx, t))
-                                .unwrap_or(16) as u32;
+                            let sz =
+                                mir_ty.and_then(|t| type_size(self.tcx, t)).unwrap_or(16) as u32;
                             let loaded = self.builder.load(
                                 v.into(),
                                 sz,
@@ -2235,10 +2492,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         _ => {
                             // Bitwise NOT: XOR with -1.
                             let ones = self.builder.iconst(-1, Origin::synthetic());
-                            Some(
-                                self.builder
-                                    .xor(v.into(), ones.into(), not_ann, Origin::synthetic()),
-                            )
+                            Some(self.builder.xor(
+                                v.into(),
+                                ones.into(),
+                                not_ann,
+                                Origin::synthetic(),
+                            ))
                         }
                     }
                 }
@@ -2315,7 +2574,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let size = type_size(self.tcx, ty).unwrap_or(8);
                         let slot_size = self.builder.stack_slot_size(slot);
                         let ir_ty = translate_ty(self.tcx, ty);
-                        let is_slot_ptr = matches!(self.builder.value_type(slot), Some(Type::Ptr(_)));
+                        let is_slot_ptr =
+                            matches!(self.builder.value_type(slot), Some(Type::Ptr(_)));
                         let should_load_stack_int = matches!(ir_ty, Some(Type::Int))
                             && is_slot_ptr
                             && ((size <= 8 && slot_size.is_some_and(|sz| sz <= 8))
@@ -2330,7 +2590,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             && size <= 8
                             && slot_size.is_some_and(|sz| sz <= 8)
                             && matches!(ir_ty, Some(Type::Bool | Type::Float(_)));
-                        if should_load_stack_int || should_load_stack_ptr || should_load_stack_scalar {
+                        if should_load_stack_int
+                            || should_load_stack_ptr
+                            || should_load_stack_scalar
+                        {
                             let load_ty = if should_load_stack_ptr {
                                 Type::Ptr(0)
                             } else {

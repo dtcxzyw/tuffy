@@ -54,6 +54,29 @@ impl FatLocalMap {
     }
 }
 
+/// Maps `*WithOverflow` destination locals to their overflow-flag `ValueRef`
+/// (the secondary result of the multi-result IR instruction).
+/// Field(1) access on a `(T, bool)` checked-op local consults this map.
+pub(super) struct OverflowLocalMap {
+    values: HashMap<usize, ValueRef>,
+}
+
+impl OverflowLocalMap {
+    pub(super) fn new() -> Self {
+        Self {
+            values: HashMap::new(),
+        }
+    }
+
+    pub(super) fn set(&mut self, local: mir::Local, overflow: ValueRef) {
+        self.values.insert(local.as_usize(), overflow);
+    }
+
+    pub(super) fn get(&self, local: mir::Local) -> Option<ValueRef> {
+        self.values.get(&local.as_usize()).copied()
+    }
+}
+
 /// Tracks which MIR locals hold stack slot addresses (aggregate/spilled values)
 /// rather than scalar values in registers.
 pub(super) struct StackLocalSet {
@@ -134,6 +157,9 @@ pub(super) struct TranslationCtx<'a, 'tcx> {
     pub(super) locals: LocalMap,
     pub(super) fat_locals: FatLocalMap,
     pub(super) stack_locals: StackLocalSet,
+    /// Maps `*WithOverflow` destination locals to the overflow-flag ValueRef
+    /// (secondary result of the IR instruction). Used by Field(1) access.
+    pub(super) overflow_locals: OverflowLocalMap,
     pub(super) symbols: SymbolTable,
     pub(super) static_data: StaticDataVec,
     pub(super) block_map: BlockMap,
@@ -289,12 +315,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     Origin::synthetic(),
                 );
                 param_idx += 1;
-                let metadata = self.builder.param(
-                    param_idx,
-                    Type::Int,
-                    None,
-                    Origin::synthetic(),
-                );
+                let metadata = self
+                    .builder
+                    .param(param_idx, Type::Int, None, Origin::synthetic());
                 param_idx += 1;
                 self.locals.set(local, data_ptr);
                 self.fat_locals.set(local, metadata);
@@ -312,14 +335,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // Unsigned(128) so the legalizer treats it as a two-slot
                 // (lo, hi) value — matching the caller's ABI which passes
                 // such values in two registers.
-                let ann = if is_indirect { None } else { composite_param_annotation(self.tcx, ty) };
+                let ann = if is_indirect {
+                    None
+                } else {
+                    composite_param_annotation(self.tcx, ty)
+                };
 
-                let val = self.builder.param(
-                    param_idx,
-                    param_ty,
-                    ann,
-                    Origin::synthetic(),
-                );
+                let val = self
+                    .builder
+                    .param(param_idx, param_ty, ann, Origin::synthetic());
                 self.locals.set(local, val);
 
                 // Mark >16 byte parameters as stack locals so element access

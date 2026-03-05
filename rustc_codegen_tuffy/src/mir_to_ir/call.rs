@@ -9,9 +9,7 @@ use tuffy_ir::types::{Annotation, Type};
 use tuffy_ir::value::ValueRef;
 
 use super::ctx::TranslationCtx;
-use super::intrinsic::{
-    intrinsic_to_libc,
-};
+use super::intrinsic::intrinsic_to_libc;
 use super::types::*;
 
 /// Resolved call target: direct symbol or virtual dispatch.
@@ -241,9 +239,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         source_info: mir::SourceInfo,
     ) {
         // Check for compiler intrinsics and handle them inline.
-        if let Some((intrinsic_name, intrinsic_substs)) =
-            self.detect_intrinsic(func)
-        {
+        if let Some((intrinsic_name, intrinsic_substs)) = self.detect_intrinsic(func) {
             // Translate intrinsic arguments to IR values.
             let mut intrinsic_args: Vec<ValueRef> = Vec::new();
             for arg in args {
@@ -253,15 +249,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // integer bits so intrinsics (bswap, ctlz, bitreverse, …) receive
                     // the actual value, not an address.
                     let v = if matches!(self.builder.value_type(v), Some(Type::Ptr(_))) {
-                        let arg_ty = self.monomorphize(
-                            arg.node.ty(&self.mir.local_decls, self.tcx),
-                        );
+                        let arg_ty =
+                            self.monomorphize(arg.node.ty(&self.mir.local_decls, self.tcx));
                         if let Some(sz) = type_size(self.tcx, arg_ty) {
-                            if sz <= 16
-                                && matches!(
-                                    translate_ty(self.tcx, arg_ty),
-                                    Some(Type::Int)
-                                )
+                            if sz <= 16 && matches!(translate_ty(self.tcx, arg_ty), Some(Type::Int))
                             {
                                 self.builder.load(
                                     v.into(),
@@ -859,7 +850,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // by value in a register, not by reference.
                 if matches!(&arg.node, Operand::Constant(_))
                     && matches!(arg_ty.kind(), ty::Tuple(_) | ty::Adt(..) | ty::Array(..))
-                    && arg_size > 0 && arg_size <= 8
+                    && arg_size > 0
+                    && arg_size <= 8
                 {
                     if matches!(self.builder.value_type(v), Some(Type::Ptr(_))) {
                         v = self.builder.load(
@@ -882,16 +874,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // itself) are NOT addresses of [ptr, len] pairs.
                 // They must not be decomposed by word-by-word loads;
                 // the fat component is pushed separately below.
-                let is_fat_value_not_slot =
-                    is_fat_ptr(self.tcx, arg_ty)
-                        && match &arg.node {
-                            Operand::Constant(_) => true,
-                            Operand::Copy(p) | Operand::Move(p) => {
-                                p.projection.is_empty()
-                                    && !self.stack_locals.is_stack(p.local)
-                            }
-                            _ => false,
-                        };
+                let is_fat_value_not_slot = is_fat_ptr(self.tcx, arg_ty)
+                    && match &arg.node {
+                        Operand::Constant(_) => true,
+                        Operand::Copy(p) | Operand::Move(p) => {
+                            p.projection.is_empty() && !self.stack_locals.is_stack(p.local)
+                        }
+                        _ => false,
+                    };
                 let is_struct_arg = arg_size > 8
                     && arg_size <= 16
                     && !matches!(repr_kind(self.tcx, arg_ty), ReprKind::Scalar)
@@ -908,12 +898,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     );
                     ir_args.push(w0.into());
                     let off8 = self.builder.iconst(8, Origin::synthetic());
-                    let hi_addr = self.builder.ptradd(
-                        v.into(),
-                        off8.into(),
-                        0,
-                        Origin::synthetic(),
-                    );
+                    let hi_addr =
+                        self.builder
+                            .ptradd(v.into(), off8.into(), 0, Origin::synthetic());
                     let w1 = self.builder.load(
                         hi_addr.into(),
                         8,
@@ -932,7 +919,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // Annotate i128/u128 arguments so the legalization
                     // pass knows to split them into (lo, hi) even when
                     // the value fits in 64 bits (e.g. small constants).
-                    if matches!(arg_ty.kind(), ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)) {
+                    if matches!(
+                        arg_ty.kind(),
+                        ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
+                    ) {
                         // If the value is a Ptr (address of the i128 in memory, from
                         // translate_place_to_value for >8-byte scalars), load lo+hi
                         // from the address instead of passing the pointer annotated
@@ -948,12 +938,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             );
                             ir_args.push(w0.into());
                             let off8 = self.builder.iconst(8, Origin::synthetic());
-                            let hi_addr = self.builder.ptradd(
-                                v.into(),
-                                off8.into(),
-                                0,
-                                Origin::synthetic(),
-                            );
+                            let hi_addr =
+                                self.builder
+                                    .ptradd(v.into(), off8.into(), 0, Origin::synthetic());
                             let w1 = self.builder.load(
                                 hi_addr.into(),
                                 8,
@@ -964,7 +951,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             );
                             ir_args.push(w1.into());
                         } else {
-                            let ann = translate_annotation(arg_ty).unwrap_or(Annotation::Unsigned(128));
+                            let ann =
+                                translate_annotation(arg_ty).unwrap_or(Annotation::Unsigned(128));
                             ir_args.push(IrOperand::annotated(v, ann));
                         }
                     } else if arg_size == 16
@@ -984,12 +972,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         );
                         ir_args.push(w0.into());
                         let off8 = self.builder.iconst(8, Origin::synthetic());
-                        let hi_addr = self.builder.ptradd(
-                            v.into(),
-                            off8.into(),
-                            0,
-                            Origin::synthetic(),
-                        );
+                        let hi_addr =
+                            self.builder
+                                .ptradd(v.into(), off8.into(), 0, Origin::synthetic());
                         let w1 = self.builder.load(
                             hi_addr.into(),
                             8,
@@ -1018,10 +1003,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let needs_fat = is_fat_ptr(self.tcx, local_ty)
                             || (local_ty.is_box()
                                 && local_ty.boxed_ty().is_some_and(|bt| {
-                                    matches!(
-                                        bt.kind(),
-                                        ty::Str | ty::Slice(..) | ty::Dynamic(..)
-                                    )
+                                    matches!(bt.kind(), ty::Str | ty::Slice(..) | ty::Dynamic(..))
                                 }));
                         if needs_fat {
                             ir_args.push(fat_v.into());
@@ -1051,9 +1033,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             && is_fat_ptr(self.tcx, const_ty)
                         {
                             let alloc = self.tcx.global_alloc(alloc_id);
-                            if let rustc_middle::mir::interpret::GlobalAlloc::Memory(
-                                mem_alloc,
-                            ) = alloc
+                            if let rustc_middle::mir::interpret::GlobalAlloc::Memory(mem_alloc) =
+                                alloc
                             {
                                 let inner = mem_alloc.inner();
                                 let byte_offset = offset.bytes() as usize + 8;
@@ -1061,11 +1042,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     .inspect_with_uninit_and_ptr_outside_interpreter(
                                         byte_offset..byte_offset + 8,
                                     );
-                                let len = u64::from_le_bytes(
-                                    len_bytes.try_into().unwrap_or([0u8; 8]),
-                                );
-                                let len_val =
-                                    self.builder.iconst(len as i64, Origin::synthetic());
+                                let len =
+                                    u64::from_le_bytes(len_bytes.try_into().unwrap_or([0u8; 8]));
+                                let len_val = self.builder.iconst(len as i64, Origin::synthetic());
                                 ir_args.push(len_val.into());
                             }
                         }
@@ -1199,9 +1178,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 .mark_secondary_return_capture(rdx_capture.index(), call_idx);
             // Store RDX (secondary return) at offset 8.
             let off8 = self.builder.iconst(8, Origin::synthetic());
-            let hi_addr =
-                self.builder
-                    .ptradd(slot.into(), off8.into(), 0, Origin::synthetic());
+            let hi_addr = self
+                .builder
+                .ptradd(slot.into(), off8.into(), 0, Origin::synthetic());
             self.current_mem = self.builder.store(
                 rdx_capture.into(),
                 hi_addr.into(),

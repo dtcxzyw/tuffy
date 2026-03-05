@@ -397,9 +397,11 @@ impl CodegenBackend for TuffyCodegenBackend {
                         writable: false,
                     });
                 }
-                if let Some(mut cf) =
-                    session.compile_function(&result.func, &mut result.symbols, &result.abi_metadata)
-                {
+                if let Some(mut cf) = session.compile_function(
+                    &result.func,
+                    &mut result.symbols,
+                    &result.abi_metadata,
+                ) {
                     cf.weak = true;
                     inline_funcs.push(cf);
                 } else {
