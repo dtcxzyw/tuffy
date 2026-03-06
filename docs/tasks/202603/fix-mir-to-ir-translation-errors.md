@@ -80,7 +80,8 @@ BinOp::Offset => {
 4. Fix `BinOp::Offset` to use `ptradd`
 5. Verify float comparison semantics and fix if needed
 6. Run codegen tests to verify fixes
-7. Run UI tests and rustlantis for regression testing
+7. Update `docs/mir_to_tuffy_ir.md` to reflect any changes in translation behavior
+8. Run UI tests and rustlantis for regression testing
 
 ## References
 
