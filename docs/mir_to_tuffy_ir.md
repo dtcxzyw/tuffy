@@ -103,6 +103,26 @@ These return two values: the wrapped result and a boolean overflow flag.
 
 **Note**: Bitwise NOT is currently emulated using XOR with -1. A dedicated `not` instruction may be added in the future.
 
+## Statements
+
+MIR statements represent actions within a basic block.
+
+| MIR Statement | Translation |
+|---------------|-------------|
+| `Assign(place, rvalue)` | Translate rvalue, store result to place |
+| `StorageLive(local)` | No-op (ignored) |
+| `StorageDead(local)` | No-op (ignored) |
+| `SetDiscriminant { place, variant }` | `store` tag value to discriminant field |
+| `Nop` | No-op |
+| `Intrinsic(intrinsic)` | See Intrinsics section |
+
+**StorageLive/StorageDead**: These are lifetime markers used by MIR for stack slot reuse and borrow checking. At the IR level, they are ignored since Tuffy IR uses explicit stack slots and does not perform lifetime-based optimizations.
+
+**SetDiscriminant**: Writes the discriminant (tag) value for an enum variant. For single-variant enums, this is a no-op. For multi-variant enums:
+- Computes the tag value based on the variant index and tag encoding (Direct or Niche)
+- Calculates the address of the discriminant field (base + offset)
+- Emits a `store` instruction to write the tag value
+
 ## Intrinsics
 
 ### Bit Manipulation
