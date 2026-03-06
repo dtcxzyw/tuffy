@@ -8,8 +8,14 @@ use tuffy_regalloc::{PReg, VReg};
 
 /// Map from IR value to virtual register.
 pub struct VRegMap {
-    /// Instruction result values.
+    /// Primary instruction result values.
     map: Vec<Option<VReg>>,
+    /// Secondary instruction result values (same instruction index as primary,
+    /// but tagged with SECONDARY_BIT in ValueRef). Stored separately to avoid
+    /// aliasing: both primary and secondary have the same `val.index()`, so
+    /// using a single array would cause secondary assignments to overwrite the
+    /// primary entry.
+    secondary_map: Vec<Option<VReg>>,
     /// Block argument values (separate namespace).
     block_arg_map: Vec<Option<VReg>>,
 }
@@ -18,6 +24,7 @@ impl VRegMap {
     pub fn new(inst_capacity: usize, block_arg_capacity: usize) -> Self {
         Self {
             map: vec![None; inst_capacity],
+            secondary_map: vec![None; inst_capacity],
             block_arg_map: vec![None; block_arg_capacity],
         }
     }
@@ -25,6 +32,8 @@ impl VRegMap {
     pub fn assign(&mut self, val: ValueRef, vreg: VReg) {
         if val.is_block_arg() {
             self.block_arg_map[val.index() as usize] = Some(vreg);
+        } else if val.is_secondary_result() {
+            self.secondary_map[val.index() as usize] = Some(vreg);
         } else {
             self.map[val.index() as usize] = Some(vreg);
         }
@@ -33,6 +42,8 @@ impl VRegMap {
     pub fn get(&self, val: ValueRef) -> Option<VReg> {
         if val.is_block_arg() {
             *self.block_arg_map.get(val.index() as usize)?
+        } else if val.is_secondary_result() {
+            *self.secondary_map.get(val.index() as usize)?
         } else {
             *self.map.get(val.index() as usize)?
         }
