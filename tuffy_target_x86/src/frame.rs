@@ -51,8 +51,14 @@ pub fn insert_prologue_epilogue(
     // callee-saved pushes, RSP is 16-byte aligned.  After `push %rbp` +
     // `mov %rsp, %rbp`, RBP (== RSP) is 16-byte aligned.  We need:
     //   sub_amount + num_callee_saved * 8  ≡  0  (mod 16)
+    //
+    // When the function makes calls, the `call` instruction pushes an 8-byte
+    // return address to [RSP].  If the lowest stack slot is allocated exactly
+    // at RSP, that push overwrites it.  Add 8 bytes of padding so that
+    // [RSP] is always below every local stack slot.
+    let padding = if has_calls { 8 } else { 0 };
     let callee_save_bytes = callee_saved.len() as i32 * 8;
-    let total_needed = total_frame + callee_save_bytes;
+    let total_needed = total_frame + callee_save_bytes + padding;
     let aligned_total = (total_needed + 15) & !15;
     let sub_amount = aligned_total - callee_save_bytes;
 
