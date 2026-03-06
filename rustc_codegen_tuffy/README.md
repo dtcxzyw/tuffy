@@ -208,6 +208,7 @@ Unsupported MIR constructs (rvalue kinds, statement kinds, terminator kinds, int
 
 ## References
 
+- [MIR to Tuffy IR Translation](../docs/mir_to_tuffy_ir.md) — Complete mapping of MIR operations to Tuffy IR instructions
 - [MIR (Mid-level IR)](https://rustc-dev-guide.rust-lang.org/mir/index.html)
 - [Lowering MIR](https://rustc-dev-guide.rust-lang.org/backend/lowering-mir.html)
 - [Backend Agnostic Codegen](https://rustc-dev-guide.rust-lang.org/backend/backend-agnostic.html)
