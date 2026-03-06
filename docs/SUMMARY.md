@@ -25,9 +25,11 @@
   - [Rewrite Trace](RFCs/202602/rewrite-trace.md)
   - [Verification](RFCs/202602/verification.md)
   - [At-Use Annotations](RFCs/202602/at-use-annotations.md)
+  - [Scalable Vectors](RFCs/202602/scalable-vectors.md)
 
 ---
 
 - [SOPs]()
   - [Modifying the IR](SOPs/ir-change.md)
   - [Updating Documentation](SOPs/docs-update.md)
+  - [Adding Codegen Tests](SOPs/add-codegen-test.md)
