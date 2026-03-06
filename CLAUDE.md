@@ -6,6 +6,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 When the user provides a common instruction or policy that applies broadly to future work in this repository, update this file to capture it. This ensures future sessions inherit the instruction without the user needing to repeat it.
 
+## Context Management
+
+**CRITICAL:** When the conversation context is compacted (compressed due to length), you MUST restore essential context by re-reading key documents.
+
+### After Context Compaction
+
+Immediately after context compaction occurs, you MUST:
+
+1. **Re-read CLAUDE.md:**
+   - Always re-read `/tuffy/CLAUDE.md` to restore project policies and conventions
+   - This file contains critical instructions that must never be lost
+
+2. **Re-read Component README files:**
+   - When modifying code in any component/module, read that component's `README.md`
+   - Example: When working on `rustc_codegen_tuffy`, read `rustc_codegen_tuffy/README.md`
+   - Example: When working on Lean code, read `lean/TuffyLean/README.md`
+
+3. **Re-read Previously Referenced Documentation:**
+   - Re-read all documents from `docs/` that were referenced earlier in the conversation
+   - This includes task documents, RFCs, and any other documentation that informed your work
+   - Maintain a mental note of which docs files have been consulted during the session
+
+### Working with Components
+
+Before modifying any component:
+- Read the component's `README.md` to understand its architecture and conventions
+- Follow the component-specific rules defined in its documentation
+- Do not proceed with changes until you have verified the component's requirements
+
 ## Problem Solving Policy
 
 **IMPORTANT:** You have sufficient time to thoroughly analyze and debug problems. Do not choose temporary workarounds or give up due to perceived time constraints. When encountering bugs or issues:
@@ -14,6 +43,114 @@ When the user provides a common instruction or policy that applies broadly to fu
 - Persist through complex debugging sessions even if they take multiple attempts
 - Avoid shortcuts or partial solutions when complete fixes are achievable
 - Only escalate or defer issues when genuinely blocked by external factors
+
+## First Principles Thinking
+
+**IMPORTANT:** When approaching any problem, design decision, or implementation task, you MUST apply first principles thinking. Break down complex problems into fundamental truths and rebuild solutions from the ground up.
+
+### Core Process
+
+1. **Deconstruct the Problem:**
+   - Identify the core components and fundamental truths that cannot be further simplified
+   - Distinguish between what is undeniably true (physical laws, mathematical constraints, fundamental requirements) and what is assumed
+
+2. **Challenge Assumptions:**
+   - Question every assumption, including industry conventions, common practices, and perceived constraints
+   - For each assumption, ask: "Why must this be true?" and "What if it weren't true?"
+   - Ignore existing solutions and conventional wisdom during this phase
+
+3. **Reconstruct from Fundamentals:**
+   - Build solutions based ONLY on the fundamental truths identified
+   - Do not reference existing implementations, competitors, or standard approaches
+   - Generate novel approaches that directly address the core requirements
+
+4. **Reason Step-by-Step:**
+   - Present clear, logical reasoning at each stage
+   - Explain why each decision follows from fundamental principles
+   - Verify that no unjustified assumptions have crept back in
+
+### SMT Solver Thinking
+
+Apply SMT (Satisfiability Modulo Theories) solver methodology to expose logical inconsistencies and hidden assumptions:
+
+1. **Logical Inversion:**
+   - Take any claim or requirement and invert it logically
+   - Test whether the negation leads to contradictions or reveals unstated constraints
+   - Example: If "this optimization is always beneficial," test scenarios where it might not be
+
+2. **Identify Axiom Systems:**
+   - When facing disagreements or design conflicts, identify the underlying axiom systems
+   - Distinguish between conflicts arising from different foundational assumptions versus genuine incompatibilities
+   - Make implicit axioms explicit before proceeding
+
+3. **Establish Formal Constraints:**
+   - Define precise success criteria and significance thresholds before implementation
+   - Expose vague statements (e.g., "good enough performance") by demanding concrete bounds
+   - Reject solutions that cannot be formally verified against stated requirements
+
+4. **Proof by Contradiction:**
+   - When uncertain about correctness, assume the opposite and derive consequences
+   - If contradictions emerge, the original approach is validated
+   - If no contradictions arise, reconsider the assumptions
+
+### Application Guidelines
+
+- When designing new components, start from the fundamental requirements rather than copying existing patterns
+- When debugging, trace issues to their root cause in the fundamental behavior of the system
+- When evaluating trade-offs, ground decisions in first principles rather than conventional wisdom
+- When someone suggests "this is how it's usually done," ask whether that approach is necessary given the fundamentals
+- Before implementing, invert key assumptions to test their necessity
+- When requirements seem vague, establish formal constraints to expose ambiguities
+
+This approach ensures that Tuffy's architecture emerges from sound reasoning rather than inherited assumptions, leading to more elegant and correct solutions.
+
+## Quality Standards and Anti-Slop Policy
+
+**CRITICAL:** You must never take shortcuts, use workarounds, or produce low-quality "slop" output. Every solution must be thorough, correct, and properly reasoned.
+
+### Prohibited Behaviors
+
+- **No Placeholder Solutions:** Never use TODO comments, stub implementations, or "this will be implemented later" patterns unless explicitly requested
+- **No Superficial Fixes:** Do not apply band-aid solutions that mask symptoms without addressing root causes
+- **No Assumption Skipping:** Do not proceed with unstated assumptions; make all assumptions explicit and verify them
+- **No Generic Responses:** Avoid vague, general advice when specific, actionable solutions are required
+- **No Premature Conclusions:** Do not jump to solutions before thoroughly understanding the problem
+
+### Mandatory Practices
+
+1. **Verify Before Acting:**
+   - Read relevant code before proposing changes
+   - Understand existing architecture before adding new components
+   - Check test results before claiming success
+
+2. **Reason Explicitly:**
+   - Show your reasoning step-by-step
+   - Explain why each decision follows from requirements
+   - Identify what you know, what you assume, and what you need to verify
+
+3. **Demand Precision:**
+   - When requirements are vague, ask clarifying questions
+   - Establish concrete success criteria before implementation
+   - Define measurable outcomes rather than accepting "good enough"
+
+4. **Self-Critique:**
+   - After proposing a solution, identify its potential weaknesses
+   - Consider edge cases and failure modes
+   - Ask: "What could go wrong with this approach?"
+
+5. **Iterate Toward Correctness:**
+   - Treat initial solutions as drafts requiring validation
+   - Test assumptions through implementation
+   - Refine based on actual results, not wishful thinking
+
+### Quality Checklist
+
+Before completing any task, verify:
+- [ ] Have I understood the root cause, not just symptoms?
+- [ ] Does this solution address fundamental requirements?
+- [ ] Have I tested this works, not just assumed it will?
+- [ ] Are there hidden assumptions I haven't validated?
+- [ ] Would this solution survive adversarial review?
 
 ## Language Policy
 
