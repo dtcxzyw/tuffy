@@ -420,25 +420,37 @@ fn is_wide<M>(s: &State<M>, v: ValueRef) -> bool {
 
 /// Returns the (lo, hi) pair for a 128-bit operand, correctly handling non-wide
 /// values. Unlike `vmap.pair()`, which returns `(v, v)` for a non-wide value,
-/// this emits hi = lo >> 63 (sign-extend) for all non-wide values.
+/// this derives the hi word from lo:
 ///
-/// Sign-extension is always correct for non-wide constants that appear in
-/// 128-bit IR: positive values get hi=0 (same as zero-extension), and negative
-/// constants used as bit-patterns (e.g. iconst(-1) for bitwise NOT) get hi=-1.
+/// - For `Unsigned` annotated operands, zero-extend (hi = 0).  A non-wide
+///   value with `Unsigned(n)` annotation represents a u64 constant whose
+///   128-bit form always has the upper 64 bits equal to zero, even when the
+///   value is in `[2^63, 2^64)` (i.e., bit 63 of lo is set).  Sign-extending
+///   such a value would incorrectly produce hi = −1.
+///
+/// - For `Signed` annotated operands or unannotated ones, sign-extend
+///   (hi = lo >> 63).  This handles negative constants such as `iconst(-1)`
+///   used as the all-ones mask for bitwise NOT; those have annotation `None`
+///   or `Signed(n)` and must propagate their sign bit into the upper half.
 fn wide_pair<M>(s: &State<M>, b: &mut Builder, op: &Operand) -> (ValueRef, ValueRef) {
     if is_wide(s, op.value) {
         s.vmap.pair(op.value)
     } else {
         let lo = s.vmap.one(op.value);
-        // Sign-extend: for positive values hi=0 (same as zero-extend); for negative
-        // values (e.g. iconst(-1) used as all-ones in a 128-bit XOR) hi=-1, which is correct.
-        let c63 = b.iconst(63i64, o());
-        let hi = b.shr(
-            Operand::annotated(lo, Annotation::Signed(64)),
-            Operand::new(c63),
-            None,
-            o(),
-        );
+        let hi = if matches!(op.annotation.as_ref(), Some(Annotation::Unsigned(_))) {
+            // Zero-extend: unsigned values always have hi = 0 in their 128-bit form.
+            b.iconst(0i64, o())
+        } else {
+            // Sign-extend: for positive values hi=0 (same as zero-extend); for negative
+            // values (e.g. iconst(-1) used as all-ones in a 128-bit XOR) hi=-1.
+            let c63 = b.iconst(63i64, o());
+            b.shr(
+                Operand::annotated(lo, Annotation::Signed(64)),
+                Operand::new(c63),
+                None,
+                o(),
+            )
+        };
         (lo, hi)
     }
 }
@@ -615,6 +627,27 @@ fn legalize_inst<M: AbiMetadata + Clone>(
         Op::Load(ptr, 16, mem) => {
             leg_load_128(s, b, old_vref, ptr, mem);
         }
+        Op::Load(ptr, bytes, mem) if *bytes > 8 && *bytes < 16 => {
+            // 9–15 byte load: split into an 8-byte lo load and a
+            // (bytes-8)-byte hi load, yielding a (lo, hi) Pair so that
+            // downstream wide stores receive the correct halves.
+            let hi_bytes = bytes - 8;
+            let ann64 = Some(Annotation::Unsigned(64));
+            let p = s.vmap.one(ptr.value);
+            let m = s.vmap.one(mem.value);
+            let lo = b.load(Operand::new(p), 8, Type::Int, Operand::new(m), ann64, o());
+            let c8 = b.iconst(8i64, o());
+            let p_hi = b.ptradd(Operand::new(p), Operand::new(c8), 0, o());
+            let hi = b.load(
+                Operand::new(p_hi),
+                hi_bytes,
+                Type::Int,
+                Operand::new(m),
+                ann64,
+                o(),
+            );
+            s.vmap.set(old_vref, Mapped::Pair(lo, hi));
+        }
         Op::Store(val, ptr, 16, mem) => {
             leg_store_128(old, s, b, old_vref, val, ptr, mem);
         }
@@ -692,6 +725,26 @@ fn legalize_inst<M: AbiMetadata + Clone>(
             s.vmap.set(old_vref, Mapped::One(v));
         }
         Op::Store(val, ptr, bytes, mem) if is_wide(s, val.value) => {
+            // For wide stores > 16 bytes (e.g. store.32 load32_result, dst),
+            // a 2-word lo/hi split would lose bytes 16+.  When the stored value
+            // comes directly from a load.N (N >= bytes) in the old function,
+            // replace the whole pattern with a mem_copy so all bytes are copied.
+            if *bytes > 16 {
+                let src_ptr_op = match &old.inst(val.value.index()).op {
+                    Op::Load(load_ptr, load_bytes, _) if *load_bytes >= *bytes => {
+                        Some(remap_op(s, load_ptr))
+                    }
+                    _ => None,
+                };
+                if let Some(src_ptr) = src_ptr_op {
+                    let dst = remap_op(s, ptr);
+                    let m = remap_op(s, mem);
+                    let count = b.iconst(*bytes as i64, o());
+                    let new_mem = b.mem_copy(dst, src_ptr, Operand::new(count), 1, m, o());
+                    s.vmap.set(old_vref, Mapped::One(new_mem));
+                    return;
+                }
+            }
             let (lo, hi) = s.vmap.pair(val.value);
             let p = remap_op(s, ptr);
             let m = remap_op(s, mem);
