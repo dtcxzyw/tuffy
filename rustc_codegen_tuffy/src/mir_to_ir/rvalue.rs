@@ -1383,6 +1383,35 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             _ => return Some(val),
                         };
                         let src_ty = self.monomorphize(src_ty);
+                        // `translate_place_to_value` returns the *address* of the
+                        // field (as a Ptr) for >8-byte types so the assignment
+                        // handler can do a word-by-word copy.  When this address
+                        // is used as the source of an IntToInt cast we must load
+                        // the actual integer value from memory first; otherwise
+                        // `coerce_to_int` below would convert the address itself
+                        // to an integer (ptrtoaddr), producing the wrong result.
+                        // This only applies when the target type fits in 64 bits;
+                        // 128-bit → 128-bit casts go through the wide_pair path.
+                        let target_ty_m = self.monomorphize(*target_ty);
+                        let val = if type_size(self.tcx, src_ty).is_some_and(|s| s > 8)
+                            && src_ty.is_integral()
+                            && type_size(self.tcx, target_ty_m).is_some_and(|s| s <= 8)
+                            && matches!(self.builder.value_type(val), Some(Type::Ptr(_)))
+                        {
+                            // Load the low 8 bytes (little-endian) which hold
+                            // bits [0..63] of the 128-bit integer — sufficient
+                            // for any narrowing cast to ≤64-bit targets.
+                            self.builder.load(
+                                val.into(),
+                                8,
+                                Type::Int,
+                                self.current_mem.into(),
+                                None,
+                                Origin::synthetic(),
+                            )
+                        } else {
+                            val
+                        };
                         // Bool is Type::Bool in IR but IntToInt casts need Int operands.
                         let val = self.coerce_to_int(val);
                         translate_int_to_int_cast(src_ty, *target_ty, val, &mut self.builder)
@@ -1725,17 +1754,17 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         };
                         let int_val = self.coerce_to_int(val);
 
-                        // Set annotation for i128/u128 types
+                        // Set annotation so the isel can sign/zero-extend narrow
+                        // integers before cvtsi2ss/cvtsi2sd.  The x86 instruction
+                        // operates on a full 64-bit value; without sign-extension
+                        // a byte like 0xDA (-38 as i8) would be seen as 218.
                         let annotation = if let Some(size) = type_size(self.tcx, src_ty) {
-                            if size == 16 {
-                                Some(if signed {
-                                    tuffy_ir::types::Annotation::Signed(128)
-                                } else {
-                                    tuffy_ir::types::Annotation::Unsigned(128)
-                                })
+                            let bits = (size * 8) as u32;
+                            Some(if signed {
+                                tuffy_ir::types::Annotation::Signed(bits)
                             } else {
-                                None
-                            }
+                                tuffy_ir::types::Annotation::Unsigned(bits)
+                            })
                         } else {
                             None
                         };
