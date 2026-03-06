@@ -3,8 +3,8 @@
 use rustc_middle::mir::{self, Operand};
 use rustc_middle::ty;
 
-use tuffy_ir::instruction::{ICmpOp, Operand as IrOperand, Origin};
-use tuffy_ir::types::{Annotation, Type};
+use tuffy_ir::instruction::{FCmpOp, ICmpOp, Operand as IrOperand, Origin};
+use tuffy_ir::types::{Annotation, FloatType, Type};
 use tuffy_ir::value::ValueRef;
 
 use super::ctx::TranslationCtx;
@@ -469,6 +469,38 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let result = self
                         .builder
                         .or(hi.into(), lo.into(), None, Origin::synthetic());
+                    self.locals.set(destination_local, result);
+                }
+                true
+            }
+
+            // minnumf32/minnumf64/maxnumf32/maxnumf64: IEEE 754 minNum/maxNum.
+            // For non-NaN inputs: min(a,b) = a < b ? a : b; max(a,b) = a > b ? a : b.
+            "minnumf32" | "minnumf64" | "maxnumf32" | "maxnumf64" => {
+                if ir_args.len() >= 2 {
+                    let a = ir_args[0];
+                    let b = ir_args[1];
+                    let ft = if name.ends_with("f32") {
+                        FloatType::F32
+                    } else {
+                        FloatType::F64
+                    };
+                    let ty = Type::Float(ft);
+                    let cmp_op = if name.starts_with("minnum") {
+                        FCmpOp::OLt
+                    } else {
+                        FCmpOp::OGt
+                    };
+                    let cond =
+                        self.builder
+                            .fcmp(cmp_op, a.into(), b.into(), Origin::synthetic());
+                    let result = self.builder.select(
+                        cond.into(),
+                        a.into(),
+                        b.into(),
+                        ty,
+                        Origin::synthetic(),
+                    );
                     self.locals.set(destination_local, result);
                 }
                 true

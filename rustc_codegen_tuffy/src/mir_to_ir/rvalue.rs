@@ -2595,7 +2595,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         Origin::synthetic(),
                     );
                 }
-                self.stack_locals.mark(dest_place.local);
+                // Only mark the local as stack when writing directly to it
+                // (no projection). For projected assignments like `(*ptr) = [v; n]`
+                // the local is a pointer whose VALUE should not be treated as a
+                // stack-slot address – marking it would corrupt later loads.
+                if dest_place.projection.is_empty() {
+                    self.stack_locals.mark(dest_place.local);
+                }
                 Some(slot)
             }
             _ => None,

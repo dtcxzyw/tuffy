@@ -676,6 +676,17 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 && let Some(sret) = self.sret_ptr
             {
                 Some(sret)
+            } else if destination.projection.is_empty()
+                && self.stack_locals.is_stack(destination.local)
+                && let Some(existing) = self.locals.get(destination.local)
+            {
+                // The destination local already has a pre-allocated stack slot
+                // (from the pre-scan phase in mod.rs). Reuse it so that any
+                // code in other basic blocks that was already translated with
+                // this slot as the local's address reads the correct result.
+                // MIR blocks are translated in numeric order, not control-flow
+                // order, so use-blocks may be translated before the call site.
+                Some(existing)
             } else {
                 let sz = dest_size.unwrap() as u32;
                 Some(self.builder.stack_slot(sz, Origin::synthetic()))
@@ -985,7 +996,33 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         );
                         ir_args.push(w1.into());
                     } else {
-                        ir_args.push(v.into());
+                        // Large struct/array (>16 bytes): pass a pointer to a fresh copy.
+                        // Passing the original slot directly would let the callee overwrite
+                        // the caller's local (violating Rust pass-by-value semantics).
+                        if arg_size > 16
+                            && matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
+                        {
+                            let align =
+                                type_align(self.tcx, arg_ty).unwrap_or(1) as u32;
+                            let tmp = self
+                                .builder
+                                .stack_slot(arg_size as u32, Origin::synthetic());
+                            let count = self
+                                .builder
+                                .iconst(arg_size as i64, Origin::synthetic());
+                            let new_mem = self.builder.mem_copy(
+                                tmp.into(),
+                                v.into(),
+                                count.into(),
+                                align,
+                                self.current_mem.into(),
+                                Origin::synthetic(),
+                            );
+                            self.current_mem = new_mem;
+                            ir_args.push(tmp.into());
+                        } else {
+                            ir_args.push(v.into());
+                        }
                     }
                     // If this arg is a Copy/Move of a fat local, also pass the high part.
                     // Exception: for virtual dispatch, skip the vtable pointer on the
@@ -1120,13 +1157,29 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // the newly spilled slot so subsequent reads see the mutation.
             if let Some(addr) = call_proj_addr {
                 if call_proj_size > 0 {
-                    self.current_mem = self.builder.store(
-                        call_vref.into(),
-                        addr.into(),
-                        call_proj_size,
-                        self.current_mem.into(),
-                        Origin::synthetic(),
-                    );
+                    if let Some(sret) = sret_slot {
+                        // SRET function: the callee wrote the value to `sret`.
+                        // Copy it to the projected destination address.
+                        let count = self
+                            .builder
+                            .iconst(call_proj_size as i64, Origin::synthetic());
+                        self.current_mem = self.builder.mem_copy(
+                            addr.into(),
+                            sret.into(),
+                            count.into(),
+                            1,
+                            self.current_mem.into(),
+                            Origin::synthetic(),
+                        );
+                    } else {
+                        self.current_mem = self.builder.store(
+                            call_vref.into(),
+                            addr.into(),
+                            call_proj_size,
+                            self.current_mem.into(),
+                            Origin::synthetic(),
+                        );
+                    }
                 }
             }
             // For non-Deref projections restore local to spilled slot.

@@ -288,7 +288,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         let ref_fat_src = match rvalue {
                                             Rvalue::Ref(_, _, src_place)
                                             | Rvalue::RawPtr(_, src_place)
-                                                if !self.stack_locals.is_stack(src_place.local) =>
+                                                if !self.stack_locals.is_stack(src_place.local)
+                                                    // When the base local is stack-allocated but
+                                                    // the place has additional projections beyond
+                                                    // Deref (e.g. &(*_1).field), `val` already
+                                                    // holds the correctly-offset pointer computed
+                                                    // by translate_rvalue.  Use it together with
+                                                    // the base local's fat metadata instead of
+                                                    // blindly copying the whole stack slot, which
+                                                    // would store the wrong (un-offset) base ptr.
+                                                    || src_place.projection.len() > 1 =>
                                             {
                                                 self.fat_locals.get(src_place.local)
                                             }
@@ -334,11 +343,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                 // stack local: the slot holds the full fat
                                                 // pointer (data ptr + metadata) which must be
                                                 // copied word-by-word to the destination.
+                                                // Only apply when the place has at most one
+                                                // projection (Deref); deeper projections
+                                                // (e.g. &(*_1).field) are handled above via
+                                                // ref_fat_src with the pre-computed `val`.
                                                 Rvalue::Ref(_, _, src_place)
                                                 | Rvalue::RawPtr(_, src_place)
                                                     if self
                                                         .stack_locals
-                                                        .is_stack(src_place.local) =>
+                                                        .is_stack(src_place.local)
+                                                        && src_place.projection.len() <= 1 =>
                                                 {
                                                     self.locals.get(src_place.local)
                                                 }
