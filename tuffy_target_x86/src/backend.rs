@@ -349,15 +349,18 @@ fn rewrite_inst(inst: &VInst, assignments: &[PReg]) -> PInst {
             signed: *signed,
             rem: *rem,
         },
-        MInst::Popcnt { dst, src } => MInst::Popcnt {
+        MInst::Popcnt { size, dst, src } => MInst::Popcnt {
+            size: *size,
             dst: r(dst),
             src: r(src),
         },
-        MInst::Lzcnt { dst, src } => MInst::Lzcnt {
+        MInst::Lzcnt { size, dst, src } => MInst::Lzcnt {
+            size: *size,
             dst: r(dst),
             src: r(src),
         },
-        MInst::Tzcnt { dst, src } => MInst::Tzcnt {
+        MInst::Tzcnt { size, dst, src } => MInst::Tzcnt {
+            size: *size,
             dst: r(dst),
             src: r(src),
         },

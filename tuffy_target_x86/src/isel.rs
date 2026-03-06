@@ -14,7 +14,7 @@ use num_traits::ToPrimitive;
 use tuffy_ir::function::{CfgNode, Function};
 use tuffy_ir::instruction::{ICmpOp, Op, Operand};
 use tuffy_ir::module::SymbolTable;
-use tuffy_ir::types::{Annotation, Type};
+use tuffy_ir::types::{Annotation, FloatType, Type};
 use tuffy_ir::value::ValueRef;
 use tuffy_regalloc::{PReg, VReg};
 use tuffy_target::isel::{CmpMap, IselResult, StackMap, VRegAlloc, VRegMap};
@@ -67,12 +67,15 @@ impl IselCtx {
             return Some(dst);
         }
         // Materialize a deferred icmp result into a register via SetCC + MovzxB.
+        // Use separate VRegs so that the spill slot for `dst` (the final result)
+        // is only written after MovzxB — ensuring a clean 0/1 value on reload.
         if let Some(cc) = self.cmps.get(val) {
-            let tmp = self.alloc.alloc();
-            self.out.push(MInst::SetCC { cc, dst: tmp });
-            self.out.push(MInst::MovzxB { dst: tmp, src: tmp });
-            self.regs.assign(val, tmp);
-            return Some(tmp);
+            let tmp_cc = self.alloc.alloc();
+            let dst = self.alloc.alloc();
+            self.out.push(MInst::SetCC { cc, dst: tmp_cc });
+            self.out.push(MInst::MovzxB { dst, src: tmp_cc });
+            self.regs.assign(val, dst);
+            return Some(dst);
         }
         None
     }
@@ -237,6 +240,159 @@ fn emit_partial_store(ctx: &mut IselCtx, base: VReg, base_offset: i32, src: VReg
                 base,
                 offset: base_offset,
                 src,
+            });
+        }
+    }
+}
+
+/// Load exactly `bytes` bytes from `[base + base_offset]` into `dst`, zero-extending.
+///
+/// For non-power-of-2 sizes (3, 5, 6, 7), splits into standard-size loads and ORs them
+/// together to avoid reading past the intended range (which would produce garbage).
+fn emit_partial_load(ctx: &mut IselCtx, base: VReg, base_offset: i32, dst: VReg, bytes: u32) {
+    match bytes {
+        1 => ctx.out.push(MInst::MovRM {
+            size: OpSize::S8,
+            dst,
+            base,
+            offset: base_offset,
+        }),
+        2 => ctx.out.push(MInst::MovRM {
+            size: OpSize::S16,
+            dst,
+            base,
+            offset: base_offset,
+        }),
+        3 => {
+            // 2-byte load (bits 0–15) + 1-byte load (bits 16–23), ORed together.
+            ctx.out.push(MInst::MovRM {
+                size: OpSize::S16,
+                dst,
+                base,
+                offset: base_offset,
+            });
+            let tmp = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRM {
+                size: OpSize::S8,
+                dst: tmp,
+                base,
+                offset: base_offset + 2,
+            });
+            ctx.out.push(MInst::ShlImm {
+                size: OpSize::S64,
+                dst: tmp,
+                imm: 16,
+            });
+            ctx.out.push(MInst::OrRR {
+                size: OpSize::S64,
+                dst,
+                src: tmp,
+            });
+        }
+        4 => ctx.out.push(MInst::MovRM {
+            size: OpSize::S32,
+            dst,
+            base,
+            offset: base_offset,
+        }),
+        5 => {
+            ctx.out.push(MInst::MovRM {
+                size: OpSize::S32,
+                dst,
+                base,
+                offset: base_offset,
+            });
+            let tmp = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRM {
+                size: OpSize::S8,
+                dst: tmp,
+                base,
+                offset: base_offset + 4,
+            });
+            ctx.out.push(MInst::ShlImm {
+                size: OpSize::S64,
+                dst: tmp,
+                imm: 32,
+            });
+            ctx.out.push(MInst::OrRR {
+                size: OpSize::S64,
+                dst,
+                src: tmp,
+            });
+        }
+        6 => {
+            ctx.out.push(MInst::MovRM {
+                size: OpSize::S32,
+                dst,
+                base,
+                offset: base_offset,
+            });
+            let tmp = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRM {
+                size: OpSize::S16,
+                dst: tmp,
+                base,
+                offset: base_offset + 4,
+            });
+            ctx.out.push(MInst::ShlImm {
+                size: OpSize::S64,
+                dst: tmp,
+                imm: 32,
+            });
+            ctx.out.push(MInst::OrRR {
+                size: OpSize::S64,
+                dst,
+                src: tmp,
+            });
+        }
+        7 => {
+            ctx.out.push(MInst::MovRM {
+                size: OpSize::S32,
+                dst,
+                base,
+                offset: base_offset,
+            });
+            let tmp = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRM {
+                size: OpSize::S16,
+                dst: tmp,
+                base,
+                offset: base_offset + 4,
+            });
+            ctx.out.push(MInst::ShlImm {
+                size: OpSize::S64,
+                dst: tmp,
+                imm: 32,
+            });
+            ctx.out.push(MInst::OrRR {
+                size: OpSize::S64,
+                dst,
+                src: tmp,
+            });
+            let tmp2 = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRM {
+                size: OpSize::S8,
+                dst: tmp2,
+                base,
+                offset: base_offset + 6,
+            });
+            ctx.out.push(MInst::ShlImm {
+                size: OpSize::S64,
+                dst: tmp2,
+                imm: 48,
+            });
+            ctx.out.push(MInst::OrRR {
+                size: OpSize::S64,
+                dst,
+                src: tmp2,
+            });
+        }
+        _ => {
+            ctx.out.push(MInst::MovRM {
+                size: bytes_to_opsize(bytes),
+                dst,
+                base,
+                offset: base_offset,
             });
         }
     }
@@ -580,6 +736,77 @@ fn select_128bit_op(ctx: &mut IselCtx, vref: ValueRef, op: &Op, func: &Function)
 }
 
 const ARG_REGS: [Gpr; 6] = [Gpr::Rdi, Gpr::Rsi, Gpr::Rdx, Gpr::Rcx, Gpr::R8, Gpr::R9];
+const MAX_XMM_ARGS: usize = 8;
+
+/// ABI location for a function parameter or call argument under SysV x86-64.
+enum ParamAbi {
+    /// Passed in the n-th integer register (rdi, rsi, rdx, rcx, r8, r9).
+    Gpr(usize),
+    /// Passed in the n-th XMM register (xmm0 .. xmm7); `double` = f64.
+    Xmm { idx: usize, double: bool },
+    /// Passed on the stack; `stack_idx` is 0-based (0 → [rbp+16]).
+    Stack(i32),
+}
+
+/// Classify where parameter `param_idx` goes under SysV x86-64 ABI,
+/// given the complete ordered parameter type list.
+fn is_wide_scalar_annotation(ann: Option<&Annotation>) -> bool {
+    matches!(
+        ann,
+        Some(Annotation::Signed(128) | Annotation::Unsigned(128))
+    )
+}
+
+fn classify_param_abi(
+    params: &[Type],
+    param_annotations: &[Option<Annotation>],
+    param_idx: usize,
+) -> ParamAbi {
+    let mut int_count = 0usize;
+    let mut float_count = 0usize;
+    let mut stack_idx: i32 = 0;
+    for (i, param_ty) in params.iter().enumerate().take(param_idx) {
+        let ann = param_annotations.get(i).and_then(|a| a.as_ref());
+        let is_wide = !matches!(param_ty, Type::Float(_)) && is_wide_scalar_annotation(ann);
+        match param_ty {
+            Type::Float(_) => {
+                if float_count < MAX_XMM_ARGS {
+                    float_count += 1;
+                } else {
+                    stack_idx += 1;
+                }
+            }
+            _ => {
+                // Wide scalars (int:u128 / int:s128) use two consecutive GPR slots.
+                let slots = if is_wide { 2 } else { 1 };
+                if int_count + slots <= ARG_REGS.len() {
+                    int_count += slots;
+                } else {
+                    stack_idx += slots as i32;
+                }
+            }
+        }
+    }
+    match &params[param_idx] {
+        Type::Float(ft) => {
+            if float_count < MAX_XMM_ARGS {
+                ParamAbi::Xmm {
+                    idx: float_count,
+                    double: matches!(ft, FloatType::F64),
+                }
+            } else {
+                ParamAbi::Stack(stack_idx)
+            }
+        }
+        _ => {
+            if int_count < ARG_REGS.len() {
+                ParamAbi::Gpr(int_count)
+            } else {
+                ParamAbi::Stack(stack_idx)
+            }
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 struct CallAbiPlan {
@@ -734,35 +961,68 @@ fn select_inst(
     }
     match op {
         Op::Param(idx) => {
-            if let Some(arg_gpr) = ARG_REGS.get(*idx as usize) {
-                let fixed = ctx.alloc.alloc_fixed(arg_gpr.to_preg());
-                // Immediately copy the argument register into a fresh unconstrained
-                // vreg. This lets the register allocator assign it to a callee-saved
-                // register when the value is live across calls (which clobber
-                // caller-saved argument registers like rdi, rsi, etc.).
-                let dst = ctx.alloc.alloc();
-                ctx.out.push(MInst::MovRR {
-                    size: OpSize::S64,
-                    dst,
-                    src: fixed,
-                });
-                ctx.regs.assign(vref, dst);
-            } else {
-                // Stack-passed argument (7th+).  After the prologue
-                // (push rbp; mov rbp, rsp) the caller's stack args sit at
-                // positive offsets from RBP:
-                //   [rbp + 16] = arg idx=6, [rbp + 24] = arg idx=7, ...
-                let stack_idx = *idx as i32 - ARG_REGS.len() as i32;
-                let offset = 16 + stack_idx * 8;
-                let rbp = ctx.alloc.alloc_fixed(Gpr::Rbp.to_preg());
-                let dst = ctx.alloc.alloc();
-                ctx.out.push(MInst::MovRM {
-                    size: OpSize::S64,
-                    dst,
-                    base: rbp,
-                    offset,
-                });
-                ctx.regs.assign(vref, dst);
+            let idx = *idx as usize;
+            let param_ann = func.param_annotations.get(idx).and_then(|a| a.as_ref());
+            let wide = is_wide_scalar_annotation(param_ann);
+            match classify_param_abi(&func.params, &func.param_annotations, idx) {
+                ParamAbi::Gpr(i) => {
+                    let fixed = ctx.alloc.alloc_fixed(ARG_REGS[i].to_preg());
+                    // Immediately copy the argument register into a fresh unconstrained
+                    // vreg. This lets the register allocator assign it to a callee-saved
+                    // register when the value is live across calls (which clobber
+                    // caller-saved argument registers like rdi, rsi, etc.).
+                    let dst = ctx.alloc.alloc();
+                    ctx.out.push(MInst::MovRR {
+                        size: OpSize::S64,
+                        dst,
+                        src: fixed,
+                    });
+                    ctx.regs.assign(vref, dst);
+                    // Wide scalars (int:u128 / int:s128) occupy two consecutive GPRs.
+                    // Capture the hi half from the next argument register.
+                    if wide && i + 1 < ARG_REGS.len() {
+                        let hi_fixed = ctx.alloc.alloc_fixed(ARG_REGS[i + 1].to_preg());
+                        let hi_dst = ctx.alloc.alloc();
+                        ctx.out.push(MInst::MovRR {
+                            size: OpSize::S64,
+                            dst: hi_dst,
+                            src: hi_fixed,
+                        });
+                        ctx.regs
+                            .assign(ValueRef::inst_secondary_result(vref.index()), hi_dst);
+                    }
+                }
+                ParamAbi::Xmm {
+                    idx: xmm_idx,
+                    double,
+                } => {
+                    // Float param: arrives in XMM register; move bits to a GPR.
+                    // PReg(0x20 + n) encodes XMMn (register class 1).
+                    let xmm = ctx.alloc.alloc_fixed(PReg(0x20 + xmm_idx as u8));
+                    let dst = ctx.alloc.alloc();
+                    ctx.out.push(MInst::MoveXmmToGpr {
+                        dst,
+                        src: xmm,
+                        double,
+                    });
+                    ctx.regs.assign(vref, dst);
+                }
+                ParamAbi::Stack(stack_idx) => {
+                    // Stack-passed argument.  After the prologue
+                    // (push rbp; mov rbp, rsp) the caller's stack args sit at
+                    // positive offsets from RBP:
+                    //   [rbp + 16] = first stack arg, [rbp + 24] = second, ...
+                    let offset = 16 + stack_idx * 8;
+                    let rbp = ctx.alloc.alloc_fixed(Gpr::Rbp.to_preg());
+                    let dst = ctx.alloc.alloc();
+                    ctx.out.push(MInst::MovRM {
+                        size: OpSize::S64,
+                        dst,
+                        base: rbp,
+                        offset,
+                    });
+                    ctx.regs.assign(vref, dst);
+                }
             }
         }
 
@@ -910,6 +1170,8 @@ fn select_inst(
             } else {
                 None
             };
+            // Check if this function returns a float (SysV ABI: f32/f64 in XMM0).
+            let ret_is_float = matches!(func.ret_ty, Some(tuffy_ir::types::Type::Float(_)));
             if let Some(v) = val {
                 let lo_src = ctx.ensure_in_reg(v.value)?;
                 // Save hi to a temp before we touch RAX/RDX.
@@ -922,19 +1184,36 @@ fn select_inst(
                     });
                     tmp
                 });
-                let rax = ctx.alloc.alloc_fixed(Gpr::Rax.to_preg());
-                ctx.out.push(MInst::MovRR {
-                    size: OpSize::S64,
-                    dst: rax,
-                    src: lo_src,
-                });
-                if let Some(tmp) = hi_tmp {
-                    let rdx = ctx.alloc.alloc_fixed(Gpr::Rdx.to_preg());
+                if ret_is_float {
+                    // Float return: SysV ABI puts f32/f64 in XMM0.
+                    // Our representation keeps float bits in GPRs, so move to XMM0.
+                    let is_double = matches!(
+                        func.ret_ty,
+                        Some(tuffy_ir::types::Type::Float(
+                            tuffy_ir::types::FloatType::F64
+                        ))
+                    );
+                    let xmm0 = ctx.alloc.alloc_fixed(PReg(0x20)); // XMM0
+                    ctx.out.push(MInst::GprToXmm {
+                        dst: xmm0,
+                        src: lo_src,
+                        double: is_double,
+                    });
+                } else {
+                    let rax = ctx.alloc.alloc_fixed(Gpr::Rax.to_preg());
                     ctx.out.push(MInst::MovRR {
                         size: OpSize::S64,
-                        dst: rdx,
-                        src: tmp,
+                        dst: rax,
+                        src: lo_src,
                     });
+                    if let Some(tmp) = hi_tmp {
+                        let rdx = ctx.alloc.alloc_fixed(Gpr::Rdx.to_preg());
+                        ctx.out.push(MInst::MovRR {
+                            size: OpSize::S64,
+                            dst: rdx,
+                            src: tmp,
+                        });
+                    }
                 }
             } else if let Some(h) = hi_src {
                 let rdx = ctx.alloc.alloc_fixed(Gpr::Rdx.to_preg());
@@ -956,26 +1235,44 @@ fn select_inst(
         }
 
         Op::Load(ptr, bytes, _mem) => {
-            let dst = ctx.alloc.alloc();
-            let size = bytes_to_opsize(*bytes);
-            if let Some(offset) = ctx.stack.get(ptr.value) {
-                let rbp = ctx.alloc.alloc_fixed(Gpr::Rbp.to_preg());
-                ctx.out.push(MInst::MovRM {
-                    size,
-                    dst,
-                    base: rbp,
-                    offset,
-                });
+            if *bytes >= 9 {
+                // 9-16 byte load: lo 8 bytes + remaining hi bytes as a second load.
+                let lo_dst = ctx.alloc.alloc();
+                let hi_dst = ctx.alloc.alloc();
+                let hi_bytes = *bytes - 8;
+                if let Some(offset) = ctx.stack.get(ptr.value) {
+                    let rbp = ctx.alloc.alloc_fixed(Gpr::Rbp.to_preg());
+                    ctx.out.push(MInst::MovRM {
+                        size: OpSize::S64,
+                        dst: lo_dst,
+                        base: rbp,
+                        offset,
+                    });
+                    emit_partial_load(ctx, rbp, offset + 8, hi_dst, hi_bytes);
+                } else {
+                    let ptr_vreg = ctx.ensure_in_reg(ptr.value)?;
+                    ctx.out.push(MInst::MovRM {
+                        size: OpSize::S64,
+                        dst: lo_dst,
+                        base: ptr_vreg,
+                        offset: 0,
+                    });
+                    emit_partial_load(ctx, ptr_vreg, 8, hi_dst, hi_bytes);
+                }
+                ctx.regs.assign(vref, lo_dst);
+                ctx.regs
+                    .assign(ValueRef::inst_secondary_result(vref.index()), hi_dst);
             } else {
-                let ptr_vreg = ctx.ensure_in_reg(ptr.value)?;
-                ctx.out.push(MInst::MovRM {
-                    size,
-                    dst,
-                    base: ptr_vreg,
-                    offset: 0,
-                });
+                let dst = ctx.alloc.alloc();
+                if let Some(offset) = ctx.stack.get(ptr.value) {
+                    let rbp = ctx.alloc.alloc_fixed(Gpr::Rbp.to_preg());
+                    emit_partial_load(ctx, rbp, offset, dst, *bytes);
+                } else {
+                    let ptr_vreg = ctx.ensure_in_reg(ptr.value)?;
+                    emit_partial_load(ctx, ptr_vreg, 0, dst, *bytes);
+                }
+                ctx.regs.assign(vref, dst);
             }
-            ctx.regs.assign(vref, dst);
         }
 
         Op::Store(val, ptr, bytes, _mem) => {
@@ -987,8 +1284,30 @@ fn select_inst(
             } else {
                 (ctx.ensure_in_reg(ptr.value)?, 0i32)
             };
-            // Emit stores; for non-power-of-2 sizes split into standard-size pieces.
-            emit_partial_store(ctx, base, base_offset, val_vreg, *bytes);
+            if *bytes >= 9 {
+                // 9-16 byte store: lo 8 bytes + remaining from hi half.
+                ctx.out.push(MInst::MovMR {
+                    size: OpSize::S64,
+                    base,
+                    offset: base_offset,
+                    src: val_vreg,
+                });
+                let hi_vreg = ensure_hi_in_reg(ctx, val.value, val.annotation)?;
+                let hi_bytes = *bytes - 8;
+                if hi_bytes == 8 {
+                    ctx.out.push(MInst::MovMR {
+                        size: OpSize::S64,
+                        base,
+                        offset: base_offset + 8,
+                        src: hi_vreg,
+                    });
+                } else {
+                    emit_partial_store(ctx, base, base_offset + 8, hi_vreg, hi_bytes);
+                }
+            } else {
+                // Emit stores; for non-power-of-2 sizes split into standard-size pieces.
+                emit_partial_store(ctx, base, base_offset, val_vreg, *bytes);
+            }
         }
 
         Op::MemCopy(dst, src, count, _align, _mem) => {
@@ -1012,14 +1331,20 @@ fn select_inst(
         }
 
         Op::BoolToInt(val) => {
-            if let Some(cc) = ctx.cmps.get(val.value) {
-                let dst = ctx.alloc.alloc();
-                ctx.out.push(MInst::SetCC { cc, dst });
-                ctx.out.push(MInst::MovzxB { dst, src: dst });
-                ctx.regs.assign(vref, dst);
-            } else {
-                let src = ctx.regs.get(val.value)?;
+            // If the ICmp result was already materialized into a register (e.g. by
+            // gen_icmp's immediate-SetCC+MovzxB), use it directly — no need to
+            // re-emit SetCC from stale flags.  This also avoids the spill-corruption
+            // bug that occurs when `SetCC { dst }` + `MovzxB { dst, src: dst }` share
+            // the same VReg and the allocator spills `dst` between the two.
+            if let Some(src) = ctx.regs.get(val.value) {
                 ctx.regs.assign(vref, src);
+            } else if let Some(cc) = ctx.cmps.get(val.value) {
+                // Fresh materialization with separate VRegs (same spill-safety fix).
+                let tmp_cc = ctx.alloc.alloc();
+                let dst = ctx.alloc.alloc();
+                ctx.out.push(MInst::SetCC { cc, dst: tmp_cc });
+                ctx.out.push(MInst::MovzxB { dst, src: tmp_cc });
+                ctx.regs.assign(vref, dst);
             }
         }
 
@@ -1066,8 +1391,8 @@ fn select_inst(
             let dst = ctx.alloc.alloc();
             // Determine f32 vs f64 from the source value's type
             let double = !matches!(
-                func.instructions.get(val.value.index() as usize),
-                Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
+                func.value_type(val.value),
+                Some(Type::Float(tuffy_ir::types::FloatType::F32))
             );
             // Float values live in GPRs as bit-patterns; move to XMM for conversion.
             let src_xmm = ctx.alloc.alloc_class(1);
@@ -1185,10 +1510,36 @@ fn select_inst(
                     double,
                 });
             } else {
+                // For signed narrow integers (i8, i16, i32), sign-extend before
+                // cvtsi2ss/cvtsi2sd, which expects a full-width signed 64-bit integer.
+                // Without sign extension, a byte like 0xDA (-38 as i8) would be
+                // seen as 218 by the instruction, producing the wrong float result.
+                let src_for_fp = if matches!(op, Op::SiToFp(..)) {
+                    match val.annotation {
+                        Some(Annotation::Signed(8)) => {
+                            let ext = ctx.alloc.alloc();
+                            ctx.out.push(MInst::MovsxB { dst: ext, src });
+                            ext
+                        }
+                        Some(Annotation::Signed(16)) => {
+                            let ext = ctx.alloc.alloc();
+                            ctx.out.push(MInst::MovsxW { dst: ext, src });
+                            ext
+                        }
+                        Some(Annotation::Signed(32)) => {
+                            let ext = ctx.alloc.alloc();
+                            ctx.out.push(MInst::MovsxD { dst: ext, src });
+                            ext
+                        }
+                        _ => src,
+                    }
+                } else {
+                    src
+                };
                 let xmm_dst = ctx.alloc.alloc_class(1);
                 ctx.out.push(MInst::CvtIntToFp {
                     dst: xmm_dst,
-                    src,
+                    src: src_for_fp,
                     double,
                 });
                 ctx.out.push(MInst::MoveXmmToGpr {
@@ -1203,10 +1554,10 @@ fn select_inst(
 
         Op::FpConvert(val) => {
             let src_gpr = ctx.ensure_in_reg(val.value)?;
-            // Determine source float type from the operand's instruction type
+            // Determine source float type from the operand's type
             let src_double = !matches!(
-                func.instructions.get(val.value.index() as usize),
-                Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
+                func.value_type(val.value),
+                Some(Type::Float(tuffy_ir::types::FloatType::F32))
             );
             // Float values live in GPRs; move to XMM, convert, move result back to GPR.
             let src_xmm = ctx.alloc.alloc_class(1);
@@ -1370,8 +1721,8 @@ fn select_inst(
             let l_gpr = ctx.ensure_in_reg(lhs.value)?;
             let r_gpr = ctx.ensure_in_reg(rhs.value)?;
             let double = !matches!(
-                func.instructions.get(lhs.value.index() as usize),
-                Some(inst) if matches!(inst.ty, Type::Float(tuffy_ir::types::FloatType::F32))
+                func.value_type(lhs.value),
+                Some(Type::Float(tuffy_ir::types::FloatType::F32))
             );
             let l_xmm = ctx.alloc.alloc_class(1);
             let r_xmm = ctx.alloc.alloc_class(1);
@@ -1608,47 +1959,35 @@ fn select_inst(
             }
         }
 
-        Op::RotateLeft(val, amt, _) => {
+        Op::RotateLeft(val, amt, bits) => {
+            let size = bytes_to_opsize(bits / 8);
             let v = ctx.ensure_in_reg(val.value)?;
             let a = ctx.ensure_in_reg(amt.value)?;
             let dst = ctx.alloc.alloc();
-            ctx.out.push(MInst::MovRR {
-                size: OpSize::S64,
-                dst,
-                src: v,
-            });
+            ctx.out.push(MInst::MovRR { size, dst, src: v });
             let cl = ctx.alloc.alloc_fixed(Gpr::Rcx.to_preg());
             ctx.out.push(MInst::MovRR {
                 size: OpSize::S64,
                 dst: cl,
                 src: a,
             });
-            ctx.out.push(MInst::RolRCL {
-                size: OpSize::S64,
-                dst,
-            });
+            ctx.out.push(MInst::RolRCL { size, dst });
             ctx.regs.assign(vref, dst);
         }
 
-        Op::RotateRight(val, amt, _) => {
+        Op::RotateRight(val, amt, bits) => {
+            let size = bytes_to_opsize(bits / 8);
             let v = ctx.ensure_in_reg(val.value)?;
             let a = ctx.ensure_in_reg(amt.value)?;
             let dst = ctx.alloc.alloc();
-            ctx.out.push(MInst::MovRR {
-                size: OpSize::S64,
-                dst,
-                src: v,
-            });
+            ctx.out.push(MInst::MovRR { size, dst, src: v });
             let cl = ctx.alloc.alloc_fixed(Gpr::Rcx.to_preg());
             ctx.out.push(MInst::MovRR {
                 size: OpSize::S64,
                 dst: cl,
                 src: a,
             });
-            ctx.out.push(MInst::RorRCL {
-                size: OpSize::S64,
-                dst,
-            });
+            ctx.out.push(MInst::RorRCL { size, dst });
             ctx.regs.assign(vref, dst);
         }
 
@@ -2607,7 +2946,7 @@ fn select_call(
     // ensure_in_reg may emit LEA/MOV instructions whose destinations
     // get allocated to argument registers (e.g. rdx), clobbering
     // values already placed there by earlier fixed-register moves.
-    let mut arg_vregs = Vec::new();
+    let mut arg_vregs: Vec<VReg> = Vec::new();
     for arg in args.iter() {
         let src = match ctx.ensure_in_reg(arg.value) {
             Some(v) => v,
@@ -2630,26 +2969,85 @@ fn select_call(
     // stack slot (i.e., a large struct). The stack slot address is obtained
     // by ensuring the call result is in a register, which for stack slots
     // produces a LEA of the slot address.
-    if ctx.stack.get(vref).is_some() {
+    let has_sret = ctx.stack.get(vref).is_some();
+    if has_sret {
         // The call returns a struct via a hidden pointer argument.
         // Ensure we have the address of the return slot.
         let ret_addr = ctx.ensure_in_reg(vref)?;
-        // Insert as the first argument.
+        // Insert as the first argument (always integer/pointer, never float).
         arg_vregs.insert(0, ret_addr);
     }
 
-    // Phase 2: push stack arguments (args beyond the 6 register slots).
-    // System V AMD64 ABI: args 7+ go on the stack, pushed right-to-left.
+    // Phase 2: classify each arg as GPR, XMM, or stack per SysV x86-64 ABI.
+    // Integer/pointer args use rdi, rsi, rdx, rcx, r8, r9 (then stack).
+    // Float args (f32/f64) use xmm0..xmm7 (then stack).
+    // The two register classes are independent.
+    let sret_offset = if has_sret { 1 } else { 0 };
+    let mut int_count = 0usize;
+    let mut float_count = 0usize;
+
+    #[derive(Clone, Copy)]
+    enum ArgDest {
+        Gpr(usize),
+        Xmm { idx: usize, double: bool },
+        Stack,
+    }
+
+    let mut arg_dests: Vec<ArgDest> = Vec::new();
+    let mut stack_arg_indices: Vec<usize> = Vec::new();
+
+    for (i, src) in arg_vregs.iter().enumerate() {
+        let _ = src;
+        let is_float = if i < sret_offset {
+            false // SRET pointer is always integer
+        } else {
+            let arg_val = args[i - sret_offset].value;
+            matches!(func.value_type(arg_val), Some(Type::Float(_)))
+        };
+
+        let dest = if is_float {
+            let double = if i >= sret_offset {
+                let arg_val = args[i - sret_offset].value;
+                matches!(func.value_type(arg_val), Some(Type::Float(FloatType::F64)))
+            } else {
+                false
+            };
+            if float_count < MAX_XMM_ARGS {
+                let idx = float_count;
+                float_count += 1;
+                ArgDest::Xmm { idx, double }
+            } else {
+                stack_arg_indices.push(i);
+                ArgDest::Stack
+            }
+        } else {
+            if int_count < ARG_REGS.len() {
+                let idx = int_count;
+                int_count += 1;
+                ArgDest::Gpr(idx)
+            } else {
+                stack_arg_indices.push(i);
+                ArgDest::Stack
+            }
+        };
+        arg_dests.push(dest);
+    }
+
+    // Phase 3: push stack arguments right-to-left.
     // RSP must be 16-byte aligned before the call instruction.
-    let num_stack_args = arg_vregs.len().saturating_sub(ARG_REGS.len());
+    let num_stack_args = stack_arg_indices.len();
     let stack_cleanup = if num_stack_args > 0 {
         // Pad for 16-byte alignment if odd number of stack args.
-        let padding = if num_stack_args % 2 != 0 { 8 } else { 0 };
+        let padding = if !num_stack_args.is_multiple_of(2) {
+            8
+        } else {
+            0
+        };
         if padding > 0 {
             ctx.out.push(MInst::SubSPI { imm: padding });
         }
-        // Push in reverse order so arg[6] ends up at lowest address (top of stack).
-        for i in (ARG_REGS.len()..arg_vregs.len()).rev() {
+        // Push in reverse order so first stack arg ends up at lowest address.
+        for &i in stack_arg_indices.iter().rev() {
             ctx.out.push(MInst::Push { reg: arg_vregs[i] });
         }
         (num_stack_args as i32 * 8) + padding
@@ -2657,24 +3055,38 @@ fn select_call(
         0
     };
 
-    // Phase 3: move register arguments to fixed argument registers.
-    // If the source vreg is already constrained to the target register,
-    // skip the redundant MovRR to avoid register allocator conflicts
-    // (e.g. param1 fixed to rsi being evicted when a new rsi vreg is created).
-    let reg_arg_count = arg_vregs.len().min(ARG_REGS.len());
-    for i in 0..reg_arg_count {
+    // Phase 4: move register arguments to their fixed registers.
+    for (i, dest) in arg_dests.iter().enumerate() {
         let src = arg_vregs[i];
-        let target_preg = ARG_REGS[i].to_preg();
-        let already_there = ctx.alloc.constraints.get(src.0 as usize) == Some(&Some(target_preg));
-        if already_there {
-            continue;
+        match *dest {
+            ArgDest::Gpr(gpr_idx) => {
+                let target_preg = ARG_REGS[gpr_idx].to_preg();
+                let already_there =
+                    ctx.alloc.constraints.get(src.0 as usize) == Some(&Some(target_preg));
+                if !already_there {
+                    let dst = ctx.alloc.alloc_fixed(target_preg);
+                    ctx.out.push(MInst::MovRR {
+                        size: OpSize::S64,
+                        dst,
+                        src,
+                    });
+                }
+            }
+            ArgDest::Xmm {
+                idx: xmm_idx,
+                double,
+            } => {
+                // Float arg: convert GPR bit-pattern → XMM register.
+                // PReg(0x20 + n) encodes XMMn (register class 1).
+                let xmm = ctx.alloc.alloc_fixed(PReg(0x20 + xmm_idx as u8));
+                ctx.out.push(MInst::GprToXmm {
+                    dst: xmm,
+                    src,
+                    double,
+                });
+            }
+            ArgDest::Stack => {} // already pushed in Phase 3
         }
-        let dst = ctx.alloc.alloc_fixed(target_preg);
-        ctx.out.push(MInst::MovRR {
-            size: OpSize::S64,
-            dst,
-            src,
-        });
     }
 
     // Classify call ABI behavior in one place, then lower according to the plan.
@@ -2807,6 +3219,19 @@ fn select_select(
     tv: &Operand,
     fv: &Operand,
 ) -> Option<()> {
+    // Pre-materialize the condition from flags into a register BEFORE calling
+    // ensure_in_reg on tv/fv. Those calls may emit CmpRR instructions that
+    // overwrite the condition flags, causing a stale-flag bug (e.g. in 128-bit
+    // comparisons where hi_eq, lo_cmp, and hi_cmp are three separate ICmps).
+    // By capturing the condition first we guarantee the TestRR+CMOVne below
+    // reads the correct value.
+    if ctx.cmps.get(cond.value).is_some() && ctx.regs.get(cond.value).is_none() {
+        let cc = ctx.cmps.get(cond.value).unwrap();
+        let tmp = ctx.alloc.alloc();
+        ctx.out.push(MInst::SetCC { cc, dst: tmp });
+        ctx.out.push(MInst::MovzxB { dst: tmp, src: tmp });
+        ctx.regs.assign(cond.value, tmp);
+    }
     let tv_vreg = ctx.ensure_in_reg(tv.value)?;
     let fv_vreg = ctx.ensure_in_reg(fv.value)?;
     let dst = ctx.alloc.alloc();
@@ -2815,27 +3240,21 @@ fn select_select(
         dst,
         src: fv_vreg,
     });
-    if let Some(cc) = ctx.cmps.get(cond.value) {
-        ctx.out.push(MInst::CMOVcc {
-            size: OpSize::S64,
-            cc,
-            dst,
-            src: tv_vreg,
-        });
-    } else {
-        let cond_vreg = ctx.regs.get(cond.value)?;
-        ctx.out.push(MInst::TestRR {
-            size: OpSize::S64,
-            src1: cond_vreg,
-            src2: cond_vreg,
-        });
-        ctx.out.push(MInst::CMOVcc {
-            size: OpSize::S64,
-            cc: CondCode::Ne,
-            dst,
-            src: tv_vreg,
-        });
-    }
+    // Always use the register-based path. The flags-based path (cmps.get) is
+    // unreliable here because ensure_in_reg calls above may have emitted
+    // additional CmpRR instructions that overwrite the condition flags.
+    let cond_vreg = ctx.regs.get(cond.value)?;
+    ctx.out.push(MInst::TestRR {
+        size: OpSize::S64,
+        src1: cond_vreg,
+        src2: cond_vreg,
+    });
+    ctx.out.push(MInst::CMOVcc {
+        size: OpSize::S64,
+        cc: CondCode::Ne,
+        dst,
+        src: tv_vreg,
+    });
     ctx.regs.assign(vref, dst);
     Some(())
 }

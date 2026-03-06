@@ -7,6 +7,22 @@ use tuffy_ir::types::Annotation;
 use tuffy_ir::value::ValueRef;
 use tuffy_regalloc::VReg;
 
+fn bits_to_opsize(bits: u32) -> OpSize {
+    match bits {
+        8 => OpSize::S8,
+        16 => OpSize::S16,
+        32 => OpSize::S32,
+        _ => OpSize::S64,
+    }
+}
+
+fn ann_bits_to_opsize(ann: Option<Annotation>) -> OpSize {
+    match ann {
+        Some(Annotation::Signed(bits)) | Some(Annotation::Unsigned(bits)) => bits_to_opsize(bits),
+        _ => OpSize::S64,
+    }
+}
+
 fn gen_add(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::MovRR {
@@ -196,7 +212,13 @@ fn gen_shr_unsigned(
     Some(())
 }
 
-fn gen_min_signed(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Option<()> {
+fn gen_min_signed(
+    ctx: &mut super::IselCtx,
+    vref: ValueRef,
+    lhs: VReg,
+    rhs: VReg,
+    size: OpSize,
+) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::MovRR {
         size: OpSize::S64,
@@ -204,7 +226,7 @@ fn gen_min_signed(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg
         src: rhs,
     });
     ctx.out.push(MInst::CmpRR {
-        size: OpSize::S64,
+        size,
         src1: lhs,
         src2: rhs,
     });
@@ -218,7 +240,13 @@ fn gen_min_signed(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg
     Some(())
 }
 
-fn gen_min_unsigned(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Option<()> {
+fn gen_min_unsigned(
+    ctx: &mut super::IselCtx,
+    vref: ValueRef,
+    lhs: VReg,
+    rhs: VReg,
+    size: OpSize,
+) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::MovRR {
         size: OpSize::S64,
@@ -226,7 +254,7 @@ fn gen_min_unsigned(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VR
         src: rhs,
     });
     ctx.out.push(MInst::CmpRR {
-        size: OpSize::S64,
+        size,
         src1: lhs,
         src2: rhs,
     });
@@ -240,7 +268,13 @@ fn gen_min_unsigned(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VR
     Some(())
 }
 
-fn gen_max_signed(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Option<()> {
+fn gen_max_signed(
+    ctx: &mut super::IselCtx,
+    vref: ValueRef,
+    lhs: VReg,
+    rhs: VReg,
+    size: OpSize,
+) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::MovRR {
         size: OpSize::S64,
@@ -248,7 +282,7 @@ fn gen_max_signed(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg
         src: rhs,
     });
     ctx.out.push(MInst::CmpRR {
-        size: OpSize::S64,
+        size,
         src1: lhs,
         src2: rhs,
     });
@@ -262,7 +296,13 @@ fn gen_max_signed(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg
     Some(())
 }
 
-fn gen_max_unsigned(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Option<()> {
+fn gen_max_unsigned(
+    ctx: &mut super::IselCtx,
+    vref: ValueRef,
+    lhs: VReg,
+    rhs: VReg,
+    size: OpSize,
+) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::MovRR {
         size: OpSize::S64,
@@ -270,7 +310,7 @@ fn gen_max_unsigned(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VR
         src: rhs,
     });
     ctx.out.push(MInst::CmpRR {
-        size: OpSize::S64,
+        size,
         src1: lhs,
         src2: rhs,
     });
@@ -284,23 +324,33 @@ fn gen_max_unsigned(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VR
     Some(())
 }
 
-fn gen_count_ones(ctx: &mut super::IselCtx, vref: ValueRef, src: VReg) -> Option<()> {
+fn gen_count_ones(ctx: &mut super::IselCtx, vref: ValueRef, src: VReg, size: OpSize) -> Option<()> {
     let v0 = ctx.alloc.alloc();
-    ctx.out.push(MInst::Popcnt { dst: v0, src });
+    ctx.out.push(MInst::Popcnt { size, dst: v0, src });
     ctx.regs.assign(vref, v0);
     Some(())
 }
 
-fn gen_count_leading_zeros(ctx: &mut super::IselCtx, vref: ValueRef, src: VReg) -> Option<()> {
+fn gen_count_leading_zeros(
+    ctx: &mut super::IselCtx,
+    vref: ValueRef,
+    src: VReg,
+    size: OpSize,
+) -> Option<()> {
     let v0 = ctx.alloc.alloc();
-    ctx.out.push(MInst::Lzcnt { dst: v0, src });
+    ctx.out.push(MInst::Lzcnt { size, dst: v0, src });
     ctx.regs.assign(vref, v0);
     Some(())
 }
 
-fn gen_count_trailing_zeros(ctx: &mut super::IselCtx, vref: ValueRef, src: VReg) -> Option<()> {
+fn gen_count_trailing_zeros(
+    ctx: &mut super::IselCtx,
+    vref: ValueRef,
+    src: VReg,
+    size: OpSize,
+) -> Option<()> {
     let v0 = ctx.alloc.alloc();
-    ctx.out.push(MInst::Tzcnt { dst: v0, src });
+    ctx.out.push(MInst::Tzcnt { size, dst: v0, src });
     ctx.regs.assign(vref, v0);
     Some(())
 }
@@ -313,13 +363,32 @@ fn gen_icmp(
     cmp_op: ICmpOp,
     lhs_ann: Option<Annotation>,
 ) -> Option<()> {
+    let size = ann_bits_to_opsize(lhs_ann);
     ctx.out.push(MInst::CmpRR {
-        size: OpSize::S64,
+        size,
         src1: lhs,
         src2: rhs,
     });
     let cc = super::icmp_to_cc(cmp_op, lhs_ann);
+    // Keep the deferred cc for BrIf (which uses flags directly).
     ctx.cmps.set(vref, cc);
+    // Also materialize immediately into a register. Without this, when multiple
+    // ICmps feed a Select (e.g. 128-bit comparisons), a later CmpRR overwrites
+    // the flags before ensure_in_reg/select_select can consume them, producing
+    // wrong values. Once the value is in a register, ensure_in_reg returns it
+    // directly without re-reading stale flags.
+    //
+    // Use two separate VRegs: `tmp_cc` for the raw SetCC output (low byte only,
+    // upper bytes are undefined/garbage from the previous value), and `dst` for
+    // the zero-extended result from MovzxB.  If the allocator spills `tmp_cc`
+    // before MovzxB runs, the spill slot has garbage upper bytes — but MovzxB
+    // only reads the low byte, so that is harmless.  `dst` is defined solely by
+    // MovzxB, so its spill slot is always written with the correct 0/1 value.
+    let tmp_cc = ctx.alloc.alloc();
+    let dst = ctx.alloc.alloc();
+    ctx.out.push(MInst::SetCC { cc, dst: tmp_cc });
+    ctx.out.push(MInst::MovzxB { dst, src: tmp_cc });
+    ctx.regs.assign(vref, dst);
     Some(())
 }
 
@@ -409,32 +478,37 @@ pub(super) fn try_select_generated(
         Op::Min(lhs, rhs) => {
             let l = ctx.ensure_in_reg(lhs.value)?;
             let r = ctx.ensure_in_reg(rhs.value)?;
+            let size = ann_bits_to_opsize(lhs.annotation);
             match lhs.annotation {
-                Some(Annotation::Signed(_)) => gen_min_signed(ctx, vref, l, r),
-                Some(Annotation::Unsigned(_)) => gen_min_unsigned(ctx, vref, l, r),
-                _ => gen_min_unsigned(ctx, vref, l, r),
+                Some(Annotation::Signed(_)) => gen_min_signed(ctx, vref, l, r, size),
+                Some(Annotation::Unsigned(_)) => gen_min_unsigned(ctx, vref, l, r, size),
+                _ => gen_min_unsigned(ctx, vref, l, r, size),
             }
         }
         Op::Max(lhs, rhs) => {
             let l = ctx.ensure_in_reg(lhs.value)?;
             let r = ctx.ensure_in_reg(rhs.value)?;
+            let size = ann_bits_to_opsize(lhs.annotation);
             match lhs.annotation {
-                Some(Annotation::Signed(_)) => gen_max_signed(ctx, vref, l, r),
-                Some(Annotation::Unsigned(_)) => gen_max_unsigned(ctx, vref, l, r),
-                _ => gen_max_unsigned(ctx, vref, l, r),
+                Some(Annotation::Signed(_)) => gen_max_signed(ctx, vref, l, r, size),
+                Some(Annotation::Unsigned(_)) => gen_max_unsigned(ctx, vref, l, r, size),
+                _ => gen_max_unsigned(ctx, vref, l, r, size),
             }
         }
         Op::CountOnes(val) => {
             let s = ctx.ensure_in_reg(val.value)?;
-            gen_count_ones(ctx, vref, s)
+            let size = ann_bits_to_opsize(val.annotation);
+            gen_count_ones(ctx, vref, s, size)
         }
-        Op::CountLeadingZeros(val, _) => {
+        Op::CountLeadingZeros(val, bits) => {
             let s = ctx.ensure_in_reg(val.value)?;
-            gen_count_leading_zeros(ctx, vref, s)
+            let size = bits_to_opsize(*bits);
+            gen_count_leading_zeros(ctx, vref, s, size)
         }
         Op::CountTrailingZeros(val) => {
             let s = ctx.ensure_in_reg(val.value)?;
-            gen_count_trailing_zeros(ctx, vref, s)
+            let size = ann_bits_to_opsize(val.annotation);
+            gen_count_trailing_zeros(ctx, vref, s, size)
         }
         Op::PtrAdd(ptr, offset) => {
             let p = ctx.ensure_in_reg(ptr.value)?;

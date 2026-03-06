@@ -937,14 +937,35 @@ fn encode_inst(inst: &PInst, ctx: &mut EncodeContext) {
         }
 
         // --- Bit manipulation ---
-        MInst::Popcnt { dst, src } => {
-            ctx.emit(Instruction::with2(Code::Popcnt_r64_rm64, gpr64(*dst), gpr64(*src)).unwrap());
+        MInst::Popcnt { size, dst, src } => {
+            let code = match size {
+                OpSize::S32 => Code::Popcnt_r32_rm32,
+                _ => Code::Popcnt_r64_rm64,
+            };
+            ctx.emit(
+                Instruction::with2(code, gpr_to_iced(*dst, *size), gpr_to_iced(*src, *size))
+                    .unwrap(),
+            );
         }
-        MInst::Lzcnt { dst, src } => {
-            ctx.emit(Instruction::with2(Code::Lzcnt_r64_rm64, gpr64(*dst), gpr64(*src)).unwrap());
+        MInst::Lzcnt { size, dst, src } => {
+            let code = match size {
+                OpSize::S32 => Code::Lzcnt_r32_rm32,
+                _ => Code::Lzcnt_r64_rm64,
+            };
+            ctx.emit(
+                Instruction::with2(code, gpr_to_iced(*dst, *size), gpr_to_iced(*src, *size))
+                    .unwrap(),
+            );
         }
-        MInst::Tzcnt { dst, src } => {
-            ctx.emit(Instruction::with2(Code::Tzcnt_r64_rm64, gpr64(*dst), gpr64(*src)).unwrap());
+        MInst::Tzcnt { size, dst, src } => {
+            let code = match size {
+                OpSize::S32 => Code::Tzcnt_r32_rm32,
+                _ => Code::Tzcnt_r64_rm64,
+            };
+            ctx.emit(
+                Instruction::with2(code, gpr_to_iced(*dst, *size), gpr_to_iced(*src, *size))
+                    .unwrap(),
+            );
         }
         MInst::Bswap { size, dst } => {
             ctx.emit(Instruction::with1(bswap_code(*size), gpr_to_iced(*dst, *size)).unwrap());

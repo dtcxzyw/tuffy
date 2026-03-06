@@ -213,12 +213,12 @@ pub enum MInst<R: RegType> {
         signed: bool,
         rem: bool,
     },
-    /// popcnt r64, r64 (population count)
-    Popcnt { dst: R, src: R },
-    /// lzcnt r64, r64 (count leading zeros)
-    Lzcnt { dst: R, src: R },
-    /// tzcnt r64, r64 (count trailing zeros)
-    Tzcnt { dst: R, src: R },
+    /// popcnt r32/r64, r32/r64 (population count)
+    Popcnt { size: OpSize, dst: R, src: R },
+    /// lzcnt r32/r64, r32/r64 (count leading zeros)
+    Lzcnt { size: OpSize, dst: R, src: R },
+    /// tzcnt r32/r64, r32/r64 (count trailing zeros)
+    Tzcnt { size: OpSize, dst: R, src: R },
     /// bswap r32/r64 (byte-swap in place)
     Bswap { size: OpSize, dst: R },
     /// rol dst, cl (rotate left by cl)
