@@ -2,6 +2,23 @@
 
 This document describes how Rust MIR (Mid-level Intermediate Representation) operations are translated to Tuffy IR instructions in the `rustc_codegen_tuffy` backend.
 
+## Operands
+
+MIR operands represent values used in operations. There are three kinds:
+
+| MIR Operand | Translation |
+|-------------|-------------|
+| `Copy(place)` | Read value from place (may generate `load` if stack-allocated) |
+| `Move(place)` | Read value from place (same as Copy at IR level) |
+| `Constant(const)` | Translate to `iconst`, `bconst`, or `symbol_addr` |
+
+**Copy vs Move**: The distinction between `Copy` and `Move` is enforced by MIR's borrow checker. At the IR level, both translate to reading the value from the place. For register-allocated locals, this is a direct value reference. For stack-allocated locals, this generates a `load` instruction.
+
+**Constants**: Constant operands are translated based on their type:
+- Integer/bool literals → `iconst` / `bconst`
+- Function pointers → `symbol_addr`
+- Static references → `symbol_addr` + optional offset
+
 ## Binary Operations
 
 ### Arithmetic Operations
