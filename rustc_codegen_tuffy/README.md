@@ -60,6 +60,7 @@ When translating MIR constructs to tuffy IR, follow these principles:
 
 - **MIR semantics are defined by [`rustc_middle::mir::syntax`](https://github.com/rust-lang/rust/blob/main/compiler/rustc_middle/src/mir/syntax.rs).** This is the authoritative source for MIR construct definitions and their intended behavior. When uncertain about MIR semantics, consult the rustc source code first, then reference existing backends (miri, LLVM, Cranelift) for translation strategies.
 - **Reference LLVM IR semantics** when uncertain about translation strategy. LLVM IR provides a well-documented, battle-tested model for lowering high-level constructs.
+- **When comparing MIR-to-IR translation with other backends, disable their optimization passes.** Use `-C opt-level=0` and `-C llvm-args=-disable-llvm-optzns` for LLVM to ensure fair comparison of MIR translation output without backend-specific optimizations obscuring the translation logic.
 - **No special-case handling for specific examples.** Translation logic must be general and correct for all valid inputs, not tailored to pass particular test cases.
 - Emit IR that accurately represents the semantics of the source construct, not IR that happens to work for a specific input.
 
