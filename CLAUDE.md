@@ -263,6 +263,8 @@ Templates are available for reference:
 - `docs/tasks/template.md` — task document template
 - `docs/RFCs/template.md` — RFC document template (based on Rust RFC format)
 
+To list incomplete tasks, run `docs/tasks/list.py`. It displays all tasks not marked as Completed/Cancelled/Abandoned, sorted by creation date.
+
 When the user provides reference documents, categorize and add them to `docs/references.md`. Download a local copy to `scratch/` when possible. Each reference entry should include a brief summary of key conclusions and their relevance to tuffy.
 
 ## Code Review Mode
