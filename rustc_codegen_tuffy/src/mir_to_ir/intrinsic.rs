@@ -3,12 +3,29 @@
 use rustc_middle::mir::{self, Operand};
 use rustc_middle::ty;
 
-use tuffy_ir::instruction::{FCmpOp, ICmpOp, Operand as IrOperand, Origin};
-use tuffy_ir::types::{Annotation, FloatType, Type};
+use tuffy_ir::instruction::{AtomicRmwOp, FCmpOp, ICmpOp, Operand as IrOperand, Origin};
+use tuffy_ir::types::{Annotation, FloatType, MemoryOrdering, Type};
 use tuffy_ir::value::ValueRef;
 
 use super::ctx::TranslationCtx;
 use super::types::{type_align, type_size};
+
+/// Parse memory ordering from atomic intrinsic name suffix.
+fn parse_atomic_ordering(name: &str) -> MemoryOrdering {
+    if name.ends_with("_relaxed") {
+        MemoryOrdering::Relaxed
+    } else if name.ends_with("_acquire") {
+        MemoryOrdering::Acquire
+    } else if name.ends_with("_release") {
+        MemoryOrdering::Release
+    } else if name.ends_with("_acqrel") {
+        MemoryOrdering::AcqRel
+    } else if name.ends_with("_seqcst") {
+        MemoryOrdering::SeqCst
+    } else {
+        MemoryOrdering::SeqCst
+    }
+}
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     /// Handle compiler intrinsics inline during MIR translation.
@@ -710,17 +727,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     return None;
                 }
                 let ptr = ir_args[0];
-                let size = elem_size as u32;
-                let val = self.builder.load(
+                let ordering = parse_atomic_ordering(name);
+                let (new_mem, val) = self.builder.load_atomic(
                     ptr.into(),
-                    size,
                     Type::Int,
+                    ordering,
                     current_mem.into(),
-                    None,
                     Origin::synthetic(),
                 );
                 self.locals.set(destination_local, val);
-                Some(current_mem)
+                Some(new_mem)
             }
 
             // atomic_store_relaxed, atomic_store_release, atomic_store_seqcst
@@ -730,11 +746,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 }
                 let ptr = ir_args[0];
                 let val = ir_args[1];
-                let size = elem_size as u32;
-                let new_mem = self.builder.store(
+                let ordering = parse_atomic_ordering(name);
+                let new_mem = self.builder.store_atomic(
                     val.into(),
                     ptr.into(),
-                    size,
+                    ordering,
                     current_mem.into(),
                     Origin::synthetic(),
                 );
@@ -749,47 +765,32 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let ptr = ir_args[0];
                 let expected = ir_args[1];
                 let new_val = ir_args[2];
-                let size = elem_size as u32;
+                let ordering = parse_atomic_ordering(name);
 
-                // Load current value.
-                let old = self.builder.load(
+                let (new_mem, actual_old) = self.builder.atomic_cmpxchg(
                     ptr.into(),
-                    size,
+                    expected.into(),
+                    new_val.into(),
                     Type::Int,
+                    ordering,
+                    ordering,
                     current_mem.into(),
-                    None,
                     Origin::synthetic(),
                 );
-                let mem = current_mem;
 
-                // Compare old == expected.
+                // Compare actual_old == expected to get success bool.
                 let eq = self.builder.icmp(
                     tuffy_ir::instruction::ICmpOp::Eq,
-                    old.into(),
+                    actual_old.into(),
                     expected.into(),
-                    Origin::synthetic(),
-                );
-
-                // Conditionally store: new_val if equal, else old (no-op store).
-                let store_val = self.builder.select(
-                    eq.into(),
-                    new_val.into(),
-                    old.into(),
-                    Type::Int,
-                    Origin::synthetic(),
-                );
-                let new_mem = self.builder.store(
-                    store_val.into(),
-                    ptr.into(),
-                    size,
-                    mem.into(),
                     Origin::synthetic(),
                 );
 
                 // Write (old, eq) into the destination stack slot.
                 if let Some(slot) = self.locals.get(destination_local) {
+                    let size = elem_size as u32;
                     let mem2 = self.builder.store(
-                        old.into(),
+                        actual_old.into(),
                         slot.into(),
                         size,
                         new_mem.into(),
@@ -808,9 +809,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     );
                     Some(mem3)
                 } else {
-                    // Destination not yet allocated — just set the scalar
-                    // (field projection will handle it like checked ops).
-                    self.locals.set(destination_local, old);
+                    self.locals.set(destination_local, actual_old);
                     Some(new_mem)
                 }
             }
@@ -822,19 +821,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 }
                 let ptr = ir_args[0];
                 let new_val = ir_args[1];
-                let size = elem_size as u32;
-                let old = self.builder.load(
+                let ordering = parse_atomic_ordering(name);
+                let (new_mem, old) = self.builder.atomic_rmw(
+                    AtomicRmwOp::Xchg,
                     ptr.into(),
-                    size,
-                    Type::Int,
-                    current_mem.into(),
-                    None,
-                    Origin::synthetic(),
-                );
-                let new_mem = self.builder.store(
                     new_val.into(),
-                    ptr.into(),
-                    size,
+                    Type::Int,
+                    ordering,
                     current_mem.into(),
                     Origin::synthetic(),
                 );
@@ -842,11 +835,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 Some(new_mem)
             }
 
-            // atomic_fence_*, atomic_singlethreadfence_* → no-op
+            // atomic_fence_*, atomic_singlethreadfence_* → fence instruction
             _ if name.starts_with("atomic_fence")
                 || name.starts_with("atomic_singlethreadfence") =>
             {
-                Some(current_mem)
+                let ordering = parse_atomic_ordering(name);
+                let new_mem = self.builder.fence(ordering, current_mem.into(), Origin::synthetic());
+                Some(new_mem)
             }
 
             // Read-modify-write: atomic_{and,or,xor,nand,xadd,xsub,
@@ -868,113 +863,159 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 }
                 let ptr = ir_args[0];
                 let operand = ir_args[1];
-                let size = elem_size as u32;
+                let ordering = parse_atomic_ordering(name);
 
-                let old = self.builder.load(
-                    ptr.into(),
-                    size,
-                    Type::Int,
-                    current_mem.into(),
-                    None,
-                    Origin::synthetic(),
-                );
-                let mem = current_mem;
-
-                // Compute new value based on the operation.
-                let new_val = if name.starts_with("atomic_and") {
-                    self.builder
-                        .and(old.into(), operand.into(), None, Origin::synthetic())
-                } else if name.starts_with("atomic_or") {
-                    self.builder
-                        .or(old.into(), operand.into(), None, Origin::synthetic())
-                } else if name.starts_with("atomic_xor") {
-                    self.builder
-                        .xor(old.into(), operand.into(), None, Origin::synthetic())
-                } else if name.starts_with("atomic_nand") {
-                    let a = self
-                        .builder
-                        .and(old.into(), operand.into(), None, Origin::synthetic());
-                    let all_ones = self.builder.iconst(-1, Origin::synthetic());
-                    self.builder
-                        .xor(a.into(), all_ones.into(), None, Origin::synthetic())
-                } else if name.starts_with("atomic_xadd") {
-                    self.builder
-                        .add(old.into(), operand.into(), None, Origin::synthetic())
+                // Use atomic_rmw for supported operations.
+                if name.starts_with("atomic_xadd") {
+                    let (new_mem, old) = self.builder.atomic_rmw(
+                        AtomicRmwOp::Add,
+                        ptr.into(),
+                        operand.into(),
+                        Type::Int,
+                        ordering,
+                        current_mem.into(),
+                        Origin::synthetic(),
+                    );
+                    self.locals.set(destination_local, old);
+                    Some(new_mem)
                 } else if name.starts_with("atomic_xsub") {
-                    self.builder
-                        .sub(old.into(), operand.into(), None, Origin::synthetic())
-                } else if name.starts_with("atomic_umax") {
-                    let bits = (elem_size * 8) as u32;
-                    let gt = self.builder.icmp(
-                        ICmpOp::Gt,
-                        IrOperand::annotated(old, Annotation::Unsigned(bits)),
-                        IrOperand::annotated(operand, Annotation::Unsigned(bits)),
-                        Origin::synthetic(),
-                    );
-                    self.builder.select(
-                        gt.into(),
-                        old.into(),
+                    let (new_mem, old) = self.builder.atomic_rmw(
+                        AtomicRmwOp::Sub,
+                        ptr.into(),
                         operand.into(),
                         Type::Int,
-                        Origin::synthetic(),
-                    )
-                } else if name.starts_with("atomic_umin") {
-                    let bits = (elem_size * 8) as u32;
-                    let lt = self.builder.icmp(
-                        ICmpOp::Lt,
-                        IrOperand::annotated(old, Annotation::Unsigned(bits)),
-                        IrOperand::annotated(operand, Annotation::Unsigned(bits)),
+                        ordering,
+                        current_mem.into(),
                         Origin::synthetic(),
                     );
-                    self.builder.select(
-                        lt.into(),
-                        old.into(),
+                    self.locals.set(destination_local, old);
+                    Some(new_mem)
+                } else if name.starts_with("atomic_and") {
+                    let (new_mem, old) = self.builder.atomic_rmw(
+                        AtomicRmwOp::And,
+                        ptr.into(),
                         operand.into(),
                         Type::Int,
-                        Origin::synthetic(),
-                    )
-                } else if name.starts_with("atomic_max") {
-                    let bits = (elem_size * 8) as u32;
-                    let gt = self.builder.icmp(
-                        ICmpOp::Gt,
-                        IrOperand::annotated(old, Annotation::Signed(bits)),
-                        IrOperand::annotated(operand, Annotation::Signed(bits)),
+                        ordering,
+                        current_mem.into(),
                         Origin::synthetic(),
                     );
-                    self.builder.select(
-                        gt.into(),
-                        old.into(),
+                    self.locals.set(destination_local, old);
+                    Some(new_mem)
+                } else if name.starts_with("atomic_or") {
+                    let (new_mem, old) = self.builder.atomic_rmw(
+                        AtomicRmwOp::Or,
+                        ptr.into(),
                         operand.into(),
                         Type::Int,
+                        ordering,
+                        current_mem.into(),
                         Origin::synthetic(),
-                    )
+                    );
+                    self.locals.set(destination_local, old);
+                    Some(new_mem)
+                } else if name.starts_with("atomic_xor") {
+                    let (new_mem, old) = self.builder.atomic_rmw(
+                        AtomicRmwOp::Xor,
+                        ptr.into(),
+                        operand.into(),
+                        Type::Int,
+                        ordering,
+                        current_mem.into(),
+                        Origin::synthetic(),
+                    );
+                    self.locals.set(destination_local, old);
+                    Some(new_mem)
                 } else {
-                    // atomic_min
-                    let bits = (elem_size * 8) as u32;
-                    let lt = self.builder.icmp(
-                        ICmpOp::Lt,
-                        IrOperand::annotated(old, Annotation::Signed(bits)),
-                        IrOperand::annotated(operand, Annotation::Signed(bits)),
+                    // Unsupported ops: nand, max, min, umax, umin — use atomic load/store.
+                    let (mem1, old) = self.builder.load_atomic(
+                        ptr.into(),
+                        Type::Int,
+                        ordering,
+                        current_mem.into(),
                         Origin::synthetic(),
                     );
-                    self.builder.select(
-                        lt.into(),
-                        old.into(),
-                        operand.into(),
-                        Type::Int,
-                        Origin::synthetic(),
-                    )
-                };
 
-                let new_mem = self.builder.store(
-                    new_val.into(),
-                    ptr.into(),
-                    size,
-                    mem.into(),
-                    Origin::synthetic(),
-                );
-                self.locals.set(destination_local, old);
-                Some(new_mem)
+                    let new_val = if name.starts_with("atomic_nand") {
+                        let a = self
+                            .builder
+                            .and(old.into(), operand.into(), None, Origin::synthetic());
+                        let all_ones = self.builder.iconst(-1, Origin::synthetic());
+                        self.builder
+                            .xor(a.into(), all_ones.into(), None, Origin::synthetic())
+                    } else if name.starts_with("atomic_umax") {
+                        let bits = (elem_size * 8) as u32;
+                        let gt = self.builder.icmp(
+                            ICmpOp::Gt,
+                            IrOperand::annotated(old, Annotation::Unsigned(bits)),
+                            IrOperand::annotated(operand, Annotation::Unsigned(bits)),
+                            Origin::synthetic(),
+                        );
+                        self.builder.select(
+                            gt.into(),
+                            old.into(),
+                            operand.into(),
+                            Type::Int,
+                            Origin::synthetic(),
+                        )
+                    } else if name.starts_with("atomic_umin") {
+                        let bits = (elem_size * 8) as u32;
+                        let lt = self.builder.icmp(
+                            ICmpOp::Lt,
+                            IrOperand::annotated(old, Annotation::Unsigned(bits)),
+                            IrOperand::annotated(operand, Annotation::Unsigned(bits)),
+                            Origin::synthetic(),
+                        );
+                        self.builder.select(
+                            lt.into(),
+                            old.into(),
+                            operand.into(),
+                            Type::Int,
+                            Origin::synthetic(),
+                        )
+                    } else if name.starts_with("atomic_max") {
+                        let bits = (elem_size * 8) as u32;
+                        let gt = self.builder.icmp(
+                            ICmpOp::Gt,
+                            IrOperand::annotated(old, Annotation::Signed(bits)),
+                            IrOperand::annotated(operand, Annotation::Signed(bits)),
+                            Origin::synthetic(),
+                        );
+                        self.builder.select(
+                            gt.into(),
+                            old.into(),
+                            operand.into(),
+                            Type::Int,
+                            Origin::synthetic(),
+                        )
+                    } else {
+                        // atomic_min
+                        let bits = (elem_size * 8) as u32;
+                        let lt = self.builder.icmp(
+                            ICmpOp::Lt,
+                            IrOperand::annotated(old, Annotation::Signed(bits)),
+                            IrOperand::annotated(operand, Annotation::Signed(bits)),
+                            Origin::synthetic(),
+                        );
+                        self.builder.select(
+                            lt.into(),
+                            old.into(),
+                            operand.into(),
+                            Type::Int,
+                            Origin::synthetic(),
+                        )
+                    };
+
+                    let new_mem = self.builder.store_atomic(
+                        new_val.into(),
+                        ptr.into(),
+                        ordering,
+                        mem1.into(),
+                        Origin::synthetic(),
+                    );
+                    self.locals.set(destination_local, old);
+                    Some(new_mem)
+                }
             }
 
             _ => None,
