@@ -49,23 +49,17 @@ pub(super) fn resolve_call_target<'tcx>(
     caller: Instance<'tcx>,
     mir: &mir::Body<'tcx>,
 ) -> ResolvedCall<'tcx> {
-    let ty = match func_op {
-        Operand::Constant(c) => c.ty(),
-        Operand::Copy(place) | Operand::Move(place) => {
-            // Use the projected type so that Deref projections (e.g.
-            // `move (*_self)` in call_mut shims where _self: &mut FnDef)
-            // resolve to the underlying FnDef type, not &mut FnDef.
-            place.ty(&mir.local_decls, tcx).ty
-        }
-        _ => {
-            return ResolvedCall {
-                target: None,
-                requires_caller_location: false,
-                needs_self_deref: false,
-                resolved_instance: None,
-                needs_tuple_spread: false,
-            };
-        }
+    // Use the projected type so that Deref projections (e.g.
+    // `move (*_self)` in call_mut shims where _self: &mut FnDef)
+    // resolve to the underlying FnDef type, not &mut FnDef.
+    let Some(ty) = operand_ty_projected(func_op, mir, tcx) else {
+        return ResolvedCall {
+            target: None,
+            requires_caller_location: false,
+            needs_self_deref: false,
+            resolved_instance: None,
+            needs_tuple_spread: false,
+        };
     };
     // Monomorphize the callee type using the caller's substitutions.
     // This resolves generic parameters (F/#0, Self/#0, etc.) that appear
@@ -737,13 +731,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         for arg in args {
             // Skip zero-sized (Unit) and untranslatable args — they don't
             // occupy a runtime slot.
-            let arg_ty = match &arg.node {
-                Operand::Copy(place) | Operand::Move(place) => {
-                    self.monomorphize(place.ty(&self.mir.local_decls, self.tcx).ty)
-                }
-                Operand::Constant(c) => self.monomorphize(c.ty()),
-                _ => self.monomorphize(self.mir.local_decls[mir::Local::from_usize(0)].ty),
-            };
+            let arg_ty = operand_ty_projected(&arg.node, self.mir, self.tcx)
+                .map(|ty| self.monomorphize(ty))
+                .unwrap_or_else(|| self.monomorphize(self.mir.local_decls[mir::Local::from_usize(0)].ty));
             if matches!(translate_ty(self.tcx, arg_ty), Some(Type::Unit) | None) {
                 continue;
             }

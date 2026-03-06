@@ -94,16 +94,45 @@ pub(super) fn translate_annotation(ty: ty::Ty<'_>) -> Option<Annotation> {
     }
 }
 
+/// Get the type of an operand (local type, not projected).
+pub(super) fn operand_ty<'tcx>(
+    operand: &Operand<'tcx>,
+    mir: &mir::Body<'tcx>,
+) -> Option<ty::Ty<'tcx>> {
+    match operand {
+        Operand::Copy(place) | Operand::Move(place) => Some(mir.local_decls[place.local].ty),
+        Operand::Constant(c) => Some(c.ty()),
+        _ => None,
+    }
+}
+
+/// Get the projected type of an operand.
+pub(super) fn operand_ty_projected<'tcx>(
+    operand: &Operand<'tcx>,
+    mir: &mir::Body<'tcx>,
+    tcx: TyCtxt<'tcx>,
+) -> Option<ty::Ty<'tcx>> {
+    match operand {
+        Operand::Copy(place) | Operand::Move(place) => Some(place.ty(&mir.local_decls, tcx).ty),
+        Operand::Constant(c) => Some(c.ty()),
+        _ => None,
+    }
+}
+
+/// Extract the place from Copy/Move operands.
+pub(super) fn operand_place<'tcx>(operand: &'tcx Operand<'tcx>) -> Option<&'tcx mir::Place<'tcx>> {
+    match operand {
+        Operand::Copy(place) | Operand::Move(place) => Some(place),
+        _ => None,
+    }
+}
+
 /// Extract the type annotation from a MIR operand.
 pub(super) fn operand_annotation<'tcx>(
     operand: &Operand<'tcx>,
     mir: &mir::Body<'tcx>,
 ) -> Option<Annotation> {
-    let ty = match operand {
-        Operand::Copy(place) | Operand::Move(place) => mir.local_decls[place.local].ty,
-        Operand::Constant(c) => c.ty(),
-        _ => return None,
-    };
+    let ty = operand_ty(operand, mir)?;
     translate_annotation(ty)
 }
 

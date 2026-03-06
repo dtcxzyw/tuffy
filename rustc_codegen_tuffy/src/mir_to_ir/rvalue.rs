@@ -607,12 +607,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     {
                         // This is an unsizing coercion to a trait object.
                         // Get the concrete source type.
-                        let src_ty = match op {
-                            Operand::Copy(p) | Operand::Move(p) => {
-                                self.monomorphize(self.mir.local_decls[p.local].ty)
-                            }
-                            Operand::Constant(c) => self.monomorphize(c.ty()),
-                            _ => return None,
+                        let Some(src_ty) = self.operand_ty_mono(op) else {
+                            return None;
                         };
                         let src_inner = match src_ty.kind() {
                             ty::Ref(_, inner, _) => *inner,
@@ -664,12 +660,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     if let Some(inner) = target_inner
                         && let ty::Slice(_) = inner.kind()
                     {
-                        let src_ty = match op {
-                            Operand::Copy(p) | Operand::Move(p) => {
-                                self.monomorphize(self.mir.local_decls[p.local].ty)
-                            }
-                            Operand::Constant(c) => self.monomorphize(c.ty()),
-                            _ => return None,
+                        let Some(src_ty) = self.operand_ty_mono(op) else {
+                            return None;
                         };
                         let src_inner = match src_ty.kind() {
                             ty::Ref(_, inner, _) => *inner,
@@ -692,12 +684,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // boundary (matching codegen_ssa::base::unsized_info).
                     if let Some(inner) = target_inner {
                         let typing_env = ty::TypingEnv::fully_monomorphized();
-                        let src_ty = match op {
-                            Operand::Copy(p) | Operand::Move(p) => {
-                                self.monomorphize(self.mir.local_decls[p.local].ty)
-                            }
-                            Operand::Constant(c) => self.monomorphize(c.ty()),
-                            _ => return None,
+                        let Some(src_ty) = self.operand_ty_mono(op) else {
+                            return None;
                         };
                         let src_inner = match src_ty.kind() {
                             ty::Ref(_, inner, _) => *inner,
@@ -830,13 +818,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
                 // Detect float operands for arithmetic dispatch.
                 let float_ty = {
-                    let mir_ty = match lhs {
-                        Operand::Copy(p) | Operand::Move(p) => {
-                            self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty)
-                        }
-                        Operand::Constant(c) => self.monomorphize(c.ty()),
-                        _ => self.tcx.types.i32,
-                    };
+                    let mir_ty = operand_ty_projected(lhs, self.mir, self.tcx)
+                        .map(|ty| self.monomorphize(ty))
+                        .unwrap_or(self.tcx.types.i32);
                     match mir_ty.kind() {
                         ty::Float(ty::FloatTy::F16) => Some(Type::Float(FloatType::F16)),
                         ty::Float(ty::FloatTy::F32) => Some(Type::Float(FloatType::F32)),
@@ -913,20 +897,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
                 // Detect 128-bit integer operands early so we can load from
                 // stack slot pointers before coercing to int.
-                let lhs_mir_ty = match lhs {
-                    Operand::Copy(p) | Operand::Move(p) => {
-                        self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty)
-                    }
-                    Operand::Constant(c) => self.monomorphize(c.ty()),
-                    _ => self.tcx.types.i32,
-                };
-                let rhs_mir_ty = match rhs {
-                    Operand::Copy(p) | Operand::Move(p) => {
-                        self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty)
-                    }
-                    Operand::Constant(c) => self.monomorphize(c.ty()),
-                    _ => self.tcx.types.i32,
-                };
+                let lhs_mir_ty = operand_ty_projected(lhs, self.mir, self.tcx)
+                    .map(|ty| self.monomorphize(ty))
+                    .unwrap_or(self.tcx.types.i32);
+                let rhs_mir_ty = operand_ty_projected(rhs, self.mir, self.tcx)
+                    .map(|ty| self.monomorphize(ty))
+                    .unwrap_or(self.tcx.types.i32);
 
                 // Recompute annotations from the fully-resolved MIR types.
                 // `operand_annotation` uses the local's type which misses
@@ -1331,17 +1307,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     BinOp::Rem => self.builder.rem(l_op, r_op, res_ann, Origin::synthetic()),
                     BinOp::Offset => {
                         // ptr.wrapping_offset(count) = ptr + count * sizeof(T).
-                        let pointee_ty = match lhs {
-                            Operand::Copy(p) | Operand::Move(p) => {
-                                let ty =
-                                    self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty);
-                                match ty.kind() {
-                                    ty::RawPtr(inner, _) => Some(*inner),
-                                    _ => None,
-                                }
-                            }
-                            _ => None,
-                        };
+                        let pointee_ty = operand_ty_projected(lhs, self.mir, self.tcx)
+                            .map(|ty| self.monomorphize(ty))
+                            .and_then(|ty| match ty.kind() {
+                                ty::RawPtr(inner, _) => Some(*inner),
+                                _ => None,
+                            });
                         let elem_size =
                             pointee_ty.and_then(|t| type_size(self.tcx, t)).unwrap_or(1);
                         if elem_size == 1 {
@@ -1375,12 +1346,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         // Use projected type so field accesses like
                         // _struct.field resolve to the field type, not
                         // the struct type.
-                        let src_ty = match operand {
-                            Operand::Copy(p) | Operand::Move(p) => {
-                                p.ty(&self.mir.local_decls, self.tcx).ty
-                            }
-                            Operand::Constant(c) => c.ty(),
-                            _ => return Some(val),
+                        let Some(src_ty) = operand_ty_projected(operand, self.mir, self.tcx) else {
+                            return Some(val);
                         };
                         let src_ty = self.monomorphize(src_ty);
                         // `translate_place_to_value` returns the *address* of the
@@ -1418,10 +1385,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     }
                     CastKind::PointerCoercion(..) => {
                         // Convert a zero-sized function item / closure to a function pointer.
-                        let src_ty = match operand {
-                            Operand::Copy(p) | Operand::Move(p) => self.mir.local_decls[p.local].ty,
-                            Operand::Constant(c) => c.ty(),
-                            _ => return Some(val),
+                        let Some(src_ty) = operand_ty(operand, self.mir) else {
+                            return Some(val);
                         };
                         let src_ty = self.tcx.instantiate_and_normalize_erasing_regions(
                             self.instance.args,
@@ -1455,12 +1420,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         }
                     }
                     CastKind::FloatToInt => {
-                        let src_ty = match operand {
-                            Operand::Copy(p) | Operand::Move(p) => {
-                                self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty)
-                            }
-                            Operand::Constant(c) => self.monomorphize(c.ty()),
-                            _ => return Some(val),
+                        let Some(src_ty) = operand_ty_projected(operand, self.mir, self.tcx)
+                            .map(|ty| self.monomorphize(ty))
+                        else {
+                            return Some(val);
                         };
                         let ft = match src_ty.kind() {
                             ty::Float(ty::FloatTy::F32) => FloatType::F32,
@@ -1738,12 +1701,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         Some(result)
                     }
                     CastKind::IntToFloat => {
-                        let src_ty = match operand {
-                            Operand::Copy(p) | Operand::Move(p) => {
-                                self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty)
-                            }
-                            Operand::Constant(c) => self.monomorphize(c.ty()),
-                            _ => return Some(val),
+                        let Some(src_ty) = operand_ty_projected(operand, self.mir, self.tcx)
+                            .map(|ty| self.monomorphize(ty))
+                        else {
+                            return Some(val);
                         };
                         let signed = matches!(src_ty.kind(), ty::Int(_));
                         let target_ty_m = self.monomorphize(*target_ty);
@@ -1782,12 +1743,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         Some(float_res)
                     }
                     CastKind::FloatToFloat => {
-                        let src_ty = match operand {
-                            Operand::Copy(p) | Operand::Move(p) => {
-                                self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty)
-                            }
-                            Operand::Constant(c) => self.monomorphize(c.ty()),
-                            _ => return Some(val),
+                        let Some(src_ty) = operand_ty_projected(operand, self.mir, self.tcx)
+                            .map(|ty| self.monomorphize(ty))
+                        else {
+                            return Some(val);
                         };
                         let src_ft = match src_ty.kind() {
                             ty::Float(ty::FloatTy::F32) => FloatType::F32,
@@ -1939,13 +1898,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 ty::RawPtr(..) | ty::Ref(..) | ty::FnPtr(..)
                             )
                         {
-                            let src_ty = match operand {
-                                Operand::Copy(p) | Operand::Move(p) => Some(
-                                    self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty),
-                                ),
-                                Operand::Constant(c) => Some(self.monomorphize(c.ty())),
-                                _ => None,
-                            };
+                            let src_ty = operand_ty_projected(operand, self.mir, self.tcx)
+                                .map(|ty| self.monomorphize(ty));
                             if let Some(st) = src_ty {
                                 if matches!(st.kind(), ty::RawPtr(..) | ty::Ref(..) | ty::FnPtr(..))
                                 {
@@ -2099,13 +2053,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 }
 
                 for (i, op) in operands.iter().enumerate() {
-                    let field_ty = match op {
-                        Operand::Copy(p) | Operand::Move(p) => {
-                            Some(self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty))
-                        }
-                        Operand::Constant(c) => Some(self.monomorphize(c.ty())),
-                        _ => None,
-                    };
+                    let field_ty = operand_ty_projected(op, self.mir, self.tcx)
+                        .map(|ty| self.monomorphize(ty));
                     let bytes = field_ty.and_then(|t| type_size(self.tcx, t)).unwrap_or(8) as u32;
                     if bytes == 0 {
                         continue;
@@ -2418,13 +2367,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             }
             Rvalue::UnaryOp(mir::UnOp::Neg, operand) => {
                 let v = self.translate_operand(operand)?;
-                let op_ty = match operand {
-                    Operand::Copy(p) | Operand::Move(p) => {
-                        Some(self.monomorphize(p.ty(&self.mir.local_decls, self.tcx).ty))
-                    }
-                    Operand::Constant(c) => Some(self.monomorphize(c.ty())),
-                    _ => None,
-                };
+                let op_ty = operand_ty_projected(operand, self.mir, self.tcx)
+                    .map(|ty| self.monomorphize(ty));
                 // Float negation: use FNeg IR op, which keeps the result Float-typed.
                 if let Some(ty) = op_ty {
                     if ty.is_floating_point() {
@@ -2474,14 +2418,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             }
             Rvalue::UnaryOp(mir::UnOp::Not, operand) => {
                 let v = self.translate_operand(operand)?;
-                let mir_ty = match operand {
-                    Operand::Copy(p) | Operand::Move(p) => {
-                        let ty = p.ty(&self.mir.local_decls, self.tcx).ty;
-                        Some(self.monomorphize(ty))
-                    }
-                    Operand::Constant(c) => Some(self.monomorphize(c.ty())),
-                    _ => None,
-                };
+                let mir_ty = operand_ty_projected(operand, self.mir, self.tcx)
+                    .map(|ty| self.monomorphize(ty));
                 let not_ann = mir_ty.and_then(|t| translate_annotation(t));
                 let is_bool = mir_ty.is_some_and(|t| t.is_bool());
                 if is_bool {

@@ -199,6 +199,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         )
     }
 
+    /// Get the monomorphized type of an operand.
+    pub(super) fn operand_ty_mono(&self, operand: &mir::Operand<'tcx>) -> Option<ty::Ty<'tcx>> {
+        let ty = operand_ty(operand, self.mir)?;
+        Some(self.monomorphize(ty))
+    }
+
     /// Spill a scalar local to a new stack slot of the given byte size.
     ///
     /// Creates a slot of `max(size, 1)` bytes, optionally stores the current

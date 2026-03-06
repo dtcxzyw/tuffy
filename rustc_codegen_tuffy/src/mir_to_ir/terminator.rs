@@ -439,13 +439,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         // target values to the correct bit width.  MIR stores switch values
         // as u128, but the runtime discriminant is stored in a sized slot
         // (e.g. 32-bit for i32) and zero-extended on load.
-        let discr_ty = match discr {
-            Operand::Copy(place) | Operand::Move(place) => {
-                Some(self.monomorphize(place.ty(&self.mir.local_decls, self.tcx).ty))
-            }
-            Operand::Constant(c) => Some(self.monomorphize(c.ty())),
-            _ => None,
-        };
+        let discr_ty = self.operand_ty_mono(discr);
         let discr_bits = discr_ty
             .and_then(|t| type_size(self.tcx, t))
             .map(|sz| sz * 8)
