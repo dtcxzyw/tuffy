@@ -1,12 +1,19 @@
 # Fix MIR-to-IR Translation Errors
 
-**Status**: Pending
-**Created**: 2026-03-06
-**Completed**: -
+- Status: Draft
+- Created: 2026-03-06
+- Completed: N/A
+- Parent: N/A
 
-## Task Description
+## Description
 
 Fix critical translation errors discovered during code audit of `rustc_codegen_tuffy/src/mir_to_ir`. These errors cause incorrect IR generation for atomic operations, pointer arithmetic, and floating-point comparisons.
+
+## Subtasks
+
+- Fix atomic operations to use correct IR instructions
+- Fix pointer offset to use ptradd instead of integer add
+- Verify float comparison NaN semantics
 
 ## Affected Modules
 
