@@ -1307,6 +1307,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     BinOp::Rem => self.builder.rem(l_op, r_op, res_ann, Origin::synthetic()),
                     BinOp::Offset => {
                         // ptr.wrapping_offset(count) = ptr + count * sizeof(T).
+                        let l_raw = self.translate_operand(lhs)?;
+                        let r = self.translate_operand(rhs)?;
                         let pointee_ty = operand_ty_projected(lhs, self.mir, self.tcx)
                             .map(|ty| self.monomorphize(ty))
                             .and_then(|ty| match ty.kind() {
@@ -1315,24 +1317,17 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             });
                         let elem_size =
                             pointee_ty.and_then(|t| type_size(self.tcx, t)).unwrap_or(1);
-                        if elem_size == 1 {
-                            self.builder.add(l_op, r_op, res_ann, Origin::synthetic())
+                        let byte_offset = if elem_size == 1 {
+                            r
                         } else {
                             let size_val =
                                 self.builder.iconst(elem_size as i64, Origin::synthetic());
-                            let size_op = IrOperand {
-                                value: size_val,
-                                annotation: None,
-                            };
-                            let byte_off =
-                                self.builder.mul(r_op, size_op, None, Origin::synthetic());
-                            let byte_off_op = IrOperand {
-                                value: byte_off,
-                                annotation: None,
-                            };
                             self.builder
-                                .add(l_op, byte_off_op, res_ann, Origin::synthetic())
-                        }
+                                .mul(r.into(), size_val.into(), None, Origin::synthetic())
+                        };
+                        let ptr = self.coerce_to_ptr(l_raw);
+                        self.builder
+                            .ptradd(ptr.into(), byte_offset.into(), 0, Origin::synthetic())
                     }
                 };
                 Some(val)
