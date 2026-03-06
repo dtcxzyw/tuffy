@@ -1,0 +1,171 @@
+# MIR to Tuffy IR Translation
+
+This document describes how Rust MIR (Mid-level Intermediate Representation) operations are translated to Tuffy IR instructions in the `rustc_codegen_tuffy` backend.
+
+## Binary Operations
+
+### Arithmetic Operations
+
+| MIR BinOp | Tuffy IR (Integer) | Tuffy IR (Float) |
+|-----------|-------------------|------------------|
+| `Add` | `add` | `fadd` |
+| `Sub` | `sub` | `fsub` |
+| `Mul` | `mul` | `fmul` |
+| `Div` | `div` | `fdiv` |
+| `Rem` | `rem` | `frem` |
+| `AddUnchecked` | `add` | N/A |
+| `SubUnchecked` | `sub` | N/A |
+| `MulUnchecked` | `mul` | N/A |
+
+**Note**: Unchecked variants map to the same IR instructions as checked variants. The difference is that MIR guarantees no overflow for unchecked operations, allowing the optimizer to assume the result is in range.
+
+### Overflow Detection
+
+| MIR BinOp | Tuffy IR (Signed) | Tuffy IR (Unsigned) |
+|-----------|-------------------|---------------------|
+| `AddWithOverflow` | `sadd_overflow` | `uadd_overflow` |
+| `SubWithOverflow` | `ssub_overflow` | `usub_overflow` |
+| `MulWithOverflow` | `smul_overflow` | `umul_overflow` |
+
+These return two values: the wrapped result and a boolean overflow flag.
+
+### Bitwise Operations
+
+| MIR BinOp | Tuffy IR |
+|-----------|----------|
+| `BitAnd` | `and` |
+| `BitOr` | `or` |
+| `BitXor` | `xor` |
+| `Shl` | `shl` |
+| `ShlUnchecked` | `shl` |
+| `Shr` | `shr` |
+| `ShrUnchecked` | `shr` |
+
+### Comparison Operations
+
+| MIR BinOp | Tuffy IR (Integer) | Tuffy IR (Float) |
+|-----------|-------------------|------------------|
+| `Eq` | `icmp.eq` | `fcmp.oeq` |
+| `Ne` | `icmp.ne` | `fcmp.one` |
+| `Lt` | `icmp.lt` | `fcmp.olt` |
+| `Le` | `icmp.le` | `fcmp.ole` |
+| `Gt` | `icmp.gt` | `fcmp.ogt` |
+| `Ge` | `icmp.ge` | `fcmp.oge` |
+| `Cmp` | Special handling* | N/A |
+
+**Note**: `Cmp` (three-way comparison) is lowered to a sequence of comparisons and selects that produce -1, 0, or 1.
+
+### Pointer Operations
+
+| MIR BinOp | Tuffy IR |
+|-----------|----------|
+| `Offset` | `ptradd` |
+
+## Unary Operations
+
+| MIR UnOp | Tuffy IR |
+|----------|----------|
+| `Not` | `xor v, -1` |
+| `Neg` | `sub 0, v` (int) / `fneg v` (float) |
+
+**Note**: Bitwise NOT is currently emulated using XOR with -1. A dedicated `not` instruction may be added in the future.
+
+## Intrinsics
+
+### Bit Manipulation
+
+| MIR Intrinsic | Tuffy IR |
+|---------------|----------|
+| `ctpop` | `count_ones` |
+| `ctlz` / `ctlz_nonzero` | `clz` |
+| `cttz` / `cttz_nonzero` | `ctz` |
+| `bswap` | `bswap` |
+| `bitreverse` | `bitreverse` |
+| `rotate_left` | `rotl` |
+| `rotate_right` | `rotr` |
+
+### Memory Operations
+
+| MIR Intrinsic | Tuffy IR |
+|---------------|----------|
+| `copy_nonoverlapping` | `memcpy` |
+| `write_bytes` | `memset` |
+| `size_of` | `iconst` (compile-time constant) |
+| `align_of` | `iconst` (compile-time constant) |
+
+### Floating Point
+
+| MIR Intrinsic | Tuffy IR |
+|---------------|----------|
+| `fabsf32` / `fabsf64` | `fabs` |
+| `copysignf32` / `copysignf64` | `copysign` |
+| `floorf32` / `floorf64` | External call |
+| `ceilf32` / `ceilf64` | External call |
+| `truncf32` / `truncf64` | External call |
+| `sqrtf32` / `sqrtf64` | External call |
+
+**Note**: Transcendental functions (floor, ceil, sqrt, etc.) are not yet implemented as IR instructions and are lowered to external function calls.
+
+### Atomic Operations
+
+| MIR Intrinsic | Tuffy IR |
+|---------------|----------|
+| `atomic_load` | `load.atomic` |
+| `atomic_store` | `store.atomic` |
+| `atomic_xchg` | `rmw.xchg` |
+| `atomic_xadd` | `rmw.add` |
+| `atomic_xsub` | `rmw.sub` |
+| `atomic_and` | `rmw.and` |
+| `atomic_or` | `rmw.or` |
+| `atomic_xor` | `rmw.xor` |
+| `atomic_cxchg` / `atomic_cxchgweak` | `cmpxchg` |
+| `atomic_fence` | `fence` |
+
+### Other Intrinsics
+
+| MIR Intrinsic | Translation |
+|---------------|-------------|
+| `black_box` | Identity (no optimization barrier in IR) |
+| `assume` | No-op |
+| `is_val_statically_known` | `bconst false` |
+| `assert_inhabited` | No-op (compile-time check) |
+| `assert_zero_valid` | No-op (compile-time check) |
+
+## Terminators
+
+| MIR Terminator | Tuffy IR |
+|----------------|----------|
+| `Return` | `ret` |
+| `Goto` | `br` |
+| `SwitchInt` | Lowered to `brif` tree |
+| `Call` | `call` |
+| `Unreachable` | `unreachable` |
+| `Drop` | Call to drop glue + `br` |
+| `Assert` | `brif` + `trap` on failure |
+
+**Note**: `SwitchInt` (multi-way branch) is lowered to a binary decision tree using nested `brif` instructions.
+
+## Type Conversions
+
+| MIR Cast | Tuffy IR |
+|----------|----------|
+| Integer extension (signed) | `sext` |
+| Integer extension (unsigned) | `zext` |
+| Integer truncation | Annotation change |
+| Float to int | `bitcast` + annotation |
+| Int to float | `bitcast` |
+| Pointer to int | `ptrtoint` |
+| Int to pointer | `inttoptr` |
+
+## Not Yet Implemented
+
+The following MIR operations are not yet translated to Tuffy IR:
+
+- **Aggregate construction**: `Rvalue::Aggregate` (tuples, structs, enums)
+- **Discriminant operations**: `Rvalue::Discriminant`, `StatementKind::SetDiscriminant`
+- **Tail calls**: `TerminatorKind::TailCall`
+- **Coroutines**: `Yield`, `CoroutineDrop`
+- **Inline assembly**: `InlineAsm`
+- **Unwind operations**: `UnwindResume`, `UnwindTerminate`
+
+These operations either require additional IR support or are Rust-specific features that don't map cleanly to a low-level IR.

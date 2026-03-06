@@ -13,6 +13,7 @@
   - [Instructions](spec/instructions.md)
   - [Text Format](spec/text-format.md)
   - [Planned Features](spec/planned.md)
+- [MIR to Tuffy IR Translation](mir_to_tuffy_ir.md)
 - [Initial Design](initial.md)
 - [References](references.md)
 
