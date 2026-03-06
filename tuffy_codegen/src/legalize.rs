@@ -426,17 +426,15 @@ fn wide_pair<M>(s: &State<M>, b: &mut Builder, op: &Operand) -> (ValueRef, Value
         s.vmap.pair(op.value)
     } else {
         let lo = s.vmap.one(op.value);
-        let hi = if is_signed_128(op.annotation.as_ref()) {
-            let c63 = b.iconst(63i64, o());
-            b.shr(
-                Operand::annotated(lo, Annotation::Signed(64)),
-                Operand::new(c63),
-                None,
-                o(),
-            )
-        } else {
-            b.iconst(0i64, o())
-        };
+        // Sign-extend: for positive values hi=0 (same as zero-extend); for negative
+        // values (e.g. iconst(-1) used as all-ones in a 128-bit XOR) hi=-1, which is correct.
+        let c63 = b.iconst(63i64, o());
+        let hi = b.shr(
+            Operand::annotated(lo, Annotation::Signed(64)),
+            Operand::new(c63),
+            None,
+            o(),
+        );
         (lo, hi)
     }
 }
@@ -1599,8 +1597,8 @@ fn leg_bitwise<M>(
     kind: BitwiseKind,
 ) {
     let ann64 = Some(Annotation::Unsigned(64));
-    let (a_lo, a_hi) = s.vmap.pair(a.value);
-    let (b_lo, b_hi) = s.vmap.pair(op_b.value);
+    let (a_lo, a_hi) = wide_pair(s, b, a);
+    let (b_lo, b_hi) = wide_pair(s, b, op_b);
     let (lo, hi) = match kind {
         BitwiseKind::And => (
             b.and(Operand::new(a_lo), Operand::new(b_lo), ann64, o()),
