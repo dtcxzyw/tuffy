@@ -62,15 +62,17 @@ These return two values: the wrapped result and a boolean overflow flag.
 
 ### Bitwise Operations
 
-| MIR BinOp | Tuffy IR |
-|-----------|----------|
-| `BitAnd` | `and` |
-| `BitOr` | `or` |
-| `BitXor` | `xor` |
-| `Shl` | `shl` |
-| `ShlUnchecked` | `shl` |
-| `Shr` | `shr` |
-| `ShrUnchecked` | `shr` |
+| MIR BinOp | Tuffy IR | Result Annotation | Notes |
+|-----------|----------|-------------------|-------|
+| `BitAnd` | `and` | `:sN` / `:uN` | Direct passthrough |
+| `BitOr` | `or` | `:sN` / `:uN` | Direct passthrough |
+| `BitXor` | `xor` | `:sN` / `:uN` | Direct passthrough |
+| `Shl` | `shl` | `:sN` / `:uN` | Shift amount masked to `% bit_width` |
+| `ShlUnchecked` | `shl` | `:sN` / `:uN` | Shift amount masked to `% bit_width` |
+| `Shr` | `shr` | `:sN` / `:uN` | Shift amount masked to `% bit_width` |
+| `ShrUnchecked` | `shr` | `:sN` / `:uN` | Shift amount masked to `% bit_width` |
+
+**Note**: Bitwise operations use the result annotation directly without extension. Shift operations mask the shift amount to `value & (bit_width - 1)` to match Rust semantics.
 
 ### Comparison Operations
 
