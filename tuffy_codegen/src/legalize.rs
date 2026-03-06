@@ -420,7 +420,11 @@ fn is_wide<M>(s: &State<M>, v: ValueRef) -> bool {
 
 /// Returns the (lo, hi) pair for a 128-bit operand, correctly handling non-wide
 /// values. Unlike `vmap.pair()`, which returns `(v, v)` for a non-wide value,
-/// this emits hi = 0 for unsigned or hi = lo >> 63 for signed operands.
+/// this emits hi = lo >> 63 (sign-extend) for all non-wide values.
+///
+/// Sign-extension is always correct for non-wide constants that appear in
+/// 128-bit IR: positive values get hi=0 (same as zero-extension), and negative
+/// constants used as bit-patterns (e.g. iconst(-1) for bitwise NOT) get hi=-1.
 fn wide_pair<M>(s: &State<M>, b: &mut Builder, op: &Operand) -> (ValueRef, ValueRef) {
     if is_wide(s, op.value) {
         s.vmap.pair(op.value)
@@ -1118,8 +1122,8 @@ fn leg_wide_const<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, val:
 
 fn leg_add<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, a: &Operand, op_b: &Operand) {
     let ann64 = Some(Annotation::Unsigned(64));
-    let (a_lo, a_hi) = s.vmap.pair(a.value);
-    let (b_lo, b_hi) = s.vmap.pair(op_b.value);
+    let (a_lo, a_hi) = wide_pair(s, b, a);
+    let (b_lo, b_hi) = wide_pair(s, b, op_b);
 
     let lo = b.add(
         Operand::annotated(a_lo, Annotation::Unsigned(64)),
@@ -1155,8 +1159,8 @@ fn leg_add<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, a: &Operand
 
 fn leg_sub<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, a: &Operand, op_b: &Operand) {
     let ann64 = Some(Annotation::Unsigned(64));
-    let (a_lo, a_hi) = s.vmap.pair(a.value);
-    let (b_lo, b_hi) = s.vmap.pair(op_b.value);
+    let (a_lo, a_hi) = wide_pair(s, b, a);
+    let (b_lo, b_hi) = wide_pair(s, b, op_b);
 
     let lo = b.sub(
         Operand::annotated(a_lo, Annotation::Unsigned(64)),
@@ -1193,8 +1197,8 @@ fn leg_sub<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, a: &Operand
 #[allow(clippy::too_many_lines)]
 fn leg_mul<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, a: &Operand, op_b: &Operand) {
     let ann64 = Some(Annotation::Unsigned(64));
-    let (a_lo, a_hi) = s.vmap.pair(a.value);
-    let (b_lo, b_hi) = s.vmap.pair(op_b.value);
+    let (a_lo, a_hi) = wide_pair(s, b, a);
+    let (b_lo, b_hi) = wide_pair(s, b, op_b);
 
     let c32 = b.iconst(32i64, o());
     let mask32 = b.iconst(0xFFFF_FFFFi64, o());
@@ -1297,8 +1301,8 @@ fn leg_add128_core<M>(
     op_b: &Operand,
 ) -> (ValueRef, ValueRef, ValueRef, ValueRef) {
     let ann64 = Some(Annotation::Unsigned(64));
-    let (a_lo, a_hi) = s.vmap.pair(a.value);
-    let (b_lo, b_hi) = s.vmap.pair(op_b.value);
+    let (a_lo, a_hi) = wide_pair(s, b, a);
+    let (b_lo, b_hi) = wide_pair(s, b, op_b);
     let lo = b.add(
         Operand::annotated(a_lo, Annotation::Unsigned(64)),
         Operand::annotated(b_lo, Annotation::Unsigned(64)),
@@ -1335,8 +1339,8 @@ fn leg_uadd_with_overflow_128<M>(
     op_b: &Operand,
 ) {
     let ann64 = Some(Annotation::Unsigned(64));
-    let (a_lo, a_hi) = s.vmap.pair(a.value);
-    let (b_lo, b_hi) = s.vmap.pair(op_b.value);
+    let (a_lo, a_hi) = wide_pair(s, b, a);
+    let (b_lo, b_hi) = wide_pair(s, b, op_b);
 
     let lo = b.add(
         Operand::annotated(a_lo, Annotation::Unsigned(64)),
@@ -1437,8 +1441,8 @@ fn leg_usub_with_overflow_128<M>(
     op_b: &Operand,
 ) {
     let ann64 = Some(Annotation::Unsigned(64));
-    let (a_lo, a_hi) = s.vmap.pair(a.value);
-    let (b_lo, b_hi) = s.vmap.pair(op_b.value);
+    let (a_lo, a_hi) = wide_pair(s, b, a);
+    let (b_lo, b_hi) = wide_pair(s, b, op_b);
 
     let lo = b.sub(
         Operand::annotated(a_lo, Annotation::Unsigned(64)),
@@ -1501,8 +1505,8 @@ fn leg_ssub_with_overflow_128<M>(
     op_b: &Operand,
 ) {
     let ann64 = Some(Annotation::Unsigned(64));
-    let (a_lo, a_hi) = s.vmap.pair(a.value);
-    let (b_lo, b_hi) = s.vmap.pair(op_b.value);
+    let (a_lo, a_hi) = wide_pair(s, b, a);
+    let (b_lo, b_hi) = wide_pair(s, b, op_b);
 
     // Compute (lo, hi) of a - b
     let lo = b.sub(
@@ -1629,7 +1633,7 @@ fn leg_shl<M>(
     _ann: Option<&Annotation>,
 ) {
     let ann64 = Some(Annotation::Unsigned(64));
-    let (a_lo, a_hi) = s.vmap.pair(a.value);
+    let (a_lo, a_hi) = wide_pair(s, b, a);
     let amt = s.vmap.one(op_b.value);
 
     let c0 = b.iconst(0i64, o());
@@ -1808,8 +1812,8 @@ fn leg_icmp<M>(
     a: &Operand,
     op_b: &Operand,
 ) {
-    let (a_lo, a_hi) = s.vmap.pair(a.value);
-    let (b_lo, b_hi) = s.vmap.pair(op_b.value);
+    let (a_lo, a_hi) = wide_pair(s, b, a);
+    let (b_lo, b_hi) = wide_pair(s, b, op_b);
     let signed = is_signed_128(a.annotation.as_ref());
 
     let hi_ann = if signed {
@@ -2100,8 +2104,8 @@ fn leg_select_128<M>(
     fv: &Operand,
 ) {
     let c = s.vmap.one(cond.value);
-    let (t_lo, t_hi) = s.vmap.pair(tv.value);
-    let (f_lo, f_hi) = s.vmap.pair(fv.value);
+    let (t_lo, t_hi) = wide_pair(s, b, tv);
+    let (f_lo, f_hi) = wide_pair(s, b, fv);
     let lo = b.select(
         Operand::new(c),
         Operand::new(t_lo),
@@ -2159,8 +2163,8 @@ fn leg_div_rem_128<M: AbiMetadata + Clone>(
     let sym_id = symbols.intern(name);
     let callee = b.symbol_addr(sym_id, o());
 
-    let (a_lo, a_hi) = s.vmap.pair(a.value);
-    let (b_lo, b_hi) = s.vmap.pair(op_b.value);
+    let (a_lo, a_hi) = wide_pair(s, b, a);
+    let (b_lo, b_hi) = wide_pair(s, b, op_b);
     let ann64 = Annotation::Unsigned(64);
     let args = vec![
         Operand::annotated(a_lo, ann64),
