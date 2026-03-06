@@ -137,6 +137,66 @@ Population count: returns the number of set bits in the binary representation
 of `vA`. Produces `poison` if `vA` is negative.
 **Semantics**: `evalCountOnes(a) = if a < 0 then poison else popcount(a)`
 
+### `clz`
+
+```
+vN = clz.<width> vA
+```
+
+Count leading zeros in an n-bit representation. Returns the number of consecutive
+zero bits starting from the most significant bit. Produces `poison` if `width` is 0.
+**Semantics**: `evalCountLeadingZeros(a, width) = if width = 0 then poison else clzN(width, a mod 2^width)`
+
+### `ctz`
+
+```
+vN = ctz vA
+```
+
+Count trailing zeros: returns the number of consecutive zero bits starting from
+the least significant bit. Produces `poison` if `vA` is zero or negative.
+**Semantics**: `evalCountTrailingZeros(a) = if a ≤ 0 then poison else ctz(a)`
+
+### `bswap`
+
+```
+vN = bswap.<bytes> vA
+```
+
+Byte-swap: reverses the byte order of the low `bytes` bytes. Produces `poison`
+if `bytes` is 0.
+**Semantics**: `evalBswap(a, bytes) = if bytes = 0 then poison else byteswap(a mod 2^(8*bytes))`
+
+### `bitreverse`
+
+```
+vN = bitreverse.<bits> vA
+```
+
+Bit-reverse: reverses the bit order of the low `bits` bits. Produces `poison`
+if `bits` is 0.
+**Semantics**: `evalBitReverse(a, bits) = if bits = 0 then poison else bitreverse(a mod 2^bits)`
+
+### `rotl`
+
+```
+vN = rotl.<width> vA, vAmt
+```
+
+Rotate left by `vAmt` positions in a `width`-bit field. Produces `poison` if
+`width` is 0.
+**Semantics**: `evalRotateLeft(a, amt, width) = if width = 0 then poison else rotate_left(a mod 2^width, amt mod width)`
+
+### `rotr`
+
+```
+vN = rotr.<width> vA, vAmt
+```
+
+Rotate right by `vAmt` positions in a `width`-bit field. Produces `poison` if
+`width` is 0.
+**Semantics**: `evalRotateRight(a, amt, width) = if width = 0 then poison else rotate_right(a mod 2^width, amt mod width)`
+
 ### `merge`
 
 ```
@@ -170,6 +230,124 @@ Carry-less multiplication (polynomial multiplication over GF(2)). Multiplies `vA
 and `vB` using XOR instead of addition for accumulating partial products. Produces
 `poison` if either operand is negative.
 **Semantics**: `evalClmul(a, b) = if a < 0 ∨ b < 0 then poison else clmulNat(a, b)`
+
+### `uadd_sat`
+
+```
+vN = uadd_sat.<width> vA, vB
+```
+
+Unsigned saturating addition in `width` bits. Clamps result to `[0, 2^width-1]`.
+Produces `poison` if `width` is 0.
+**Semantics**: `evalSaturatingAdd(a, b, width) = if width = 0 then poison else min(a + b, 2^width - 1)`
+
+### `usub_sat`
+
+```
+vN = usub_sat.<width> vA, vB
+```
+
+Unsigned saturating subtraction in `width` bits. Clamps result to `[0, 2^width-1]`.
+Produces `poison` if `width` is 0.
+**Semantics**: `evalSaturatingSub(a, b, width) = if width = 0 then poison else max(a - b, 0)`
+
+### `sadd_sat`
+
+```
+vN = sadd_sat.<width> vA, vB
+```
+
+Signed saturating addition in `width` bits. Clamps result to `[-2^(width-1), 2^(width-1)-1]`.
+Produces `poison` if `width` is 0.
+**Semantics**: `evalSignedSaturatingAdd(a, b, width) = if width = 0 then poison else clamp(a + b, -2^(width-1), 2^(width-1)-1)`
+
+### `ssub_sat`
+
+```
+vN = ssub_sat.<width> vA, vB
+```
+
+Signed saturating subtraction in `width` bits. Clamps result to `[-2^(width-1), 2^(width-1)-1]`.
+Produces `poison` if `width` is 0.
+**Semantics**: `evalSignedSaturatingSub(a, b, width) = if width = 0 then poison else clamp(a - b, -2^(width-1), 2^(width-1)-1)`
+
+### `sadd_overflow`
+
+```
+vSum, vOverflow = sadd_overflow.<width> vA, vB
+```
+
+Signed addition with overflow detection in `width` bits. Returns two results:
+the wrapped sum and a boolean overflow flag. Produces `poison` if `width` is 0.
+**Semantics**: `evalSAddOverflow(a, b, width) = (wrapped_sum, overflow_flag)`
+
+### `uadd_overflow`
+
+```
+vSum, vOverflow = uadd_overflow.<width> vA, vB
+```
+
+Unsigned addition with overflow detection in `width` bits. Returns two results:
+the wrapped sum and a boolean overflow flag. Produces `poison` if `width` is 0.
+**Semantics**: `evalUAddOverflow(a, b, width) = (wrapped_sum, overflow_flag)`
+
+### `ssub_overflow`
+
+```
+vDiff, vOverflow = ssub_overflow.<width> vA, vB
+```
+
+Signed subtraction with overflow detection in `width` bits. Returns two results:
+the wrapped difference and a boolean overflow flag. Produces `poison` if `width` is 0.
+**Semantics**: `evalSSubOverflow(a, b, width) = (wrapped_diff, overflow_flag)`
+
+### `usub_overflow`
+
+```
+vDiff, vOverflow = usub_overflow.<width> vA, vB
+```
+
+Unsigned subtraction with overflow detection in `width` bits. Returns two results:
+the wrapped difference and a boolean overflow flag. Produces `poison` if `width` is 0.
+**Semantics**: `evalUSubOverflow(a, b, width) = (wrapped_diff, overflow_flag)`
+
+### `smul_overflow`
+
+```
+vProd, vOverflow = smul_overflow.<width> vA, vB
+```
+
+Signed multiplication with overflow detection in `width` bits. Returns two results:
+the wrapped product and a boolean overflow flag. Produces `poison` if `width` is 0.
+**Semantics**: `evalSMulOverflow(a, b, width) = (wrapped_prod, overflow_flag)`
+
+### `umul_overflow`
+
+```
+vProd, vOverflow = umul_overflow.<width> vA, vB
+```
+
+Unsigned multiplication with overflow detection in `width` bits. Returns two results:
+the wrapped product and a boolean overflow flag. Produces `poison` if `width` is 0.
+**Semantics**: `evalUMulOverflow(a, b, width) = (wrapped_prod, overflow_flag)`
+
+### `min`
+
+```
+vN = min vA, vB
+```
+
+Integer minimum. Returns the smaller of two integers.
+**Semantics**: `evalMin(a, b) = if a ≤ b then a else b`
+
+### `max`
+
+```
+vN = max vA, vB
+```
+
+Integer maximum. Returns the larger of two integers.
+**Semantics**: `evalMax(a, b) = if a ≥ b then a else b`
 
 ## Floating Point Arithmetic
 
@@ -255,6 +433,51 @@ vN = copysign vMag, vSign
 
 Produce a value with the magnitude of `vMag` and the sign bit of `vSign`.
 **Semantics**: `evalCopySign(mag, sign) = if sign < 0 then -(abs mag) else abs mag`
+
+### `frem`
+
+```
+vN = frem vA, vB
+```
+
+Floating point remainder (IEEE 754 fmod). Computes the remainder of `vA / vB`
+with truncation toward zero.
+**Semantics**: `evalFRem(a, b) = a - trunc(a/b) * b`
+
+### `fcmp`
+
+```
+vN = fcmp.<pred> vA, vB
+```
+
+Floating point comparison. Returns a `bool` value: `true` if the comparison holds,
+`false` otherwise.
+
+Predicates:
+
+| Predicate | Description |
+|-----------|-------------|
+| `false` | Always false |
+| `oeq` | Ordered equal |
+| `ogt` | Ordered greater than |
+| `oge` | Ordered greater than or equal |
+| `olt` | Ordered less than |
+| `ole` | Ordered less than or equal |
+| `one` | Ordered not equal |
+| `ord` | Ordered (neither operand is NaN) |
+| `uno` | Unordered (either operand is NaN) |
+| `ueq` | Unordered or equal |
+| `ugt` | Unordered or greater than |
+| `uge` | Unordered or greater than or equal |
+| `ult` | Unordered or less than |
+| `ule` | Unordered or less than or equal |
+| `une` | Unordered or not equal |
+| `true` | Always true |
+
+Ordered predicates return `false` if either operand is NaN. Unordered predicates
+return `true` if either operand is NaN.
+
+**Semantics**: `evalFCmp(op, a, b) = bool(op(a, b))`
 
 ## Comparison
 
