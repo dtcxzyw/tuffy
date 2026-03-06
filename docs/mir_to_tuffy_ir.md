@@ -21,20 +21,34 @@ MIR operands represent values used in operations. There are three kinds:
 
 ## Binary Operations
 
-### Arithmetic Operations
+### Integer Arithmetic
 
-| MIR BinOp | Tuffy IR (Integer) | Tuffy IR (Float) |
-|-----------|-------------------|------------------|
-| `Add` | `add` | `fadd` |
-| `Sub` | `sub` | `fsub` |
-| `Mul` | `mul` | `fmul` |
-| `Div` | `div` | `fdiv` |
-| `Rem` | `rem` | `frem` |
-| `AddUnchecked` | `add` | N/A |
-| `SubUnchecked` | `sub` | N/A |
-| `MulUnchecked` | `mul` | N/A |
+| MIR BinOp | Tuffy IR | Result Annotation | Extension |
+|-----------|----------|-------------------|-----------|
+| `Add` | `add` | `:dontcare(N)` | `sext` (signed) / `zext` (unsigned) |
+| `Sub` | `sub` | `:dontcare(N)` | `sext` (signed) / `zext` (unsigned) |
+| `Mul` | `mul` | `:dontcare(N)` | `sext` (signed) / `zext` (unsigned) |
+| `Div` | `div` | `:sN` / `:uN` | None |
+| `Rem` | `rem` | `:sN` / `:uN` | None |
+| `AddUnchecked` | `add` | `:sN` / `:uN` | None |
+| `SubUnchecked` | `sub` | `:sN` / `:uN` | None |
+| `MulUnchecked` | `mul` | `:sN` / `:uN` | None |
 
-**Note**: Unchecked variants map to the same IR instructions as checked variants. The difference is that MIR guarantees no overflow for unchecked operations, allowing the optimizer to assume the result is in range.
+**Wrapping arithmetic** (`Add`, `Sub`, `Mul`): The IR instruction produces a result with `:dontcare(N)` annotation, then `sext` (for signed types) or `zext` (for unsigned types) is inserted to correctly interpret the low N bits. This prevents high bits from 64-bit operations bleeding through for sub-64-bit types.
+
+**Unchecked arithmetic**: MIR guarantees no overflow, so the result uses `:sN` or `:uN` annotation directly without extension. The optimizer can assume the result is in range.
+
+### Floating Point Arithmetic
+
+| MIR BinOp | Tuffy IR |
+|-----------|----------|
+| `Add` | `fadd` |
+| `Sub` | `fsub` |
+| `Mul` | `fmul` |
+| `Div` | `fdiv` |
+| `Rem` | `frem` |
+
+**Note**: Floating point operations do not use annotations or extensions.
 
 ### Overflow Detection
 
