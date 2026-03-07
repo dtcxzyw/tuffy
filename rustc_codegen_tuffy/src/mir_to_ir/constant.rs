@@ -35,7 +35,7 @@ pub(super) fn translate_int_to_int_cast(
                     let sv = builder.iconst(shift_amt as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                     let shifted = builder.shl(val.into(), sv.into(), None, Origin::synthetic());
                     let sv2 = builder.iconst(shift_amt as i64, 64, IntSignedness::DontCare, Origin::synthetic());
-                    let shifted_op = shifted.into());
+                    let shifted_op = shifted.into();
                     builder.shr(shifted_op, sv2.into(), None, Origin::synthetic())
                 } else {
                     let mask = (BigInt::from(1u64) << src_bits) - 1;
@@ -56,7 +56,7 @@ pub(super) fn translate_int_to_int_cast(
             let shift_val = builder.iconst(shift_amt as i64, 64, IntSignedness::DontCare, Origin::synthetic());
             let shifted = builder.shl(val.into(), shift_val.into(), None, Origin::synthetic());
             let shift_val2 = builder.iconst(shift_amt as i64, 64, IntSignedness::DontCare, Origin::synthetic());
-            let shifted_op = shifted.into());
+            let shifted_op = shifted.into();
             Some(builder.shr(shifted_op, shift_val2.into(), None, Origin::synthetic()))
         } else if !is_signed_int(src_ty) && src_bits < 64 {
             // Zero-extend: mask off high bits.

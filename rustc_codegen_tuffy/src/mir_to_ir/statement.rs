@@ -885,8 +885,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     };
                                     let hi_word = if src_is_signed {
                                         let c63 = self.builder.iconst(63, 64, IntSignedness::DontCare, Origin::synthetic());
-                                        let signed_op =
-                                            val.into());
+                                        let signed_op = val.into();
                                         self.builder.shr(
                                             signed_op,
                                             c63.into(),

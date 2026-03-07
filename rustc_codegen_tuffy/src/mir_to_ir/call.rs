@@ -5,7 +5,7 @@ use rustc_middle::ty::{self, Instance, TyCtxt, TypeVisitableExt};
 use rustc_span::source_map::Spanned;
 
 use tuffy_ir::instruction::{Operand as IrOperand, Origin};
-use tuffy_ir::types::{Annotation, IntSignedness, Type};
+use tuffy_ir::types::{Annotation, IntAnnotation, IntSignedness, Type};
 use tuffy_ir::value::ValueRef;
 
 use super::ctx::TranslationCtx;
@@ -954,8 +954,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             );
                             ir_args.push(w1.into());
                         } else {
-                            let ann =
-                                translate_annotation(arg_ty).unwrap_or(IntAnn::Unsigned(128));
+                            let ann = translate_annotation(arg_ty).unwrap_or(
+                                Annotation::Int(IntAnnotation {
+                                    bit_width: 128,
+                                    signedness: IntSignedness::Unsigned,
+                                })
+                            );
                             ir_args.push(IrOperand::annotated(v, ann));
                         }
                     } else if arg_size == 16

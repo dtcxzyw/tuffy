@@ -949,8 +949,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let bits = (elem_size * 8) as u32;
                         let gt = self.builder.icmp(
                             ICmpOp::Gt,
-                            old.into()),
-                            operand.into()),
+                            old.into(),
+                            operand.into(),
                             Origin::synthetic(),
                         );
                         self.builder.select(
@@ -964,8 +964,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let bits = (elem_size * 8) as u32;
                         let lt = self.builder.icmp(
                             ICmpOp::Lt,
-                            old.into()),
-                            operand.into()),
+                            old.into(),
+                            operand.into(),
                             Origin::synthetic(),
                         );
                         self.builder.select(
@@ -979,8 +979,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let bits = (elem_size * 8) as u32;
                         let gt = self.builder.icmp(
                             ICmpOp::Gt,
-                            old.into()),
-                            operand.into()),
+                            old.into(),
+                            operand.into(),
                             Origin::synthetic(),
                         );
                         self.builder.select(
@@ -995,8 +995,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let bits = (elem_size * 8) as u32;
                         let lt = self.builder.icmp(
                             ICmpOp::Lt,
-                            old.into()),
-                            operand.into()),
+                            old.into(),
+                            operand.into(),
                             Origin::synthetic(),
                         );
                         self.builder.select(

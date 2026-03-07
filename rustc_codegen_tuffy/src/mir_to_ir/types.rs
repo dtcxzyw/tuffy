@@ -20,6 +20,36 @@ impl IntAnn {
             IntAnn::Signed(n) | IntAnn::Unsigned(n) | IntAnn::DontCare(n) => *n,
         }
     }
+
+    /// Convert from Annotation to IntAnn.
+    pub(super) fn from_annotation(ann: &Annotation) -> Option<Self> {
+        match ann {
+            Annotation::Int(int_ann) => Some(match int_ann.signedness {
+                IntSignedness::Signed => IntAnn::Signed(int_ann.bit_width),
+                IntSignedness::Unsigned => IntAnn::Unsigned(int_ann.bit_width),
+                IntSignedness::DontCare => IntAnn::DontCare(int_ann.bit_width),
+            }),
+            Annotation::Align(_) => None,
+        }
+    }
+
+    /// Convert IntAnn to Annotation.
+    pub(super) fn to_annotation(&self) -> Annotation {
+        match self {
+            IntAnn::Signed(n) => Annotation::Int(IntAnnotation {
+                bit_width: *n,
+                signedness: IntSignedness::Signed,
+            }),
+            IntAnn::Unsigned(n) => Annotation::Int(IntAnnotation {
+                bit_width: *n,
+                signedness: IntSignedness::Unsigned,
+            }),
+            IntAnn::DontCare(n) => Annotation::Int(IntAnnotation {
+                bit_width: *n,
+                signedness: IntSignedness::DontCare,
+            }),
+        }
+    }
 }
 
 /// Helper to create a default Int type (64-bit, DontCare signedness).
