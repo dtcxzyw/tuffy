@@ -975,6 +975,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
             remap_op(s, tv),
             remap_op(s, fv),
             inst.ty.clone(),
+            inst.result_annotation,
             o(),
         ),
         Op::BoolToInt(a) => b.bool_to_int(remap_op(s, a), 64, o()),
@@ -1142,6 +1143,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
                 inst.secondary_ty.clone().unwrap_or(I64_TYPE),
                 *ord,
                 remap_op(s, mem),
+                inst.result_annotation,
                 o(),
             );
             s.vmap.set(old_vref, Mapped::One(primary));
@@ -1164,6 +1166,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
                 inst.secondary_ty.clone().unwrap_or(I64_TYPE),
                 *ord,
                 remap_op(s, mem),
+                inst.result_annotation,
                 o(),
             );
             s.vmap.set(old_vref, Mapped::One(primary));
@@ -1180,6 +1183,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
                 *s_ord,
                 *f_ord,
                 remap_op(s, mem),
+                inst.result_annotation,
                 o(),
             );
             s.vmap.set(old_vref, Mapped::One(primary));
@@ -1568,6 +1572,7 @@ fn leg_shl<M>(
         Operand::new(lo_spill),
         Operand::new(c0),
         I64_TYPE,
+        Some(Annotation::Int(I64)),
         o(),
     );
     let hi_small = b.or(
@@ -1587,6 +1592,7 @@ fn leg_shl<M>(
         Operand::new(c0),
         Operand::new(lo_small),
         I64_TYPE,
+        Some(Annotation::Int(I64)),
         o(),
     );
     let hi = b.select(
@@ -1594,6 +1600,7 @@ fn leg_shl<M>(
         Operand::new(hi_large),
         Operand::new(hi_small),
         I64_TYPE,
+        Some(Annotation::Int(I64)),
         o(),
     );
 
@@ -1630,6 +1637,7 @@ fn leg_shr<M>(
         Operand::new(hi_spill),
         Operand::new(c0),
         I64_TYPE,
+        Some(Annotation::Int(I64)),
         o(),
     );
     let lo_small = b.or(
@@ -1655,6 +1663,7 @@ fn leg_shr<M>(
         Operand::new(lo_large),
         Operand::new(lo_small),
         I64_TYPE,
+        Some(Annotation::Int(I64)),
         o(),
     );
     let hi = b.select(
@@ -1662,6 +1671,7 @@ fn leg_shr<M>(
         Operand::new(hi_large),
         Operand::new(hi_small),
         I64_TYPE,
+        Some(Annotation::Int(I64)),
         o(),
     );
 
@@ -1711,6 +1721,7 @@ fn leg_icmp<M>(
                 Operand::new(lo_cmp),
                 Operand::new(hi_cmp),
                 Type::Bool,
+                None,
                 o(),
             )
         }
@@ -1946,6 +1957,7 @@ fn leg_select_128<M>(
         Operand::new(t_lo),
         Operand::new(f_lo),
         I64_TYPE,
+        Some(Annotation::Int(I64)),
         o(),
     );
     let hi = b.select(
@@ -1953,6 +1965,7 @@ fn leg_select_128<M>(
         Operand::new(t_hi),
         Operand::new(f_hi),
         I64_TYPE,
+        Some(Annotation::Int(I64)),
         o(),
     );
     s.vmap.set(old_vref, Mapped::Pair(lo, hi));

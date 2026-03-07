@@ -1248,16 +1248,32 @@ impl FuncVerifier<'_> {
             self.check_annotation(ann, ret_ty, "return annotation", &loc);
         }
 
-        // Validate parameter types.
+        // Validate that Int parameters have annotations.
         for (i, param_ty) in self.func.params.iter().enumerate() {
-            let loc = self.func_loc();
-            self.check_int_type(param_ty, &format!("param {i} type"), &loc);
+            if matches!(param_ty, Type::Int) {
+                let loc = self.func_loc();
+                if self
+                    .func
+                    .param_annotations
+                    .get(i)
+                    .and_then(|a| *a)
+                    .is_none()
+                {
+                    self.result
+                        .error(loc, format!("param {i}: Int type requires annotation"));
+                }
+            }
         }
 
-        // Validate return type.
-        if let Some(ref ret_ty) = self.func.ret_ty {
+        // Validate that Int return type has annotation.
+        if let Some(ref ret_ty) = self.func.ret_ty
+            && matches!(ret_ty, Type::Int)
+        {
             let loc = self.func_loc();
-            self.check_int_type(ret_ty, "return type", &loc);
+            if self.func.ret_annotation.is_none() {
+                self.result
+                    .error(loc, "return type: Int type requires annotation".to_string());
+            }
         }
 
         self.verify_regions();

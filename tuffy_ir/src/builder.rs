@@ -558,15 +558,10 @@ impl<'a> Builder<'a> {
         true_val: Operand,
         false_val: Operand,
         ty: Type,
+        ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(
-            Op::Select(cond, true_val, false_val),
-            ty,
-            None,
-            origin,
-            None,
-        )
+        self.push_inst(Op::Select(cond, true_val, false_val), ty, None, origin, ann)
     }
 
     /// Convert Bool to Int: true → 1, false → 0.
@@ -1077,6 +1072,7 @@ impl<'a> Builder<'a> {
         ty: Type,
         ordering: MemoryOrdering,
         mem: Operand,
+        ann: Option<Annotation>,
         origin: Origin,
     ) -> (ValueRef, ValueRef) {
         let primary = self.push_inst(
@@ -1084,7 +1080,7 @@ impl<'a> Builder<'a> {
             Type::Mem,
             Some(ty),
             origin,
-            None,
+            ann,
         );
         let secondary = ValueRef::inst_secondary_result(primary.index());
         (primary, secondary)
@@ -1118,6 +1114,7 @@ impl<'a> Builder<'a> {
         ty: Type,
         ordering: MemoryOrdering,
         mem: Operand,
+        ann: Option<Annotation>,
         origin: Origin,
     ) -> (ValueRef, ValueRef) {
         let primary = self.push_inst(
@@ -1125,7 +1122,7 @@ impl<'a> Builder<'a> {
             Type::Mem,
             Some(ty),
             origin,
-            None,
+            ann,
         );
         let secondary = ValueRef::inst_secondary_result(primary.index());
         (primary, secondary)
@@ -1142,6 +1139,7 @@ impl<'a> Builder<'a> {
         success_ord: MemoryOrdering,
         failure_ord: MemoryOrdering,
         mem: Operand,
+        ann: Option<Annotation>,
         origin: Origin,
     ) -> (ValueRef, ValueRef) {
         let primary = self.push_inst(
@@ -1149,7 +1147,7 @@ impl<'a> Builder<'a> {
             Type::Mem,
             Some(ty),
             origin,
-            None,
+            ann,
         );
         let secondary = ValueRef::inst_secondary_result(primary.index());
         (primary, secondary)

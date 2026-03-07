@@ -295,12 +295,21 @@ fn fmt_inst(
     // For multi-result instructions, format "v0: type1, v1: type2 = ..."
     let multi_v = if let Some(sec_ty) = &inst.secondary_ty {
         let sec = ValueRef::inst_secondary_result(vref.index());
-        format!(
-            "{}, {}: {}",
-            ctx.fmt_val_typed(vref, ty, result_ann),
-            ctx.fmt_val(sec),
-            fmt_type(sec_ty)
-        )
+        // For atomic operations, annotation applies to secondary result (data), not primary (mem)
+        if matches!(sec_ty, Type::Int) && matches!(ty, Type::Mem) {
+            format!(
+                "{}, {}",
+                ctx.fmt_val_typed(vref, ty, &None),
+                ctx.fmt_val_typed(sec, sec_ty, result_ann)
+            )
+        } else {
+            format!(
+                "{}, {}: {}",
+                ctx.fmt_val_typed(vref, ty, result_ann),
+                ctx.fmt_val(sec),
+                fmt_type(sec_ty)
+            )
+        }
     } else {
         String::new()
     };
