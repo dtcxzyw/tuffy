@@ -34,28 +34,28 @@
 // CHECK: }
 // CHECK: func @_RINvNtCsiYoX4ApF2vj_4core10intrinsics11rotate_leftmECs6B0qe4jXIYt_6rotate(%x: int:u32, %shift: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1:u32 = param %x
-// CHECK:     v2:u32 = param %shift
-// CHECK:     v3 = iconst 4
-// CHECK:     v4 = iconst 4294967295
-// CHECK:     v5 = and v3, v4
-// CHECK:     v6 = iconst 8
-// CHECK:     v7:i32 = mul v5:u32, v6:u32
-// CHECK:     v8 = zext v7:i32, 32
-// CHECK:     v9 = iconst 0
-// CHECK:     v10 = icmp.eq v8:u32, v9:u32
-// CHECK:     v11 = bool_to_int v10
-// CHECK:     v12 = iconst 0
-// CHECK:     v13 = icmp.eq v11, v12
+// CHECK:     v1: int:u32 = param %x
+// CHECK:     v2: int:u32 = param %shift
+// CHECK:     v3: int = iconst 4
+// CHECK:     v4: int = iconst 4294967295
+// CHECK:     v5: int = and v3, v4
+// CHECK:     v6: int = iconst 8
+// CHECK:     v7: int:i32 = mul v5:u32, v6:u32
+// CHECK:     v8: int = zext v7:i32, 32
+// CHECK:     v9: int = iconst 0
+// CHECK:     v10: bool = icmp.eq v8:u32, v9:u32
+// CHECK:     v11: int = bool_to_int v10
+// CHECK:     v12: int = iconst 0
+// CHECK:     v13: bool = icmp.eq v11, v12
 // CHECK:     brif v13, bb1(v0), bb3(v0)
 // CHECK:
 // CHECK:   bb1(v15: mem):
-// CHECK:     v16:u32 = rem v2:u32, v8:u32
-// CHECK:     v17 = iconst 32
-// CHECK:     v18 = sub v17, v16
-// CHECK:     v19 = shl v1, v16
-// CHECK:     v20 = shr v1, v18
-// CHECK:     v21 = or v19, v20
+// CHECK:     v16: int:u32 = rem v2:u32, v8:u32
+// CHECK:     v17: int = iconst 32
+// CHECK:     v18: int = sub v17, v16
+// CHECK:     v19: int = shl v1, v16
+// CHECK:     v20: int = shr v1, v18
+// CHECK:     v21: int = or v19, v20
 // CHECK:     br bb2(v15)
 // CHECK:
 // CHECK:   bb2(v23: mem):
@@ -100,28 +100,28 @@
 // CHECK: }
 // CHECK: func @_RINvNtCsiYoX4ApF2vj_4core10intrinsics12rotate_rightmECs6B0qe4jXIYt_6rotate(%x: int:u32, %shift: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1:u32 = param %x
-// CHECK:     v2:u32 = param %shift
-// CHECK:     v3 = iconst 4
-// CHECK:     v4 = iconst 4294967295
-// CHECK:     v5 = and v3, v4
-// CHECK:     v6 = iconst 8
-// CHECK:     v7:i32 = mul v5:u32, v6:u32
-// CHECK:     v8 = zext v7:i32, 32
-// CHECK:     v9 = iconst 0
-// CHECK:     v10 = icmp.eq v8:u32, v9:u32
-// CHECK:     v11 = bool_to_int v10
-// CHECK:     v12 = iconst 0
-// CHECK:     v13 = icmp.eq v11, v12
+// CHECK:     v1: int:u32 = param %x
+// CHECK:     v2: int:u32 = param %shift
+// CHECK:     v3: int = iconst 4
+// CHECK:     v4: int = iconst 4294967295
+// CHECK:     v5: int = and v3, v4
+// CHECK:     v6: int = iconst 8
+// CHECK:     v7: int:i32 = mul v5:u32, v6:u32
+// CHECK:     v8: int = zext v7:i32, 32
+// CHECK:     v9: int = iconst 0
+// CHECK:     v10: bool = icmp.eq v8:u32, v9:u32
+// CHECK:     v11: int = bool_to_int v10
+// CHECK:     v12: int = iconst 0
+// CHECK:     v13: bool = icmp.eq v11, v12
 // CHECK:     brif v13, bb1(v0), bb3(v0)
 // CHECK:
 // CHECK:   bb1(v15: mem):
-// CHECK:     v16:u32 = rem v2:u32, v8:u32
-// CHECK:     v17 = iconst 32
-// CHECK:     v18 = sub v17, v16
-// CHECK:     v19 = shl v1, v18
-// CHECK:     v20 = shr v1, v16
-// CHECK:     v21 = or v19, v20
+// CHECK:     v16: int:u32 = rem v2:u32, v8:u32
+// CHECK:     v17: int = iconst 32
+// CHECK:     v18: int = sub v17, v16
+// CHECK:     v19: int = shl v1, v18
+// CHECK:     v20: int = shr v1, v16
+// CHECK:     v21: int = or v19, v20
 // CHECK:     br bb2(v15)
 // CHECK:
 // CHECK:   bb2(v23: mem):
@@ -146,10 +146,10 @@
 // CHECK: }
 // CHECK: func @_RINvNtCsiYoX4ApF2vj_4core10intrinsics14disjoint_bitormECs6B0qe4jXIYt_6rotate(%a: int:u32, %b: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1:u32 = param %a
-// CHECK:     v2:u32 = param %b
-// CHECK:     v3 = symbol_addr @_RNvXsd_NtNtCsiYoX4ApF2vj_4core10intrinsics8fallbackmNtB5_13DisjointBitOr14disjoint_bitorCs6B0qe4jXIYt_6rotate
-// CHECK:     v4, v5 = call v3(v1, v2), v0 -> int
+// CHECK:     v1: int:u32 = param %a
+// CHECK:     v2: int:u32 = param %b
+// CHECK:     v3: ptr = symbol_addr @_RNvXsd_NtNtCsiYoX4ApF2vj_4core10intrinsics8fallbackmNtB5_13DisjointBitOr14disjoint_bitorCs6B0qe4jXIYt_6rotate
+// CHECK:     v4: mem, v5: int = call v3(v1, v2), v0 -> int
 // CHECK:     br bb1(v4)
 // CHECK:
 // CHECK:   bb1(v7: mem):
@@ -172,11 +172,11 @@
 // CHECK: }
 // CHECK: func @_RINvNtCsiYoX4ApF2vj_4core10intrinsics20unchecked_funnel_shlmECs6B0qe4jXIYt_6rotate(%a: int:u32, %b: int:u32, %shift: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1:u32 = param %a
-// CHECK:     v2:u32 = param %b
-// CHECK:     v3:u32 = param %shift
-// CHECK:     v4 = symbol_addr @_RNvXsp_NtNtCsiYoX4ApF2vj_4core10intrinsics8fallbackmNtB5_11FunnelShift20unchecked_funnel_shlCs6B0qe4jXIYt_6rotate
-// CHECK:     v5, v6 = call v4(v1, v2, v3), v0 -> int
+// CHECK:     v1: int:u32 = param %a
+// CHECK:     v2: int:u32 = param %b
+// CHECK:     v3: int:u32 = param %shift
+// CHECK:     v4: ptr = symbol_addr @_RNvXsp_NtNtCsiYoX4ApF2vj_4core10intrinsics8fallbackmNtB5_11FunnelShift20unchecked_funnel_shlCs6B0qe4jXIYt_6rotate
+// CHECK:     v5: mem, v6: int = call v4(v1, v2, v3), v0 -> int
 // CHECK:     br bb1(v5)
 // CHECK:
 // CHECK:   bb1(v8: mem):
@@ -199,11 +199,11 @@
 // CHECK: }
 // CHECK: func @_RINvNtCsiYoX4ApF2vj_4core10intrinsics20unchecked_funnel_shrmECs6B0qe4jXIYt_6rotate(%a: int:u32, %b: int:u32, %shift: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1:u32 = param %a
-// CHECK:     v2:u32 = param %b
-// CHECK:     v3:u32 = param %shift
-// CHECK:     v4 = symbol_addr @_RNvXsp_NtNtCsiYoX4ApF2vj_4core10intrinsics8fallbackmNtB5_11FunnelShift20unchecked_funnel_shrCs6B0qe4jXIYt_6rotate
-// CHECK:     v5, v6 = call v4(v1, v2, v3), v0 -> int
+// CHECK:     v1: int:u32 = param %a
+// CHECK:     v2: int:u32 = param %b
+// CHECK:     v3: int:u32 = param %shift
+// CHECK:     v4: ptr = symbol_addr @_RNvXsp_NtNtCsiYoX4ApF2vj_4core10intrinsics8fallbackmNtB5_11FunnelShift20unchecked_funnel_shrCs6B0qe4jXIYt_6rotate
+// CHECK:     v5: mem, v6: int = call v4(v1, v2, v3), v0 -> int
 // CHECK:     br bb1(v5)
 // CHECK:
 // CHECK:   bb1(v8: mem):
@@ -231,13 +231,13 @@
 // CHECK: }
 // CHECK: func @_RNvXsd_NtNtCsiYoX4ApF2vj_4core10intrinsics8fallbackmNtB5_13DisjointBitOr14disjoint_bitorCs6B0qe4jXIYt_6rotate(%self: int:u32, %other: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1:u32 = param %self
-// CHECK:     v2:u32 = param %other
-// CHECK:     v3:u32 = and v1:u32, v2:u32
-// CHECK:     v4 = iconst 0
-// CHECK:     v5 = icmp.eq v3:u32, v4:u32
-// CHECK:     v6 = bool_to_int v5
-// CHECK:     v7:u32 = or v1:u32, v2:u32
+// CHECK:     v1: int:u32 = param %self
+// CHECK:     v2: int:u32 = param %other
+// CHECK:     v3: int:u32 = and v1:u32, v2:u32
+// CHECK:     v4: int = iconst 0
+// CHECK:     v5: bool = icmp.eq v3:u32, v4:u32
+// CHECK:     v6: int = bool_to_int v5
+// CHECK:     v7: int:u32 = or v1:u32, v2:u32
 // CHECK:     ret v7, v0
 // CHECK: }
 // CHECK:
@@ -287,40 +287,40 @@
 // CHECK: }
 // CHECK: func @_RNvXsp_NtNtCsiYoX4ApF2vj_4core10intrinsics8fallbackmNtB5_11FunnelShift20unchecked_funnel_shlCs6B0qe4jXIYt_6rotate(%self: int:u32, %rhs: int:u32, %shift: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1:u32 = param %self
-// CHECK:     v2:u32 = param %rhs
-// CHECK:     v3:u32 = param %shift
-// CHECK:     v4 = stack_slot 4
-// CHECK:     v5 = iconst 32
-// CHECK:     v6 = icmp.lt v3:u32, v5:u32
-// CHECK:     v7 = bool_to_int v6
-// CHECK:     v8 = iconst 4294967295
-// CHECK:     v9 = and v3, v8
-// CHECK:     v10 = iconst 0
-// CHECK:     v11 = icmp.eq v9, v10
+// CHECK:     v1: int:u32 = param %self
+// CHECK:     v2: int:u32 = param %rhs
+// CHECK:     v3: int:u32 = param %shift
+// CHECK:     v4: ptr = stack_slot 4
+// CHECK:     v5: int = iconst 32
+// CHECK:     v6: bool = icmp.lt v3:u32, v5:u32
+// CHECK:     v7: int = bool_to_int v6
+// CHECK:     v8: int = iconst 4294967295
+// CHECK:     v9: int = and v3, v8
+// CHECK:     v10: int = iconst 0
+// CHECK:     v11: bool = icmp.eq v9, v10
 // CHECK:     brif v11, bb1(v0), bb2(v0)
 // CHECK:
 // CHECK:   bb1(v13: mem):
-// CHECK:     v14 = store.4 v1, v4, v13
+// CHECK:     v14: mem = store.4 v1, v4, v13
 // CHECK:     br bb4(v14)
 // CHECK:
 // CHECK:   bb2(v16: mem):
-// CHECK:     v17 = iconst 31
-// CHECK:     v18 = and v3, v17
-// CHECK:     v19:u32 = shl v1:u32, v18
-// CHECK:     v20 = iconst 32
-// CHECK:     v21:i32 = sub v20:u32, v3:u32
-// CHECK:     v22 = zext v21:i32, 32
-// CHECK:     v23 = iconst 31
-// CHECK:     v24 = and v22, v23
-// CHECK:     v25 = shr v2:u32, v24
+// CHECK:     v17: int = iconst 31
+// CHECK:     v18: int = and v3, v17
+// CHECK:     v19: int:u32 = shl v1:u32, v18
+// CHECK:     v20: int = iconst 32
+// CHECK:     v21: int:i32 = sub v20:u32, v3:u32
+// CHECK:     v22: int = zext v21:i32, 32
+// CHECK:     v23: int = iconst 31
+// CHECK:     v24: int = and v22, v23
+// CHECK:     v25: int = shr v2:u32, v24
 // CHECK:     br bb3(v16)
 // CHECK:
 // CHECK:   bb3(v27: mem):
 // CHECK:     br bb4(v27)
 // CHECK:
 // CHECK:   bb4(v29: mem):
-// CHECK:     v30 = load.4 v4, v29
+// CHECK:     v30: int = load.4 v4, v29
 // CHECK:     ret v30, v29
 // CHECK: }
 // CHECK:
@@ -370,40 +370,40 @@
 // CHECK: }
 // CHECK: func @_RNvXsp_NtNtCsiYoX4ApF2vj_4core10intrinsics8fallbackmNtB5_11FunnelShift20unchecked_funnel_shrCs6B0qe4jXIYt_6rotate(%self: int:u32, %rhs: int:u32, %shift: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1:u32 = param %self
-// CHECK:     v2:u32 = param %rhs
-// CHECK:     v3:u32 = param %shift
-// CHECK:     v4 = stack_slot 4
-// CHECK:     v5 = iconst 32
-// CHECK:     v6 = icmp.lt v3:u32, v5:u32
-// CHECK:     v7 = bool_to_int v6
-// CHECK:     v8 = iconst 4294967295
-// CHECK:     v9 = and v3, v8
-// CHECK:     v10 = iconst 0
-// CHECK:     v11 = icmp.eq v9, v10
+// CHECK:     v1: int:u32 = param %self
+// CHECK:     v2: int:u32 = param %rhs
+// CHECK:     v3: int:u32 = param %shift
+// CHECK:     v4: ptr = stack_slot 4
+// CHECK:     v5: int = iconst 32
+// CHECK:     v6: bool = icmp.lt v3:u32, v5:u32
+// CHECK:     v7: int = bool_to_int v6
+// CHECK:     v8: int = iconst 4294967295
+// CHECK:     v9: int = and v3, v8
+// CHECK:     v10: int = iconst 0
+// CHECK:     v11: bool = icmp.eq v9, v10
 // CHECK:     brif v11, bb1(v0), bb2(v0)
 // CHECK:
 // CHECK:   bb1(v13: mem):
-// CHECK:     v14 = store.4 v2, v4, v13
+// CHECK:     v14: mem = store.4 v2, v4, v13
 // CHECK:     br bb4(v14)
 // CHECK:
 // CHECK:   bb2(v16: mem):
-// CHECK:     v17 = iconst 32
-// CHECK:     v18:i32 = sub v17:u32, v3:u32
-// CHECK:     v19 = zext v18:i32, 32
-// CHECK:     v20 = iconst 31
-// CHECK:     v21 = and v19, v20
-// CHECK:     v22:u32 = shl v1:u32, v21
-// CHECK:     v23 = iconst 31
-// CHECK:     v24 = and v3, v23
-// CHECK:     v25 = shr v2:u32, v24
+// CHECK:     v17: int = iconst 32
+// CHECK:     v18: int:i32 = sub v17:u32, v3:u32
+// CHECK:     v19: int = zext v18:i32, 32
+// CHECK:     v20: int = iconst 31
+// CHECK:     v21: int = and v19, v20
+// CHECK:     v22: int:u32 = shl v1:u32, v21
+// CHECK:     v23: int = iconst 31
+// CHECK:     v24: int = and v3, v23
+// CHECK:     v25: int = shr v2:u32, v24
 // CHECK:     br bb3(v16)
 // CHECK:
 // CHECK:   bb3(v27: mem):
 // CHECK:     br bb4(v27)
 // CHECK:
 // CHECK:   bb4(v29: mem):
-// CHECK:     v30 = load.4 v4, v29
+// CHECK:     v30: int = load.4 v4, v29
 // CHECK:     ret v30, v29
 // CHECK: }
 // CHECK:
@@ -424,9 +424,9 @@
 // CHECK: }
 // CHECK: func @rotate_left_u32(%x: int:u32, %n: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1:u32 = param %x
-// CHECK:     v2:u32 = param %n
-// CHECK:     v3 = rotate_left.32 v1, v2
+// CHECK:     v1: int:u32 = param %x
+// CHECK:     v2: int:u32 = param %n
+// CHECK:     v3: int = rotate_left.32 v1, v2
 // CHECK:     br bb1(v0)
 // CHECK:
 // CHECK:   bb1(v5: mem):
@@ -450,9 +450,9 @@
 // CHECK: }
 // CHECK: func @rotate_right_u32(%x: int:u32, %n: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1:u32 = param %x
-// CHECK:     v2:u32 = param %n
-// CHECK:     v3 = rotate_right.32 v1, v2
+// CHECK:     v1: int:u32 = param %x
+// CHECK:     v2: int:u32 = param %n
+// CHECK:     v3: int = rotate_right.32 v1, v2
 // CHECK:     br bb1(v0)
 // CHECK:
 // CHECK:   bb1(v5: mem):

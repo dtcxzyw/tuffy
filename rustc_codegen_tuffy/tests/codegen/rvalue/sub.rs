@@ -11,10 +11,10 @@
 // CHECK: }
 // CHECK: func @mul_i32(%a: int:s32, %b: int:s32) -> int:s32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1:s32 = param %a
-// CHECK:     v2:s32 = param %b
-// CHECK:     v3:i32 = mul v1:s32, v2:s32
-// CHECK:     v4 = sext v3:i32, 32
+// CHECK:     v1: int:s32 = param %a
+// CHECK:     v2: int:s32 = param %b
+// CHECK:     v3: int:i32 = mul v1:s32, v2:s32
+// CHECK:     v4: int = sext v3:i32, 32
 // CHECK:     ret v4, v0
 // CHECK: }
 // CHECK:
@@ -30,10 +30,10 @@
 // CHECK: }
 // CHECK: func @mul_u64(%a: int:u64, %b: int:u64) -> int:u64 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1:u64 = param %a
-// CHECK:     v2:u64 = param %b
-// CHECK:     v3:i64 = mul v1:u64, v2:u64
-// CHECK:     v4 = zext v3:i64, 64
+// CHECK:     v1: int:u64 = param %a
+// CHECK:     v2: int:u64 = param %b
+// CHECK:     v3: int:i64 = mul v1:u64, v2:u64
+// CHECK:     v4: int = zext v3:i64, 64
 // CHECK:     ret v4, v0
 // CHECK: }
 // CHECK:
@@ -49,10 +49,10 @@
 // CHECK: }
 // CHECK: func @sub_i32(%a: int:s32, %b: int:s32) -> int:s32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1:s32 = param %a
-// CHECK:     v2:s32 = param %b
-// CHECK:     v3:i32 = sub v1:s32, v2:s32
-// CHECK:     v4 = sext v3:i32, 32
+// CHECK:     v1: int:s32 = param %a
+// CHECK:     v2: int:s32 = param %b
+// CHECK:     v3: int:i32 = sub v1:s32, v2:s32
+// CHECK:     v4: int = sext v3:i32, 32
 // CHECK:     ret v4, v0
 // CHECK: }
 // CHECK:
@@ -68,10 +68,10 @@
 // CHECK: }
 // CHECK: func @sub_u64(%a: int:u64, %b: int:u64) -> int:u64 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1:u64 = param %a
-// CHECK:     v2:u64 = param %b
-// CHECK:     v3:i64 = sub v1:u64, v2:u64
-// CHECK:     v4 = zext v3:i64, 64
+// CHECK:     v1: int:u64 = param %a
+// CHECK:     v2: int:u64 = param %b
+// CHECK:     v3: int:i64 = sub v1:u64, v2:u64
+// CHECK:     v4: int = zext v3:i64, 64
 // CHECK:     ret v4, v0
 // CHECK: }
 // CHECK:

@@ -11,10 +11,10 @@
 // CHECK: }
 // CHECK: func @add(%a: int:s32, %b: int:s32) -> int:s32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1:s32 = param %a
-// CHECK:     v2:s32 = param %b
-// CHECK:     v3:i32 = add v1:s32, v2:s32
-// CHECK:     v4 = sext v3:i32, 32
+// CHECK:     v1: int:s32 = param %a
+// CHECK:     v2: int:s32 = param %b
+// CHECK:     v3: int:i32 = add v1:s32, v2:s32
+// CHECK:     v4: int = sext v3:i32, 32
 // CHECK:     ret v4, v0
 // CHECK: }
 // CHECK:
@@ -30,10 +30,10 @@
 // CHECK: }
 // CHECK: func @add128(%a: int:u128, %b: int:u128) -> int:u128 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1:u128 = param %a
-// CHECK:     v2:u128 = param %b
-// CHECK:     v3:i128 = add v1:u128, v2:u128
-// CHECK:     v4 = zext v3:i128, 128
+// CHECK:     v1: int:u128 = param %a
+// CHECK:     v2: int:u128 = param %b
+// CHECK:     v3: int:i128 = add v1:u128, v2:u128
+// CHECK:     v4: int = zext v3:i128, 128
 // CHECK:     ret v4, v0
 // CHECK: }
 // CHECK:

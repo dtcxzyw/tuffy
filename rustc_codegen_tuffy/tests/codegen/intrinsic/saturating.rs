@@ -16,9 +16,9 @@
 // CHECK: }
 // CHECK: func @saturating_add_i32(%a: int:s32, %b: int:s32) -> int:s32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1:s32 = param %a
-// CHECK:     v2:s32 = param %b
-// CHECK:     v3 = ssaturating_add.32 v1, v2
+// CHECK:     v1: int:s32 = param %a
+// CHECK:     v2: int:s32 = param %b
+// CHECK:     v3: int = ssaturating_add.32 v1, v2
 // CHECK:     br bb1(v0)
 // CHECK:
 // CHECK:   bb1(v5: mem):
@@ -42,9 +42,9 @@
 // CHECK: }
 // CHECK: func @saturating_add_u32(%a: int:u32, %b: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1:u32 = param %a
-// CHECK:     v2:u32 = param %b
-// CHECK:     v3 = saturating_add.32 v1, v2
+// CHECK:     v1: int:u32 = param %a
+// CHECK:     v2: int:u32 = param %b
+// CHECK:     v3: int = saturating_add.32 v1, v2
 // CHECK:     br bb1(v0)
 // CHECK:
 // CHECK:   bb1(v5: mem):
@@ -68,9 +68,9 @@
 // CHECK: }
 // CHECK: func @saturating_sub_i32(%a: int:s32, %b: int:s32) -> int:s32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1:s32 = param %a
-// CHECK:     v2:s32 = param %b
-// CHECK:     v3 = ssaturating_sub.32 v1, v2
+// CHECK:     v1: int:s32 = param %a
+// CHECK:     v2: int:s32 = param %b
+// CHECK:     v3: int = ssaturating_sub.32 v1, v2
 // CHECK:     br bb1(v0)
 // CHECK:
 // CHECK:   bb1(v5: mem):

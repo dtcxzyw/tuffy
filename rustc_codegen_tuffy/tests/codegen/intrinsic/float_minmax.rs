@@ -14,14 +14,13 @@
 // CHECK: }
 // CHECK: func @maxf32(%a: f32, %b: f32) -> f32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1 = param %a
-// CHECK:     v2 = param %b
-// CHECK:     v3 = fcmp.ogt v1, v2
-// CHECK:     v4 = select v3, v1, v2
+// CHECK:     v1: f32 = param %a
+// CHECK:     v2: f32 = param %b
+// CHECK:     v3: f32 = fmaxnum v1, v2
 // CHECK:     br bb1(v0)
 // CHECK:
-// CHECK:   bb1(v6: mem):
-// CHECK:     ret v4, v6
+// CHECK:   bb1(v5: mem):
+// CHECK:     ret v3, v5
 // CHECK: }
 // CHECK:
 // CHECK: fn maxf64(_1: f64, _2: f64) -> f64 {
@@ -39,14 +38,13 @@
 // CHECK: }
 // CHECK: func @maxf64(%a: f64, %b: f64) -> f64 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1 = param %a
-// CHECK:     v2 = param %b
-// CHECK:     v3 = fcmp.ogt v1, v2
-// CHECK:     v4 = select v3, v1, v2
+// CHECK:     v1: f64 = param %a
+// CHECK:     v2: f64 = param %b
+// CHECK:     v3: f64 = fmaxnum v1, v2
 // CHECK:     br bb1(v0)
 // CHECK:
-// CHECK:   bb1(v6: mem):
-// CHECK:     ret v4, v6
+// CHECK:   bb1(v5: mem):
+// CHECK:     ret v3, v5
 // CHECK: }
 // CHECK:
 // CHECK: fn minf32(_1: f32, _2: f32) -> f32 {
@@ -64,14 +62,13 @@
 // CHECK: }
 // CHECK: func @minf32(%a: f32, %b: f32) -> f32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1 = param %a
-// CHECK:     v2 = param %b
-// CHECK:     v3 = fcmp.olt v1, v2
-// CHECK:     v4 = select v3, v1, v2
+// CHECK:     v1: f32 = param %a
+// CHECK:     v2: f32 = param %b
+// CHECK:     v3: f32 = fminnum v1, v2
 // CHECK:     br bb1(v0)
 // CHECK:
-// CHECK:   bb1(v6: mem):
-// CHECK:     ret v4, v6
+// CHECK:   bb1(v5: mem):
+// CHECK:     ret v3, v5
 // CHECK: }
 // CHECK:
 // CHECK: fn minf64(_1: f64, _2: f64) -> f64 {
@@ -89,14 +86,13 @@
 // CHECK: }
 // CHECK: func @minf64(%a: f64, %b: f64) -> f64 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1 = param %a
-// CHECK:     v2 = param %b
-// CHECK:     v3 = fcmp.olt v1, v2
-// CHECK:     v4 = select v3, v1, v2
+// CHECK:     v1: f64 = param %a
+// CHECK:     v2: f64 = param %b
+// CHECK:     v3: f64 = fminnum v1, v2
 // CHECK:     br bb1(v0)
 // CHECK:
-// CHECK:   bb1(v6: mem):
-// CHECK:     ret v4, v6
+// CHECK:   bb1(v5: mem):
+// CHECK:     ret v3, v5
 // CHECK: }
 // CHECK:
 

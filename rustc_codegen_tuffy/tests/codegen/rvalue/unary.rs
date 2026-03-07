@@ -10,9 +10,9 @@
 // CHECK: }
 // CHECK: func @neg_i128(%a: int:s128) -> int:s128 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1:s128 = param %a
-// CHECK:     v2 = iconst 0
-// CHECK:     v3:s128 = sub v2, v1
+// CHECK:     v1: int:s128 = param %a
+// CHECK:     v2: int = iconst 0
+// CHECK:     v3: int:s128 = sub v2, v1
 // CHECK:     ret v3, v0
 // CHECK: }
 // CHECK:
@@ -27,9 +27,9 @@
 // CHECK: }
 // CHECK: func @neg_i32(%a: int:s32) -> int:s32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1:s32 = param %a
-// CHECK:     v2 = iconst 0
-// CHECK:     v3:s32 = sub v2, v1
+// CHECK:     v1: int:s32 = param %a
+// CHECK:     v2: int = iconst 0
+// CHECK:     v3: int:s32 = sub v2, v1
 // CHECK:     ret v3, v0
 // CHECK: }
 // CHECK:
@@ -44,11 +44,11 @@
 // CHECK: }
 // CHECK: func @not_bool(%a: bool) -> bool {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1 = param %a
-// CHECK:     v2 = bool_to_int v1
-// CHECK:     v3 = iconst 1
-// CHECK:     v4 = xor v2, v3
-// CHECK:     v5 = int_to_bool v4
+// CHECK:     v1: bool = param %a
+// CHECK:     v2: int = bool_to_int v1
+// CHECK:     v3: int = iconst 1
+// CHECK:     v4: int = xor v2, v3
+// CHECK:     v5: bool = int_to_bool v4
 // CHECK:     ret v5, v0
 // CHECK: }
 // CHECK:
@@ -63,9 +63,9 @@
 // CHECK: }
 // CHECK: func @not_i128(%a: int:s128) -> int:s128 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1:s128 = param %a
-// CHECK:     v2 = iconst -1
-// CHECK:     v3:s128 = xor v1, v2
+// CHECK:     v1: int:s128 = param %a
+// CHECK:     v2: int = iconst -1
+// CHECK:     v3: int:s128 = xor v1, v2
 // CHECK:     ret v3, v0
 // CHECK: }
 // CHECK:
@@ -80,9 +80,9 @@
 // CHECK: }
 // CHECK: func @not_u128(%a: int:u128) -> int:u128 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1:u128 = param %a
-// CHECK:     v2 = iconst -1
-// CHECK:     v3:u128 = xor v1, v2
+// CHECK:     v1: int:u128 = param %a
+// CHECK:     v2: int = iconst -1
+// CHECK:     v3: int:u128 = xor v1, v2
 // CHECK:     ret v3, v0
 // CHECK: }
 // CHECK:
@@ -97,9 +97,9 @@
 // CHECK: }
 // CHECK: func @not_u32(%a: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1:u32 = param %a
-// CHECK:     v2 = iconst -1
-// CHECK:     v3:u32 = xor v1, v2
+// CHECK:     v1: int:u32 = param %a
+// CHECK:     v2: int = iconst -1
+// CHECK:     v3: int:u32 = xor v1, v2
 // CHECK:     ret v3, v0
 // CHECK: }
 // CHECK:

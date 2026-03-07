@@ -72,11 +72,12 @@ impl<'a> DisplayCtx<'a> {
         format!("v{}", self.name(vref))
     }
 
-    /// Format a value with an optional result-side annotation as "vN:s32".
-    fn fmt_val_ann(&self, vref: ValueRef, ann: &Option<Annotation>) -> String {
+    /// Format a value with its type and optional annotation as "vN: int:s32".
+    fn fmt_val_typed(&self, vref: ValueRef, ty: &Type, ann: &Option<Annotation>) -> String {
+        let ty_str = fmt_type(ty);
         match ann {
-            Some(a) => format!("v{}{}", self.name(vref), fmt_annotation(a)),
-            None => format!("v{}", self.name(vref)),
+            Some(a) => format!("v{}: {}{}", self.name(vref), ty_str, fmt_annotation(a)),
+            None => format!("v{}: {}", self.name(vref), ty_str),
         }
     }
 
@@ -255,13 +256,18 @@ fn fmt_inst(
     ctx: &DisplayCtx,
 ) -> String {
     let op = &inst.op;
-    let _ty = &inst.ty;
+    let ty = &inst.ty;
     let result_ann = &inst.result_annotation;
-    let v = ctx.fmt_val_ann(vref, result_ann);
-    // For multi-result instructions, format "v0, v1 = ..."
-    let multi_v = if inst.secondary_ty.is_some() {
+    let v = ctx.fmt_val_typed(vref, ty, result_ann);
+    // For multi-result instructions, format "v0: type1, v1: type2 = ..."
+    let multi_v = if let Some(sec_ty) = &inst.secondary_ty {
         let sec = ValueRef::inst_secondary_result(vref.index());
-        format!("{}, {}", ctx.fmt_val(vref), ctx.fmt_val(sec))
+        format!(
+            "{}, {}: {}",
+            ctx.fmt_val_typed(vref, ty, result_ann),
+            ctx.fmt_val(sec),
+            fmt_type(sec_ty)
+        )
     } else {
         String::new()
     };

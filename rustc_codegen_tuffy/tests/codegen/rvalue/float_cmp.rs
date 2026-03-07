@@ -1,6 +1,6 @@
 // compile-flags: -Zmir-opt-level=3 -C debug-assertions=off --crate-type lib
 // CHECK: warning: incorrect NaN comparison, NaN cannot be directly compared to itself
-// CHECK:    --> /tuffy/rustc_codegen_tuffy/tests/codegen/float_cmp.rs:117:5
+// CHECK:    --> codegen/rvalue/float_cmp.rs:117:5
 // CHECK:     |
 // CHECK: 117 |     f32::NAN != f32::NAN
 // CHECK:     |     ^^^^^^^^^^^^^^^^^^^^
@@ -24,11 +24,11 @@
 // CHECK: }
 // CHECK: func @f32_eq(%a: f32, %b: f32) -> bool {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1 = param %a
-// CHECK:     v2 = param %b
-// CHECK:     v3 = fcmp.oeq v1, v2
-// CHECK:     v4 = bool_to_int v3
-// CHECK:     v5 = int_to_bool v4
+// CHECK:     v1: f32 = param %a
+// CHECK:     v2: f32 = param %b
+// CHECK:     v3: bool = fcmp.oeq v1, v2
+// CHECK:     v4: int = bool_to_int v3
+// CHECK:     v5: bool = int_to_bool v4
 // CHECK:     ret v5, v0
 // CHECK: }
 // CHECK:
@@ -44,11 +44,11 @@
 // CHECK: }
 // CHECK: func @f32_ne(%a: f32, %b: f32) -> bool {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1 = param %a
-// CHECK:     v2 = param %b
-// CHECK:     v3 = fcmp.une v1, v2
-// CHECK:     v4 = bool_to_int v3
-// CHECK:     v5 = int_to_bool v4
+// CHECK:     v1: f32 = param %a
+// CHECK:     v2: f32 = param %b
+// CHECK:     v3: bool = fcmp.une v1, v2
+// CHECK:     v4: int = bool_to_int v3
+// CHECK:     v5: bool = int_to_bool v4
 // CHECK:     ret v5, v0
 // CHECK: }
 // CHECK:
@@ -62,7 +62,7 @@
 // CHECK: }
 // CHECK: func @f32_ne_nan() -> bool {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1 = bconst true
+// CHECK:     v1: bool = bconst true
 // CHECK:     ret v1, v0
 // CHECK: }
 // CHECK:
@@ -78,11 +78,11 @@
 // CHECK: }
 // CHECK: func @f64_ne(%a: f64, %b: f64) -> bool {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1 = param %a
-// CHECK:     v2 = param %b
-// CHECK:     v3 = fcmp.une v1, v2
-// CHECK:     v4 = bool_to_int v3
-// CHECK:     v5 = int_to_bool v4
+// CHECK:     v1: f64 = param %a
+// CHECK:     v2: f64 = param %b
+// CHECK:     v3: bool = fcmp.une v1, v2
+// CHECK:     v4: int = bool_to_int v3
+// CHECK:     v5: bool = int_to_bool v4
 // CHECK:     ret v5, v0
 // CHECK: }
 // CHECK:

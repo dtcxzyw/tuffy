@@ -11,7 +11,7 @@
 // CHECK: }
 // CHECK: func @align_of_u32() -> int:u64 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1 = iconst 4
+// CHECK:     v1: int = iconst 4
 // CHECK:     ret v1, v0
 // CHECK: }
 // CHECK:
@@ -27,7 +27,7 @@
 // CHECK: }
 // CHECK: func @align_of_u64() -> int:u64 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1 = iconst 8
+// CHECK:     v1: int = iconst 8
 // CHECK:     ret v1, v0
 // CHECK: }
 // CHECK:
@@ -43,7 +43,7 @@
 // CHECK: }
 // CHECK: func @size_of_u32() -> int:u64 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1 = iconst 4
+// CHECK:     v1: int = iconst 4
 // CHECK:     ret v1, v0
 // CHECK: }
 // CHECK:
@@ -59,7 +59,7 @@
 // CHECK: }
 // CHECK: func @size_of_u64() -> int:u64 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1 = iconst 8
+// CHECK:     v1: int = iconst 8
 // CHECK:     ret v1, v0
 // CHECK: }
 // CHECK:

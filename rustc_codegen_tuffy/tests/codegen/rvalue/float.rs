@@ -11,9 +11,9 @@
 // CHECK: }
 // CHECK: func @fadd_f32(%a: f32, %b: f32) -> f32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1 = param %a
-// CHECK:     v2 = param %b
-// CHECK:     v3 = fadd v1, v2
+// CHECK:     v1: f32 = param %a
+// CHECK:     v2: f32 = param %b
+// CHECK:     v3: f32 = fadd v1, v2
 // CHECK:     ret v3, v0
 // CHECK: }
 // CHECK:
@@ -29,9 +29,9 @@
 // CHECK: }
 // CHECK: func @fdiv_f32(%a: f32, %b: f32) -> f32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1 = param %a
-// CHECK:     v2 = param %b
-// CHECK:     v3 = fdiv v1, v2
+// CHECK:     v1: f32 = param %a
+// CHECK:     v2: f32 = param %b
+// CHECK:     v3: f32 = fdiv v1, v2
 // CHECK:     ret v3, v0
 // CHECK: }
 // CHECK:
@@ -47,9 +47,9 @@
 // CHECK: }
 // CHECK: func @fmul_f32(%a: f32, %b: f32) -> f32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1 = param %a
-// CHECK:     v2 = param %b
-// CHECK:     v3 = fmul v1, v2
+// CHECK:     v1: f32 = param %a
+// CHECK:     v2: f32 = param %b
+// CHECK:     v3: f32 = fmul v1, v2
 // CHECK:     ret v3, v0
 // CHECK: }
 // CHECK:
@@ -65,9 +65,9 @@
 // CHECK: }
 // CHECK: func @fsub_f32(%a: f32, %b: f32) -> f32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1 = param %a
-// CHECK:     v2 = param %b
-// CHECK:     v3 = fsub v1, v2
+// CHECK:     v1: f32 = param %a
+// CHECK:     v2: f32 = param %b
+// CHECK:     v3: f32 = fsub v1, v2
 // CHECK:     ret v3, v0
 // CHECK: }
 // CHECK:

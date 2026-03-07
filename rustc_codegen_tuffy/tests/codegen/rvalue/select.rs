@@ -25,27 +25,27 @@
 // CHECK: }
 // CHECK: func @select_i64(%cond: bool, %a: int:s64, %b: int:s64) -> int:s64 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1 = param %cond
-// CHECK:     v2:s64 = param %a
-// CHECK:     v3:s64 = param %b
-// CHECK:     v4 = stack_slot 8
-// CHECK:     v5 = bool_to_int v1
-// CHECK:     v6 = iconst 255
-// CHECK:     v7 = and v5, v6
-// CHECK:     v8 = iconst 0
-// CHECK:     v9 = icmp.eq v7, v8
+// CHECK:     v1: bool = param %cond
+// CHECK:     v2: int:s64 = param %a
+// CHECK:     v3: int:s64 = param %b
+// CHECK:     v4: ptr = stack_slot 8
+// CHECK:     v5: int = bool_to_int v1
+// CHECK:     v6: int = iconst 255
+// CHECK:     v7: int = and v5, v6
+// CHECK:     v8: int = iconst 0
+// CHECK:     v9: bool = icmp.eq v7, v8
 // CHECK:     brif v9, bb2(v0), bb1(v0)
 // CHECK:
 // CHECK:   bb1(v11: mem):
-// CHECK:     v12 = store.8 v2, v4, v11
+// CHECK:     v12: mem = store.8 v2, v4, v11
 // CHECK:     br bb3(v12)
 // CHECK:
 // CHECK:   bb2(v14: mem):
-// CHECK:     v15 = store.8 v3, v4, v14
+// CHECK:     v15: mem = store.8 v3, v4, v14
 // CHECK:     br bb3(v15)
 // CHECK:
 // CHECK:   bb3(v17: mem):
-// CHECK:     v18 = load.8 v4, v17
+// CHECK:     v18: int = load.8 v4, v17
 // CHECK:     ret v18, v17
 // CHECK: }
 // CHECK:
@@ -75,27 +75,27 @@
 // CHECK: }
 // CHECK: func @select_u32(%cond: bool, %a: int:u32, %b: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1 = param %cond
-// CHECK:     v2:u32 = param %a
-// CHECK:     v3:u32 = param %b
-// CHECK:     v4 = stack_slot 4
-// CHECK:     v5 = bool_to_int v1
-// CHECK:     v6 = iconst 255
-// CHECK:     v7 = and v5, v6
-// CHECK:     v8 = iconst 0
-// CHECK:     v9 = icmp.eq v7, v8
+// CHECK:     v1: bool = param %cond
+// CHECK:     v2: int:u32 = param %a
+// CHECK:     v3: int:u32 = param %b
+// CHECK:     v4: ptr = stack_slot 4
+// CHECK:     v5: int = bool_to_int v1
+// CHECK:     v6: int = iconst 255
+// CHECK:     v7: int = and v5, v6
+// CHECK:     v8: int = iconst 0
+// CHECK:     v9: bool = icmp.eq v7, v8
 // CHECK:     brif v9, bb2(v0), bb1(v0)
 // CHECK:
 // CHECK:   bb1(v11: mem):
-// CHECK:     v12 = store.4 v2, v4, v11
+// CHECK:     v12: mem = store.4 v2, v4, v11
 // CHECK:     br bb3(v12)
 // CHECK:
 // CHECK:   bb2(v14: mem):
-// CHECK:     v15 = store.4 v3, v4, v14
+// CHECK:     v15: mem = store.4 v3, v4, v14
 // CHECK:     br bb3(v15)
 // CHECK:
 // CHECK:   bb3(v17: mem):
-// CHECK:     v18 = load.4 v4, v17
+// CHECK:     v18: int = load.4 v4, v17
 // CHECK:     ret v18, v17
 // CHECK: }
 // CHECK:

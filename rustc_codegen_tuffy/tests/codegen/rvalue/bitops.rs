@@ -11,9 +11,9 @@
 // CHECK: }
 // CHECK: func @bitand_u32(%a: int:u32, %b: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1:u32 = param %a
-// CHECK:     v2:u32 = param %b
-// CHECK:     v3:u32 = and v1:u32, v2:u32
+// CHECK:     v1: int:u32 = param %a
+// CHECK:     v2: int:u32 = param %b
+// CHECK:     v3: int:u32 = and v1:u32, v2:u32
 // CHECK:     ret v3, v0
 // CHECK: }
 // CHECK:
@@ -29,9 +29,9 @@
 // CHECK: }
 // CHECK: func @bitor_u32(%a: int:u32, %b: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1:u32 = param %a
-// CHECK:     v2:u32 = param %b
-// CHECK:     v3:u32 = or v1:u32, v2:u32
+// CHECK:     v1: int:u32 = param %a
+// CHECK:     v2: int:u32 = param %b
+// CHECK:     v3: int:u32 = or v1:u32, v2:u32
 // CHECK:     ret v3, v0
 // CHECK: }
 // CHECK:
@@ -47,9 +47,9 @@
 // CHECK: }
 // CHECK: func @bitxor_u32(%a: int:u32, %b: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1:u32 = param %a
-// CHECK:     v2:u32 = param %b
-// CHECK:     v3:u32 = xor v1:u32, v2:u32
+// CHECK:     v1: int:u32 = param %a
+// CHECK:     v2: int:u32 = param %b
+// CHECK:     v3: int:u32 = xor v1:u32, v2:u32
 // CHECK:     ret v3, v0
 // CHECK: }
 // CHECK:
