@@ -409,6 +409,22 @@ vN = fdiv [flags] vA, vB
 
 Floating point division. **Semantics**: `evalFDiv(a, b) = a / b`
 
+### `fminnum`
+
+```
+vN = fminnum vA, vB
+```
+
+IEEE 754-2008 minNum operation. NaN-suppressing: if one operand is qNaN and the other is numeric, returns the numeric value. **Semantics**: `evalFMinNum(a, b)`
+
+### `fmaxnum`
+
+```
+vN = fmaxnum vA, vB
+```
+
+IEEE 754-2008 maxNum operation. NaN-suppressing: if one operand is qNaN and the other is numeric, returns the numeric value. **Semantics**: `evalFMaxNum(a, b)`
+
 ### `fneg`
 
 ```
