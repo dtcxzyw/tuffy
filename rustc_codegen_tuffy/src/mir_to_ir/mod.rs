@@ -121,15 +121,10 @@ pub fn translate_function<'tcx>(
                 let sz = type_size(tcx, ty).unwrap_or(0);
                 // For >16 byte parameters, the caller passes a pointer per x86-64 ABI.
                 let param_ty = if sz > 16 { Type::Ptr(0) } else { ir_ty };
-                // For composite types of 9–16 bytes that contain no floats
-                // and are passed as an integer (not a pointer), annotate as
-                // Unsigned(128) so the legalizer splits the param into two
-                // 8-byte slots — matching the x86-64 SysV ABI which passes
-                // such values in two integer registers.
                 let param_ann = if sz > 16 {
                     None
                 } else {
-                    composite_param_annotation(tcx, ty)
+                    translate_annotation(ty)
                 };
                 params.push(param_ty);
                 param_anns.push(param_ann);

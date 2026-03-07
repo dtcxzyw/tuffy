@@ -1,16 +1,16 @@
 // compile-flags: -Zmir-opt-level=3 -C debug-assertions=off --crate-type lib
 // CHECK: warning: incorrect NaN comparison, NaN cannot be directly compared to itself
-// CHECK:   --> tests/codegen/float_cmp.rs:32:5
-// CHECK:    |
-// CHECK: 32 |     f32::NAN != f32::NAN
-// CHECK:    |     ^^^^^^^^^^^^^^^^^^^^
-// CHECK:    |
-// CHECK:    = note: `#[warn(invalid_nan_comparisons)]` on by default
+// CHECK:    --> /tuffy/rustc_codegen_tuffy/tests/codegen/float_cmp.rs:117:5
+// CHECK:     |
+// CHECK: 117 |     f32::NAN != f32::NAN
+// CHECK:     |     ^^^^^^^^^^^^^^^^^^^^
+// CHECK:     |
+// CHECK:     = note: `#[warn(invalid_nan_comparisons)]` on by default
 // CHECK: help: use `f32::is_nan()` or `f64::is_nan()` instead
-// CHECK:    |
-// CHECK: 32 -     f32::NAN != f32::NAN
-// CHECK: 32 +     !f32::NAN.is_nan()
-// CHECK:    |
+// CHECK:     |
+// CHECK: 117 -     f32::NAN != f32::NAN
+// CHECK: 117 +     !f32::NAN.is_nan()
+// CHECK:     |
 // CHECK:
 // CHECK: fn f32_eq(_1: f32, _2: f32) -> bool {
 // CHECK:     debug a => _1;

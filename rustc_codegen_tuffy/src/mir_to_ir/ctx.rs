@@ -337,14 +337,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let param_ty = if is_indirect { Type::Ptr(0) } else { ir_ty_val };
 
                 // For composite types of 9–16 bytes that contain no floats
-                // and passed as an integer, annotate the parameter as
-                // Unsigned(128) so the legalizer treats it as a two-slot
-                // (lo, hi) value — matching the caller's ABI which passes
-                // such values in two registers.
                 let ann = if is_indirect {
                     None
                 } else {
-                    composite_param_annotation(self.tcx, ty)
+                    translate_annotation(ty)
                 };
 
                 let val = self
