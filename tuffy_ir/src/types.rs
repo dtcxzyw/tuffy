@@ -171,3 +171,12 @@ pub enum Annotation {
     /// `:dc<N>` — only low N bits meaningful, high bits undef.
     DontCare(u32),
 }
+
+/// Parameter attribute for ABI lowering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ParamAttr {
+    /// Structured return: parameter is a pointer to caller-allocated return space
+    Sret,
+    /// By-value: parameter is a pointer to argument data
+    Byval,
+}

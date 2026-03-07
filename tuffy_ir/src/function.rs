@@ -6,7 +6,7 @@
 
 use crate::instruction::Instruction;
 use crate::module::SymbolId;
-use crate::types::{Annotation, Type};
+use crate::types::{Annotation, ParamAttr, Type};
 use crate::value::{BlockRef, RegionRef, ValueRef};
 
 /// A block argument (replaces PHI nodes).
@@ -64,6 +64,8 @@ pub struct Function {
     pub params: Vec<Type>,
     /// Annotations on function parameters (ABI-level caller guarantees).
     pub param_annotations: Vec<Option<Annotation>>,
+    /// ABI attributes on function parameters (sret/byval).
+    pub param_attributes: Vec<Option<ParamAttr>>,
     /// Optional source-level names for parameters (for display only).
     /// Indexed by ABI parameter index. `None` means no name available.
     pub param_names: Vec<Option<SymbolId>>,
@@ -87,6 +89,7 @@ impl Function {
         name: SymbolId,
         params: Vec<Type>,
         param_annotations: Vec<Option<Annotation>>,
+        param_attributes: Vec<Option<ParamAttr>>,
         param_names: Vec<Option<SymbolId>>,
         ret_ty: Option<Type>,
         ret_annotation: Option<Annotation>,
@@ -95,12 +98,15 @@ impl Function {
         let mut param_anns = param_annotations;
         // Pad with None if caller provided fewer annotations than params.
         param_anns.resize(param_count, None);
+        let mut param_attrs = param_attributes;
+        param_attrs.resize(param_count, None);
         let mut names = param_names;
         names.resize(param_count, None);
         Self {
             name,
             params,
             param_annotations: param_anns,
+            param_attributes: param_attrs,
             param_names: names,
             ret_ty,
             ret_annotation,

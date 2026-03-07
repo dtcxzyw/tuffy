@@ -86,6 +86,7 @@ fn build_add_func() -> (Function, SymbolTable) {
         vec![Type::Int, Type::Int],
         vec![s32, s32],
         vec![],
+        vec![],
         Some(Type::Int),
         s32,
     );
@@ -168,6 +169,7 @@ fn build_branch_func() -> (Function, SymbolTable) {
         name,
         vec![Type::Int, Type::Int],
         vec![s32, s32],
+        vec![],
         vec![],
         Some(Type::Int),
         s32,
@@ -305,7 +307,15 @@ fn build_annotated_wide_call_func() -> (Function, SymbolTable) {
     let caller = st.intern("caller_wide");
     let callee = st.intern("callee_wide");
 
-    let mut func = Function::new(caller, vec![], vec![], vec![], Some(Type::Int), None);
+    let mut func = Function::new(
+        caller,
+        vec![],
+        vec![],
+        vec![],
+        vec![],
+        Some(Type::Int),
+        None,
+    );
     let mut builder = Builder::new(&mut func);
 
     let root = builder.create_region(RegionKind::Function);
@@ -343,6 +353,7 @@ fn build_extend_func(name: &str, ann: Annotation, is_sext: bool) -> (Function, S
         sym,
         vec![Type::Int],
         vec![src_ann],
+        vec![],
         vec![],
         Some(Type::Int),
         s64,

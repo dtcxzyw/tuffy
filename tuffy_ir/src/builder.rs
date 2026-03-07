@@ -7,7 +7,7 @@ use num_bigint::BigInt;
 use crate::function::{BasicBlock, BlockArg, CfgNode, Function, Region, RegionKind};
 use crate::instruction::{AtomicRmwOp, FCmpOp, ICmpOp, Instruction, Op, Operand, Origin};
 use crate::module::SymbolId;
-use crate::types::{Annotation, FloatType, FpRewriteFlags, MemoryOrdering, Type};
+use crate::types::{Annotation, FloatType, FpRewriteFlags, MemoryOrdering, ParamAttr, Type};
 use crate::value::{BlockRef, RegionRef, ValueRef};
 
 /// Builder for constructing a function's IR.
@@ -24,6 +24,10 @@ impl<'a> Builder<'a> {
             current_block: None,
             region_stack: Vec::new(),
         }
+    }
+
+    pub fn param_attributes(&self) -> &[Option<ParamAttr>] {
+        &self.func.param_attributes
     }
 
     // ── Region management ──
