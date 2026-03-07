@@ -680,42 +680,42 @@ fn fmt_inst(
         }
         Op::SAddWithOverflow(a, b, bits) => {
             format!(
-                "{v} = sadd_overflow.{bits} {}, {}",
+                "{multi_v} = sadd_overflow.{bits} {}, {}",
                 ctx.fmt_operand(a),
                 ctx.fmt_operand(b)
             )
         }
         Op::UAddWithOverflow(a, b, bits) => {
             format!(
-                "{v} = uadd_overflow.{bits} {}, {}",
+                "{multi_v} = uadd_overflow.{bits} {}, {}",
                 ctx.fmt_operand(a),
                 ctx.fmt_operand(b)
             )
         }
         Op::SSubWithOverflow(a, b, bits) => {
             format!(
-                "{v} = ssub_overflow.{bits} {}, {}",
+                "{multi_v} = ssub_overflow.{bits} {}, {}",
                 ctx.fmt_operand(a),
                 ctx.fmt_operand(b)
             )
         }
         Op::USubWithOverflow(a, b, bits) => {
             format!(
-                "{v} = usub_overflow.{bits} {}, {}",
+                "{multi_v} = usub_overflow.{bits} {}, {}",
                 ctx.fmt_operand(a),
                 ctx.fmt_operand(b)
             )
         }
         Op::SMulWithOverflow(a, b, bits) => {
             format!(
-                "{v} = smul_overflow.{bits} {}, {}",
+                "{multi_v} = smul_overflow.{bits} {}, {}",
                 ctx.fmt_operand(a),
                 ctx.fmt_operand(b)
             )
         }
         Op::UMulWithOverflow(a, b, bits) => {
             format!(
-                "{v} = umul_overflow.{bits} {}, {}",
+                "{multi_v} = umul_overflow.{bits} {}, {}",
                 ctx.fmt_operand(a),
                 ctx.fmt_operand(b)
             )
