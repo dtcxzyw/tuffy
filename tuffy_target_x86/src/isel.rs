@@ -831,10 +831,11 @@ struct CallAbiPlan {
 }
 
 fn has_wide_scalar_annotation(func: &Function, inst_idx: u32) -> bool {
-    matches!(
-        func.inst(inst_idx).ty,
-        Type::Int(IntAnnotation { bit_width: 128, .. })
-    )
+    let inst = func.inst(inst_idx);
+    // For Call instructions, the data return type is in secondary_ty (primary is Mem).
+    // For other instructions, check the primary ty.
+    let check_ty = inst.secondary_ty.as_ref().unwrap_or(&inst.ty);
+    matches!(check_ty, Type::Int(IntAnnotation { bit_width: 128, .. }))
 }
 
 fn classify_call_abi(
@@ -3365,23 +3366,35 @@ fn select_sext(ctx: &mut IselCtx, vref: ValueRef, val: &Operand, func: &Function
             });
         }
         Some(n) => {
-            // Non-standard bit width: use shift-based sign extension
-            let shift = 64 - n;
-            ctx.out.push(MInst::MovRR {
-                size: OpSize::S64,
-                dst,
-                src,
-            });
-            ctx.out.push(MInst::ShlImm {
-                size: OpSize::S64,
-                dst,
-                imm: shift as u8,
-            });
-            ctx.out.push(MInst::SarImm {
-                size: OpSize::S64,
-                dst,
-                imm: shift as u8,
-            });
+            // Non-standard bit width: check signedness
+            let is_signed = src_ann
+                .is_some_and(|a| matches!(a.signedness, tuffy_ir::types::IntSignedness::Signed));
+            if is_signed {
+                // Already signed, no extension needed
+                ctx.out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst,
+                    src,
+                });
+            } else {
+                // Unsigned source: use shift-based sign extension
+                let shift = 64 - n;
+                ctx.out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst,
+                    src,
+                });
+                ctx.out.push(MInst::ShlImm {
+                    size: OpSize::S64,
+                    dst,
+                    imm: shift as u8,
+                });
+                ctx.out.push(MInst::SarImm {
+                    size: OpSize::S64,
+                    dst,
+                    imm: shift as u8,
+                });
+            }
         }
         None => {
             // No type information, default to 64-bit
@@ -3414,7 +3427,33 @@ fn select_zext(ctx: &mut IselCtx, vref: ValueRef, val: &Operand, func: &Function
                 src,
             });
         }
-        _ => {
+        Some(n) => {
+            // Non-standard bit width: check signedness
+            let is_unsigned = src_ann
+                .is_none_or(|a| matches!(a.signedness, tuffy_ir::types::IntSignedness::Unsigned));
+            if is_unsigned {
+                // Already unsigned, no masking needed
+                ctx.out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst,
+                    src,
+                });
+            } else {
+                // Signed source: mask to clear potential sign bits
+                let mask = (1u64 << n) - 1;
+                ctx.out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst,
+                    src,
+                });
+                ctx.out.push(MInst::AndRI {
+                    size: OpSize::S64,
+                    dst,
+                    imm: mask as i64,
+                });
+            }
+        }
+        None => {
             ctx.out.push(MInst::MovRR {
                 size: OpSize::S64,
                 dst,
