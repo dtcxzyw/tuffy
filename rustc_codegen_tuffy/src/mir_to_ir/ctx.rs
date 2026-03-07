@@ -6,7 +6,7 @@ use tuffy_codegen::AbiMetadataBox;
 use tuffy_ir::builder::Builder;
 use tuffy_ir::instruction::Origin;
 use tuffy_ir::module::{SymbolId, SymbolTable};
-use tuffy_ir::types::Type;
+use tuffy_ir::types::{ParamAttr, Type};
 use tuffy_ir::value::{BlockRef, ValueRef};
 
 use super::StaticDataVec;
@@ -329,14 +329,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 self.fat_locals.set(local, metadata);
             } else {
                 let ir_ty_val = ir_ty.expect("checked above");
-                let sz = type_size(self.tcx, ty).unwrap_or(0);
 
-                // For >16 byte parameters, the caller passes a pointer per x86-64 ABI.
-                // The parameter receives this pointer, so create it as Ptr type.
-                let is_indirect = sz > 16;
+                // Check if this parameter has the byval attribute (>16 byte parameters).
+                // The frontend already determined ABI requirements and set the attribute.
+                let param_attr = self.builder.param_attributes().get(param_idx as usize).copied().flatten();
+                let is_indirect = param_attr == Some(ParamAttr::Byval);
                 let param_ty = if is_indirect { Type::Ptr(0) } else { ir_ty_val };
 
-                // For composite types of 9–16 bytes that contain no floats
                 let ann = if is_indirect {
                     None
                 } else {
@@ -348,7 +347,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     .param(param_idx, param_ty, ann, Origin::synthetic());
                 self.locals.set(local, val);
 
-                // Mark >16 byte parameters as stack locals so element access
+                // Mark byval parameters as stack locals so element access
                 // knows to dereference the pointer.
                 if is_indirect {
                     self.stack_locals.mark(local);

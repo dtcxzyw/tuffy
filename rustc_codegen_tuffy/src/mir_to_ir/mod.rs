@@ -26,7 +26,7 @@ use tuffy_ir::builder::Builder;
 use tuffy_ir::function::{Function, RegionKind};
 use tuffy_ir::instruction::Origin;
 use tuffy_ir::module::{SymbolId, SymbolTable};
-use tuffy_ir::types::Type;
+use tuffy_ir::types::{ParamAttr, Type};
 
 /// Static data entry: (symbol_id, bytes, relocations).
 /// Relocations are (offset_in_bytes, target_symbol_name) for function pointers in vtables.
@@ -84,6 +84,7 @@ pub fn translate_function<'tcx>(
 
     let mut params = Vec::new();
     let mut param_anns = Vec::new();
+    let mut param_attrs = Vec::new();
 
     let ret_mir_ty = monomorphize(mir.local_decls[mir::RETURN_PLACE].ty);
     let ret_size = type_size(tcx, ret_mir_ty).unwrap_or(0);
@@ -109,6 +110,7 @@ pub fn translate_function<'tcx>(
     if needs_sret {
         params.push(Type::Ptr(0));
         param_anns.push(None);
+        param_attrs.push(Some(ParamAttr::Sret));
         param_names.push(None);
     }
 
@@ -126,8 +128,10 @@ pub fn translate_function<'tcx>(
                 } else {
                     translate_annotation(ty)
                 };
+                let param_attr = if sz > 16 { Some(ParamAttr::Byval) } else { None };
                 params.push(param_ty);
                 param_anns.push(param_ann);
+                param_attrs.push(param_attr);
                 param_names.push(all_names.get(i).copied().flatten());
                 // Fat pointer types (&str, &[T], &dyn Trait) are passed
                 // as two register-sized values: data pointer + metadata
@@ -135,13 +139,14 @@ pub fn translate_function<'tcx>(
                 if is_fat_ptr(tcx, ty) {
                     params.push(Type::Int);
                     param_anns.push(None);
+                    param_attrs.push(None);
                     param_names.push(None);
                 }
             }
         }
     }
 
-    let mut func = Function::new(func_sym, params, param_anns, param_names, ret_ty, ret_ann);
+    let mut func = Function::new(func_sym, params, param_anns, param_attrs, param_names, ret_ty, ret_ann);
     let mut builder = Builder::new(&mut func);
     let abi_metadata = session.new_metadata();
 
