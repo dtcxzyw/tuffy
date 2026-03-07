@@ -38,7 +38,7 @@
 // CHECK:     v6 = iconst 8
 // CHECK:     v7 = ptradd v2, v6
 // CHECK:     v8 = load.8 v7, v4
-// CHECK:     v9 = uadd_overflow.64 v5:u64, v8:u64
+// CHECK:     v9, v10 = uadd_overflow.64 v5:u64, v8:u64
 // CHECK:     v11 = bool_to_int v10
 // CHECK:     v12 = iconst 0
 // CHECK:     v13 = icmp.eq v11, v12
@@ -48,7 +48,7 @@
 // CHECK:     v16 = iconst 16
 // CHECK:     v17 = ptradd v2, v16
 // CHECK:     v18 = load.8 v17, v15
-// CHECK:     v19 = uadd_overflow.64 v9:u64, v18:u64
+// CHECK:     v19, v20 = uadd_overflow.64 v9:u64, v18:u64
 // CHECK:     v21 = bool_to_int v20
 // CHECK:     v22 = iconst 0
 // CHECK:     v23 = icmp.eq v21, v22
