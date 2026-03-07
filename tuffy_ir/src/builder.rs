@@ -170,9 +170,14 @@ impl<'a> Builder<'a> {
     }
 
     /// Add a block argument and return its ValueRef.
-    pub fn add_block_arg(&mut self, block: BlockRef, ty: Type) -> ValueRef {
+    pub fn add_block_arg(
+        &mut self,
+        block: BlockRef,
+        ty: Type,
+        annotation: Option<Annotation>,
+    ) -> ValueRef {
         let arg_idx = self.func.block_args.len() as u32;
-        self.func.block_args.push(BlockArg { ty });
+        self.func.block_args.push(BlockArg { ty, annotation });
         self.func.blocks[block.index() as usize].arg_count += 1;
         ValueRef::block_arg(arg_idx)
     }

@@ -13,6 +13,7 @@ use crate::value::{BlockRef, RegionRef, ValueRef};
 #[derive(Debug, Clone)]
 pub struct BlockArg {
     pub ty: Type,
+    pub annotation: Option<Annotation>,
 }
 
 /// A basic block containing a sequence of instructions.

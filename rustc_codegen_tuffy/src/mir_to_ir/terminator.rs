@@ -241,7 +241,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     );
                     // Create a trap block for the failure path.
                     let trap_block = self.builder.create_block();
-                    let _trap_mem = self.builder.add_block_arg(trap_block, Type::Mem);
+                    let _trap_mem = self.builder.add_block_arg(trap_block, Type::Mem, None);
                     self.builder.brif(
                         cmp.into(),
                         target_block,
@@ -593,7 +593,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 } else {
                     // Not last: else falls through to a new comparison block.
                     let next_block = self.builder.create_block();
-                    let next_mem = self.builder.add_block_arg(next_block, Type::Mem);
+                    let next_mem = self.builder.add_block_arg(next_block, Type::Mem, None);
                     self.builder.brif(
                         cmp.into(),
                         then_block,

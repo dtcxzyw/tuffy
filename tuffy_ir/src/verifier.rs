@@ -303,11 +303,17 @@ impl<'a> FuncVerifier<'a> {
                     );
                 }
             }
-            Annotation::Int(_) => {
+            Annotation::Int(int_ann) => {
                 if !matches!(ty, Type::Int) {
                     self.result.error(
                         loc.clone(),
                         format!("{ctx}: int annotation on non-Int type {ty:?}"),
+                    );
+                }
+                if int_ann.bit_width == 0 {
+                    self.result.error(
+                        loc.clone(),
+                        format!("{ctx}: int annotation bit_width must be > 0"),
                     );
                 }
             }

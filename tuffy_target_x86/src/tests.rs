@@ -1,6 +1,7 @@
 //! Tests for x86-64 target definitions, instruction selection, encoding, and ELF emission.
 
 use crate::reg::Gpr;
+use tuffy_ir::types::Annotation;
 
 #[test]
 fn gpr_encoding() {
@@ -102,7 +103,7 @@ fn build_add_func() -> (Function, SymbolTable) {
     let entry = builder.create_block();
     builder.switch_to_block(entry);
 
-    let mem0 = builder.add_block_arg(entry, Type::Mem);
+    let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let a = builder.param(0, i32_type.clone(), None, Origin::synthetic());
     let b = builder.param(1, i32_type.clone(), None, Origin::synthetic());
     let sum = builder.add(a.into(), b.into(), I64, Origin::synthetic());
@@ -178,7 +179,7 @@ fn build_branch_func() -> (Function, SymbolTable) {
     let else_bb = builder.create_block();
 
     builder.switch_to_block(entry);
-    let mem0 = builder.add_block_arg(entry, Type::Mem);
+    let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let a = builder.param(0, i32_type.clone(), None, Origin::synthetic());
     let b = builder.param(1, i32_type, None, Origin::synthetic());
     let cmp = builder.icmp(ICmpOp::Gt, a.into(), b.into(), Origin::synthetic());
@@ -330,7 +331,18 @@ fn build_annotated_wide_call_func() -> (Function, SymbolTable) {
     let callee = st.intern("callee_wide");
 
     let ret_type = Type::Int;
-    let mut func = Function::new(caller, vec![], vec![], vec![], Some(ret_type.clone()), None);
+    let wide_ann = Some(Annotation::Int(IntAnnotation {
+        bit_width: 128,
+        signedness: IntSignedness::Unsigned,
+    }));
+    let mut func = Function::new(
+        caller,
+        vec![],
+        vec![],
+        vec![],
+        Some(ret_type.clone()),
+        wide_ann,
+    );
     let mut builder = Builder::new(&mut func);
 
     let root = builder.create_region(RegionKind::Function);
@@ -339,14 +351,14 @@ fn build_annotated_wide_call_func() -> (Function, SymbolTable) {
     let entry = builder.create_block();
     builder.switch_to_block(entry);
 
-    let mem0 = builder.add_block_arg(entry, Type::Mem);
+    let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let callee_addr = builder.symbol_addr(callee, Origin::synthetic());
     let (call_mem, call_data) = builder.call(
         callee_addr.into(),
         vec![],
         ret_type,
         mem0.into(),
-        None,
+        wide_ann,
         Origin::synthetic(),
     );
     let call_data = call_data.expect("non-void call should produce data result");
@@ -359,18 +371,23 @@ fn build_annotated_wide_call_func() -> (Function, SymbolTable) {
 }
 
 /// Build: fn name(a: int :ann) -> int { sext/zext a to 64 }
-fn build_extend_func(name: &str, _ann: IntAnnotation, is_sext: bool) -> (Function, SymbolTable) {
+fn build_extend_func(name: &str, ann: IntAnnotation, is_sext: bool) -> (Function, SymbolTable) {
     let src_type = Type::Int;
     let i64_type = Type::Int;
     let mut st = SymbolTable::new();
     let sym = st.intern(name);
+    let src_ann = Some(Annotation::Int(ann));
+    let i64_ann = Some(Annotation::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    }));
     let mut func = Function::new(
         sym,
         vec![src_type.clone()],
-        vec![None],
+        vec![src_ann],
         vec![],
         Some(i64_type.clone()),
-        None,
+        i64_ann,
     );
     let mut builder = Builder::new(&mut func);
 
@@ -380,8 +397,8 @@ fn build_extend_func(name: &str, _ann: IntAnnotation, is_sext: bool) -> (Functio
     let entry = builder.create_block();
     builder.switch_to_block(entry);
 
-    let mem0 = builder.add_block_arg(entry, Type::Mem);
-    let a = builder.param(0, src_type, None, Origin::synthetic());
+    let mem0 = builder.add_block_arg(entry, Type::Mem, None);
+    let a = builder.param(0, src_type, src_ann, Origin::synthetic());
     let extended = if is_sext {
         builder.sext(Operand::new(a), 64, Origin::synthetic())
     } else {

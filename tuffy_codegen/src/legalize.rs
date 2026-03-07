@@ -566,13 +566,14 @@ fn precreate_blocks<M>(
                 let old_ba_idx = old_bb.arg_start + i;
                 let old_ba_ref = ValueRef::block_arg(old_ba_idx);
                 let ba_ty = old.block_args[old_ba_idx as usize].ty.clone();
+                let ba_ann = old.block_args[old_ba_idx as usize].annotation;
 
                 if s.wide.contains(&old_ba_ref.raw()) {
-                    let lo = b.add_block_arg(new_blk, I64_TYPE);
-                    let hi = b.add_block_arg(new_blk, I64_TYPE);
+                    let lo = b.add_block_arg(new_blk, I64_TYPE, Some(Annotation::Int(I64)));
+                    let hi = b.add_block_arg(new_blk, I64_TYPE, Some(Annotation::Int(I64)));
                     s.vmap.set(old_ba_ref, Mapped::Pair(lo, hi));
                 } else {
-                    let v = b.add_block_arg(new_blk, ba_ty);
+                    let v = b.add_block_arg(new_blk, ba_ty, ba_ann);
                     s.vmap.set(old_ba_ref, Mapped::One(v));
                 }
             }

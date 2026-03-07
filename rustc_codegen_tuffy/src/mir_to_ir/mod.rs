@@ -156,7 +156,7 @@ pub fn translate_function<'tcx>(
     for (bb, _) in mir.basic_blocks.iter_enumerated() {
         let ir_block = builder.create_block();
         block_map.set(bb, ir_block);
-        let mem_arg = builder.add_block_arg(ir_block, Type::Mem);
+        let mem_arg = builder.add_block_arg(ir_block, Type::Mem, None);
         block_mem_args.push(mem_arg);
     }
 

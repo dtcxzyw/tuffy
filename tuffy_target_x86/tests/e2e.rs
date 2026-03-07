@@ -36,7 +36,7 @@ fn build_add_func() -> (Function, SymbolTable) {
     let entry = builder.create_block();
     builder.switch_to_block(entry);
 
-    let mem0 = builder.add_block_arg(entry, Type::Mem);
+    let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let a = builder.param(0, i32_type.clone(), None, Origin::synthetic());
     let b = builder.param(1, i32_type.clone(), None, Origin::synthetic());
     let sum = builder.add(a.into(), b.into(), I64, Origin::synthetic());

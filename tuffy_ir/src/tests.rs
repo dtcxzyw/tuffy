@@ -34,7 +34,7 @@ fn build_add_function() {
     let entry = builder.create_block();
     builder.switch_to_block(entry);
 
-    let mem0 = builder.add_block_arg(entry, Type::Mem);
+    let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let a = builder.param(0, i64_type.clone(), None, Origin::synthetic());
     let b = builder.param(1, i64_type, None, Origin::synthetic());
     let sum = builder.add(a.into(), b.into(), I64, Origin::synthetic());
@@ -73,7 +73,7 @@ fn build_with_annotations() {
     let entry = builder.create_block();
     builder.switch_to_block(entry);
 
-    let mem0 = builder.add_block_arg(entry, Type::Mem);
+    let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let a = builder.param(0, i32_type.clone(), None, Origin::synthetic());
     let b = builder.param(1, i32_type, None, Origin::synthetic());
     let sum = builder.add(a.into(), b.into(), I64, Origin::synthetic());
@@ -108,7 +108,7 @@ fn display_add_function() {
     let entry = builder.create_block();
     builder.switch_to_block(entry);
 
-    let mem0 = builder.add_block_arg(entry, Type::Mem);
+    let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let a = builder.param(0, i64_type.clone(), s64_ann, Origin::synthetic());
     let b = builder.param(1, i64_type, s64_ann, Origin::synthetic());
     let sum = builder.add(
@@ -162,7 +162,7 @@ fn display_named_params() {
     let entry = builder.create_block();
     builder.switch_to_block(entry);
 
-    let mem0 = builder.add_block_arg(entry, Type::Mem);
+    let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let a = builder.param(0, i64_type.clone(), s64_ann, Origin::synthetic());
     let b = builder.param(1, i64_type, s64_ann, Origin::synthetic());
     let sum = builder.add(
@@ -217,7 +217,7 @@ fn display_multi_block_branch() {
     let bb2 = builder.create_block();
 
     builder.switch_to_block(bb0);
-    let mem0 = builder.add_block_arg(bb0, Type::Mem);
+    let mem0 = builder.add_block_arg(bb0, Type::Mem, None);
     let a = builder.param(0, i64_type.clone(), s64_ann, Origin::synthetic());
     let b = builder.param(1, i64_type, s64_ann, Origin::synthetic());
     let cmp = builder.icmp(ICmpOp::Gt, a.into(), b.into(), Origin::synthetic());
@@ -276,7 +276,7 @@ fn display_nested_loop_region() {
     builder.enter_region(root);
 
     let bb0 = builder.create_block();
-    let mem0 = builder.add_block_arg(bb0, Type::Mem);
+    let mem0 = builder.add_block_arg(bb0, Type::Mem, None);
 
     let loop_region = builder.create_region(RegionKind::Loop);
     builder.enter_region(loop_region);
@@ -294,8 +294,8 @@ fn display_nested_loop_region() {
     builder.br(bb1, vec![init_acc.into(), one.into()], Origin::synthetic());
 
     // bb1: loop header with block args
-    let acc = builder.add_block_arg(bb1, i64_type.clone());
-    let i = builder.add_block_arg(bb1, i64_type);
+    let acc = builder.add_block_arg(bb1, i64_type.clone(), s64_ann);
+    let i = builder.add_block_arg(bb1, i64_type, s64_ann);
     builder.switch_to_block(bb1);
     let cmp = builder.icmp(ICmpOp::Le, i.into(), n.into(), Origin::synthetic());
     builder.brif(cmp.into(), bb2, vec![], bb3, vec![], Origin::synthetic());
@@ -359,7 +359,7 @@ fn build_bitwise_ops() {
     let entry = builder.create_block();
     builder.switch_to_block(entry);
 
-    let mem0 = builder.add_block_arg(entry, Type::Mem);
+    let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let a = builder.param(0, i64_type.clone(), None, Origin::synthetic());
     let b = builder.param(1, i64_type, None, Origin::synthetic());
     let v_and = builder.and(a.into(), b.into(), I64, Origin::synthetic());
@@ -398,7 +398,7 @@ fn display_shift_ops() {
     let entry = builder.create_block();
     builder.switch_to_block(entry);
 
-    let mem0 = builder.add_block_arg(entry, Type::Mem);
+    let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let a = builder.param(0, i64_type.clone(), s64_ann, Origin::synthetic());
     let b = builder.param(1, i64_type, s64_ann, Origin::synthetic());
     let _v_shl = builder.shl(a.into(), b.into(), s64_ann, Origin::synthetic());
@@ -448,7 +448,7 @@ fn display_division_ops() {
     let entry = builder.create_block();
     builder.switch_to_block(entry);
 
-    let mem0 = builder.add_block_arg(entry, Type::Mem);
+    let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let a = builder.param(0, i64_type.clone(), s64_ann, Origin::synthetic());
     let b = builder.param(1, i64_type, s64_ann, Origin::synthetic());
     let v_div = builder.div(a.into(), b.into(), s64, Origin::synthetic());
@@ -492,7 +492,7 @@ fn build_ptradd() {
     let entry = builder.create_block();
     builder.switch_to_block(entry);
 
-    let mem0 = builder.add_block_arg(entry, Type::Mem);
+    let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let ptr = builder.param(0, Type::Ptr(0), None, Origin::synthetic());
     let off = builder.param(1, i64_type, None, Origin::synthetic());
     let result = builder.ptradd(ptr.into(), off.into(), 0, Origin::synthetic());
@@ -528,7 +528,7 @@ fn display_pointer_ops() {
     let entry = builder.create_block();
     builder.switch_to_block(entry);
 
-    let mem0 = builder.add_block_arg(entry, Type::Mem);
+    let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let p1 = builder.param(0, Type::Ptr(0), None, Origin::synthetic());
     let p2 = builder.param(1, Type::Ptr(0), None, Origin::synthetic());
     let i = builder.param(2, i64_type, s64_ann, Origin::synthetic());
@@ -578,7 +578,7 @@ fn build_float_binary_ops() {
     let entry = builder.create_block();
     builder.switch_to_block(entry);
 
-    let mem0 = builder.add_block_arg(entry, Type::Mem);
+    let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let a = builder.param(0, f32_ty.clone(), None, Origin::synthetic());
     let b = builder.param(1, f32_ty.clone(), None, Origin::synthetic());
     let flags = FpRewriteFlags::default();
@@ -647,7 +647,7 @@ fn display_float_ops() {
     let entry = builder.create_block();
     builder.switch_to_block(entry);
 
-    let mem0 = builder.add_block_arg(entry, Type::Mem);
+    let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let a = builder.param(0, f64_ty.clone(), None, Origin::synthetic());
     let b = builder.param(1, f64_ty.clone(), None, Origin::synthetic());
     let flags = FpRewriteFlags::default();
@@ -724,7 +724,7 @@ fn build_atomic_ops() {
     let entry = builder.create_block();
     builder.switch_to_block(entry);
 
-    let mem0 = builder.add_block_arg(entry, Type::Mem);
+    let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let ptr = builder.param(0, Type::Ptr(0), None, Origin::synthetic());
     let val = builder.param(1, i64_type.clone(), None, Origin::synthetic());
 
@@ -809,7 +809,7 @@ fn display_atomic_ops() {
     let entry = builder.create_block();
     builder.switch_to_block(entry);
 
-    let mem0 = builder.add_block_arg(entry, Type::Mem);
+    let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let ptr = builder.param(0, Type::Ptr(0), None, Origin::synthetic());
     let val = builder.param(1, i64_type.clone(), s64_ann, Origin::synthetic());
     let (mem1, _la) = builder.load_atomic(
@@ -890,7 +890,7 @@ fn build_select_and_bool_to_int() {
     let entry = builder.create_block();
     builder.switch_to_block(entry);
 
-    let mem0 = builder.add_block_arg(entry, Type::Mem);
+    let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let a = builder.param(0, i64_type.clone(), None, Origin::synthetic());
     let b = builder.param(1, i64_type.clone(), None, Origin::synthetic());
     let cmp = builder.icmp(ICmpOp::Gt, a.into(), b.into(), Origin::synthetic());
@@ -942,7 +942,7 @@ fn display_select_and_bool_to_int() {
     let entry = builder.create_block();
     builder.switch_to_block(entry);
 
-    let mem0 = builder.add_block_arg(entry, Type::Mem);
+    let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let a = builder.param(0, i64_type.clone(), s64_ann, Origin::synthetic());
     let b = builder.param(1, i64_type.clone(), s64_ann, Origin::synthetic());
     let cmp = builder.icmp(ICmpOp::Lt, a.into(), b.into(), Origin::synthetic());
@@ -1009,7 +1009,7 @@ fn build_symbol_addr() {
     let entry = builder.create_block();
     builder.switch_to_block(entry);
 
-    let mem0 = builder.add_block_arg(entry, Type::Mem);
+    let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let size = builder.param(0, i64_type, None, Origin::synthetic());
     let addr = builder.symbol_addr(malloc_sym, Origin::synthetic());
     let (mem1, Some(result)) = builder.call(
@@ -1048,7 +1048,7 @@ fn display_symbol_addr_without_symbols() {
     let entry = builder.create_block();
     builder.switch_to_block(entry);
 
-    let mem0 = builder.add_block_arg(entry, Type::Mem);
+    let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     builder.symbol_addr(sym, Origin::synthetic());
     builder.ret(None, mem0.into(), Origin::synthetic());
     builder.exit_region();
@@ -1098,7 +1098,7 @@ fn build_valid_add_module() -> Module {
     b.enter_region(root);
     let bb = b.create_block();
     b.switch_to_block(bb);
-    let mem0 = b.add_block_arg(bb, Type::Mem);
+    let mem0 = b.add_block_arg(bb, Type::Mem, None);
     let a = b.param(0, i64_type.clone(), s64_ann, Origin::synthetic());
     let p1 = b.param(1, i64_type, s64_ann, Origin::synthetic());
     let sum = b.add(a.into(), p1.into(), I64, Origin::synthetic());
@@ -1141,7 +1141,7 @@ fn verify_valid_multi_block() {
     let bb2 = b.create_block();
 
     b.switch_to_block(bb0);
-    let mem0 = b.add_block_arg(bb0, Type::Mem);
+    let mem0 = b.add_block_arg(bb0, Type::Mem, None);
     let a = b.param(0, i64_type.clone(), s64_ann, Origin::synthetic());
     let p1 = b.param(1, i64_type, s64_ann, Origin::synthetic());
     let cmp = b.icmp(ICmpOp::Gt, a.into(), p1.into(), Origin::synthetic());
@@ -1181,7 +1181,7 @@ fn verify_valid_loop_region() {
     b.enter_region(root);
 
     let bb0 = b.create_block();
-    let mem0 = b.add_block_arg(bb0, Type::Mem);
+    let mem0 = b.add_block_arg(bb0, Type::Mem, None);
     let loop_region = b.create_region(RegionKind::Loop);
     b.enter_region(loop_region);
     let bb1 = b.create_block();
@@ -1195,8 +1195,8 @@ fn verify_valid_loop_region() {
     let init = b.iconst(1, 64, IntSignedness::Signed, Origin::synthetic());
     b.br(bb1, vec![init.into(), one.into()], Origin::synthetic());
 
-    let acc = b.add_block_arg(bb1, i64_type.clone());
-    let i = b.add_block_arg(bb1, i64_type);
+    let acc = b.add_block_arg(bb1, i64_type.clone(), s64_ann);
+    let i = b.add_block_arg(bb1, i64_type, s64_ann);
     b.switch_to_block(bb1);
     let cmp = b.icmp(ICmpOp::Le, i.into(), n.into(), Origin::synthetic());
     b.brif(cmp.into(), bb2, vec![], bb3, vec![], Origin::synthetic());
@@ -1235,7 +1235,7 @@ fn verify_detects_wrong_arith_operand_type() {
         let bb = b.create_block();
         b.switch_to_block(bb);
 
-        let mem0 = b.add_block_arg(bb, Type::Mem);
+        let mem0 = b.add_block_arg(bb, Type::Mem, None);
         let a = b.param(0, i64_type.clone(), None, Origin::synthetic());
         let p1 = b.param(1, i64_type.clone(), None, Origin::synthetic());
         let cmp = b.icmp(ICmpOp::Gt, a.into(), p1.into(), Origin::synthetic());
@@ -1324,7 +1324,7 @@ fn verify_detects_load_non_ptr() {
     let bb = b.create_block();
     b.switch_to_block(bb);
 
-    let mem0 = b.add_block_arg(bb, Type::Mem);
+    let mem0 = b.add_block_arg(bb, Type::Mem, None);
     let a = b.param(0, i64_type.clone(), None, Origin::synthetic());
     // Load from Int instead of Ptr — should be flagged.
     let v = b.load(
@@ -1368,10 +1368,17 @@ fn verify_detects_branch_arg_count_mismatch() {
 
     let bb0 = b.create_block();
     let bb1 = b.create_block();
-    let _arg = b.add_block_arg(bb1, i64_type.clone());
+    let _arg = b.add_block_arg(
+        bb1,
+        i64_type.clone(),
+        Some(Annotation::Int(IntAnnotation {
+            bit_width: 64,
+            signedness: IntSignedness::Signed,
+        })),
+    );
 
     b.switch_to_block(bb0);
-    let mem0 = b.add_block_arg(bb0, Type::Mem);
+    let mem0 = b.add_block_arg(bb0, Type::Mem, None);
     let a = b.param(0, i64_type, None, Origin::synthetic());
     // Branch to bb1 which expects 1 arg, but pass 0.
     b.br(bb1, vec![], Origin::synthetic());
@@ -1439,7 +1446,7 @@ fn display_min_max() {
     let entry = builder.create_block();
     builder.switch_to_block(entry);
 
-    let mem0 = builder.add_block_arg(entry, Type::Mem);
+    let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let a = builder.param(0, i64_type.clone(), s64_ann, Origin::synthetic());
     let b = builder.param(1, i64_type.clone(), s64_ann, Origin::synthetic());
     let v_min = builder.min(a.into(), b.into(), s64_ann, Origin::synthetic());
@@ -1498,7 +1505,7 @@ fn memssa_store_load_threading() {
     let bb = b.create_block();
     b.switch_to_block(bb);
 
-    let mem0 = b.add_block_arg(bb, Type::Mem);
+    let mem0 = b.add_block_arg(bb, Type::Mem, None);
     let val = b.param(0, i32_type.clone(), s32_ann, Origin::synthetic());
     let ptr = b.param(1, Type::Ptr(0), None, Origin::synthetic());
     // store produces mem1
@@ -1550,7 +1557,7 @@ fn memssa_multi_result_load_atomic() {
     let bb = b.create_block();
     b.switch_to_block(bb);
 
-    let mem0 = b.add_block_arg(bb, Type::Mem);
+    let mem0 = b.add_block_arg(bb, Type::Mem, None);
     let ptr = b.param(0, Type::Ptr(0), None, Origin::synthetic());
     let (mem1, data) = b.load_atomic(
         ptr.into(),
@@ -1578,13 +1585,17 @@ fn memssa_block_arg_phi() {
     let mut st = SymbolTable::new();
     let name = st.intern("mem_phi");
     let i32_type = Type::Int;
+    let s32_ann = Some(Annotation::Int(IntAnnotation {
+        bit_width: 32,
+        signedness: IntSignedness::Signed,
+    }));
     let mut func = Function::new(
         name,
         vec![Type::Bool, i32_type.clone(), Type::Ptr(0)],
-        vec![],
+        vec![None, s32_ann, None],
         vec![],
         Some(i32_type.clone()),
-        None,
+        s32_ann,
     );
     let mut b = Builder::new(&mut func);
 
@@ -1598,7 +1609,7 @@ fn memssa_block_arg_phi() {
 
     // bb0: branch based on condition
     b.switch_to_block(bb0);
-    let mem0 = b.add_block_arg(bb0, Type::Mem);
+    let mem0 = b.add_block_arg(bb0, Type::Mem, None);
     let cond = b.param(0, Type::Bool, None, Origin::synthetic());
     let val = b.param(1, i32_type.clone(), None, Origin::synthetic());
     let ptr = b.param(2, Type::Ptr(0), None, Origin::synthetic());
@@ -1614,7 +1625,7 @@ fn memssa_block_arg_phi() {
     b.br(bb3, vec![mem0.into()], Origin::synthetic());
 
     // bb3: mem phi via block arg
-    let mem_phi = b.add_block_arg(bb3, Type::Mem);
+    let mem_phi = b.add_block_arg(bb3, Type::Mem, None);
     b.switch_to_block(bb3);
     let loaded = b.load(
         ptr.into(),
@@ -1656,7 +1667,7 @@ fn memssa_display_store_load() {
     let bb = b.create_block();
     b.switch_to_block(bb);
 
-    let mem0 = b.add_block_arg(bb, Type::Mem);
+    let mem0 = b.add_block_arg(bb, Type::Mem, None);
     let val = b.param(0, i32_type.clone(), s32_ann, Origin::synthetic());
     let ptr = b.param(1, Type::Ptr(0), None, Origin::synthetic());
     let mem1 = b.store(val.into(), ptr.into(), 4, mem0.into(), Origin::synthetic());
@@ -1665,7 +1676,7 @@ fn memssa_display_store_load() {
         4,
         i32_type,
         mem1.into(),
-        None,
+        s32_ann,
         Origin::synthetic(),
     );
     b.ret(Some(loaded.into()), mem1.into(), Origin::synthetic());
@@ -1705,7 +1716,7 @@ fn build_merge() {
     let bb = b.create_block();
     b.switch_to_block(bb);
 
-    let mem0 = b.add_block_arg(bb, Type::Mem);
+    let mem0 = b.add_block_arg(bb, Type::Mem, None);
     let a = b.param(0, i64_type.clone(), None, Origin::synthetic());
     let lo = b.param(1, i64_type.clone(), None, Origin::synthetic());
     let merged = b.merge(a.into(), lo.into(), 64, Origin::synthetic());
@@ -1739,7 +1750,7 @@ fn build_split() {
     let bb = b.create_block();
     b.switch_to_block(bb);
 
-    let mem0 = b.add_block_arg(bb, Type::Mem);
+    let mem0 = b.add_block_arg(bb, Type::Mem, None);
     let wide = b.param(0, i128_type.clone(), None, Origin::synthetic());
     let (hi, lo) = b.split(wide.into(), 64, Origin::synthetic());
 
@@ -1778,7 +1789,7 @@ fn build_clmul() {
     let bb = b.create_block();
     b.switch_to_block(bb);
 
-    let mem0 = b.add_block_arg(bb, Type::Mem);
+    let mem0 = b.add_block_arg(bb, Type::Mem, None);
     let a = b.param(0, i64_type.clone(), None, Origin::synthetic());
     let bv = b.param(1, i64_type.clone(), None, Origin::synthetic());
     let result = b.clmul(a.into(), bv.into(), Origin::synthetic());
@@ -1829,7 +1840,7 @@ fn test_extractvalue_basic() {
     let bb = b.create_block();
     b.switch_to_block(bb);
 
-    let mem0 = b.add_block_arg(bb, Type::Mem);
+    let mem0 = b.add_block_arg(bb, Type::Mem, None);
     let s = b.param(0, struct_ty, None, Origin::synthetic());
     let field0 = b.extract_value(
         s.into(),
@@ -1870,7 +1881,7 @@ fn test_insertvalue_basic() {
     let bb = b.create_block();
     b.switch_to_block(bb);
 
-    let mem0 = b.add_block_arg(bb, Type::Mem);
+    let mem0 = b.add_block_arg(bb, Type::Mem, None);
     let s = b.param(0, struct_ty.clone(), None, Origin::synthetic());
     let val = b.param(1, i64_type, None, Origin::synthetic());
     let result = b.insert_value(s.into(), val.into(), vec![0], None, Origin::synthetic());
@@ -1906,7 +1917,7 @@ fn test_extractvalue_array() {
     let bb = b.create_block();
     b.switch_to_block(bb);
 
-    let mem0 = b.add_block_arg(bb, Type::Mem);
+    let mem0 = b.add_block_arg(bb, Type::Mem, None);
     let arr = b.param(0, array_ty, None, Origin::synthetic());
     let elem = b.extract_value(
         arr.into(),
@@ -1944,7 +1955,7 @@ fn test_insertvalue_array() {
     let bb = b.create_block();
     b.switch_to_block(bb);
 
-    let mem0 = b.add_block_arg(bb, Type::Mem);
+    let mem0 = b.add_block_arg(bb, Type::Mem, None);
     let arr = b.param(0, array_ty.clone(), None, Origin::synthetic());
     let val = b.param(1, i64_type, None, Origin::synthetic());
     let result = b.insert_value(arr.into(), val.into(), vec![3], None, Origin::synthetic());
@@ -1961,13 +1972,17 @@ fn test_dontcare_annotation_display() {
     let mut st = SymbolTable::new();
     let name = st.intern("test_dc");
     let i32_dc = Type::Int;
+    let dc_ann = Some(Annotation::Int(IntAnnotation {
+        bit_width: 32,
+        signedness: IntSignedness::DontCare,
+    }));
     let mut func = Function::new(
         name,
         vec![i32_dc.clone()],
-        vec![],
+        vec![dc_ann],
         vec![],
         Some(i32_dc.clone()),
-        None,
+        dc_ann,
     );
     let mut b = Builder::new(&mut func);
 
@@ -1975,8 +1990,8 @@ fn test_dontcare_annotation_display() {
     b.enter_region(root);
     let bb = b.create_block();
     b.switch_to_block(bb);
-    let mem0 = b.add_block_arg(bb, Type::Mem);
-    let a = b.param(0, i32_dc, None, Origin::synthetic());
+    let mem0 = b.add_block_arg(bb, Type::Mem, None);
+    let a = b.param(0, i32_dc, dc_ann, Origin::synthetic());
     b.ret(Some(a.into()), mem0.into(), Origin::synthetic());
     b.exit_region();
 
@@ -1992,13 +2007,17 @@ fn verify_detects_dontcare_zero() {
     let mut st = SymbolTable::new();
     let name = st.intern("bad_dc");
     let i0_type = Type::Int;
+    let zero_ann = Some(Annotation::Int(IntAnnotation {
+        bit_width: 0,
+        signedness: IntSignedness::DontCare,
+    }));
     let mut func = Function::new(
         name,
         vec![i0_type.clone()],
-        vec![],
+        vec![zero_ann],
         vec![],
         Some(i0_type.clone()),
-        None,
+        zero_ann,
     );
     let mut b = Builder::new(&mut func);
 
@@ -2006,8 +2025,8 @@ fn verify_detects_dontcare_zero() {
     b.enter_region(root);
     let bb = b.create_block();
     b.switch_to_block(bb);
-    let mem0 = b.add_block_arg(bb, Type::Mem);
-    let a = b.param(0, i0_type, None, Origin::synthetic());
+    let mem0 = b.add_block_arg(bb, Type::Mem, None);
+    let a = b.param(0, i0_type, zero_ann, Origin::synthetic());
     b.ret(Some(a.into()), mem0.into(), Origin::synthetic());
     b.exit_region();
 
@@ -2042,7 +2061,7 @@ fn mem_copy_builder_and_display() {
     let bb = b.create_block();
     b.switch_to_block(bb);
 
-    let mem0 = b.add_block_arg(bb, Type::Mem);
+    let mem0 = b.add_block_arg(bb, Type::Mem, None);
     let dst = b.param(0, Type::Ptr(0), None, Origin::synthetic());
     let src = b.param(1, Type::Ptr(0), None, Origin::synthetic());
     let count = b.param(2, i64_type, None, Origin::synthetic());
@@ -2086,7 +2105,7 @@ fn mem_move_builder_and_display() {
     let bb = b.create_block();
     b.switch_to_block(bb);
 
-    let mem0 = b.add_block_arg(bb, Type::Mem);
+    let mem0 = b.add_block_arg(bb, Type::Mem, None);
     let dst = b.param(0, Type::Ptr(0), None, Origin::synthetic());
     let src = b.param(1, Type::Ptr(0), None, Origin::synthetic());
     let count = b.param(2, i64_type, None, Origin::synthetic());
@@ -2131,7 +2150,7 @@ fn mem_set_builder_and_display() {
     let bb = b.create_block();
     b.switch_to_block(bb);
 
-    let mem0 = b.add_block_arg(bb, Type::Mem);
+    let mem0 = b.add_block_arg(bb, Type::Mem, None);
     let dst = b.param(0, Type::Ptr(0), None, Origin::synthetic());
     let val = b.param(1, i8_type, None, Origin::synthetic());
     let count = b.param(2, i64_type, None, Origin::synthetic());

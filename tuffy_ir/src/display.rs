@@ -788,8 +788,8 @@ fn fmt_block_header(func: &Function, bref: BlockRef, ctx: &DisplayCtx) -> String
         let args: Vec<String> = (0..bb.arg_count)
             .map(|i| {
                 let vref = ValueRef::block_arg(bb.arg_start + i);
-                let ty = &func.block_args[(bb.arg_start + i) as usize].ty;
-                format!("{}: {}", ctx.fmt_val(vref), fmt_type(ty))
+                let ba = &func.block_args[(bb.arg_start + i) as usize];
+                ctx.fmt_val_typed(vref, &ba.ty, &ba.annotation)
             })
             .collect();
         format!("bb{}({}):", bref.index(), args.join(", "))
