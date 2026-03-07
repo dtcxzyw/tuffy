@@ -79,7 +79,7 @@ These return two values: the wrapped result and a boolean overflow flag.
 | MIR BinOp | Tuffy IR (Integer) | Tuffy IR (Float) |
 |-----------|-------------------|------------------|
 | `Eq` | `icmp.eq` | `fcmp.oeq` |
-| `Ne` | `icmp.ne` | `fcmp.one` |
+| `Ne` | `icmp.ne` | `fcmp.une` |
 | `Lt` | `icmp.lt` | `fcmp.olt` |
 | `Le` | `icmp.le` | `fcmp.ole` |
 | `Gt` | `icmp.gt` | `fcmp.ogt` |

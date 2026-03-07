@@ -1,8 +1,8 @@
 # Fix MIR-to-IR Translation Errors
 
-- Status: Draft
+- Status: Completed
 - Created: 2026-03-06
-- Completed: N/A
+- Completed: 2026-03-07
 - Parent: N/A
 
 ## Description
