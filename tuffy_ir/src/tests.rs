@@ -4,7 +4,9 @@ use crate::builder::Builder;
 use crate::function::{Function, RegionKind};
 use crate::instruction::{AtomicRmwOp, ICmpOp, Instruction, Op, Origin};
 use crate::module::{Module, SymbolTable};
-use crate::types::{FloatType, FpRewriteFlags, IntAnnotation, IntSignedness, MemoryOrdering, Type};
+use crate::types::{
+    Annotation, FloatType, FpRewriteFlags, IntAnnotation, IntSignedness, MemoryOrdering, Type,
+};
 
 const I64: IntAnnotation = IntAnnotation {
     bit_width: 64,
@@ -87,13 +89,17 @@ fn display_add_function() {
     let mut st = SymbolTable::new();
     let name = st.intern("add");
     let i64_type = Type::Int;
+    let s64_ann = Some(Annotation::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    }));
     let mut func = Function::new(
         name,
         vec![i64_type.clone(), i64_type.clone()],
-        vec![],
+        vec![s64_ann, s64_ann],
         vec![],
         Some(i64_type.clone()),
-        None,
+        s64_ann,
     );
     let mut builder = Builder::new(&mut func);
 
@@ -103,9 +109,17 @@ fn display_add_function() {
     builder.switch_to_block(entry);
 
     let mem0 = builder.add_block_arg(entry, Type::Mem);
-    let a = builder.param(0, i64_type.clone(), None, Origin::synthetic());
-    let b = builder.param(1, i64_type, None, Origin::synthetic());
-    let sum = builder.add(a.into(), b.into(), I64, Origin::synthetic());
+    let a = builder.param(0, i64_type.clone(), s64_ann, Origin::synthetic());
+    let b = builder.param(1, i64_type, s64_ann, Origin::synthetic());
+    let sum = builder.add(
+        a.into(),
+        b.into(),
+        IntAnnotation {
+            bit_width: 64,
+            signedness: IntSignedness::Signed,
+        },
+        Origin::synthetic(),
+    );
     builder.ret(Some(sum.into()), mem0.into(), Origin::synthetic());
     builder.exit_region();
 
@@ -129,13 +143,17 @@ fn display_named_params() {
     let a_sym = st.intern("a");
     let b_sym = st.intern("b");
     let i64_type = Type::Int;
+    let s64_ann = Some(Annotation::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    }));
     let mut func = Function::new(
         name,
         vec![i64_type.clone(), i64_type.clone()],
-        vec![],
+        vec![s64_ann, s64_ann],
         vec![Some(a_sym), Some(b_sym)],
         Some(i64_type.clone()),
-        None,
+        s64_ann,
     );
     let mut builder = Builder::new(&mut func);
 
@@ -145,9 +163,17 @@ fn display_named_params() {
     builder.switch_to_block(entry);
 
     let mem0 = builder.add_block_arg(entry, Type::Mem);
-    let a = builder.param(0, i64_type.clone(), None, Origin::synthetic());
-    let b = builder.param(1, i64_type, None, Origin::synthetic());
-    let sum = builder.add(a.into(), b.into(), I64, Origin::synthetic());
+    let a = builder.param(0, i64_type.clone(), s64_ann, Origin::synthetic());
+    let b = builder.param(1, i64_type, s64_ann, Origin::synthetic());
+    let sum = builder.add(
+        a.into(),
+        b.into(),
+        IntAnnotation {
+            bit_width: 64,
+            signedness: IntSignedness::Signed,
+        },
+        Origin::synthetic(),
+    );
     builder.ret(Some(sum.into()), mem0.into(), Origin::synthetic());
     builder.exit_region();
 

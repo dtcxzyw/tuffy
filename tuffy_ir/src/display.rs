@@ -35,22 +35,26 @@ struct DisplayCtx<'a> {
     next_value: u32,
     /// Optional symbol table for resolving SymbolId names.
     symbols: Option<&'a SymbolTable>,
+    /// Optional function reference for annotation comparison.
+    func: Option<&'a Function>,
 }
 
 impl<'a> DisplayCtx<'a> {
-    fn new() -> Self {
+    fn new(func: &'a Function) -> Self {
         Self {
             value_names: HashMap::new(),
             next_value: 0,
             symbols: None,
+            func: Some(func),
         }
     }
 
-    fn with_symbols(symbols: &'a SymbolTable) -> Self {
+    fn with_symbols(symbols: &'a SymbolTable, func: &'a Function) -> Self {
         Self {
             value_names: HashMap::new(),
             next_value: 0,
             symbols: Some(symbols),
+            func: Some(func),
         }
     }
 
@@ -84,7 +88,27 @@ impl<'a> DisplayCtx<'a> {
     /// Format an operand (value + optional use-side annotation).
     fn fmt_operand(&self, op: &Operand) -> String {
         match &op.annotation {
-            Some(a) => format!("v{}{}", self.name(op.value), fmt_annotation(a)),
+            Some(a) => {
+                // Check if annotation matches the instruction's result_annotation
+                let should_display = if let Some(func) = self.func {
+                    if !op.value.is_block_arg() {
+                        let inst_idx = op.value.index();
+                        let inst = func.inst(inst_idx);
+                        // Only display if different from instruction's annotation
+                        inst.result_annotation != Some(*a)
+                    } else {
+                        true // Block arg, display annotation
+                    }
+                } else {
+                    true // No function context, display annotation
+                };
+
+                if should_display {
+                    format!("v{}{}", self.name(op.value), fmt_annotation(a))
+                } else {
+                    format!("v{}", self.name(op.value))
+                }
+            }
             None => format!("v{}", self.name(op.value)),
         }
     }
@@ -890,7 +914,7 @@ fn write_function(f: &mut fmt::Formatter<'_>, func: &Function, ctx: &DisplayCtx)
 
 impl fmt::Display for Function {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut ctx = DisplayCtx::new();
+        let mut ctx = DisplayCtx::new(self);
         assign_values(self, self.root_region, &mut ctx);
         write_function(f, self, &ctx)
     }
@@ -904,7 +928,7 @@ pub struct FunctionDisplay<'a> {
 
 impl fmt::Display for FunctionDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut ctx = DisplayCtx::with_symbols(self.symbols);
+        let mut ctx = DisplayCtx::with_symbols(self.symbols, self.func);
         assign_values(self.func, self.func.root_region, &mut ctx);
         write_function(f, self.func, &ctx)
     }
@@ -975,7 +999,7 @@ impl fmt::Display for crate::module::Module {
                 writeln!(f)?;
                 writeln!(f)?;
             }
-            let mut ctx = DisplayCtx::with_symbols(&self.symbols);
+            let mut ctx = DisplayCtx::with_symbols(&self.symbols, func);
             assign_values(func, func.root_region, &mut ctx);
             write_function(f, func, &ctx)?;
         }
