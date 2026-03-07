@@ -1123,6 +1123,10 @@ fn encode_fp_binop(
         (FpBinOpKind::Mul, false) => (Code::Movss_xmm_xmmm32, Code::Mulss_xmm_xmmm32),
         (FpBinOpKind::Div, true) => (Code::Movsd_xmm_xmmm64, Code::Divsd_xmm_xmmm64),
         (FpBinOpKind::Div, false) => (Code::Movss_xmm_xmmm32, Code::Divss_xmm_xmmm32),
+        (FpBinOpKind::Min, true) => (Code::Movsd_xmm_xmmm64, Code::Minsd_xmm_xmmm64),
+        (FpBinOpKind::Min, false) => (Code::Movss_xmm_xmmm32, Code::Minss_xmm_xmmm32),
+        (FpBinOpKind::Max, true) => (Code::Movsd_xmm_xmmm64, Code::Maxsd_xmm_xmmm64),
+        (FpBinOpKind::Max, false) => (Code::Movss_xmm_xmmm32, Code::Maxss_xmm_xmmm32),
     };
 
     // movsd/movss dst, lhs

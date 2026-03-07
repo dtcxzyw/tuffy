@@ -285,4 +285,6 @@ pub enum FpBinOpKind {
     Sub,
     Mul,
     Div,
+    Min,
+    Max,
 }

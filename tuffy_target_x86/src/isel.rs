@@ -1717,6 +1717,70 @@ fn select_inst(
             });
             ctx.regs.assign(vref, gpr_dst);
         }
+        Op::FMinNum(lhs, rhs) => {
+            let l_gpr = ctx.ensure_in_reg(lhs.value)?;
+            let r_gpr = ctx.ensure_in_reg(rhs.value)?;
+            let double = !matches!(inst_ty, Type::Float(tuffy_ir::types::FloatType::F32));
+            let l_xmm = ctx.alloc.alloc_class(1);
+            let r_xmm = ctx.alloc.alloc_class(1);
+            let dst_xmm = ctx.alloc.alloc_class(1);
+            let gpr_dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::GprToXmm {
+                dst: l_xmm,
+                src: l_gpr,
+                double,
+            });
+            ctx.out.push(MInst::GprToXmm {
+                dst: r_xmm,
+                src: r_gpr,
+                double,
+            });
+            ctx.out.push(MInst::FpBinOp {
+                op: FpBinOpKind::Min,
+                dst: dst_xmm,
+                lhs: l_xmm,
+                rhs: r_xmm,
+                double,
+            });
+            ctx.out.push(MInst::MoveXmmToGpr {
+                dst: gpr_dst,
+                src: dst_xmm,
+                double,
+            });
+            ctx.regs.assign(vref, gpr_dst);
+        }
+        Op::FMaxNum(lhs, rhs) => {
+            let l_gpr = ctx.ensure_in_reg(lhs.value)?;
+            let r_gpr = ctx.ensure_in_reg(rhs.value)?;
+            let double = !matches!(inst_ty, Type::Float(tuffy_ir::types::FloatType::F32));
+            let l_xmm = ctx.alloc.alloc_class(1);
+            let r_xmm = ctx.alloc.alloc_class(1);
+            let dst_xmm = ctx.alloc.alloc_class(1);
+            let gpr_dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::GprToXmm {
+                dst: l_xmm,
+                src: l_gpr,
+                double,
+            });
+            ctx.out.push(MInst::GprToXmm {
+                dst: r_xmm,
+                src: r_gpr,
+                double,
+            });
+            ctx.out.push(MInst::FpBinOp {
+                op: FpBinOpKind::Max,
+                dst: dst_xmm,
+                lhs: l_xmm,
+                rhs: r_xmm,
+                double,
+            });
+            ctx.out.push(MInst::MoveXmmToGpr {
+                dst: gpr_dst,
+                src: dst_xmm,
+                double,
+            });
+            ctx.regs.assign(vref, gpr_dst);
+        }
         Op::FCmp(kind, lhs, rhs) => {
             let l_gpr = ctx.ensure_in_reg(lhs.value)?;
             let r_gpr = ctx.ensure_in_reg(rhs.value)?;
