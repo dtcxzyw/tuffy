@@ -25,9 +25,7 @@ use std::fmt;
 use crate::function::{CfgNode, Function, RegionKind};
 use crate::instruction::{AtomicRmwOp, FCmpOp, ICmpOp, Op, Operand};
 use crate::module::SymbolTable;
-use crate::types::{
-    Annotation, FloatType, FpRewriteFlags, MemoryOrdering, ParamAttr, Type, VectorType,
-};
+use crate::types::{Annotation, FloatType, FpRewriteFlags, MemoryOrdering, Type, VectorType};
 use crate::value::{BlockRef, RegionRef, ValueRef};
 
 /// Display context that tracks value numbering.
@@ -132,13 +130,6 @@ fn fmt_annotation(ann: &Annotation) -> String {
         Annotation::Signed(n) => format!(":s{n}"),
         Annotation::Unsigned(n) => format!(":u{n}"),
         Annotation::DontCare(n) => format!(":i{n}"),
-    }
-}
-
-fn fmt_param_attr(attr: ParamAttr) -> &'static str {
-    match attr {
-        ParamAttr::Sret => "sret ",
-        ParamAttr::Byval => "byval ",
     }
 }
 
@@ -846,22 +837,20 @@ fn write_function(f: &mut fmt::Formatter<'_>, func: &Function, ctx: &DisplayCtx)
         .params
         .iter()
         .zip(func.param_annotations.iter())
-        .zip(func.param_attributes.iter())
         .enumerate()
-        .map(|(i, ((ty, ann), attr))| {
+        .map(|(i, (ty, ann))| {
             let ty_s = fmt_type(ty);
             let ty_with_ann = match ann {
                 Some(a) => format!("{ty_s}{}", fmt_annotation(a)),
                 None => ty_s.to_string(),
             };
-            let attr_prefix = attr.map(fmt_param_attr).unwrap_or("");
             // Prepend %name if a parameter name is available
             let name = func.param_names.get(i).and_then(|n| *n);
             match (name, ctx.symbols) {
                 (Some(sym_id), Some(symbols)) => {
-                    format!("%{}: {attr_prefix}{ty_with_ann}", symbols.resolve(sym_id))
+                    format!("%{}: {ty_with_ann}", symbols.resolve(sym_id))
                 }
-                _ => format!("{attr_prefix}{ty_with_ann}"),
+                _ => ty_with_ann.to_string(),
             }
         })
         .collect();

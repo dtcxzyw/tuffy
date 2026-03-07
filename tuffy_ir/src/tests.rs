@@ -15,7 +15,6 @@ fn build_add_function() {
         vec![Type::Int, Type::Int],
         vec![],
         vec![],
-        vec![],
         Some(Type::Int),
         None,
     );
@@ -54,7 +53,6 @@ fn build_with_annotations() {
         name,
         vec![Type::Int, Type::Int],
         vec![s32, s32],
-        vec![],
         vec![],
         Some(Type::Int),
         s32,
@@ -100,7 +98,6 @@ fn display_add_function() {
         vec![Type::Int, Type::Int],
         vec![],
         vec![],
-        vec![],
         Some(Type::Int),
         None,
     );
@@ -141,7 +138,6 @@ fn display_named_params() {
         name,
         vec![Type::Int, Type::Int],
         vec![],
-        vec![],
         vec![Some(a_sym), Some(b_sym)],
         Some(Type::Int),
         None,
@@ -180,7 +176,6 @@ fn display_multi_block_branch() {
     let mut func = Function::new(
         name,
         vec![Type::Int, Type::Int],
-        vec![],
         vec![],
         vec![],
         Some(Type::Int),
@@ -232,15 +227,7 @@ fn display_multi_block_branch() {
 fn display_nested_loop_region() {
     let mut st = SymbolTable::new();
     let name = st.intern("factorial");
-    let mut func = Function::new(
-        name,
-        vec![Type::Int],
-        vec![],
-        vec![],
-        vec![],
-        Some(Type::Int),
-        None,
-    );
+    let mut func = Function::new(name, vec![Type::Int], vec![], vec![], Some(Type::Int), None);
     let mut builder = Builder::new(&mut func);
 
     let root = builder.create_region(RegionKind::Function);
@@ -319,7 +306,6 @@ fn build_bitwise_ops() {
         vec![Type::Int, Type::Int],
         vec![],
         vec![],
-        vec![],
         Some(Type::Int),
         None,
     );
@@ -352,7 +338,6 @@ fn display_shift_ops() {
     let mut func = Function::new(
         name,
         vec![Type::Int, Type::Int],
-        vec![],
         vec![],
         vec![],
         Some(Type::Int),
@@ -394,7 +379,6 @@ fn display_division_ops() {
     let mut func = Function::new(
         name,
         vec![Type::Int, Type::Int],
-        vec![],
         vec![],
         vec![],
         Some(Type::Int),
@@ -440,7 +424,6 @@ fn build_ptradd() {
         vec![Type::Ptr(0), Type::Int],
         vec![],
         vec![],
-        vec![],
         Some(Type::Ptr(0)),
         None,
     );
@@ -470,7 +453,6 @@ fn display_pointer_ops() {
     let mut func = Function::new(
         name,
         vec![Type::Ptr(0), Type::Ptr(0), Type::Int],
-        vec![],
         vec![],
         vec![],
         Some(Type::Int),
@@ -521,7 +503,6 @@ fn build_float_binary_ops() {
     let mut func = Function::new(
         name,
         vec![f32_ty.clone(), f32_ty.clone()],
-        vec![],
         vec![],
         vec![],
         Some(f32_ty.clone()),
@@ -591,7 +572,6 @@ fn display_float_ops() {
     let mut func = Function::new(
         name,
         vec![f64_ty.clone(), f64_ty.clone()],
-        vec![],
         vec![],
         vec![],
         Some(f64_ty.clone()),
@@ -668,7 +648,6 @@ fn build_atomic_ops() {
     let mut func = Function::new(
         name,
         vec![Type::Ptr(0), Type::Int],
-        vec![],
         vec![],
         vec![],
         Some(Type::Int),
@@ -748,7 +727,6 @@ fn display_atomic_ops() {
         vec![Type::Ptr(0), Type::Int],
         vec![],
         vec![],
-        vec![],
         Some(Type::Int),
         None,
     );
@@ -825,7 +803,6 @@ fn build_select_and_bool_to_int() {
         vec![Type::Int, Type::Int],
         vec![],
         vec![],
-        vec![],
         Some(Type::Int),
         None,
     );
@@ -870,7 +847,6 @@ fn display_select_and_bool_to_int() {
     let mut func = Function::new(
         name,
         vec![Type::Int, Type::Int],
-        vec![],
         vec![],
         vec![],
         Some(Type::Int),
@@ -938,7 +914,6 @@ fn build_symbol_addr() {
         vec![Type::Int],
         vec![],
         vec![],
-        vec![],
         Some(Type::Ptr(0)),
         None,
     );
@@ -980,7 +955,7 @@ fn display_symbol_addr_without_symbols() {
     let sym = st.intern("puts");
     let test_sym = st.intern("test");
 
-    let mut func = Function::new(test_sym, vec![], vec![], vec![], vec![], None, None);
+    let mut func = Function::new(test_sym, vec![], vec![], vec![], None, None);
     let mut builder = Builder::new(&mut func);
 
     let root = builder.create_region(RegionKind::Function);
@@ -1025,7 +1000,6 @@ fn build_valid_add_module() -> Module {
         vec![Type::Int, Type::Int],
         vec![],
         vec![],
-        vec![],
         Some(Type::Int),
         None,
     );
@@ -1058,7 +1032,6 @@ fn verify_valid_multi_block() {
     let mut func = Function::new(
         name,
         vec![Type::Int, Type::Int],
-        vec![],
         vec![],
         vec![],
         Some(Type::Int),
@@ -1094,15 +1067,7 @@ fn verify_valid_multi_block() {
 fn verify_valid_loop_region() {
     let mut st = SymbolTable::new();
     let name = st.intern("factorial");
-    let mut func = Function::new(
-        name,
-        vec![Type::Int],
-        vec![],
-        vec![],
-        vec![],
-        Some(Type::Int),
-        None,
-    );
+    let mut func = Function::new(name, vec![Type::Int], vec![], vec![], Some(Type::Int), None);
     let mut b = Builder::new(&mut func);
 
     let root = b.create_region(RegionKind::Function);
@@ -1151,7 +1116,6 @@ fn verify_detects_wrong_arith_operand_type() {
         vec![Type::Int, Type::Int],
         vec![],
         vec![],
-        vec![],
         Some(Type::Int),
         None,
     );
@@ -1185,15 +1149,7 @@ fn verify_detects_wrong_arith_operand_type() {
 fn verify_detects_missing_terminator() {
     let mut st = SymbolTable::new();
     let name = st.intern("no_term");
-    let mut func = Function::new(
-        name,
-        vec![Type::Int],
-        vec![],
-        vec![],
-        vec![],
-        Some(Type::Int),
-        None,
-    );
+    let mut func = Function::new(name, vec![Type::Int], vec![], vec![], Some(Type::Int), None);
     let mut b = Builder::new(&mut func);
     let root = b.create_region(RegionKind::Function);
     b.enter_region(root);
@@ -1218,15 +1174,7 @@ fn verify_detects_missing_terminator() {
 fn verify_detects_load_non_ptr() {
     let mut st = SymbolTable::new();
     let name = st.intern("bad_load");
-    let mut func = Function::new(
-        name,
-        vec![Type::Int],
-        vec![],
-        vec![],
-        vec![],
-        Some(Type::Int),
-        None,
-    );
+    let mut func = Function::new(name, vec![Type::Int], vec![], vec![], Some(Type::Int), None);
     let mut b = Builder::new(&mut func);
     let root = b.create_region(RegionKind::Function);
     b.enter_region(root);
@@ -1262,15 +1210,7 @@ fn verify_detects_load_non_ptr() {
 fn verify_detects_branch_arg_count_mismatch() {
     let mut st = SymbolTable::new();
     let name = st.intern("bad_br");
-    let mut func = Function::new(
-        name,
-        vec![Type::Int],
-        vec![],
-        vec![],
-        vec![],
-        Some(Type::Int),
-        None,
-    );
+    let mut func = Function::new(name, vec![Type::Int], vec![], vec![], Some(Type::Int), None);
     let mut b = Builder::new(&mut func);
     let root = b.create_region(RegionKind::Function);
     b.enter_region(root);
@@ -1309,7 +1249,6 @@ fn verify_detects_annotation_on_non_int() {
         vec![Type::Ptr(0)],
         vec![Some(Annotation::Signed(32))],
         vec![],
-        vec![],
         Some(Type::Ptr(0)),
         None,
     );
@@ -1338,8 +1277,8 @@ fn verify_detects_annotation_on_non_int() {
 fn verify_detects_duplicate_function_names() {
     let mut module = Module::new("test");
     let name = module.intern("dup");
-    let func1 = Function::new(name, vec![], vec![], vec![], vec![], None, None);
-    let func2 = Function::new(name, vec![], vec![], vec![], vec![], None, None);
+    let func1 = Function::new(name, vec![], vec![], vec![], None, None);
+    let func2 = Function::new(name, vec![], vec![], vec![], None, None);
     module.add_function(func1);
     module.add_function(func2);
 
@@ -1361,7 +1300,6 @@ fn display_min_max() {
     let mut func = Function::new(
         name,
         vec![Type::Int, Type::Int],
-        vec![],
         vec![],
         vec![],
         Some(Type::Int),
@@ -1418,7 +1356,6 @@ fn memssa_store_load_threading() {
         vec![Type::Int, Type::Ptr(0)],
         vec![],
         vec![],
-        vec![],
         Some(Type::Int),
         None,
     );
@@ -1466,7 +1403,6 @@ fn memssa_multi_result_load_atomic() {
         vec![Type::Ptr(0)],
         vec![],
         vec![],
-        vec![],
         Some(Type::Int),
         None,
     );
@@ -1506,7 +1442,6 @@ fn memssa_block_arg_phi() {
     let mut func = Function::new(
         name,
         vec![Type::Bool, Type::Int, Type::Ptr(0)],
-        vec![],
         vec![],
         vec![],
         Some(Type::Int),
@@ -1567,7 +1502,6 @@ fn memssa_display_store_load() {
         vec![Type::Int, Type::Ptr(0)],
         vec![],
         vec![],
-        vec![],
         Some(Type::Int),
         None,
     );
@@ -1616,7 +1550,6 @@ fn build_merge() {
         vec![Type::Int, Type::Int],
         vec![],
         vec![],
-        vec![],
         Some(Type::Int),
         None,
     );
@@ -1645,15 +1578,7 @@ fn build_merge() {
 fn build_split() {
     let mut st = SymbolTable::new();
     let name = st.intern("split_test");
-    let mut func = Function::new(
-        name,
-        vec![Type::Int],
-        vec![],
-        vec![],
-        vec![],
-        Some(Type::Int),
-        None,
-    );
+    let mut func = Function::new(name, vec![Type::Int], vec![], vec![], Some(Type::Int), None);
     let mut b = Builder::new(&mut func);
 
     let root = b.create_region(RegionKind::Function);
@@ -1687,7 +1612,6 @@ fn build_clmul() {
     let mut func = Function::new(
         name,
         vec![Type::Int, Type::Int],
-        vec![],
         vec![],
         vec![],
         Some(Type::Int),
@@ -1738,7 +1662,6 @@ fn test_extractvalue_basic() {
         vec![struct_ty.clone()],
         vec![],
         vec![],
-        vec![],
         Some(Type::Int),
         None,
     );
@@ -1771,7 +1694,6 @@ fn test_insertvalue_basic() {
     let mut func = Function::new(
         name,
         vec![struct_ty.clone(), Type::Int],
-        vec![],
         vec![],
         vec![],
         Some(struct_ty.clone()),
@@ -1809,7 +1731,6 @@ fn test_extractvalue_array() {
         vec![array_ty.clone()],
         vec![],
         vec![],
-        vec![],
         Some(Type::Int),
         None,
     );
@@ -1839,7 +1760,6 @@ fn test_insertvalue_array() {
     let mut func = Function::new(
         name,
         vec![array_ty.clone(), Type::Int],
-        vec![],
         vec![],
         vec![],
         Some(array_ty.clone()),
@@ -1874,7 +1794,6 @@ fn test_dontcare_annotation_display() {
         vec![Type::Int],
         vec![dc32],
         vec![],
-        vec![],
         Some(Type::Int),
         dc32,
     );
@@ -1902,7 +1821,6 @@ fn verify_detects_dontcare_zero() {
         name,
         vec![Type::Int],
         vec![dc0],
-        vec![],
         vec![],
         Some(Type::Int),
         None,
@@ -1936,7 +1854,6 @@ fn mem_copy_builder_and_display() {
     let mut func = Function::new(
         name,
         vec![Type::Ptr(0), Type::Ptr(0), Type::Int],
-        vec![],
         vec![],
         vec![],
         None,
@@ -1987,7 +1904,6 @@ fn mem_move_builder_and_display() {
         vec![Type::Ptr(0), Type::Ptr(0), Type::Int],
         vec![],
         vec![],
-        vec![],
         None,
         None,
     );
@@ -2034,7 +1950,6 @@ fn mem_set_builder_and_display() {
     let mut func = Function::new(
         name,
         vec![Type::Ptr(0), Type::Int, Type::Int],
-        vec![],
         vec![],
         vec![],
         None,

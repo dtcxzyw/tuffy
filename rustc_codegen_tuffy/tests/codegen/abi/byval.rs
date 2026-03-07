@@ -28,36 +28,39 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @use_large(%x: byval ptr) -> int:u64 {
+// CHECK: func @use_large(%x: ptr) -> int:u64 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1 = param %x
-// CHECK:     v2 = load.8 v1, v0
-// CHECK:     v3 = iconst 8
-// CHECK:     v4 = ptradd v1, v3
-// CHECK:     v5 = load.8 v4, v0
-// CHECK:     v6 = uadd_overflow.64 v2:u64, v5:u64
-// CHECK:     v8 = bool_to_int v7
-// CHECK:     v9 = iconst 0
-// CHECK:     v10 = icmp.eq v8, v9
-// CHECK:     brif v10, bb1(v0), bb3(v0)
+// CHECK:     v2 = stack_slot 24
+// CHECK:     v3 = iconst 24
+// CHECK:     v4 = memcopy v2, v1, v3, align=8, v0
+// CHECK:     v5 = load.8 v2, v4
+// CHECK:     v6 = iconst 8
+// CHECK:     v7 = ptradd v2, v6
+// CHECK:     v8 = load.8 v7, v4
+// CHECK:     v9 = uadd_overflow.64 v5:u64, v8:u64
+// CHECK:     v11 = bool_to_int v10
+// CHECK:     v12 = iconst 0
+// CHECK:     v13 = icmp.eq v11, v12
+// CHECK:     brif v13, bb1(v4), bb3(v4)
 // CHECK:
-// CHECK:   bb1(v12: mem):
-// CHECK:     v13 = iconst 16
-// CHECK:     v14 = ptradd v1, v13
-// CHECK:     v15 = load.8 v14, v12
-// CHECK:     v16 = uadd_overflow.64 v6:u64, v15:u64
-// CHECK:     v18 = bool_to_int v17
-// CHECK:     v19 = iconst 0
-// CHECK:     v20 = icmp.eq v18, v19
-// CHECK:     brif v20, bb2(v12), bb4(v12)
+// CHECK:   bb1(v15: mem):
+// CHECK:     v16 = iconst 16
+// CHECK:     v17 = ptradd v2, v16
+// CHECK:     v18 = load.8 v17, v15
+// CHECK:     v19 = uadd_overflow.64 v9:u64, v18:u64
+// CHECK:     v21 = bool_to_int v20
+// CHECK:     v22 = iconst 0
+// CHECK:     v23 = icmp.eq v21, v22
+// CHECK:     brif v23, bb2(v15), bb4(v15)
 // CHECK:
-// CHECK:   bb2(v22: mem):
-// CHECK:     ret v16, v22
+// CHECK:   bb2(v25: mem):
+// CHECK:     ret v19, v25
 // CHECK:
-// CHECK:   bb3(v24: mem):
+// CHECK:   bb3(v27: mem):
 // CHECK:     trap
 // CHECK:
-// CHECK:   bb4(v26: mem):
+// CHECK:   bb4(v29: mem):
 // CHECK:     trap
 // CHECK: }
 // CHECK:

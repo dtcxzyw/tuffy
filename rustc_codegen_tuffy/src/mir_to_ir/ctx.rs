@@ -6,7 +6,7 @@ use tuffy_codegen::AbiMetadataBox;
 use tuffy_ir::builder::Builder;
 use tuffy_ir::instruction::Origin;
 use tuffy_ir::module::{SymbolId, SymbolTable};
-use tuffy_ir::types::{ParamAttr, Type};
+use tuffy_ir::types::Type;
 use tuffy_ir::value::{BlockRef, ValueRef};
 
 use super::StaticDataVec;
@@ -329,28 +329,36 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 self.fat_locals.set(local, metadata);
             } else {
                 let ir_ty_val = ir_ty.expect("checked above");
+                let sz = type_size(self.tcx, ty).unwrap_or(0);
+                let is_large = sz > 16;
 
-                // Check if this parameter has the byval attribute (>16 byte parameters).
-                // The frontend already determined ABI requirements and set the attribute.
-                let param_attr = self.builder.param_attributes().get(param_idx as usize).copied().flatten();
-                let is_indirect = param_attr == Some(ParamAttr::Byval);
-                let param_ty = if is_indirect { Type::Ptr(0) } else { ir_ty_val };
+                if is_large {
+                    // Large parameter: receive pointer from caller
+                    let ptr = self.builder.param(param_idx, Type::Ptr(0), None, Origin::synthetic());
 
-                let ann = if is_indirect {
-                    None
-                } else {
-                    translate_annotation(ty)
-                };
+                    // Allocate local stack space
+                    let local_slot = self.builder.stack_slot(sz as u32, Origin::synthetic());
 
-                let val = self
-                    .builder
-                    .param(param_idx, param_ty, ann, Origin::synthetic());
-                self.locals.set(local, val);
+                    // Copy data from caller's pointer to local
+                    let size_val = self.builder.iconst(sz as i64, Origin::synthetic());
+                    let align = 8; // TODO: compute proper alignment
+                    let new_mem = self.builder.mem_copy(
+                        local_slot.into(),
+                        ptr.into(),
+                        size_val.into(),
+                        align,
+                        self.current_mem.into(),
+                        Origin::synthetic(),
+                    );
+                    self.current_mem = new_mem;
 
-                // Mark byval parameters as stack locals so element access
-                // knows to dereference the pointer.
-                if is_indirect {
+                    // Use the local slot, not the parameter pointer
+                    self.locals.set(local, local_slot);
                     self.stack_locals.mark(local);
+                } else {
+                    // Small parameter: passed directly
+                    let val = self.builder.param(param_idx, ir_ty_val, translate_annotation(ty), Origin::synthetic());
+                    self.locals.set(local, val);
                 }
 
                 param_idx += 1;

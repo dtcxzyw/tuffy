@@ -20,7 +20,6 @@ fn build_add_func() -> (Function, SymbolTable) {
         vec![Type::Int, Type::Int],
         vec![s32, s32],
         vec![],
-        vec![],
         Some(Type::Int),
         s32,
     );

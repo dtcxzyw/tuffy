@@ -14,12 +14,29 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     pub(super) fn translate_terminator(&mut self, term: &mir::Terminator<'tcx>) {
         match &term.kind {
             TerminatorKind::Return => {
-                // SRET: the return data was written directly through the SRET
-                // pointer. Just return the pointer itself (goes in RAX).
+                // SRET: copy the constructed return value from local stack slot
+                // to the SRET pointer, then return the pointer.
                 if let Some(sret) = self.sret_ptr {
+                    let ret_local = mir::Local::from_usize(0);
+                    let local_slot = self.locals.get(ret_local).expect("sret local must be set");
+                    let ret_mir_ty = self.monomorphize(self.mir.local_decls[ret_local].ty);
+                    let ret_size = type_size(self.tcx, ret_mir_ty).unwrap_or(0);
+
+                    // Copy from local slot to SRET pointer
+                    let size_val = self.builder.iconst(ret_size as i64, Origin::synthetic());
+                    let align = 8; // TODO: compute proper alignment
+                    let new_mem = self.builder.mem_copy(
+                        sret.into(),
+                        local_slot.into(),
+                        size_val.into(),
+                        align,
+                        self.current_mem.into(),
+                        Origin::synthetic(),
+                    );
+
                     self.builder.ret(
                         Some(sret.into()),
-                        self.current_mem.into(),
+                        new_mem.into(),
                         Origin::synthetic(),
                     );
                     return;

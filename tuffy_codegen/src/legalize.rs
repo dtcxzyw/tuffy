@@ -303,15 +303,7 @@ fn build_new_func<M: AbiMetadata + Clone>(
     };
 
     let wide = collect_wide_values(old, old_meta, legality);
-    let out = Function::new(
-        old.name,
-        params,
-        param_anns,
-        vec![],
-        param_names,
-        ret_ty,
-        ret_ann,
-    );
+    let out = Function::new(old.name, params, param_anns, param_names, ret_ty, ret_ann);
     let state = State {
         meta: M::default(),
         old_meta: old_meta.clone(),
