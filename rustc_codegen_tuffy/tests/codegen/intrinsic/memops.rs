@@ -1686,7 +1686,7 @@
 // CHECK:     v6 = stack_slot 16
 // CHECK:     v7 = ptrtoaddr v1
 // CHECK:     v8 = ptrtoaddr v2
-// CHECK:     v9 = umul_overflow.64 v3:u64, v4:u64
+// CHECK:     v9, v10 = umul_overflow.64 v3:u64, v4:u64
 // CHECK:     v11 = bool_to_int v10
 // CHECK:     v12 = iconst 255
 // CHECK:     v13 = and v11, v12
