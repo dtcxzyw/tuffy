@@ -1,7 +1,7 @@
 use rustc_middle::mir::{self, BinOp, CastKind, Operand, Place, PlaceElem, Rvalue};
 use rustc_middle::ty::{self, Instance, TypeVisitableExt};
 use tuffy_ir::instruction::{FCmpOp, ICmpOp, Operand as IrOperand, Origin};
-use tuffy_ir::types::{Annotation, FloatType, FpRewriteFlags, IntAnnotation, IntSignedness, Type};
+use tuffy_ir::types::{FloatType, FpRewriteFlags, IntAnnotation, IntSignedness, Type};
 use tuffy_ir::value::ValueRef;
 
 use super::constant::*;
@@ -2369,7 +2369,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         ));
                     }
                 }
-                let neg_ann = op_ty.and_then(translate_annotation);
+                let _neg_ann = op_ty.and_then(translate_annotation);
                 // For large integral types (>8 bytes, e.g. i128) stored in memory,
                 // translate_place_to_value returns a Ptr to the stack slot.
                 // Load the value before negating.
@@ -2405,7 +2405,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let v = self.translate_operand(operand)?;
                 let mir_ty = operand_ty_projected(operand, self.mir, self.tcx)
                     .map(|ty| self.monomorphize(ty));
-                let not_ann = mir_ty.and_then(|t| translate_annotation(t));
+                let _not_ann = mir_ty.and_then(|t| translate_annotation(t));
                 let is_bool = mir_ty.is_some_and(|t| t.is_bool());
                 if is_bool {
                     // Boolean NOT: XOR 1.

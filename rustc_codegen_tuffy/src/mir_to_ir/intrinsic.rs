@@ -8,7 +8,7 @@ use tuffy_ir::types::{Annotation, FloatType, IntAnnotation, IntSignedness, Memor
 use tuffy_ir::value::ValueRef;
 
 use super::ctx::TranslationCtx;
-use super::types::{default_int_type, type_align, type_size, IntAnn};
+use super::types::{default_int_type, type_align, type_size};
 
 const I64: IntAnnotation = IntAnnotation {
     bit_width: 64,
@@ -951,7 +951,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         self.builder
                             .xor(a.into(), all_ones.into(), I64, Origin::synthetic())
                     } else if name.starts_with("atomic_umax") {
-                        let bits = (elem_size * 8) as u32;
+                        let _bits = (elem_size * 8) as u32;
                         let gt = self.builder.icmp(
                             ICmpOp::Gt,
                             old.into(),
@@ -966,7 +966,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             Origin::synthetic(),
                         )
                     } else if name.starts_with("atomic_umin") {
-                        let bits = (elem_size * 8) as u32;
+                        let _bits = (elem_size * 8) as u32;
                         let lt = self.builder.icmp(
                             ICmpOp::Lt,
                             old.into(),
@@ -981,7 +981,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             Origin::synthetic(),
                         )
                     } else if name.starts_with("atomic_max") {
-                        let bits = (elem_size * 8) as u32;
+                        let _bits = (elem_size * 8) as u32;
                         let gt = self.builder.icmp(
                             ICmpOp::Gt,
                             old.into(),
@@ -997,7 +997,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         )
                     } else {
                         // atomic_min
-                        let bits = (elem_size * 8) as u32;
+                        let _bits = (elem_size * 8) as u32;
                         let lt = self.builder.icmp(
                             ICmpOp::Lt,
                             old.into(),

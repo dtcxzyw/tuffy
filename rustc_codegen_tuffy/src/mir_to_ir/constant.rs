@@ -1,12 +1,12 @@
 use super::StaticDataVec;
-use super::types::{int_bitwidth, is_signed_int, IntAnn};
+use super::types::{int_bitwidth, is_signed_int};
 use num_bigint::BigInt;
 use rustc_middle::mir;
 use rustc_middle::ty::{self, Instance, TyCtxt};
 use tuffy_ir::builder::Builder;
-use tuffy_ir::instruction::{Operand as IrOperand, Origin};
+use tuffy_ir::instruction::Origin;
 use tuffy_ir::module::SymbolTable;
-use tuffy_ir::types::{Annotation, FloatType, IntAnnotation, IntSignedness, Type};
+use tuffy_ir::types::{FloatType, IntAnnotation, IntSignedness, Type};
 use tuffy_ir::value::ValueRef;
 
 const I64: IntAnnotation = IntAnnotation {

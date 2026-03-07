@@ -15,12 +15,6 @@ pub(super) enum IntAnn {
 }
 
 impl IntAnn {
-    pub(super) fn bit_width(&self) -> u32 {
-        match self {
-            IntAnn::Signed(n) | IntAnn::Unsigned(n) | IntAnn::DontCare(n) => *n,
-        }
-    }
-
     /// Convert from Annotation to IntAnn.
     pub(super) fn from_annotation(ann: &Annotation) -> Option<Self> {
         match ann {
@@ -158,14 +152,6 @@ pub(super) fn operand_ty_projected<'tcx>(
     match operand {
         Operand::Copy(place) | Operand::Move(place) => Some(place.ty(&mir.local_decls, tcx).ty),
         Operand::Constant(c) => Some(c.ty()),
-        _ => None,
-    }
-}
-
-/// Extract the place from Copy/Move operands.
-pub(super) fn operand_place<'tcx>(operand: &'tcx Operand<'tcx>) -> Option<&'tcx mir::Place<'tcx>> {
-    match operand {
-        Operand::Copy(place) | Operand::Move(place) => Some(place),
         _ => None,
     }
 }

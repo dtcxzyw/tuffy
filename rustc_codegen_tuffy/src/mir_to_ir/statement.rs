@@ -2,8 +2,8 @@ use super::ctx::TranslationCtx;
 use super::types::*;
 use rustc_middle::mir::{self, BinOp, CastKind, Operand, Place, Rvalue, StatementKind};
 use rustc_middle::ty;
-use tuffy_ir::instruction::{Operand as IrOperand, Origin};
-use tuffy_ir::types::{Annotation, IntAnnotation, IntSignedness, Type};
+use tuffy_ir::instruction::Origin;
+use tuffy_ir::types::{IntAnnotation, IntSignedness, Type};
 use tuffy_ir::value::ValueRef;
 
 const I64: IntAnnotation = IntAnnotation {
