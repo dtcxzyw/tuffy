@@ -110,6 +110,7 @@ fn fmt_type(ty: &Type) -> String {
             FloatType::F16 => "f16".to_string(),
             FloatType::F32 => "f32".to_string(),
             FloatType::F64 => "f64".to_string(),
+            FloatType::F128 => "f128".to_string(),
         },
         Type::Vec(vt) => match vt {
             VectorType::Fixed(w) => format!("vec<{w}>"),
@@ -189,6 +190,7 @@ fn fmt_float_type(ft: &FloatType) -> &'static str {
         FloatType::F64 => "f64",
         FloatType::F16 => "f16",
         FloatType::BF16 => "bf16",
+        FloatType::F128 => "f128",
     }
 }
 

@@ -17,6 +17,8 @@ pub enum FloatType {
     F32,
     /// IEEE 754 double precision.
     F64,
+    /// IEEE 754 quadruple precision.
+    F128,
 }
 
 /// Vector type parameterized by total bit-width.

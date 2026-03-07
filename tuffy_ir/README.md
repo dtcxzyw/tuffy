@@ -13,7 +13,7 @@ All types are defined in `types.rs`:
 - `Unit` — zero-sized type for Rust's `()`.
 - `Byte(n)` — raw memory data of `n` bytes with per-byte poison tracking.
 - `Ptr(as)` — pointer with address space.
-- `Float(ft)` — IEEE 754 floating point (`BF16`, `F16`, `F32`, `F64`).
+- `Float(ft)` — IEEE 754 floating point (`BF16`, `F16`, `F32`, `F64`, `F128`).
 - `Vec(vt)` — vector type parameterized by total bit-width (fixed or scalable).
 - `Mem` — abstract memory state token for MemSSA.
 
