@@ -6,10 +6,15 @@ use rustc_middle::ty::{self, TypeVisitableExt};
 use num_bigint::BigInt;
 use tuffy_ir::instruction::Operand as IrOperand;
 use tuffy_ir::instruction::{ICmpOp, Origin};
-use tuffy_ir::types::{Annotation, IntSignedness, Type};
+use tuffy_ir::types::{Annotation, IntAnnotation, IntSignedness, Type};
 
 use super::ctx::TranslationCtx;
 use super::types::*;
+
+const I64: IntAnnotation = IntAnnotation {
+    bit_width: 64,
+    signedness: IntSignedness::Unsigned,
+};
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     pub(super) fn translate_terminator(&mut self, term: &mir::Terminator<'tcx>) {
@@ -134,7 +139,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         // Coerce to match the declared return type.
                         let ret_ir_ty = translate_ty(self.tcx, ret_mir_ty);
                         let coerced = match (ret_ir_ty, self.builder.value_type(v).cloned()) {
-                            (Some(Type::Int(_)), Some(Type::Ptr(_)))
+                            (Some(Type::Int), Some(Type::Ptr(_)))
                                 if self.builder.is_memory_address(v) =>
                             {
                                 // v is a pointer to data (e.g. symbol_addr for an
@@ -152,12 +157,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 );
                                 loaded
                             }
-                            (Some(Type::Int(_)), _) => self.coerce_to_int(v),
+                            (Some(Type::Int), _) => self.coerce_to_int(v),
                             (Some(Type::Ptr(_)), _) => self.coerce_to_ptr(v),
-                            (Some(Type::Bool), Some(Type::Int(_))) => {
+                            (Some(Type::Bool), Some(Type::Int)) => {
                                 self.builder.int_to_bool(v.into(), Origin::synthetic())
                             }
-                            (Some(Type::Float(ft)), Some(Type::Int(_))) => {
+                            (Some(Type::Float(ft)), Some(Type::Int)) => {
                                 // Float value was carried as Int bits — reinterpret.
                                 self.builder.bitcast(
                                     v.into(),
@@ -510,7 +515,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 .iconst((1i64 << discr_bits) - 1, 64, IntSignedness::DontCare, Origin::synthetic());
             discr_val =
                 self.builder
-                    .and(discr_val.into(), mask_val.into(), None, Origin::synthetic());
+                    .and(discr_val.into(), mask_val.into(), I64, Origin::synthetic());
         }
 
         let all_targets: Vec<_> = targets.iter().collect();

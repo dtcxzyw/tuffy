@@ -199,7 +199,7 @@ impl<'a> FuncVerifier<'a> {
 
     fn expect_int(&mut self, op: &Operand, ctx: &str, loc: &Location) {
         if let Some(ty) = self.value_type(op.value)
-            && !matches!(ty, Type::Int(_))
+            && !matches!(ty, Type::Int)
         {
             self.result
                 .error(loc.clone(), format!("{ctx}: expected Int, got {ty:?}"));
@@ -229,11 +229,10 @@ impl<'a> FuncVerifier<'a> {
     }
 
     fn check_int_type(&mut self, ty: &Type, ctx: &str, loc: &Location) {
-        if let Type::Int(ann) = ty
-            && ann.bit_width == 0
-        {
+        // Int type validation - bit_width is now in result_annotation
+        if !matches!(ty, Type::Int) {
             self.result
-                .error(loc.clone(), format!("{ctx}: Int bit_width must be > 0"));
+                .error(loc.clone(), format!("{ctx}: expected Int type"));
         }
     }
 
@@ -305,7 +304,7 @@ impl<'a> FuncVerifier<'a> {
                 }
             }
             Annotation::Int(_) => {
-                if !matches!(ty, Type::Int(_)) {
+                if !matches!(ty, Type::Int) {
                     self.result.error(
                         loc.clone(),
                         format!("{ctx}: int annotation on non-Int type {ty:?}"),
@@ -372,7 +371,7 @@ impl FuncVerifier<'_> {
                 self.check_operand(b, &loc);
                 self.expect_int(a, "int arith lhs", &loc);
                 self.expect_int(b, "int arith rhs", &loc);
-                if !matches!(inst.ty, Type::Int(_)) {
+                if !matches!(inst.ty, Type::Int) {
                     self.result.error(
                         loc.clone(),
                         format!("int arith result must be Int, got {:?}", inst.ty),
@@ -384,7 +383,7 @@ impl FuncVerifier<'_> {
             Op::CountOnes(a) => {
                 self.check_operand(a, &loc);
                 self.expect_int(a, "count_ones", &loc);
-                if !matches!(inst.ty, Type::Int(_)) {
+                if !matches!(inst.ty, Type::Int) {
                     self.result.error(
                         loc,
                         format!("count_ones result must be Int, got {:?}", inst.ty),
@@ -399,7 +398,7 @@ impl FuncVerifier<'_> {
                     self.result
                         .error(loc.clone(), "count_leading_zeros bit width must be > 0");
                 }
-                if !matches!(inst.ty, Type::Int(_)) {
+                if !matches!(inst.ty, Type::Int) {
                     self.result.error(
                         loc,
                         format!("count_leading_zeros result must be Int, got {:?}", inst.ty),
@@ -410,7 +409,7 @@ impl FuncVerifier<'_> {
             Op::CountTrailingZeros(a) => {
                 self.check_operand(a, &loc);
                 self.expect_int(a, "count_trailing_zeros", &loc);
-                if !matches!(inst.ty, Type::Int(_)) {
+                if !matches!(inst.ty, Type::Int) {
                     self.result.error(
                         loc,
                         format!("count_trailing_zeros result must be Int, got {:?}", inst.ty),
@@ -425,7 +424,7 @@ impl FuncVerifier<'_> {
                     self.result
                         .error(loc.clone(), "bswap byte count must be > 0");
                 }
-                if !matches!(inst.ty, Type::Int(_)) {
+                if !matches!(inst.ty, Type::Int) {
                     self.result
                         .error(loc, format!("bswap result must be Int, got {:?}", inst.ty));
                 }
@@ -438,7 +437,7 @@ impl FuncVerifier<'_> {
                     self.result
                         .error(loc.clone(), "bit_reverse bit width must be > 0");
                 }
-                if !matches!(inst.ty, Type::Int(_)) {
+                if !matches!(inst.ty, Type::Int) {
                     self.result.error(
                         loc,
                         format!("bit_reverse result must be Int, got {:?}", inst.ty),
@@ -455,7 +454,7 @@ impl FuncVerifier<'_> {
                     self.result
                         .error(loc.clone(), "rotate bit width must be > 0");
                 }
-                if !matches!(inst.ty, Type::Int(_)) {
+                if !matches!(inst.ty, Type::Int) {
                     self.result
                         .error(loc, format!("rotate result must be Int, got {:?}", inst.ty));
                 }
@@ -473,7 +472,7 @@ impl FuncVerifier<'_> {
                     self.result
                         .error(loc.clone(), "saturating arith bit width must be > 0");
                 }
-                if !matches!(inst.ty, Type::Int(_)) {
+                if !matches!(inst.ty, Type::Int) {
                     self.result.error(
                         loc,
                         format!("saturating arith result must be Int, got {:?}", inst.ty),
@@ -495,7 +494,7 @@ impl FuncVerifier<'_> {
                     self.result
                         .error(loc.clone(), "overflow arith bit width must be > 0");
                 }
-                if !matches!(inst.ty, Type::Int(_)) {
+                if !matches!(inst.ty, Type::Int) {
                     self.result.error(
                         loc.clone(),
                         format!(
@@ -516,7 +515,7 @@ impl FuncVerifier<'_> {
             }
 
             Op::Const(_) => {
-                if !matches!(inst.ty, Type::Int(_)) {
+                if !matches!(inst.ty, Type::Int) {
                     self.result
                         .error(loc, format!("const result must be Int, got {:?}", inst.ty));
                 }
@@ -573,7 +572,7 @@ impl FuncVerifier<'_> {
             Op::BoolToInt(a) => {
                 self.check_operand(a, &loc);
                 self.expect_bool(a, "bool_to_int", &loc);
-                if !matches!(inst.ty, Type::Int(_)) {
+                if !matches!(inst.ty, Type::Int) {
                     self.result.error(
                         loc,
                         format!("bool_to_int result must be Int, got {:?}", inst.ty),
@@ -827,7 +826,7 @@ impl FuncVerifier<'_> {
                 self.check_operand(b, loc);
                 self.expect_ptr(a, "ptrdiff lhs", loc);
                 self.expect_ptr(b, "ptrdiff rhs", loc);
-                if !matches!(inst.ty, Type::Int(_)) {
+                if !matches!(inst.ty, Type::Int) {
                     self.result.error(
                         loc.clone(),
                         format!("ptrdiff result must be Int, got {:?}", inst.ty),
@@ -837,7 +836,7 @@ impl FuncVerifier<'_> {
             Op::PtrToInt(a) | Op::PtrToAddr(a) => {
                 self.check_operand(a, loc);
                 self.expect_ptr(a, "ptr-to-int/addr", loc);
-                if !matches!(inst.ty, Type::Int(_)) {
+                if !matches!(inst.ty, Type::Int) {
                     self.result.error(
                         loc.clone(),
                         format!("ptr-to-int/addr result must be Int, got {:?}", inst.ty),
@@ -953,7 +952,7 @@ impl FuncVerifier<'_> {
             }
             Op::Sext(a, _) | Op::Zext(a, _) => {
                 self.check_operand(a, loc);
-                if !matches!(inst.ty, Type::Int(_)) {
+                if !matches!(inst.ty, Type::Int) {
                     self.result.error(
                         loc.clone(),
                         format!("sext/zext result must be Int, got {:?}", inst.ty),
@@ -962,7 +961,7 @@ impl FuncVerifier<'_> {
             }
             Op::FpToSi(a) | Op::FpToUi(a) => {
                 self.check_operand(a, loc);
-                if !matches!(inst.ty, Type::Int(_)) {
+                if !matches!(inst.ty, Type::Int) {
                     self.result.error(
                         loc.clone(),
                         format!("fp_to_si/fp_to_ui result must be Int, got {:?}", inst.ty),

@@ -398,28 +398,14 @@ fn emit_partial_load(ctx: &mut IselCtx, base: VReg, base_offset: i32, dst: VReg,
     }
 }
 
-/// Extract IntAnnotation from a ValueRef's type.
+/// Extract IntAnnotation from a ValueRef's result_annotation.
 fn get_int_annotation(func: &Function, val: ValueRef) -> Option<IntAnnotation> {
     if val.is_block_arg() {
-        let ty = &func.block_args.get(val.index() as usize)?.ty;
-        match ty {
-            Type::Int(ann) => Some(*ann),
-            _ => None,
-        }
-    } else if val.is_secondary_result() {
-        let ty = func
-            .instructions
-            .get(val.inst_index() as usize)?
-            .secondary_ty
-            .as_ref()?;
-        match ty {
-            Type::Int(ann) => Some(*ann),
-            _ => None,
-        }
+        None
     } else {
-        let ty = &func.instructions.get(val.index() as usize)?.ty;
-        match ty {
-            Type::Int(ann) => Some(*ann),
+        let inst = func.instructions.get(val.index() as usize)?;
+        match &inst.result_annotation {
+            Some(Annotation::Int(ann)) => Some(*ann),
             _ => None,
         }
     }
@@ -770,20 +756,26 @@ enum ParamAbi {
 
 /// Classify where parameter `param_idx` goes under SysV x86-64 ABI,
 /// given the complete ordered parameter type list.
-fn is_wide_scalar_type(ty: &Type) -> bool {
-    matches!(ty, Type::Int(IntAnnotation { bit_width: 128, .. }))
+fn is_wide_scalar_type(ty: &Type, ann: &Option<Annotation>) -> bool {
+    matches!(ty, Type::Int)
+        && matches!(
+            ann,
+            Some(Annotation::Int(IntAnnotation { bit_width: 128, .. }))
+        )
 }
 
 fn classify_param_abi(
     params: &[Type],
-    _param_annotations: &[Option<Annotation>],
+    param_annotations: &[Option<Annotation>],
     param_idx: usize,
 ) -> ParamAbi {
     let mut int_count = 0usize;
     let mut float_count = 0usize;
     let mut stack_idx: i32 = 0;
-    for (_i, param_ty) in params.iter().enumerate().take(param_idx) {
-        let is_wide = !matches!(param_ty, Type::Float(_)) && is_wide_scalar_type(param_ty);
+    for (i, param_ty) in params.iter().enumerate().take(param_idx) {
+        let param_ann = &param_annotations[i];
+        let is_wide =
+            !matches!(param_ty, Type::Float(_)) && is_wide_scalar_type(param_ty, param_ann);
         match param_ty {
             Type::Float(_) => {
                 if float_count < MAX_XMM_ARGS {
@@ -832,10 +824,10 @@ struct CallAbiPlan {
 
 fn has_wide_scalar_annotation(func: &Function, inst_idx: u32) -> bool {
     let inst = func.inst(inst_idx);
-    // For Call instructions, the data return type is in secondary_ty (primary is Mem).
-    // For other instructions, check the primary ty.
-    let check_ty = inst.secondary_ty.as_ref().unwrap_or(&inst.ty);
-    matches!(check_ty, Type::Int(IntAnnotation { bit_width: 128, .. }))
+    matches!(
+        &inst.result_annotation,
+        Some(Annotation::Int(IntAnnotation { bit_width: 128, .. }))
+    )
 }
 
 fn classify_call_abi(
@@ -979,7 +971,7 @@ fn select_inst(
     match op {
         Op::Param(idx) => {
             let idx = *idx as usize;
-            let wide = is_wide_scalar_type(&func.params[idx]);
+            let wide = is_wide_scalar_type(&func.params[idx], &func.param_annotations[idx]);
             match classify_param_abi(&func.params, &func.param_annotations, idx) {
                 ParamAbi::Gpr(i) => {
                     let fixed = ctx.alloc.alloc_fixed(ARG_REGS[i].to_preg());

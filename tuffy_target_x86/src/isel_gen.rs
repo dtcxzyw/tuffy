@@ -9,25 +9,11 @@ use tuffy_regalloc::VReg;
 
 fn get_int_annotation(func: &tuffy_ir::function::Function, val: ValueRef) -> Option<IntAnnotation> {
     if val.is_block_arg() {
-        let ty = &func.block_args.get(val.index() as usize)?.ty;
-        match ty {
-            tuffy_ir::types::Type::Int(ann) => Some(*ann),
-            _ => None,
-        }
-    } else if val.is_secondary_result() {
-        let ty = func
-            .instructions
-            .get(val.inst_index() as usize)?
-            .secondary_ty
-            .as_ref()?;
-        match ty {
-            tuffy_ir::types::Type::Int(ann) => Some(*ann),
-            _ => None,
-        }
+        None
     } else {
-        let ty = &func.instructions.get(val.index() as usize)?.ty;
-        match ty {
-            tuffy_ir::types::Type::Int(ann) => Some(*ann),
+        let inst = func.instructions.get(val.index() as usize)?;
+        match &inst.result_annotation {
+            Some(tuffy_ir::types::Annotation::Int(ann)) => Some(*ann),
             _ => None,
         }
     }

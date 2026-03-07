@@ -246,7 +246,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let arg_ty =
                             self.monomorphize(arg.node.ty(&self.mir.local_decls, self.tcx));
                         if let Some(sz) = type_size(self.tcx, arg_ty) {
-                            if sz <= 16 && matches!(translate_ty(self.tcx, arg_ty), Some(Type::Int(_)))
+                            if sz <= 16 && matches!(translate_ty(self.tcx, arg_ty), Some(Type::Int))
                             {
                                 self.builder.load(
                                     v.into(),

@@ -11,11 +11,13 @@ use tuffy_ir::module::SymbolTable;
 use tuffy_ir::types::{IntAnnotation, IntSignedness, Type};
 use tuffy_target_x86::{backend, emit, encode, isel};
 
+const I64: IntAnnotation = IntAnnotation {
+    bit_width: 64,
+    signedness: IntSignedness::Unsigned,
+};
+
 fn build_add_func() -> (Function, SymbolTable) {
-    let i32_type = Type::Int(IntAnnotation {
-        bit_width: 32,
-        signedness: IntSignedness::Signed,
-    });
+    let i32_type = Type::Int;
     let mut st = SymbolTable::new();
     let name = st.intern("add");
     let mut func = Function::new(
@@ -37,7 +39,7 @@ fn build_add_func() -> (Function, SymbolTable) {
     let mem0 = builder.add_block_arg(entry, Type::Mem);
     let a = builder.param(0, i32_type.clone(), None, Origin::synthetic());
     let b = builder.param(1, i32_type.clone(), None, Origin::synthetic());
-    let sum = builder.add(a.into(), b.into(), None, Origin::synthetic());
+    let sum = builder.add(a.into(), b.into(), I64, Origin::synthetic());
     builder.ret(Some(sum.into()), mem0.into(), Origin::synthetic());
 
     builder.exit_region();

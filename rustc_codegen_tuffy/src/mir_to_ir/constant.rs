@@ -6,8 +6,13 @@ use rustc_middle::ty::{self, Instance, TyCtxt};
 use tuffy_ir::builder::Builder;
 use tuffy_ir::instruction::{Operand as IrOperand, Origin};
 use tuffy_ir::module::SymbolTable;
-use tuffy_ir::types::{Annotation, FloatType, IntSignedness, Type};
+use tuffy_ir::types::{Annotation, FloatType, IntAnnotation, IntSignedness, Type};
 use tuffy_ir::value::ValueRef;
+
+const I64: IntAnnotation = IntAnnotation {
+    bit_width: 64,
+    signedness: IntSignedness::Unsigned,
+};
 
 pub(super) fn translate_int_to_int_cast(
     src_ty: ty::Ty<'_>,
@@ -40,7 +45,7 @@ pub(super) fn translate_int_to_int_cast(
                 } else {
                     let mask = (BigInt::from(1u64) << src_bits) - 1;
                     let mask_val = builder.iconst(mask, 64, IntSignedness::DontCare, Origin::synthetic());
-                    builder.and(val.into(), mask_val.into(), None, Origin::synthetic())
+                    builder.and(val.into(), mask_val.into(), I64, Origin::synthetic())
                 }
             } else {
                 val
@@ -62,7 +67,7 @@ pub(super) fn translate_int_to_int_cast(
             // Zero-extend: mask off high bits.
             let mask = (BigInt::from(1) << src_bits) - 1;
             let mask_val = builder.iconst(mask, 64, IntSignedness::DontCare, Origin::synthetic());
-            Some(builder.and(val.into(), mask_val.into(), None, Origin::synthetic()))
+            Some(builder.and(val.into(), mask_val.into(), I64, Origin::synthetic()))
         } else {
             Some(val)
         }
@@ -70,7 +75,7 @@ pub(super) fn translate_int_to_int_cast(
         // Narrowing cast: mask to target width.
         let mask = (BigInt::from(1) << dst_bits) - 1;
         let mask_val = builder.iconst(mask, 64, IntSignedness::DontCare, Origin::synthetic());
-        Some(builder.and(val.into(), mask_val.into(), None, Origin::synthetic()))
+        Some(builder.and(val.into(), mask_val.into(), I64, Origin::synthetic()))
     }
 }
 
@@ -144,7 +149,7 @@ pub(super) fn translate_const<'tcx>(
                     let base = builder.symbol_addr(sym_id, Origin::synthetic());
                     if ptr_offset.bytes() > 0 {
                         let off = builder.iconst(ptr_offset.bytes() as i64, 64, IntSignedness::DontCare, Origin::synthetic());
-                        Some(builder.add(base.into(), off.into(), None, Origin::synthetic()))
+                        Some(builder.add(base.into(), off.into(), I64, Origin::synthetic()))
                     } else {
                         Some(base)
                     }

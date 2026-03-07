@@ -3,8 +3,13 @@ use super::types::*;
 use rustc_middle::mir::{self, BinOp, CastKind, Operand, Place, Rvalue, StatementKind};
 use rustc_middle::ty;
 use tuffy_ir::instruction::{Operand as IrOperand, Origin};
-use tuffy_ir::types::{Annotation, IntSignedness, Type};
+use tuffy_ir::types::{Annotation, IntAnnotation, IntSignedness, Type};
 use tuffy_ir::value::ValueRef;
+
+const I64: IntAnnotation = IntAnnotation {
+    bit_width: 64,
+    signedness: IntSignedness::Unsigned,
+};
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     pub(super) fn translate_statement(&mut self, stmt: &mir::Statement<'tcx>) {
@@ -1020,7 +1025,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 self.builder.mul(
                                     count_v.into(),
                                     sz.into(),
-                                    None,
+                                    I64,
                                     Origin::synthetic(),
                                 )
                             };

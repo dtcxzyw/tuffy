@@ -130,6 +130,17 @@ impl<'a> Builder<'a> {
         }
     }
 
+    pub fn value_annotation(&self, v: ValueRef) -> Option<&Annotation> {
+        if v.is_block_arg() || v.is_secondary_result() {
+            None
+        } else {
+            self.func
+                .instructions
+                .get(v.index() as usize)
+                .and_then(|i| i.result_annotation.as_ref())
+        }
+    }
+
     /// If `v` is a StackSlot instruction, return its size in bytes.
     pub fn stack_slot_size(&self, v: ValueRef) -> Option<u32> {
         if v.is_block_arg() || v.is_secondary_result() {
@@ -212,11 +223,11 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> ValueRef {
         use crate::types::IntAnnotation;
-        let ty = Type::Int(IntAnnotation {
+        let ann = Annotation::Int(IntAnnotation {
             bit_width,
             signedness,
         });
-        self.push_inst(Op::Const(val.into()), ty, None, origin, None)
+        self.push_inst(Op::Const(val.into()), Type::Int, None, origin, Some(ann))
     }
 
     /// Float constant. `bits` is the IEEE 754 bit pattern.
@@ -234,17 +245,15 @@ impl<'a> Builder<'a> {
         &mut self,
         a: Operand,
         b: Operand,
-        ann: Option<Annotation>,
+        int_ann: crate::types::IntAnnotation,
         origin: Origin,
     ) -> ValueRef {
-        let ty = self
+        let _ty = self
             .value_type(a.value)
-            .and_then(|t| match t {
-                Type::Int(ann) => Some(Type::Int(*ann)),
-                _ => None,
-            })
+            .filter(|t| matches!(t, Type::Int))
             .expect("add operand must be Int type");
-        self.push_inst(Op::Add(a, b), ty, None, origin, ann)
+        let res_ann = Some(Annotation::Int(int_ann));
+        self.push_inst(Op::Add(a, b), Type::Int, None, origin, res_ann)
     }
 
     /// Integer subtraction.
@@ -252,17 +261,15 @@ impl<'a> Builder<'a> {
         &mut self,
         a: Operand,
         b: Operand,
-        ann: Option<Annotation>,
+        int_ann: crate::types::IntAnnotation,
         origin: Origin,
     ) -> ValueRef {
-        let ty = self
+        let _ty = self
             .value_type(a.value)
-            .and_then(|t| match t {
-                Type::Int(ann) => Some(Type::Int(*ann)),
-                _ => None,
-            })
+            .filter(|t| matches!(t, Type::Int))
             .expect("sub operand must be Int type");
-        self.push_inst(Op::Sub(a, b), ty, None, origin, ann)
+        let res_ann = Some(Annotation::Int(int_ann));
+        self.push_inst(Op::Sub(a, b), Type::Int, None, origin, res_ann)
     }
 
     /// Integer multiplication.
@@ -270,17 +277,15 @@ impl<'a> Builder<'a> {
         &mut self,
         a: Operand,
         b: Operand,
-        ann: Option<Annotation>,
+        int_ann: crate::types::IntAnnotation,
         origin: Origin,
     ) -> ValueRef {
-        let ty = self
+        let _ty = self
             .value_type(a.value)
-            .and_then(|t| match t {
-                Type::Int(ann) => Some(Type::Int(*ann)),
-                _ => None,
-            })
+            .filter(|t| matches!(t, Type::Int))
             .expect("mul operand must be Int type");
-        self.push_inst(Op::Mul(a, b), ty, None, origin, ann)
+        let res_ann = Some(Annotation::Int(int_ann));
+        self.push_inst(Op::Mul(a, b), Type::Int, None, origin, res_ann)
     }
 
     /// Integer division (poison on division by zero).
@@ -288,17 +293,15 @@ impl<'a> Builder<'a> {
         &mut self,
         a: Operand,
         b: Operand,
-        ann: Option<Annotation>,
+        int_ann: crate::types::IntAnnotation,
         origin: Origin,
     ) -> ValueRef {
-        let ty = self
+        let _ty = self
             .value_type(a.value)
-            .and_then(|t| match t {
-                Type::Int(ann) => Some(Type::Int(*ann)),
-                _ => None,
-            })
+            .filter(|t| matches!(t, Type::Int))
             .expect("div operand must be Int type");
-        self.push_inst(Op::Div(a, b), ty, None, origin, ann)
+        let res_ann = Some(Annotation::Int(int_ann));
+        self.push_inst(Op::Div(a, b), Type::Int, None, origin, res_ann)
     }
 
     /// Integer remainder (poison on division by zero).
@@ -306,17 +309,15 @@ impl<'a> Builder<'a> {
         &mut self,
         a: Operand,
         b: Operand,
-        ann: Option<Annotation>,
+        int_ann: crate::types::IntAnnotation,
         origin: Origin,
     ) -> ValueRef {
-        let ty = self
+        let _ty = self
             .value_type(a.value)
-            .and_then(|t| match t {
-                Type::Int(ann) => Some(Type::Int(*ann)),
-                _ => None,
-            })
+            .filter(|t| matches!(t, Type::Int))
             .expect("rem operand must be Int type");
-        self.push_inst(Op::Rem(a, b), ty, None, origin, ann)
+        let res_ann = Some(Annotation::Int(int_ann));
+        self.push_inst(Op::Rem(a, b), Type::Int, None, origin, res_ann)
     }
 
     /// Bitwise AND.
@@ -324,17 +325,15 @@ impl<'a> Builder<'a> {
         &mut self,
         a: Operand,
         b: Operand,
-        ann: Option<Annotation>,
+        int_ann: crate::types::IntAnnotation,
         origin: Origin,
     ) -> ValueRef {
-        let ty = self
+        let _ty = self
             .value_type(a.value)
-            .and_then(|t| match t {
-                Type::Int(ann) => Some(Type::Int(*ann)),
-                _ => None,
-            })
+            .filter(|t| matches!(t, Type::Int))
             .expect("and operand must be Int type");
-        self.push_inst(Op::And(a, b), ty, None, origin, ann)
+        let res_ann = Some(Annotation::Int(int_ann));
+        self.push_inst(Op::And(a, b), Type::Int, None, origin, res_ann)
     }
 
     /// Bitwise OR.
@@ -342,17 +341,15 @@ impl<'a> Builder<'a> {
         &mut self,
         a: Operand,
         b: Operand,
-        ann: Option<Annotation>,
+        int_ann: crate::types::IntAnnotation,
         origin: Origin,
     ) -> ValueRef {
-        let ty = self
+        let _ty = self
             .value_type(a.value)
-            .and_then(|t| match t {
-                Type::Int(ann) => Some(Type::Int(*ann)),
-                _ => None,
-            })
+            .filter(|t| matches!(t, Type::Int))
             .expect("or operand must be Int type");
-        self.push_inst(Op::Or(a, b), ty, None, origin, ann)
+        let res_ann = Some(Annotation::Int(int_ann));
+        self.push_inst(Op::Or(a, b), Type::Int, None, origin, res_ann)
     }
 
     /// Bitwise XOR.
@@ -360,17 +357,15 @@ impl<'a> Builder<'a> {
         &mut self,
         a: Operand,
         b: Operand,
-        ann: Option<Annotation>,
+        int_ann: crate::types::IntAnnotation,
         origin: Origin,
     ) -> ValueRef {
-        let ty = self
+        let _ty = self
             .value_type(a.value)
-            .and_then(|t| match t {
-                Type::Int(ann) => Some(Type::Int(*ann)),
-                _ => None,
-            })
+            .filter(|t| matches!(t, Type::Int))
             .expect("xor operand must be Int type");
-        self.push_inst(Op::Xor(a, b), ty, None, origin, ann)
+        let res_ann = Some(Annotation::Int(int_ann));
+        self.push_inst(Op::Xor(a, b), Type::Int, None, origin, res_ann)
     }
 
     /// Left shift (poison if shift amount is negative).
@@ -384,7 +379,7 @@ impl<'a> Builder<'a> {
         let ty = self
             .value_type(a.value)
             .and_then(|t| match t {
-                Type::Int(ann) => Some(Type::Int(*ann)),
+                Type::Int => Some(Type::Int),
                 _ => None,
             })
             .expect("shl operand must be Int type");
@@ -400,10 +395,10 @@ impl<'a> Builder<'a> {
         ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
-        let ty = self
+        let _ty = self
             .value_type(a.value)
             .and_then(|t| match t {
-                Type::Int(ann) => Some(Type::Int(*ann)),
+                Type::Int => Some(Type::Int),
                 _ => None,
             })
             .expect("shr operand must be Int type");
@@ -412,7 +407,7 @@ impl<'a> Builder<'a> {
         if ann.is_some() {
             a.annotation = ann;
         }
-        self.push_inst(Op::Shr(a, b), ty, None, origin, None)
+        self.push_inst(Op::Shr(a, b), Type::Int, None, origin, ann)
     }
 
     /// Integer minimum.
@@ -423,17 +418,17 @@ impl<'a> Builder<'a> {
         ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
-        let ty = self
+        let _ty = self
             .value_type(a.value)
             .and_then(|t| match t {
-                Type::Int(ann) => Some(Type::Int(*ann)),
+                Type::Int => Some(Type::Int),
                 _ => None,
             })
             .expect("min operand must be Int type");
         if ann.is_some() {
             a.annotation = ann;
         }
-        self.push_inst(Op::Min(a, b), ty, None, origin, None)
+        self.push_inst(Op::Min(a, b), Type::Int, None, origin, ann)
     }
 
     /// Integer maximum.
@@ -444,17 +439,17 @@ impl<'a> Builder<'a> {
         ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
-        let ty = self
+        let _ty = self
             .value_type(a.value)
             .and_then(|t| match t {
-                Type::Int(ann) => Some(Type::Int(*ann)),
+                Type::Int => Some(Type::Int),
                 _ => None,
             })
             .expect("max operand must be Int type");
         if ann.is_some() {
             a.annotation = ann;
         }
-        self.push_inst(Op::Max(a, b), ty, None, origin, None)
+        self.push_inst(Op::Max(a, b), Type::Int, None, origin, ann)
     }
 
     // ── Floating point arithmetic ──
@@ -577,11 +572,11 @@ impl<'a> Builder<'a> {
     /// Convert Bool to Int: true → 1, false → 0.
     pub fn bool_to_int(&mut self, val: Operand, bit_width: u32, origin: Origin) -> ValueRef {
         use crate::types::{IntAnnotation, IntSignedness};
-        let ty = Type::Int(IntAnnotation {
+        let ann = Annotation::Int(IntAnnotation {
             bit_width,
             signedness: IntSignedness::Unsigned,
         });
-        self.push_inst(Op::BoolToInt(val), ty, None, origin, None)
+        self.push_inst(Op::BoolToInt(val), Type::Int, None, origin, Some(ann))
     }
 
     /// Convert Int to Bool: 0 → false, non-zero → true.
@@ -592,11 +587,11 @@ impl<'a> Builder<'a> {
     /// Population count: count the number of set bits.
     pub fn count_ones(&mut self, val: Operand, result_bits: u32, origin: Origin) -> ValueRef {
         use crate::types::{IntAnnotation, IntSignedness};
-        let ty = Type::Int(IntAnnotation {
+        let ann = Annotation::Int(IntAnnotation {
             bit_width: result_bits,
             signedness: IntSignedness::Unsigned,
         });
-        self.push_inst(Op::CountOnes(val), ty, None, origin, None)
+        self.push_inst(Op::CountOnes(val), Type::Int, None, origin, Some(ann))
     }
 
     /// Count leading zeros after truncating to `bits` width.
@@ -608,11 +603,17 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> ValueRef {
         use crate::types::{IntAnnotation, IntSignedness};
-        let ty = Type::Int(IntAnnotation {
+        let ann = Annotation::Int(IntAnnotation {
             bit_width: result_bits,
             signedness: IntSignedness::Unsigned,
         });
-        self.push_inst(Op::CountLeadingZeros(val, bits), ty, None, origin, None)
+        self.push_inst(
+            Op::CountLeadingZeros(val, bits),
+            Type::Int,
+            None,
+            origin,
+            Some(ann),
+        )
     }
 
     /// Count trailing zeros.
@@ -623,59 +624,63 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> ValueRef {
         use crate::types::{IntAnnotation, IntSignedness};
-        let ty = Type::Int(IntAnnotation {
+        let ann = Annotation::Int(IntAnnotation {
             bit_width: result_bits,
             signedness: IntSignedness::Unsigned,
         });
-        self.push_inst(Op::CountTrailingZeros(val), ty, None, origin, None)
+        self.push_inst(
+            Op::CountTrailingZeros(val),
+            Type::Int,
+            None,
+            origin,
+            Some(ann),
+        )
     }
 
     /// Byte-swap: reverse byte order of the low `bytes` bytes.
     pub fn bswap(&mut self, val: Operand, bytes: u32, origin: Origin) -> ValueRef {
-        let ty = self
+        let _ty = self
             .value_type(val.value)
-            .and_then(|t| match t {
-                Type::Int(ann) => Some(Type::Int(*ann)),
-                _ => None,
-            })
+            .filter(|t| matches!(t, Type::Int))
             .expect("bswap operand must be Int type");
-        self.push_inst(Op::Bswap(val, bytes), ty, None, origin, None)
+        let ann = self.value_annotation(val.value).cloned();
+        self.push_inst(Op::Bswap(val, bytes), Type::Int, None, origin, ann)
     }
 
     /// Bit-reverse: reverse bit order of the low `bits` bits.
     pub fn bit_reverse(&mut self, val: Operand, bits: u32, origin: Origin) -> ValueRef {
-        let ty = self
+        let _ty = self
             .value_type(val.value)
-            .and_then(|t| match t {
-                Type::Int(ann) => Some(Type::Int(*ann)),
-                _ => None,
-            })
+            .filter(|t| matches!(t, Type::Int))
             .expect("bit_reverse operand must be Int type");
-        self.push_inst(Op::BitReverse(val, bits), ty, None, origin, None)
+        let ann = self.value_annotation(val.value).cloned();
+        self.push_inst(Op::BitReverse(val, bits), Type::Int, None, origin, ann)
     }
 
     /// Merge: replace the low `width` bits of `a` with the low `width` bits of `b`.
     pub fn merge(&mut self, a: Operand, b: Operand, width: u32, origin: Origin) -> ValueRef {
-        let ty = self
+        let _ty = self
             .value_type(a.value)
             .and_then(|t| match t {
-                Type::Int(ann) => Some(Type::Int(*ann)),
+                Type::Int => Some(Type::Int),
                 _ => None,
             })
             .expect("merge operand must be Int type");
-        self.push_inst(Op::Merge(a, b, width), ty, None, origin, None)
+        let ann = self.value_annotation(a.value).cloned();
+        self.push_inst(Op::Merge(a, b, width), Type::Int, None, origin, ann)
     }
 
     /// Carry-less multiplication (polynomial multiplication over GF(2)).
     pub fn clmul(&mut self, a: Operand, b: Operand, origin: Origin) -> ValueRef {
-        let ty = self
+        let _ty = self
             .value_type(a.value)
             .and_then(|t| match t {
-                Type::Int(ann) => Some(Type::Int(*ann)),
+                Type::Int => Some(Type::Int),
                 _ => None,
             })
             .expect("clmul operand must be Int type");
-        self.push_inst(Op::Clmul(a, b), ty, None, origin, None)
+        let ann = self.value_annotation(a.value).cloned();
+        self.push_inst(Op::Clmul(a, b), Type::Int, None, origin, ann)
     }
 
     /// Split: decompose `a` at bit position `width`. Returns (hi, lo).
@@ -683,7 +688,7 @@ impl<'a> Builder<'a> {
         let ty = self
             .value_type(a.value)
             .and_then(|t| match t {
-                Type::Int(ann) => Some(Type::Int(*ann)),
+                Type::Int => Some(Type::Int),
                 _ => None,
             })
             .expect("split operand must be Int type");
@@ -700,14 +705,15 @@ impl<'a> Builder<'a> {
         bits: u32,
         origin: Origin,
     ) -> ValueRef {
-        let ty = self
+        let _ty = self
             .value_type(val.value)
             .and_then(|t| match t {
-                Type::Int(ann) => Some(Type::Int(*ann)),
+                Type::Int => Some(Type::Int),
                 _ => None,
             })
             .expect("rotate_left operand must be Int type");
-        self.push_inst(Op::RotateLeft(val, amt, bits), ty, None, origin, None)
+        let ann = self.value_annotation(val.value).cloned();
+        self.push_inst(Op::RotateLeft(val, amt, bits), Type::Int, None, origin, ann)
     }
 
     /// Rotate right in an `bits`-bit field.
@@ -718,14 +724,21 @@ impl<'a> Builder<'a> {
         bits: u32,
         origin: Origin,
     ) -> ValueRef {
-        let ty = self
+        let _ty = self
             .value_type(val.value)
             .and_then(|t| match t {
-                Type::Int(ann) => Some(Type::Int(*ann)),
+                Type::Int => Some(Type::Int),
                 _ => None,
             })
             .expect("rotate_right operand must be Int type");
-        self.push_inst(Op::RotateRight(val, amt, bits), ty, None, origin, None)
+        let ann = self.value_annotation(val.value).cloned();
+        self.push_inst(
+            Op::RotateRight(val, amt, bits),
+            Type::Int,
+            None,
+            origin,
+            ann,
+        )
     }
 
     /// Unsigned saturating addition in `bits` bits.
@@ -737,11 +750,17 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> ValueRef {
         use crate::types::{IntAnnotation, IntSignedness};
-        let ty = Type::Int(IntAnnotation {
+        let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Unsigned,
         });
-        self.push_inst(Op::SaturatingAdd(a, b, bits), ty, None, origin, None)
+        self.push_inst(
+            Op::SaturatingAdd(a, b, bits),
+            Type::Int,
+            None,
+            origin,
+            Some(ann),
+        )
     }
 
     /// Unsigned saturating subtraction in `bits` bits.
@@ -753,11 +772,17 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> ValueRef {
         use crate::types::{IntAnnotation, IntSignedness};
-        let ty = Type::Int(IntAnnotation {
+        let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Unsigned,
         });
-        self.push_inst(Op::SaturatingSub(a, b, bits), ty, None, origin, None)
+        self.push_inst(
+            Op::SaturatingSub(a, b, bits),
+            Type::Int,
+            None,
+            origin,
+            Some(ann),
+        )
     }
 
     /// Signed saturating addition in `bits` bits.
@@ -770,11 +795,17 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> ValueRef {
         use crate::types::{IntAnnotation, IntSignedness};
-        let ty = Type::Int(IntAnnotation {
+        let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Signed,
         });
-        self.push_inst(Op::SignedSaturatingAdd(a, b, bits), ty, None, origin, None)
+        self.push_inst(
+            Op::SignedSaturatingAdd(a, b, bits),
+            Type::Int,
+            None,
+            origin,
+            Some(ann),
+        )
     }
 
     /// Signed saturating subtraction in `bits` bits.
@@ -787,11 +818,17 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> ValueRef {
         use crate::types::{IntAnnotation, IntSignedness};
-        let ty = Type::Int(IntAnnotation {
+        let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Signed,
         });
-        self.push_inst(Op::SignedSaturatingSub(a, b, bits), ty, None, origin, None)
+        self.push_inst(
+            Op::SignedSaturatingSub(a, b, bits),
+            Type::Int,
+            None,
+            origin,
+            Some(ann),
+        )
     }
 
     /// Signed addition with overflow detection. Returns (wrapping_sum: Int, overflow: Bool).
@@ -803,16 +840,16 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> (ValueRef, ValueRef) {
         use crate::types::{IntAnnotation, IntSignedness};
-        let ty = Type::Int(IntAnnotation {
+        let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Signed,
         });
         let primary = self.push_inst(
             Op::SAddWithOverflow(a, b, bits),
-            ty,
+            Type::Int,
             Some(Type::Bool),
             origin,
-            None,
+            Some(ann),
         );
         let secondary = ValueRef::inst_secondary_result(primary.index());
         (primary, secondary)
@@ -827,16 +864,16 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> (ValueRef, ValueRef) {
         use crate::types::{IntAnnotation, IntSignedness};
-        let ty = Type::Int(IntAnnotation {
+        let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Unsigned,
         });
         let primary = self.push_inst(
             Op::UAddWithOverflow(a, b, bits),
-            ty,
+            Type::Int,
             Some(Type::Bool),
             origin,
-            None,
+            Some(ann),
         );
         let secondary = ValueRef::inst_secondary_result(primary.index());
         (primary, secondary)
@@ -851,16 +888,16 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> (ValueRef, ValueRef) {
         use crate::types::{IntAnnotation, IntSignedness};
-        let ty = Type::Int(IntAnnotation {
+        let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Signed,
         });
         let primary = self.push_inst(
             Op::SSubWithOverflow(a, b, bits),
-            ty,
+            Type::Int,
             Some(Type::Bool),
             origin,
-            None,
+            Some(ann),
         );
         let secondary = ValueRef::inst_secondary_result(primary.index());
         (primary, secondary)
@@ -875,16 +912,16 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> (ValueRef, ValueRef) {
         use crate::types::{IntAnnotation, IntSignedness};
-        let ty = Type::Int(IntAnnotation {
+        let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Unsigned,
         });
         let primary = self.push_inst(
             Op::USubWithOverflow(a, b, bits),
-            ty,
+            Type::Int,
             Some(Type::Bool),
             origin,
-            None,
+            Some(ann),
         );
         let secondary = ValueRef::inst_secondary_result(primary.index());
         (primary, secondary)
@@ -899,16 +936,16 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> (ValueRef, ValueRef) {
         use crate::types::{IntAnnotation, IntSignedness};
-        let ty = Type::Int(IntAnnotation {
+        let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Signed,
         });
         let primary = self.push_inst(
             Op::SMulWithOverflow(a, b, bits),
-            ty,
+            Type::Int,
             Some(Type::Bool),
             origin,
-            None,
+            Some(ann),
         );
         let secondary = ValueRef::inst_secondary_result(primary.index());
         (primary, secondary)
@@ -923,16 +960,16 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> (ValueRef, ValueRef) {
         use crate::types::{IntAnnotation, IntSignedness};
-        let ty = Type::Int(IntAnnotation {
+        let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Unsigned,
         });
         let primary = self.push_inst(
             Op::UMulWithOverflow(a, b, bits),
-            ty,
+            Type::Int,
             Some(Type::Bool),
             origin,
-            None,
+            Some(ann),
         );
         let secondary = ValueRef::inst_secondary_result(primary.index());
         (primary, secondary)
@@ -1178,41 +1215,41 @@ impl<'a> Builder<'a> {
     /// Sign-extend to n bits.
     pub fn sext(&mut self, val: Operand, bits: u32, origin: Origin) -> ValueRef {
         use crate::types::{IntAnnotation, IntSignedness};
-        let ty = Type::Int(IntAnnotation {
+        let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Signed,
         });
-        self.push_inst(Op::Sext(val, bits), ty, None, origin, None)
+        self.push_inst(Op::Sext(val, bits), Type::Int, None, origin, Some(ann))
     }
 
     /// Zero-extend to n bits.
     pub fn zext(&mut self, val: Operand, bits: u32, origin: Origin) -> ValueRef {
         use crate::types::{IntAnnotation, IntSignedness};
-        let ty = Type::Int(IntAnnotation {
+        let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Unsigned,
         });
-        self.push_inst(Op::Zext(val, bits), ty, None, origin, None)
+        self.push_inst(Op::Zext(val, bits), Type::Int, None, origin, Some(ann))
     }
 
     /// Float to signed integer (truncation toward zero).
     pub fn fp_to_si(&mut self, val: Operand, bits: u32, origin: Origin) -> ValueRef {
         use crate::types::{IntAnnotation, IntSignedness};
-        let ty = Type::Int(IntAnnotation {
+        let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Signed,
         });
-        self.push_inst(Op::FpToSi(val), ty, None, origin, None)
+        self.push_inst(Op::FpToSi(val), Type::Int, None, origin, Some(ann))
     }
 
     /// Float to unsigned integer (truncation toward zero).
     pub fn fp_to_ui(&mut self, val: Operand, bits: u32, origin: Origin) -> ValueRef {
         use crate::types::{IntAnnotation, IntSignedness};
-        let ty = Type::Int(IntAnnotation {
+        let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Unsigned,
         });
-        self.push_inst(Op::FpToUi(val), ty, None, origin, None)
+        self.push_inst(Op::FpToUi(val), Type::Int, None, origin, Some(ann))
     }
 
     /// Signed integer to float.
@@ -1252,31 +1289,31 @@ impl<'a> Builder<'a> {
     /// Pointer difference (same allocation).
     pub fn ptrdiff(&mut self, a: Operand, b: Operand, bits: u32, origin: Origin) -> ValueRef {
         use crate::types::{IntAnnotation, IntSignedness};
-        let ty = Type::Int(IntAnnotation {
+        let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Signed,
         });
-        self.push_inst(Op::PtrDiff(a, b), ty, None, origin, None)
+        self.push_inst(Op::PtrDiff(a, b), Type::Int, None, origin, Some(ann))
     }
 
     /// Pointer to integer with provenance capture.
     pub fn ptrtoint(&mut self, ptr: Operand, bits: u32, origin: Origin) -> ValueRef {
         use crate::types::{IntAnnotation, IntSignedness};
-        let ty = Type::Int(IntAnnotation {
+        let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Unsigned,
         });
-        self.push_inst(Op::PtrToInt(ptr), ty, None, origin, None)
+        self.push_inst(Op::PtrToInt(ptr), Type::Int, None, origin, Some(ann))
     }
 
     /// Pointer to address (discard provenance).
     pub fn ptrtoaddr(&mut self, ptr: Operand, bits: u32, origin: Origin) -> ValueRef {
         use crate::types::{IntAnnotation, IntSignedness};
-        let ty = Type::Int(IntAnnotation {
+        let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Unsigned,
         });
-        self.push_inst(Op::PtrToAddr(ptr), ty, None, origin, None)
+        self.push_inst(Op::PtrToAddr(ptr), Type::Int, None, origin, Some(ann))
     }
 
     /// Integer to pointer (no valid provenance).

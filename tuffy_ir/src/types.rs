@@ -68,8 +68,8 @@ pub struct IntAnnotation {
 /// A type in the tuffy IR.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
-    /// Integer with explicit bit width and signedness annotation.
-    Int(IntAnnotation),
+    /// Infinite precision integer. Use result_annotation for bit width/signedness.
+    Int,
     /// Boolean (true/false). Distinct from integers.
     Bool,
     /// Zero-sized unit type. Represents Rust's `()`.

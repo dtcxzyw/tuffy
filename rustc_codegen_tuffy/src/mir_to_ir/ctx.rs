@@ -238,7 +238,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     /// If `val` is an Int, insert inttoptr to coerce it to Ptr.
     pub(super) fn coerce_to_ptr(&mut self, val: ValueRef) -> ValueRef {
         match self.builder.value_type(val) {
-            Some(Type::Int(_)) => self.builder.inttoptr(val.into(), 0, Origin::synthetic()),
+            Some(Type::Int) => self.builder.inttoptr(val.into(), 0, Origin::synthetic()),
             _ => val,
         }
     }

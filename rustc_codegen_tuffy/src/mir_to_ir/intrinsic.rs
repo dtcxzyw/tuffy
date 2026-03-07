@@ -4,11 +4,16 @@ use rustc_middle::mir::{self, Operand};
 use rustc_middle::ty;
 
 use tuffy_ir::instruction::{AtomicRmwOp, ICmpOp, Operand as IrOperand, Origin};
-use tuffy_ir::types::{Annotation, FloatType, IntSignedness, MemoryOrdering, Type};
+use tuffy_ir::types::{Annotation, FloatType, IntAnnotation, IntSignedness, MemoryOrdering, Type};
 use tuffy_ir::value::ValueRef;
 
 use super::ctx::TranslationCtx;
 use super::types::{default_int_type, type_align, type_size, IntAnn};
+
+const I64: IntAnnotation = IntAnnotation {
+    bit_width: 64,
+    signedness: IntSignedness::Unsigned,
+};
 
 /// Parse memory ordering from atomic intrinsic name suffix.
 fn parse_atomic_ordering(name: &str) -> MemoryOrdering {
@@ -210,7 +215,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     let result = self.builder.mul(
                                         len.into(),
                                         esz.into(),
-                                        None,
+                                        I64,
                                         Origin::synthetic(),
                                     );
                                     self.locals.set(destination_local, result);
@@ -271,7 +276,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     } else {
                         let sz = self.builder.iconst(elem_size as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                         self.builder
-                            .mul(offset.into(), sz.into(), None, Origin::synthetic())
+                            .mul(offset.into(), sz.into(), I64, Origin::synthetic())
                     };
                     let result =
                         self.builder
@@ -299,7 +304,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     } else {
                         let sz = self.builder.iconst(elem_size as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                         self.builder
-                            .div(diff.into(), sz.into(), None, Origin::synthetic())
+                            .div(diff.into(), sz.into(), I64, Origin::synthetic())
                     };
                     self.locals.set(destination_local, result);
                 }
@@ -387,7 +392,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let result = self.builder.add(
                         ir_args[0].into(),
                         ir_args[1].into(),
-                        None,
+                        I64,
                         Origin::synthetic(),
                     );
                     self.locals.set(destination_local, result);
@@ -399,7 +404,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let result = self.builder.sub(
                         ir_args[0].into(),
                         ir_args[1].into(),
-                        None,
+                        I64,
                         Origin::synthetic(),
                     );
                     self.locals.set(destination_local, result);
@@ -411,7 +416,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let result = self.builder.mul(
                         ir_args[0].into(),
                         ir_args[1].into(),
-                        None,
+                        I64,
                         Origin::synthetic(),
                     );
                     self.locals.set(destination_local, result);
@@ -459,7 +464,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let bits_val = self.builder.iconst(bits, 64, IntSignedness::DontCare, Origin::synthetic());
                     let complement =
                         self.builder
-                            .sub(bits_val.into(), c.into(), None, Origin::synthetic());
+                            .sub(bits_val.into(), c.into(), I64, Origin::synthetic());
                     let (hi, lo) = if name == "unchecked_funnel_shl" {
                         (
                             self.builder
@@ -485,7 +490,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     };
                     let result = self
                         .builder
-                        .or(hi.into(), lo.into(), None, Origin::synthetic());
+                        .or(hi.into(), lo.into(), I64, Origin::synthetic());
                     self.locals.set(destination_local, result);
                 }
                 true
@@ -561,7 +566,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 } else {
                     let sz = self.builder.iconst(elem_size as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                     self.builder
-                        .mul(count.into(), sz.into(), None, Origin::synthetic())
+                        .mul(count.into(), sz.into(), I64, Origin::synthetic())
                 };
                 let dst_annotated = IrOperand::annotated(dst, Annotation::Align(elem_align as u32));
                 let mem_out = self.builder.mem_set(
@@ -587,7 +592,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 } else {
                     let sz = self.builder.iconst(elem_size as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                     self.builder
-                        .mul(count.into(), sz.into(), None, Origin::synthetic())
+                        .mul(count.into(), sz.into(), I64, Origin::synthetic())
                 };
                 let dst_annotated = IrOperand::annotated(dst, Annotation::Align(elem_align as u32));
                 let src_annotated = IrOperand::annotated(src, Annotation::Align(elem_align as u32));
@@ -614,7 +619,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 } else {
                     let sz = self.builder.iconst(elem_size as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                     self.builder
-                        .mul(count.into(), sz.into(), None, Origin::synthetic())
+                        .mul(count.into(), sz.into(), I64, Origin::synthetic())
                 };
                 let dst_annotated = IrOperand::annotated(dst, Annotation::Align(elem_align as u32));
                 let src_annotated = IrOperand::annotated(src, Annotation::Align(elem_align as u32));
@@ -941,10 +946,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let new_val = if name.starts_with("atomic_nand") {
                         let a =
                             self.builder
-                                .and(old.into(), operand.into(), None, Origin::synthetic());
+                                .and(old.into(), operand.into(), I64, Origin::synthetic());
                         let all_ones = self.builder.iconst(-1, 64, IntSignedness::DontCare, Origin::synthetic());
                         self.builder
-                            .xor(a.into(), all_ones.into(), None, Origin::synthetic())
+                            .xor(a.into(), all_ones.into(), I64, Origin::synthetic())
                     } else if name.starts_with("atomic_umax") {
                         let bits = (elem_size * 8) as u32;
                         let gt = self.builder.icmp(

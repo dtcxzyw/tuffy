@@ -1,12 +1,17 @@
 use rustc_middle::mir::{self, BinOp, CastKind, Operand, Place, PlaceElem, Rvalue};
 use rustc_middle::ty::{self, Instance, TypeVisitableExt};
 use tuffy_ir::instruction::{FCmpOp, ICmpOp, Operand as IrOperand, Origin};
-use tuffy_ir::types::{Annotation, FloatType, FpRewriteFlags, IntSignedness, Type};
+use tuffy_ir::types::{Annotation, FloatType, FpRewriteFlags, IntAnnotation, IntSignedness, Type};
 use tuffy_ir::value::ValueRef;
 
 use super::constant::*;
 use super::ctx::TranslationCtx;
 use super::types::*;
+
+const I64: IntAnnotation = IntAnnotation {
+    bit_width: 64,
+    signedness: IntSignedness::Unsigned,
+};
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     pub(super) fn translate_place_to_addr(
@@ -196,7 +201,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let byte_offset = self.builder.mul(
                         idx_val.into(),
                         size_val.into(),
-                        None,
+                        I64,
                         Origin::synthetic(),
                     );
                     addr = self.builder.ptradd(
@@ -468,7 +473,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             let relative = self.builder.sub(
                                 tag_val.into(),
                                 ns.into(),
-                                None,
+                                I64,
                                 Origin::synthetic(),
                             );
                             let start_c = self
@@ -477,7 +482,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             let variant_idx = self.builder.add(
                                 relative.into(),
                                 start_c.into(),
-                                None,
+                                I64,
                                 Origin::synthetic(),
                             );
                             // Check relative < num_niche (unsigned).
@@ -887,10 +892,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // (Ge, Le, etc.) are handled further below via fcmp.
                 if !matches!(
                     self.builder.value_type(l_raw),
-                    Some(Type::Int(_) | Type::Ptr(_) | Type::Bool | Type::Float(_))
+                    Some(Type::Int | Type::Ptr(_) | Type::Bool | Type::Float(_))
                 ) || !matches!(
                     self.builder.value_type(r_raw),
-                    Some(Type::Int(_) | Type::Ptr(_) | Type::Bool | Type::Float(_))
+                    Some(Type::Int | Type::Ptr(_) | Type::Bool | Type::Float(_))
                 ) {
                     return Some(self.builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic()));
                 }
@@ -988,7 +993,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             ) => n,
                             None => 64,
                         };
-                        let sum = self.builder.add(l_op, r_op, None, Origin::synthetic());
+                        let sum = self.builder.add(l_op, r_op, I64, Origin::synthetic());
                         match res_ann {
                             Some(IntAnn::Signed(_)) => self.builder.sext(
                                 sum.into(),
@@ -1012,7 +1017,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             ) => n,
                             None => 64,
                         };
-                        let diff = self.builder.sub(l_op, r_op, None, Origin::synthetic());
+                        let diff = self.builder.sub(l_op, r_op, I64, Origin::synthetic());
                         match res_ann {
                             Some(IntAnn::Signed(_)) => self.builder.sext(
                                 diff.into(),
@@ -1036,7 +1041,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             ) => n,
                             None => 64,
                         };
-                        let prod = self.builder.mul(l_op, r_op, None, Origin::synthetic());
+                        let prod = self.builder.mul(l_op, r_op, I64, Origin::synthetic());
                         match res_ann {
                             Some(IntAnn::Signed(_)) => self.builder.sext(
                                 prod.into(),
@@ -1054,13 +1059,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // Unchecked variants: the caller guarantees no overflow so the
                     // result can carry a full Signed/Unsigned annotation directly.
                     BinOp::AddUnchecked => {
-                        self.builder.add(l_op, r_op, None, Origin::synthetic())
+                        self.builder.add(l_op, r_op, I64, Origin::synthetic())
                     }
                     BinOp::SubUnchecked => {
-                        self.builder.sub(l_op, r_op, None, Origin::synthetic())
+                        self.builder.sub(l_op, r_op, I64, Origin::synthetic())
                     }
                     BinOp::MulUnchecked => {
-                        self.builder.mul(l_op, r_op, None, Origin::synthetic())
+                        self.builder.mul(l_op, r_op, I64, Origin::synthetic())
                     }
                     // Checked arithmetic: emit a multi-result IR intrinsic that
                     // produces (wrapping_result: Int, overflow: Bool).  The primary
@@ -1239,7 +1244,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             self.builder.sub(
                                 gt_int.into(),
                                 lt_int.into(),
-                                None,
+                                I64,
                                 Origin::synthetic(),
                             )
                         } else {
@@ -1257,7 +1262,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             self.builder.sub(
                                 gt_int.into(),
                                 lt_int.into(),
-                                None,
+                                I64,
                                 Origin::synthetic(),
                             )
                         }
@@ -1270,7 +1275,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let masked = self.builder.and(
                             shift_val.into(),
                             mask_val.into(),
-                            None,
+                            I64,
                             Origin::synthetic(),
                         );
                         let masked_op = IrOperand {
@@ -1280,9 +1285,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         self.builder
                             .shl(l_op, masked_op, None, Origin::synthetic())
                     }
-                    BinOp::BitOr => self.builder.or(l_op, r_op, None, Origin::synthetic()),
-                    BinOp::BitAnd => self.builder.and(l_op, r_op, None, Origin::synthetic()),
-                    BinOp::BitXor => self.builder.xor(l_op, r_op, None, Origin::synthetic()),
+                    BinOp::BitOr => self.builder.or(l_op, r_op, I64, Origin::synthetic()),
+                    BinOp::BitAnd => self.builder.and(l_op, r_op, I64, Origin::synthetic()),
+                    BinOp::BitXor => self.builder.xor(l_op, r_op, I64, Origin::synthetic()),
                     BinOp::Shr | BinOp::ShrUnchecked => {
                         let shift_val = r_op.value;
                         let lhs_bits = type_size(self.tcx, lhs_mir_ty).unwrap_or(8) as i64 * 8;
@@ -1290,7 +1295,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let masked = self.builder.and(
                             shift_val.into(),
                             mask_val.into(),
-                            None,
+                            I64,
                             Origin::synthetic(),
                         );
                         let masked_op = IrOperand {
@@ -1300,8 +1305,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         self.builder
                             .shr(l_op, masked_op, None, Origin::synthetic())
                     }
-                    BinOp::Div => self.builder.div(l_op, r_op, None, Origin::synthetic()),
-                    BinOp::Rem => self.builder.rem(l_op, r_op, None, Origin::synthetic()),
+                    BinOp::Div => self.builder.div(l_op, r_op, I64, Origin::synthetic()),
+                    BinOp::Rem => self.builder.rem(l_op, r_op, I64, Origin::synthetic()),
                     BinOp::Offset => {
                         // ptr.wrapping_offset(count) = ptr + count * sizeof(T).
                         let l_raw = self.translate_operand(lhs)?;
@@ -1320,7 +1325,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             let size_val =
                                 self.builder.iconst(elem_size as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                             self.builder
-                                .mul(r.into(), size_val.into(), None, Origin::synthetic())
+                                .mul(r.into(), size_val.into(), I64, Origin::synthetic())
                         };
                         let ptr = self.coerce_to_ptr(l_raw);
                         self.builder
@@ -1628,7 +1633,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 let result_large = self.builder.or(
                                     raw_shifted.into(),
                                     sign_bit.into(),
-                                    None,
+                                    I64,
                                     Origin::synthetic(),
                                 );
                                 let max_u64 = self.builder.iconst(-1_i64, 64, IntSignedness::DontCare, Origin::synthetic());
@@ -1666,7 +1671,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 let sign_masked = self.builder.and(
                                     sign.into(),
                                     one.into(),
-                                    None,
+                                    I64,
                                     Origin::synthetic(),
                                 );
                                 let is_neg = self
@@ -1826,7 +1831,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         type_size(self.tcx, target_ty_mono).unwrap_or(0);
                                     let target_ir_ty = translate_ty(self.tcx, target_ty_mono);
                                     if target_size > 0
-                                        && matches!(target_ir_ty, Some(Type::Int(_) | Type::Float(_)))
+                                        && matches!(target_ir_ty, Some(Type::Int | Type::Float(_)))
                                     {
                                         let load_ty = target_ir_ty.unwrap();
                                         let loaded = self.builder.load(
@@ -1845,7 +1850,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         // Transmute from an Int register value to a Float type: reinterpret
                         // the bit pattern via a temporary stack slot (no bitcast in IR).
                         if matches!(kind, CastKind::Transmute)
-                            && matches!(self.builder.value_type(val), Some(Type::Int(_) | Type::Bool))
+                            && matches!(self.builder.value_type(val), Some(Type::Int | Type::Bool))
                         {
                             if let Some(Type::Float(ft)) = translate_ty(self.tcx, target_ty_mono) {
                                 let size = type_size(self.tcx, target_ty_mono).unwrap_or(0) as u32;
@@ -2048,7 +2053,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // data and return a pointer so the word-by-word copy path handles it.
                     let is_i128_const = bytes == 16
                         && matches!(op, Operand::Constant(_))
-                        && matches!(self.builder.value_type(val), Some(Type::Int(_)))
+                        && matches!(self.builder.value_type(val), Some(Type::Int))
                         && field_ty.map_or(false, |t| {
                             matches!(
                                 t.kind(),
@@ -2387,13 +2392,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // Coerce Bool/Ptr to Int for integer negation.
                     self.coerce_to_int(v)
                 };
-                if !matches!(self.builder.value_type(v), Some(Type::Int(_))) {
+                if !matches!(self.builder.value_type(v), Some(Type::Int)) {
                     return Some(self.builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic()));
                 }
                 let zero = self.builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
                 Some(
                     self.builder
-                        .sub(zero.into(), v.into(), neg_ann, Origin::synthetic()),
+                        .sub(zero.into(), v.into(), I64, Origin::synthetic()),
                 )
             }
             Rvalue::UnaryOp(mir::UnOp::Not, operand) => {
@@ -2408,7 +2413,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let one = self.builder.iconst(1, 64, IntSignedness::DontCare, Origin::synthetic());
                     Some(
                         self.builder
-                            .xor(int_v.into(), one.into(), None, Origin::synthetic()),
+                            .xor(int_v.into(), one.into(), I64, Origin::synthetic()),
                     )
                 } else {
                     match self.builder.value_type(v) {
@@ -2418,7 +2423,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             Some(self.builder.xor(
                                 int_v.into(),
                                 one.into(),
-                                None,
+                                I64,
                                 Origin::synthetic(),
                             ))
                         }
@@ -2445,7 +2450,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             Some(self.builder.xor(
                                 loaded.into(),
                                 ones.into(),
-                                not_ann,
+                                I64,
                                 Origin::synthetic(),
                             ))
                         }
@@ -2455,7 +2460,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             Some(self.builder.xor(
                                 v.into(),
                                 ones.into(),
-                                not_ann,
+                                I64,
                                 Origin::synthetic(),
                             ))
                         }
@@ -2542,7 +2547,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let ir_ty = translate_ty(self.tcx, ty);
                         let is_slot_ptr =
                             matches!(self.builder.value_type(slot), Some(Type::Ptr(_)));
-                        let should_load_stack_int = matches!(ir_ty, Some(Type::Int(_)))
+                        let should_load_stack_int = matches!(ir_ty, Some(Type::Int))
                             && is_slot_ptr
                             && ((size <= 8 && slot_size.is_some_and(|sz| sz <= 8))
                                 || (size > 8
@@ -2590,7 +2595,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     {
                         let ty = self.monomorphize(self.mir.local_decls[place.local].ty);
                         let size = type_size(self.tcx, ty).unwrap_or(8);
-                        if matches!(translate_ty(self.tcx, ty), Some(Type::Int(_)))
+                        if matches!(translate_ty(self.tcx, ty), Some(Type::Int))
                             && (size <= 8 || ty.is_integral())
                         {
                             let ann = translate_annotation(ty);

@@ -54,10 +54,7 @@ impl IntAnn {
 
 /// Helper to create a default Int type (64-bit, DontCare signedness).
 pub(super) fn default_int_type() -> Type {
-    Type::Int(IntAnnotation {
-        bit_width: 64,
-        signedness: IntSignedness::DontCare,
-    })
+    Type::Int
 }
 
 /// Look up the fully-monomorphized layout for a type, or return `None` on failure.
@@ -103,19 +100,19 @@ pub(super) fn repr_kind<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> ReprKind {
 pub(super) fn translate_ty<'tcx>(_tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> Option<Type> {
     match ty.kind() {
         ty::Bool => Some(Type::Bool),
-        ty::Int(ty::IntTy::I8) => Some(Type::Int(IntAnnotation { bit_width: 8, signedness: IntSignedness::Signed })),
-        ty::Uint(ty::UintTy::U8) => Some(Type::Int(IntAnnotation { bit_width: 8, signedness: IntSignedness::Unsigned })),
-        ty::Int(ty::IntTy::I16) => Some(Type::Int(IntAnnotation { bit_width: 16, signedness: IntSignedness::Signed })),
-        ty::Uint(ty::UintTy::U16) => Some(Type::Int(IntAnnotation { bit_width: 16, signedness: IntSignedness::Unsigned })),
-        ty::Int(ty::IntTy::I32) => Some(Type::Int(IntAnnotation { bit_width: 32, signedness: IntSignedness::Signed })),
-        ty::Uint(ty::UintTy::U32) => Some(Type::Int(IntAnnotation { bit_width: 32, signedness: IntSignedness::Unsigned })),
-        ty::Char => Some(Type::Int(IntAnnotation { bit_width: 32, signedness: IntSignedness::Unsigned })),
-        ty::Int(ty::IntTy::I64) => Some(Type::Int(IntAnnotation { bit_width: 64, signedness: IntSignedness::Signed })),
-        ty::Uint(ty::UintTy::U64) => Some(Type::Int(IntAnnotation { bit_width: 64, signedness: IntSignedness::Unsigned })),
-        ty::Int(ty::IntTy::I128) => Some(Type::Int(IntAnnotation { bit_width: 128, signedness: IntSignedness::Signed })),
-        ty::Uint(ty::UintTy::U128) => Some(Type::Int(IntAnnotation { bit_width: 128, signedness: IntSignedness::Unsigned })),
-        ty::Int(ty::IntTy::Isize) => Some(Type::Int(IntAnnotation { bit_width: 64, signedness: IntSignedness::Signed })),
-        ty::Uint(ty::UintTy::Usize) => Some(Type::Int(IntAnnotation { bit_width: 64, signedness: IntSignedness::Unsigned })),
+        ty::Int(ty::IntTy::I8) => Some(Type::Int),
+        ty::Uint(ty::UintTy::U8) => Some(Type::Int),
+        ty::Int(ty::IntTy::I16) => Some(Type::Int),
+        ty::Uint(ty::UintTy::U16) => Some(Type::Int),
+        ty::Int(ty::IntTy::I32) => Some(Type::Int),
+        ty::Uint(ty::UintTy::U32) => Some(Type::Int),
+        ty::Char => Some(Type::Int),
+        ty::Int(ty::IntTy::I64) => Some(Type::Int),
+        ty::Uint(ty::UintTy::U64) => Some(Type::Int),
+        ty::Int(ty::IntTy::I128) => Some(Type::Int),
+        ty::Uint(ty::UintTy::U128) => Some(Type::Int),
+        ty::Int(ty::IntTy::Isize) => Some(Type::Int),
+        ty::Uint(ty::UintTy::Usize) => Some(Type::Int),
         ty::RawPtr(..) | ty::Ref(..) | ty::FnPtr(..) => Some(Type::Ptr(0)),
         ty::Tuple(fields) if fields.is_empty() => Some(Type::Unit),
         ty::FnDef(..) => None,
@@ -132,7 +129,7 @@ pub(super) fn translate_ty<'tcx>(_tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> Option
 }
 
 pub(super) fn translate_annotation(ty: ty::Ty<'_>) -> Option<Annotation> {
-    // Integer annotations are now part of Type::Int(IntAnnotation).
+    // Integer annotations are now part of Type::Int.
     // This function only handles pointer alignment annotations.
     match ty.kind() {
         ty::RawPtr(..) | ty::Ref(..) | ty::FnPtr(..) => None,

@@ -23,6 +23,11 @@ use tuffy_ir::instruction::{ICmpOp, Operand, Origin};
 use tuffy_ir::module::SymbolTable;
 use tuffy_ir::types::{IntAnnotation, IntSignedness, Type};
 
+const I64: IntAnnotation = IntAnnotation {
+    bit_width: 64,
+    signedness: IntSignedness::Unsigned,
+};
+
 use std::collections::{HashMap, HashSet};
 
 use crate::backend::lower_isel_result;
@@ -78,10 +83,7 @@ fn emit_elf_valid() {
 }
 
 fn build_add_func() -> (Function, SymbolTable) {
-    let i32_type = Type::Int(IntAnnotation {
-        bit_width: 32,
-        signedness: IntSignedness::Signed,
-    });
+    let i32_type = Type::Int;
     let mut st = SymbolTable::new();
     let name = st.intern("add");
     let mut func = Function::new(
@@ -103,7 +105,7 @@ fn build_add_func() -> (Function, SymbolTable) {
     let mem0 = builder.add_block_arg(entry, Type::Mem);
     let a = builder.param(0, i32_type.clone(), None, Origin::synthetic());
     let b = builder.param(1, i32_type.clone(), None, Origin::synthetic());
-    let sum = builder.add(a.into(), b.into(), None, Origin::synthetic());
+    let sum = builder.add(a.into(), b.into(), I64, Origin::synthetic());
     builder.ret(Some(sum.into()), mem0.into(), Origin::synthetic());
 
     builder.exit_region();
@@ -155,10 +157,7 @@ fn encode_branch_labels_resolved() {
 /// else_bb:
 ///   ret %1
 fn build_branch_func() -> (Function, SymbolTable) {
-    let i32_type = Type::Int(IntAnnotation {
-        bit_width: 32,
-        signedness: IntSignedness::Signed,
-    });
+    let i32_type = Type::Int;
     let mut st = SymbolTable::new();
     let name = st.intern("max");
     let mut func = Function::new(
@@ -330,10 +329,7 @@ fn build_annotated_wide_call_func() -> (Function, SymbolTable) {
     let caller = st.intern("caller_wide");
     let callee = st.intern("callee_wide");
 
-    let ret_type = Type::Int(IntAnnotation {
-        bit_width: 128,
-        signedness: IntSignedness::Unsigned,
-    });
+    let ret_type = Type::Int;
     let mut func = Function::new(caller, vec![], vec![], vec![], Some(ret_type.clone()), None);
     let mut builder = Builder::new(&mut func);
 
@@ -363,12 +359,9 @@ fn build_annotated_wide_call_func() -> (Function, SymbolTable) {
 }
 
 /// Build: fn name(a: int :ann) -> int { sext/zext a to 64 }
-fn build_extend_func(name: &str, ann: IntAnnotation, is_sext: bool) -> (Function, SymbolTable) {
-    let src_type = Type::Int(ann);
-    let ret_type = Type::Int(IntAnnotation {
-        bit_width: 64,
-        signedness: IntSignedness::Signed,
-    });
+fn build_extend_func(name: &str, _ann: IntAnnotation, is_sext: bool) -> (Function, SymbolTable) {
+    let src_type = Type::Int;
+    let i64_type = Type::Int;
     let mut st = SymbolTable::new();
     let sym = st.intern(name);
     let mut func = Function::new(
@@ -376,7 +369,7 @@ fn build_extend_func(name: &str, ann: IntAnnotation, is_sext: bool) -> (Function
         vec![src_type.clone()],
         vec![None],
         vec![],
-        Some(ret_type.clone()),
+        Some(i64_type.clone()),
         None,
     );
     let mut builder = Builder::new(&mut func);

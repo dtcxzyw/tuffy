@@ -100,7 +100,7 @@ impl<'a> DisplayCtx<'a> {
 
 fn fmt_type(ty: &Type) -> String {
     match ty {
-        Type::Int(ann) => format!("int:{}", fmt_int_annotation(ann)),
+        Type::Int => "int".to_string(),
         Type::Bool => "bool".to_string(),
         Type::Unit => "unit".to_string(),
         Type::Byte(_) => "byte".to_string(),
