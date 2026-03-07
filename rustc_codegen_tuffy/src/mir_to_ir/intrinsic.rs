@@ -495,16 +495,28 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             "minnumf32" | "minnumf64" => {
                 let a = ir_args[0];
                 let b = ir_args[1];
-                let ty = self.builder.value_type(a).cloned().unwrap_or(Type::Float(FloatType::F64));
-                let result = self.builder.fminnum(a.into(), b.into(), ty, Origin::synthetic());
+                let ty = self
+                    .builder
+                    .value_type(a)
+                    .cloned()
+                    .unwrap_or(Type::Float(FloatType::F64));
+                let result = self
+                    .builder
+                    .fminnum(a.into(), b.into(), ty, Origin::synthetic());
                 self.locals.set(destination_local, result);
                 true
             }
             "maxnumf32" | "maxnumf64" => {
                 let a = ir_args[0];
                 let b = ir_args[1];
-                let ty = self.builder.value_type(a).cloned().unwrap_or(Type::Float(FloatType::F64));
-                let result = self.builder.fmaxnum(a.into(), b.into(), ty, Origin::synthetic());
+                let ty = self
+                    .builder
+                    .value_type(a)
+                    .cloned()
+                    .unwrap_or(Type::Float(FloatType::F64));
+                let result = self
+                    .builder
+                    .fmaxnum(a.into(), b.into(), ty, Origin::synthetic());
                 self.locals.set(destination_local, result);
                 true
             }
@@ -551,11 +563,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     self.builder
                         .mul(count.into(), sz.into(), None, Origin::synthetic())
                 };
+                let dst_annotated = IrOperand::annotated(dst, Annotation::Align(elem_align as u32));
                 let mem_out = self.builder.mem_set(
-                    dst.into(),
+                    dst_annotated,
                     val.into(),
                     byte_count.into(),
-                    elem_align as u32,
                     current_mem.into(),
                     Origin::synthetic(),
                 );
@@ -577,11 +589,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     self.builder
                         .mul(count.into(), sz.into(), None, Origin::synthetic())
                 };
+                let dst_annotated = IrOperand::annotated(dst, Annotation::Align(elem_align as u32));
+                let src_annotated = IrOperand::annotated(src, Annotation::Align(elem_align as u32));
                 let mem_out = self.builder.mem_copy(
-                    dst.into(),
-                    src.into(),
+                    dst_annotated,
+                    src_annotated,
                     byte_count.into(),
-                    elem_align as u32,
                     current_mem.into(),
                     Origin::synthetic(),
                 );
@@ -603,11 +616,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     self.builder
                         .mul(count.into(), sz.into(), None, Origin::synthetic())
                 };
+                let dst_annotated = IrOperand::annotated(dst, Annotation::Align(elem_align as u32));
+                let src_annotated = IrOperand::annotated(src, Annotation::Align(elem_align as u32));
                 let mem_out = self.builder.mem_move(
-                    dst.into(),
-                    src.into(),
+                    dst_annotated,
+                    src_annotated,
                     byte_count.into(),
-                    elem_align as u32,
                     current_mem.into(),
                     Origin::synthetic(),
                 );
@@ -826,7 +840,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 || name.starts_with("atomic_singlethreadfence") =>
             {
                 let ordering = parse_atomic_ordering(name);
-                let new_mem = self.builder.fence(ordering, current_mem.into(), Origin::synthetic());
+                let new_mem = self
+                    .builder
+                    .fence(ordering, current_mem.into(), Origin::synthetic());
                 Some(new_mem)
             }
 
@@ -923,9 +939,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     );
 
                     let new_val = if name.starts_with("atomic_nand") {
-                        let a = self
-                            .builder
-                            .and(old.into(), operand.into(), None, Origin::synthetic());
+                        let a =
+                            self.builder
+                                .and(old.into(), operand.into(), None, Origin::synthetic());
                         let all_ones = self.builder.iconst(-1, Origin::synthetic());
                         self.builder
                             .xor(a.into(), all_ones.into(), None, Origin::synthetic())

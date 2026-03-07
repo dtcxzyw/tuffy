@@ -1874,17 +1874,13 @@ fn mem_copy_builder_and_display() {
         dst.into(),
         src.into(),
         count.into(),
-        1,
         mem0.into(),
         Origin::synthetic(),
     );
     b.ret(None, mem1.into(), Origin::synthetic());
     b.exit_region();
 
-    assert!(matches!(
-        func.instructions[3].op,
-        Op::MemCopy(_, _, _, 1, _)
-    ));
+    assert!(matches!(func.instructions[3].op, Op::MemCopy(_, _, _, _)));
     assert_eq!(func.instructions[3].ty, Type::Mem);
 
     let output = format!("{}", func.display(&st));
@@ -1892,7 +1888,6 @@ fn mem_copy_builder_and_display() {
         output.contains("memcpy"),
         "should display 'memcpy': {output}"
     );
-    assert!(output.contains("align=1"), "should display align: {output}");
 }
 
 #[test]
@@ -1922,17 +1917,13 @@ fn mem_move_builder_and_display() {
         dst.into(),
         src.into(),
         count.into(),
-        8,
         mem0.into(),
         Origin::synthetic(),
     );
     b.ret(None, mem1.into(), Origin::synthetic());
     b.exit_region();
 
-    assert!(matches!(
-        func.instructions[3].op,
-        Op::MemMove(_, _, _, 8, _)
-    ));
+    assert!(matches!(func.instructions[3].op, Op::MemMove(_, _, _, _)));
     assert_eq!(func.instructions[3].ty, Type::Mem);
 
     let output = format!("{}", func.display(&st));
@@ -1940,7 +1931,6 @@ fn mem_move_builder_and_display() {
         output.contains("memmove"),
         "should display 'memmove': {output}"
     );
-    assert!(output.contains("align=8"), "should display align: {output}");
 }
 
 #[test]
@@ -1970,14 +1960,13 @@ fn mem_set_builder_and_display() {
         dst.into(),
         val.into(),
         count.into(),
-        4,
         mem0.into(),
         Origin::synthetic(),
     );
     b.ret(None, mem1.into(), Origin::synthetic());
     b.exit_region();
 
-    assert!(matches!(func.instructions[3].op, Op::MemSet(_, _, _, 4, _)));
+    assert!(matches!(func.instructions[3].op, Op::MemSet(_, _, _, _)));
     assert_eq!(func.instructions[3].ty, Type::Mem);
 
     let output = format!("{}", func.display(&st));
@@ -1985,5 +1974,4 @@ fn mem_set_builder_and_display() {
         output.contains("memset"),
         "should display 'memset': {output}"
     );
-    assert!(output.contains("align=4"), "should display align: {output}");
 }

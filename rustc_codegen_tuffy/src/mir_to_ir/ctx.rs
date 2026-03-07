@@ -4,9 +4,9 @@ use rustc_middle::mir::{self, BasicBlock};
 use rustc_middle::ty::{self, Instance, TyCtxt};
 use tuffy_codegen::AbiMetadataBox;
 use tuffy_ir::builder::Builder;
-use tuffy_ir::instruction::Origin;
+use tuffy_ir::instruction::{Operand, Origin};
 use tuffy_ir::module::{SymbolId, SymbolTable};
-use tuffy_ir::types::Type;
+use tuffy_ir::types::{Annotation, Type};
 use tuffy_ir::value::{BlockRef, ValueRef};
 
 use super::StaticDataVec;
@@ -334,7 +334,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
                 if is_large {
                     // Large parameter: receive pointer from caller
-                    let ptr = self.builder.param(param_idx, Type::Ptr(0), None, Origin::synthetic());
+                    let ptr =
+                        self.builder
+                            .param(param_idx, Type::Ptr(0), None, Origin::synthetic());
 
                     // Allocate local stack space
                     let local_slot = self.builder.stack_slot(sz as u32, Origin::synthetic());
@@ -342,11 +344,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // Copy data from caller's pointer to local
                     let size_val = self.builder.iconst(sz as i64, Origin::synthetic());
                     let align = 8; // TODO: compute proper alignment
+                    let local_annotated = Operand::annotated(local_slot, Annotation::Align(align));
+                    let ptr_annotated = Operand::annotated(ptr, Annotation::Align(align));
                     let new_mem = self.builder.mem_copy(
-                        local_slot.into(),
-                        ptr.into(),
+                        local_annotated,
+                        ptr_annotated,
                         size_val.into(),
-                        align,
                         self.current_mem.into(),
                         Origin::synthetic(),
                     );
@@ -357,7 +360,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     self.stack_locals.mark(local);
                 } else {
                     // Small parameter: passed directly
-                    let val = self.builder.param(param_idx, ir_ty_val, translate_annotation(ty), Origin::synthetic());
+                    let val = self.builder.param(
+                        param_idx,
+                        ir_ty_val,
+                        translate_annotation(ty),
+                        Origin::synthetic(),
+                    );
                     self.locals.set(local, val);
                 }
 

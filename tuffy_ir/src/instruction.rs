@@ -267,14 +267,14 @@ pub enum Op {
     /// Allocate n bytes on stack, returns pointer.
     StackSlot(u32),
     /// Memory copy (non-overlapping): memcpy semantics.
-    /// Args: (dst_ptr, src_ptr, byte_count, align, mem_token)
-    MemCopy(Operand, Operand, Operand, u32, Operand),
+    /// Args: (dst_ptr, src_ptr, byte_count, mem_token)
+    MemCopy(Operand, Operand, Operand, Operand),
     /// Memory move (may overlap): memmove semantics.
-    /// Args: (dst_ptr, src_ptr, byte_count, align, mem_token)
-    MemMove(Operand, Operand, Operand, u32, Operand),
+    /// Args: (dst_ptr, src_ptr, byte_count, mem_token)
+    MemMove(Operand, Operand, Operand, Operand),
     /// Memory set: memset semantics.
-    /// Args: (dst_ptr, value, byte_count, align, mem_token)
-    MemSet(Operand, Operand, Operand, u32, Operand),
+    /// Args: (dst_ptr, value, byte_count, mem_token)
+    MemSet(Operand, Operand, Operand, Operand),
 
     // -- Atomic memory operations --
     /// Atomic load from pointer with memory ordering. Third is mem token input.

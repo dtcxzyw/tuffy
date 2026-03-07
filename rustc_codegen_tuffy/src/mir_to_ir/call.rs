@@ -733,7 +733,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // occupy a runtime slot.
             let arg_ty = operand_ty_projected(&arg.node, self.mir, self.tcx)
                 .map(|ty| self.monomorphize(ty))
-                .unwrap_or_else(|| self.monomorphize(self.mir.local_decls[mir::Local::from_usize(0)].ty));
+                .unwrap_or_else(|| {
+                    self.monomorphize(self.mir.local_decls[mir::Local::from_usize(0)].ty)
+                });
             if matches!(translate_ty(self.tcx, arg_ty), Some(Type::Unit) | None) {
                 continue;
             }
@@ -989,22 +991,19 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         // Large struct/array (>16 bytes): pass a pointer to a fresh copy.
                         // Passing the original slot directly would let the callee overwrite
                         // the caller's local (violating Rust pass-by-value semantics).
-                        if arg_size > 16
-                            && matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
+                        if arg_size > 16 && matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
                         {
-                            let align =
-                                type_align(self.tcx, arg_ty).unwrap_or(1) as u32;
+                            let align = type_align(self.tcx, arg_ty).unwrap_or(1) as u32;
                             let tmp = self
                                 .builder
                                 .stack_slot(arg_size as u32, Origin::synthetic());
-                            let count = self
-                                .builder
-                                .iconst(arg_size as i64, Origin::synthetic());
+                            let count = self.builder.iconst(arg_size as i64, Origin::synthetic());
+                            let tmp_annotated = IrOperand::annotated(tmp, Annotation::Align(align));
+                            let v_annotated = IrOperand::annotated(v, Annotation::Align(align));
                             let new_mem = self.builder.mem_copy(
-                                tmp.into(),
-                                v.into(),
+                                tmp_annotated,
+                                v_annotated,
                                 count.into(),
-                                align,
                                 self.current_mem.into(),
                                 Origin::synthetic(),
                             );
@@ -1153,11 +1152,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let count = self
                             .builder
                             .iconst(call_proj_size as i64, Origin::synthetic());
+                        let addr_annotated = IrOperand::annotated(addr, Annotation::Align(1));
+                        let sret_annotated = IrOperand::annotated(sret, Annotation::Align(1));
                         self.current_mem = self.builder.mem_copy(
-                            addr.into(),
-                            sret.into(),
+                            addr_annotated,
+                            sret_annotated,
                             count.into(),
-                            1,
                             self.current_mem.into(),
                             Origin::synthetic(),
                         );

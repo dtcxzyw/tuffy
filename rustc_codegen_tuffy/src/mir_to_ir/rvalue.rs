@@ -986,6 +986,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 | Annotation::Unsigned(n)
                                 | Annotation::DontCare(n),
                             ) => n,
+                            Some(Annotation::Align(_)) => 64,
                             None => 64,
                         };
                         let dont_care = res_ann.map(|_| Annotation::DontCare(bits));
@@ -1011,6 +1012,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 | Annotation::Unsigned(n)
                                 | Annotation::DontCare(n),
                             ) => n,
+                            Some(Annotation::Align(_)) => 64,
                             None => 64,
                         };
                         let dont_care = res_ann.map(|_| Annotation::DontCare(bits));
@@ -1036,6 +1038,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 | Annotation::Unsigned(n)
                                 | Annotation::DontCare(n),
                             ) => n,
+                            Some(Annotation::Align(_)) => 64,
                             None => 64,
                         };
                         let dont_care = res_ann.map(|_| Annotation::DontCare(bits));
@@ -1076,6 +1079,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 | Annotation::Unsigned(n)
                                 | Annotation::DontCare(n),
                             ) => n,
+                            Some(Annotation::Align(_)) => 64,
                             None => 64,
                         };
                         let (primary, overflow) = if matches!(res_ann, Some(Annotation::Signed(_)))
@@ -1104,6 +1108,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 | Annotation::Unsigned(n)
                                 | Annotation::DontCare(n),
                             ) => n,
+                            Some(Annotation::Align(_)) => 64,
                             None => 64,
                         };
                         let (primary, overflow) = if matches!(res_ann, Some(Annotation::Signed(_)))
@@ -1132,6 +1137,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 | Annotation::Unsigned(n)
                                 | Annotation::DontCare(n),
                             ) => n,
+                            Some(Annotation::Align(_)) => 64,
                             None => 64,
                         };
                         let (primary, overflow) = if matches!(res_ann, Some(Annotation::Signed(_)))
@@ -1831,10 +1837,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         type_size(self.tcx, target_ty_mono).unwrap_or(0);
                                     let target_ir_ty = translate_ty(self.tcx, target_ty_mono);
                                     if target_size > 0
-                                        && matches!(
-                                            target_ir_ty,
-                                            Some(Type::Int | Type::Float(_))
-                                        )
+                                        && matches!(target_ir_ty, Some(Type::Int | Type::Float(_)))
                                     {
                                         let load_ty = target_ir_ty.unwrap();
                                         let loaded = self.builder.load(
@@ -1853,19 +1856,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         // Transmute from an Int register value to a Float type: reinterpret
                         // the bit pattern via a temporary stack slot (no bitcast in IR).
                         if matches!(kind, CastKind::Transmute)
-                            && matches!(
-                                self.builder.value_type(val),
-                                Some(Type::Int | Type::Bool)
-                            )
+                            && matches!(self.builder.value_type(val), Some(Type::Int | Type::Bool))
                         {
-                            if let Some(Type::Float(ft)) =
-                                translate_ty(self.tcx, target_ty_mono)
-                            {
-                                let size =
-                                    type_size(self.tcx, target_ty_mono).unwrap_or(0) as u32;
+                            if let Some(Type::Float(ft)) = translate_ty(self.tcx, target_ty_mono) {
+                                let size = type_size(self.tcx, target_ty_mono).unwrap_or(0) as u32;
                                 if size > 0 && size <= 8 {
-                                    let slot =
-                                        self.builder.stack_slot(size, Origin::synthetic());
+                                    let slot = self.builder.stack_slot(size, Origin::synthetic());
                                     self.current_mem = self.builder.store(
                                         val.into(),
                                         slot.into(),

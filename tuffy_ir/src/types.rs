@@ -170,4 +170,6 @@ pub enum Annotation {
     Unsigned(u32),
     /// `:dc<N>` — only low N bits meaningful, high bits undef.
     DontCare(u32),
+    /// `:align<N>` — pointer alignment in bytes.
+    Align(u32),
 }

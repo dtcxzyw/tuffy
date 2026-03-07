@@ -1310,15 +1310,15 @@ fn select_inst(
             }
         }
 
-        Op::MemCopy(dst, src, count, _align, _mem) => {
+        Op::MemCopy(dst, src, count, _mem) => {
             select_memcopy(ctx, dst, src, count)?;
         }
 
-        Op::MemMove(dst, src, count, _align, _mem) => {
+        Op::MemMove(dst, src, count, _mem) => {
             select_memmove(ctx, dst, src, count)?;
         }
 
-        Op::MemSet(dst, val, count, _align, _mem) => {
+        Op::MemSet(dst, val, count, _mem) => {
             select_memset(ctx, dst, val, count)?;
         }
 

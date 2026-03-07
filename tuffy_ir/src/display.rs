@@ -130,6 +130,7 @@ fn fmt_annotation(ann: &Annotation) -> String {
         Annotation::Signed(n) => format!(":s{n}"),
         Annotation::Unsigned(n) => format!(":u{n}"),
         Annotation::DontCare(n) => format!(":i{n}"),
+        Annotation::Align(n) => format!(":align{n}"),
     }
 }
 
@@ -422,33 +423,30 @@ fn fmt_inst(
             )
         }
         Op::StackSlot(bytes) => format!("{v} = stack_slot {bytes}"),
-        Op::MemCopy(dst, src, count, align, mem) => {
+        Op::MemCopy(dst, src, count, mem) => {
             format!(
-                "{v} = memcopy {}, {}, {}, align={}, {}",
+                "{v} = memcopy {}, {}, {}, {}",
                 ctx.fmt_operand(dst),
                 ctx.fmt_operand(src),
                 ctx.fmt_operand(count),
-                align,
                 ctx.fmt_operand(mem)
             )
         }
-        Op::MemMove(dst, src, count, align, mem) => {
+        Op::MemMove(dst, src, count, mem) => {
             format!(
-                "{v} = memmove {}, {}, {}, align={}, {}",
+                "{v} = memmove {}, {}, {}, {}",
                 ctx.fmt_operand(dst),
                 ctx.fmt_operand(src),
                 ctx.fmt_operand(count),
-                align,
                 ctx.fmt_operand(mem)
             )
         }
-        Op::MemSet(dst, val, count, align, mem) => {
+        Op::MemSet(dst, val, count, mem) => {
             format!(
-                "{v} = memset {}, {}, {}, align={}, {}",
+                "{v} = memset {}, {}, {}, {}",
                 ctx.fmt_operand(dst),
                 ctx.fmt_operand(val),
                 ctx.fmt_operand(count),
-                align,
                 ctx.fmt_operand(mem)
             )
         }

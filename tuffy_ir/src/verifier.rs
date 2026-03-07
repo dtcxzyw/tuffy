@@ -290,6 +290,14 @@ impl<'a> FuncVerifier<'a> {
                     );
                 }
             }
+            Annotation::Align(_) => {
+                if !matches!(ty, Type::Ptr(_)) {
+                    self.result.error(
+                        loc.clone(),
+                        format!("{ctx}: align annotation on non-Ptr type {ty:?}"),
+                    );
+                }
+            }
         }
 
         if let Annotation::DontCare(bits) = ann

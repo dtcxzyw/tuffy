@@ -794,12 +794,11 @@ impl<'a> Builder<'a> {
         dst: Operand,
         src: Operand,
         count: Operand,
-        align: u32,
         mem: Operand,
         origin: Origin,
     ) -> ValueRef {
         self.push_inst(
-            Op::MemCopy(dst, src, count, align, mem),
+            Op::MemCopy(dst, src, count, mem),
             Type::Mem,
             None,
             origin,
@@ -813,12 +812,11 @@ impl<'a> Builder<'a> {
         dst: Operand,
         src: Operand,
         count: Operand,
-        align: u32,
         mem: Operand,
         origin: Origin,
     ) -> ValueRef {
         self.push_inst(
-            Op::MemMove(dst, src, count, align, mem),
+            Op::MemMove(dst, src, count, mem),
             Type::Mem,
             None,
             origin,
@@ -832,12 +830,11 @@ impl<'a> Builder<'a> {
         dst: Operand,
         val: Operand,
         count: Operand,
-        align: u32,
         mem: Operand,
         origin: Origin,
     ) -> ValueRef {
         self.push_inst(
-            Op::MemSet(dst, val, count, align, mem),
+            Op::MemSet(dst, val, count, mem),
             Type::Mem,
             None,
             origin,

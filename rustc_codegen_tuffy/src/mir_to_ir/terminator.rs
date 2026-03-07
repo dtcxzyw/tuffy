@@ -4,8 +4,9 @@ use rustc_middle::mir::{self, Operand, TerminatorKind};
 use rustc_middle::ty::{self, TypeVisitableExt};
 
 use num_bigint::BigInt;
+use tuffy_ir::instruction::Operand as IrOperand;
 use tuffy_ir::instruction::{ICmpOp, Origin};
-use tuffy_ir::types::Type;
+use tuffy_ir::types::{Annotation, Type};
 
 use super::ctx::TranslationCtx;
 use super::types::*;
@@ -25,20 +26,19 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // Copy from local slot to SRET pointer
                     let size_val = self.builder.iconst(ret_size as i64, Origin::synthetic());
                     let align = 8; // TODO: compute proper alignment
+                    let sret_annotated = IrOperand::annotated(sret, Annotation::Align(align));
+                    let local_annotated =
+                        IrOperand::annotated(local_slot, Annotation::Align(align));
                     let new_mem = self.builder.mem_copy(
-                        sret.into(),
-                        local_slot.into(),
+                        sret_annotated,
+                        local_annotated,
                         size_val.into(),
-                        align,
                         self.current_mem.into(),
                         Origin::synthetic(),
                     );
 
-                    self.builder.ret(
-                        Some(sret.into()),
-                        new_mem.into(),
-                        Origin::synthetic(),
-                    );
+                    self.builder
+                        .ret(Some(sret.into()), new_mem.into(), Origin::synthetic());
                     return;
                 }
 

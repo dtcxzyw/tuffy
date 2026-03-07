@@ -69,6 +69,7 @@ impl VMap {
 fn annotation_width(ann: Option<&Annotation>) -> Option<u32> {
     match ann {
         Some(Annotation::Signed(w) | Annotation::Unsigned(w) | Annotation::DontCare(w)) => Some(*w),
+        Some(Annotation::Align(_)) => None,
         None => None,
     }
 }
@@ -740,7 +741,10 @@ fn legalize_inst<M: AbiMetadata + Clone>(
                     let dst = remap_op(s, ptr);
                     let m = remap_op(s, mem);
                     let count = b.iconst(*bytes as i64, o());
-                    let new_mem = b.mem_copy(dst, src_ptr, Operand::new(count), 1, m, o());
+                    let dst_annotated = Operand::annotated(dst.value, Annotation::Align(1));
+                    let src_annotated = Operand::annotated(src_ptr.value, Annotation::Align(1));
+                    let new_mem =
+                        b.mem_copy(dst_annotated, src_annotated, Operand::new(count), m, o());
                     s.vmap.set(old_vref, Mapped::One(new_mem));
                     return;
                 }
@@ -935,27 +939,24 @@ fn copy_inst<M: AbiMetadata + Clone>(
             o(),
         ),
         Op::StackSlot(bytes) => b.stack_slot(*bytes, o()),
-        Op::MemCopy(dst, src, count, align, mem) => b.mem_copy(
+        Op::MemCopy(dst, src, count, mem) => b.mem_copy(
             remap_op(s, dst),
             remap_op(s, src),
             remap_op(s, count),
-            *align,
             remap_op(s, mem),
             o(),
         ),
-        Op::MemMove(dst, src, count, align, mem) => b.mem_move(
+        Op::MemMove(dst, src, count, mem) => b.mem_move(
             remap_op(s, dst),
             remap_op(s, src),
             remap_op(s, count),
-            *align,
             remap_op(s, mem),
             o(),
         ),
-        Op::MemSet(dst, val, count, align, mem) => b.mem_set(
+        Op::MemSet(dst, val, count, mem) => b.mem_set(
             remap_op(s, dst),
             remap_op(s, val),
             remap_op(s, count),
-            *align,
             remap_op(s, mem),
             o(),
         ),
