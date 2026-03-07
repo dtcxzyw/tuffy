@@ -4,7 +4,7 @@ use rustc_abi::BackendRepr;
 use rustc_middle::mir::{self, Operand};
 use rustc_middle::ty::{self, TyCtxt};
 
-use tuffy_ir::types::{Annotation, FloatType, Type};
+use tuffy_ir::types::{Annotation, FloatType, IntAnnotation, IntSignedness, Type};
 
 /// Look up the fully-monomorphized layout for a type, or return `None` on failure.
 ///
@@ -49,46 +49,38 @@ pub(super) fn repr_kind<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> ReprKind {
 pub(super) fn translate_ty<'tcx>(_tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> Option<Type> {
     match ty.kind() {
         ty::Bool => Some(Type::Bool),
-        ty::Int(ty::IntTy::I8) | ty::Uint(ty::UintTy::U8) => Some(Type::Int),
-        ty::Int(ty::IntTy::I16) | ty::Uint(ty::UintTy::U16) => Some(Type::Int),
-        ty::Int(ty::IntTy::I32) | ty::Uint(ty::UintTy::U32) | ty::Char => Some(Type::Int),
-        ty::Int(ty::IntTy::I64)
-        | ty::Uint(ty::UintTy::U64)
-        | ty::Int(ty::IntTy::I128)
-        | ty::Uint(ty::UintTy::U128)
-        | ty::Int(ty::IntTy::Isize)
-        | ty::Uint(ty::UintTy::Usize) => Some(Type::Int),
+        ty::Int(ty::IntTy::I8) => Some(Type::Int(IntAnnotation { bit_width: 8, signedness: IntSignedness::Signed })),
+        ty::Uint(ty::UintTy::U8) => Some(Type::Int(IntAnnotation { bit_width: 8, signedness: IntSignedness::Unsigned })),
+        ty::Int(ty::IntTy::I16) => Some(Type::Int(IntAnnotation { bit_width: 16, signedness: IntSignedness::Signed })),
+        ty::Uint(ty::UintTy::U16) => Some(Type::Int(IntAnnotation { bit_width: 16, signedness: IntSignedness::Unsigned })),
+        ty::Int(ty::IntTy::I32) => Some(Type::Int(IntAnnotation { bit_width: 32, signedness: IntSignedness::Signed })),
+        ty::Uint(ty::UintTy::U32) => Some(Type::Int(IntAnnotation { bit_width: 32, signedness: IntSignedness::Unsigned })),
+        ty::Char => Some(Type::Int(IntAnnotation { bit_width: 32, signedness: IntSignedness::Unsigned })),
+        ty::Int(ty::IntTy::I64) => Some(Type::Int(IntAnnotation { bit_width: 64, signedness: IntSignedness::Signed })),
+        ty::Uint(ty::UintTy::U64) => Some(Type::Int(IntAnnotation { bit_width: 64, signedness: IntSignedness::Unsigned })),
+        ty::Int(ty::IntTy::I128) => Some(Type::Int(IntAnnotation { bit_width: 128, signedness: IntSignedness::Signed })),
+        ty::Uint(ty::UintTy::U128) => Some(Type::Int(IntAnnotation { bit_width: 128, signedness: IntSignedness::Unsigned })),
+        ty::Int(ty::IntTy::Isize) => Some(Type::Int(IntAnnotation { bit_width: 64, signedness: IntSignedness::Signed })),
+        ty::Uint(ty::UintTy::Usize) => Some(Type::Int(IntAnnotation { bit_width: 64, signedness: IntSignedness::Unsigned })),
         ty::RawPtr(..) | ty::Ref(..) | ty::FnPtr(..) => Some(Type::Ptr(0)),
         ty::Tuple(fields) if fields.is_empty() => Some(Type::Unit),
-        ty::FnDef(..) => Some(Type::Int),
-        ty::Never => Some(Type::Int),
+        ty::FnDef(..) => Some(Type::Int(IntAnnotation { bit_width: 64, signedness: IntSignedness::DontCare })),
+        ty::Never => Some(Type::Int(IntAnnotation { bit_width: 64, signedness: IntSignedness::DontCare })),
         ty::Float(ty::FloatTy::F16) => Some(Type::Float(FloatType::F16)),
         ty::Float(ty::FloatTy::F32) => Some(Type::Float(FloatType::F32)),
         ty::Float(ty::FloatTy::F64) => Some(Type::Float(FloatType::F64)),
-        ty::Float(ty::FloatTy::F128) => Some(Type::Int), // f128 not yet supported
-        ty::Adt(..) | ty::Tuple(..) => Some(Type::Int),
-        ty::Array(..) | ty::Slice(..) | ty::Str => Some(Type::Int),
-        // Closure / coroutine-closure structs that capture variables are
-        // laid out like regular structs — treat them as Int so they are
-        // not skipped as "untranslatable" in call argument handling.
-        ty::Closure(..) | ty::CoroutineClosure(..) => Some(Type::Int),
+        ty::Float(ty::FloatTy::F128) => Some(Type::Int(IntAnnotation { bit_width: 128, signedness: IntSignedness::DontCare })),
+        ty::Adt(..) | ty::Tuple(..) => Some(Type::Int(IntAnnotation { bit_width: 64, signedness: IntSignedness::DontCare })),
+        ty::Array(..) | ty::Slice(..) | ty::Str => Some(Type::Int(IntAnnotation { bit_width: 64, signedness: IntSignedness::DontCare })),
+        ty::Closure(..) | ty::CoroutineClosure(..) => Some(Type::Int(IntAnnotation { bit_width: 64, signedness: IntSignedness::DontCare })),
         _ => None,
     }
 }
 
 pub(super) fn translate_annotation(ty: ty::Ty<'_>) -> Option<Annotation> {
+    // Integer annotations are now part of Type::Int(IntAnnotation).
+    // This function only handles pointer alignment annotations.
     match ty.kind() {
-        ty::Bool => None,
-        ty::Int(ty::IntTy::I8) => Some(Annotation::Signed(8)),
-        ty::Uint(ty::UintTy::U8) => Some(Annotation::Unsigned(8)),
-        ty::Int(ty::IntTy::I16) => Some(Annotation::Signed(16)),
-        ty::Uint(ty::UintTy::U16) => Some(Annotation::Unsigned(16)),
-        ty::Int(ty::IntTy::I32) | ty::Char => Some(Annotation::Signed(32)),
-        ty::Uint(ty::UintTy::U32) => Some(Annotation::Unsigned(32)),
-        ty::Int(ty::IntTy::I64) | ty::Int(ty::IntTy::Isize) => Some(Annotation::Signed(64)),
-        ty::Uint(ty::UintTy::U64) | ty::Uint(ty::UintTy::Usize) => Some(Annotation::Unsigned(64)),
-        ty::Int(ty::IntTy::I128) => Some(Annotation::Signed(128)),
-        ty::Uint(ty::UintTy::U128) => Some(Annotation::Unsigned(128)),
         ty::RawPtr(..) | ty::Ref(..) | ty::FnPtr(..) => None,
         _ => None,
     }

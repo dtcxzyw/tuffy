@@ -6,22 +6,25 @@ use std::process::Command;
 
 use tuffy_ir::builder::Builder;
 use tuffy_ir::function::{Function, RegionKind};
-use tuffy_ir::instruction::{Operand, Origin};
+use tuffy_ir::instruction::Origin;
 use tuffy_ir::module::SymbolTable;
-use tuffy_ir::types::{Annotation, Type};
+use tuffy_ir::types::{IntAnnotation, IntSignedness, Type};
 use tuffy_target_x86::{backend, emit, encode, isel};
 
 fn build_add_func() -> (Function, SymbolTable) {
-    let s32 = Some(Annotation::Signed(32));
+    let i32_type = Type::Int(IntAnnotation {
+        bit_width: 32,
+        signedness: IntSignedness::Signed,
+    });
     let mut st = SymbolTable::new();
     let name = st.intern("add");
     let mut func = Function::new(
         name,
-        vec![Type::Int, Type::Int],
-        vec![s32, s32],
+        vec![i32_type.clone(), i32_type.clone()],
+        vec![None, None],
         vec![],
-        Some(Type::Int),
-        s32,
+        Some(i32_type.clone()),
+        None,
     );
     let mut builder = Builder::new(&mut func);
 
@@ -32,19 +35,10 @@ fn build_add_func() -> (Function, SymbolTable) {
     builder.switch_to_block(entry);
 
     let mem0 = builder.add_block_arg(entry, Type::Mem);
-    let a = builder.param(0, Type::Int, s32, Origin::synthetic());
-    let b = builder.param(1, Type::Int, s32, Origin::synthetic());
-    let sum = builder.add(
-        Operand::annotated(a, Annotation::Signed(32)),
-        Operand::annotated(b, Annotation::Signed(32)),
-        s32,
-        Origin::synthetic(),
-    );
-    builder.ret(
-        Some(Operand::annotated(sum, Annotation::Signed(32))),
-        mem0.into(),
-        Origin::synthetic(),
-    );
+    let a = builder.param(0, i32_type.clone(), None, Origin::synthetic());
+    let b = builder.param(1, i32_type.clone(), None, Origin::synthetic());
+    let sum = builder.add(a.into(), b.into(), None, Origin::synthetic());
+    builder.ret(Some(sum.into()), mem0.into(), Origin::synthetic());
 
     builder.exit_region();
 

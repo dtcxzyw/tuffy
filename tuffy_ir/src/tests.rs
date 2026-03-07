@@ -2,20 +2,24 @@
 
 use crate::builder::Builder;
 use crate::function::{Function, RegionKind};
-use crate::instruction::{AtomicRmwOp, ICmpOp, Op, Operand, Origin};
+use crate::instruction::{AtomicRmwOp, ICmpOp, Instruction, Op, Origin};
 use crate::module::{Module, SymbolTable};
-use crate::types::{Annotation, FloatType, FpRewriteFlags, MemoryOrdering, Type};
+use crate::types::{FloatType, FpRewriteFlags, IntAnnotation, IntSignedness, MemoryOrdering, Type};
 
 #[test]
 fn build_add_function() {
     let mut st = SymbolTable::new();
     let name = st.intern("add");
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
     let mut func = Function::new(
         name,
-        vec![Type::Int, Type::Int],
+        vec![i64_type.clone(), i64_type.clone()],
         vec![],
         vec![],
-        Some(Type::Int),
+        Some(i64_type.clone()),
         None,
     );
     let mut builder = Builder::new(&mut func);
@@ -27,8 +31,8 @@ fn build_add_function() {
     builder.switch_to_block(entry);
 
     let mem0 = builder.add_block_arg(entry, Type::Mem);
-    let a = builder.param(0, Type::Int, None, Origin::synthetic());
-    let b = builder.param(1, Type::Int, None, Origin::synthetic());
+    let a = builder.param(0, i64_type.clone(), None, Origin::synthetic());
+    let b = builder.param(1, i64_type, None, Origin::synthetic());
     let sum = builder.add(a.into(), b.into(), None, Origin::synthetic());
     builder.ret(Some(sum.into()), mem0.into(), Origin::synthetic());
 
@@ -46,16 +50,19 @@ fn build_add_function() {
 
 #[test]
 fn build_with_annotations() {
-    let s32 = Some(Annotation::Signed(32));
     let mut st = SymbolTable::new();
     let name = st.intern("add_i32");
+    let i32_type = Type::Int(IntAnnotation {
+        bit_width: 32,
+        signedness: IntSignedness::Signed,
+    });
     let mut func = Function::new(
         name,
-        vec![Type::Int, Type::Int],
-        vec![s32, s32],
+        vec![i32_type.clone(), i32_type.clone()],
         vec![],
-        Some(Type::Int),
-        s32,
+        vec![],
+        Some(i32_type.clone()),
+        None,
     );
     let mut builder = Builder::new(&mut func);
 
@@ -66,39 +73,30 @@ fn build_with_annotations() {
     builder.switch_to_block(entry);
 
     let mem0 = builder.add_block_arg(entry, Type::Mem);
-    let a = builder.param(0, Type::Int, s32, Origin::synthetic());
-    let b = builder.param(1, Type::Int, s32, Origin::synthetic());
-    let sum = builder.add(
-        Operand::annotated(a, Annotation::Signed(32)),
-        Operand::annotated(b, Annotation::Signed(32)),
-        s32,
-        Origin::synthetic(),
-    );
-    builder.ret(
-        Some(Operand::annotated(sum, Annotation::Signed(32))),
-        mem0.into(),
-        Origin::synthetic(),
-    );
+    let a = builder.param(0, i32_type.clone(), None, Origin::synthetic());
+    let b = builder.param(1, i32_type, None, Origin::synthetic());
+    let sum = builder.add(a.into(), b.into(), None, Origin::synthetic());
+    builder.ret(Some(sum.into()), mem0.into(), Origin::synthetic());
 
     builder.exit_region();
 
     assert_eq!(func.instructions.len(), 4);
-    assert_eq!(
-        func.instructions[0].result_annotation,
-        Some(Annotation::Signed(32))
-    );
 }
 
 #[test]
 fn display_add_function() {
     let mut st = SymbolTable::new();
     let name = st.intern("add");
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
     let mut func = Function::new(
         name,
-        vec![Type::Int, Type::Int],
+        vec![i64_type.clone(), i64_type.clone()],
         vec![],
         vec![],
-        Some(Type::Int),
+        Some(i64_type.clone()),
         None,
     );
     let mut builder = Builder::new(&mut func);
@@ -109,8 +107,8 @@ fn display_add_function() {
     builder.switch_to_block(entry);
 
     let mem0 = builder.add_block_arg(entry, Type::Mem);
-    let a = builder.param(0, Type::Int, None, Origin::synthetic());
-    let b = builder.param(1, Type::Int, None, Origin::synthetic());
+    let a = builder.param(0, i64_type.clone(), None, Origin::synthetic());
+    let b = builder.param(1, i64_type, None, Origin::synthetic());
     let sum = builder.add(a.into(), b.into(), None, Origin::synthetic());
     builder.ret(Some(sum.into()), mem0.into(), Origin::synthetic());
     builder.exit_region();
@@ -118,11 +116,11 @@ fn display_add_function() {
     let output = format!("{}", func.display(&st));
     assert_eq!(
         output,
-        "func @add(int, int) -> int {\n\
+        "func @add(int:s64, int:s64) -> int:s64 {\n\
          \x20\x20bb0(v0: mem):\n\
-         \x20\x20\x20\x20v1 = param 0\n\
-         \x20\x20\x20\x20v2 = param 1\n\
-         \x20\x20\x20\x20v3 = add v1, v2\n\
+         \x20\x20\x20\x20v1: int:s64 = param 0\n\
+         \x20\x20\x20\x20v2: int:s64 = param 1\n\
+         \x20\x20\x20\x20v3: int:s64 = add v1, v2\n\
          \x20\x20\x20\x20ret v3, v0\n\
          }"
     );
@@ -134,12 +132,16 @@ fn display_named_params() {
     let name = st.intern("add");
     let a_sym = st.intern("a");
     let b_sym = st.intern("b");
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
     let mut func = Function::new(
         name,
-        vec![Type::Int, Type::Int],
+        vec![i64_type.clone(), i64_type.clone()],
         vec![],
         vec![Some(a_sym), Some(b_sym)],
-        Some(Type::Int),
+        Some(i64_type.clone()),
         None,
     );
     let mut builder = Builder::new(&mut func);
@@ -150,8 +152,8 @@ fn display_named_params() {
     builder.switch_to_block(entry);
 
     let mem0 = builder.add_block_arg(entry, Type::Mem);
-    let a = builder.param(0, Type::Int, None, Origin::synthetic());
-    let b = builder.param(1, Type::Int, None, Origin::synthetic());
+    let a = builder.param(0, i64_type.clone(), None, Origin::synthetic());
+    let b = builder.param(1, i64_type, None, Origin::synthetic());
     let sum = builder.add(a.into(), b.into(), None, Origin::synthetic());
     builder.ret(Some(sum.into()), mem0.into(), Origin::synthetic());
     builder.exit_region();
@@ -159,11 +161,11 @@ fn display_named_params() {
     let output = format!("{}", func.display(&st));
     assert_eq!(
         output,
-        "func @add(%a: int, %b: int) -> int {\n\
+        "func @add(%a: int:s64, %b: int:s64) -> int:s64 {\n\
          \x20\x20bb0(v0: mem):\n\
-         \x20\x20\x20\x20v1 = param %a\n\
-         \x20\x20\x20\x20v2 = param %b\n\
-         \x20\x20\x20\x20v3 = add v1, v2\n\
+         \x20\x20\x20\x20v1: int:s64 = param %a\n\
+         \x20\x20\x20\x20v2: int:s64 = param %b\n\
+         \x20\x20\x20\x20v3: int:s64 = add v1, v2\n\
          \x20\x20\x20\x20ret v3, v0\n\
          }"
     );
@@ -173,12 +175,16 @@ fn display_named_params() {
 fn display_multi_block_branch() {
     let mut st = SymbolTable::new();
     let name = st.intern("max");
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
     let mut func = Function::new(
         name,
-        vec![Type::Int, Type::Int],
+        vec![i64_type.clone(), i64_type.clone()],
         vec![],
         vec![],
-        Some(Type::Int),
+        Some(i64_type.clone()),
         None,
     );
     let mut builder = Builder::new(&mut func);
@@ -192,8 +198,8 @@ fn display_multi_block_branch() {
 
     builder.switch_to_block(bb0);
     let mem0 = builder.add_block_arg(bb0, Type::Mem);
-    let a = builder.param(0, Type::Int, None, Origin::synthetic());
-    let b = builder.param(1, Type::Int, None, Origin::synthetic());
+    let a = builder.param(0, i64_type.clone(), None, Origin::synthetic());
+    let b = builder.param(1, i64_type, None, Origin::synthetic());
     let cmp = builder.icmp(ICmpOp::Gt, a.into(), b.into(), Origin::synthetic());
     builder.brif(cmp.into(), bb1, vec![], bb2, vec![], Origin::synthetic());
 
@@ -207,11 +213,11 @@ fn display_multi_block_branch() {
     let output = format!("{}", func.display(&st));
     assert_eq!(
         output,
-        "func @max(int, int) -> int {\n\
+        "func @max(int:s64, int:s64) -> int:s64 {\n\
          \x20\x20bb0(v0: mem):\n\
-         \x20\x20\x20\x20v1 = param 0\n\
-         \x20\x20\x20\x20v2 = param 1\n\
-         \x20\x20\x20\x20v3 = icmp.gt v1, v2\n\
+         \x20\x20\x20\x20v1: int:s64 = param 0\n\
+         \x20\x20\x20\x20v2: int:s64 = param 1\n\
+         \x20\x20\x20\x20v3: bool = icmp.gt v1, v2\n\
          \x20\x20\x20\x20brif v3, bb1, bb2\n\
          \n\
          \x20\x20bb1:\n\
@@ -227,7 +233,18 @@ fn display_multi_block_branch() {
 fn display_nested_loop_region() {
     let mut st = SymbolTable::new();
     let name = st.intern("factorial");
-    let mut func = Function::new(name, vec![Type::Int], vec![], vec![], Some(Type::Int), None);
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
+    let mut func = Function::new(
+        name,
+        vec![i64_type.clone()],
+        vec![],
+        vec![],
+        Some(i64_type.clone()),
+        None,
+    );
     let mut builder = Builder::new(&mut func);
 
     let root = builder.create_region(RegionKind::Function);
@@ -246,14 +263,14 @@ fn display_nested_loop_region() {
 
     // bb0: entry
     builder.switch_to_block(bb0);
-    let n = builder.param(0, Type::Int, None, Origin::synthetic());
-    let one = builder.iconst(1, Origin::synthetic());
-    let init_acc = builder.iconst(1, Origin::synthetic());
+    let n = builder.param(0, i64_type.clone(), None, Origin::synthetic());
+    let one = builder.iconst(1, 64, IntSignedness::Signed, Origin::synthetic());
+    let init_acc = builder.iconst(1, 64, IntSignedness::Signed, Origin::synthetic());
     builder.br(bb1, vec![init_acc.into(), one.into()], Origin::synthetic());
 
     // bb1: loop header with block args
-    let acc = builder.add_block_arg(bb1, Type::Int);
-    let i = builder.add_block_arg(bb1, Type::Int);
+    let acc = builder.add_block_arg(bb1, i64_type.clone());
+    let i = builder.add_block_arg(bb1, i64_type);
     builder.switch_to_block(bb1);
     let cmp = builder.icmp(ICmpOp::Le, i.into(), n.into(), Origin::synthetic());
     builder.brif(cmp.into(), bb2, vec![], bb3, vec![], Origin::synthetic());
@@ -273,21 +290,21 @@ fn display_nested_loop_region() {
     let output = format!("{}", func.display(&st));
     assert_eq!(
         output,
-        "func @factorial(int) -> int {\n\
+        "func @factorial(int:s64) -> int:s64 {\n\
          \x20\x20bb0(v0: mem):\n\
-         \x20\x20\x20\x20v1 = param 0\n\
-         \x20\x20\x20\x20v2 = iconst 1\n\
-         \x20\x20\x20\x20v3 = iconst 1\n\
+         \x20\x20\x20\x20v1: int:s64 = param 0\n\
+         \x20\x20\x20\x20v2: int:s64 = iconst 1\n\
+         \x20\x20\x20\x20v3: int:s64 = iconst 1\n\
          \x20\x20\x20\x20br bb1(v3, v2)\n\
          \n\
          \x20\x20region loop {\n\
-         \x20\x20\x20\x20bb1(v5: int, v6: int):\n\
-         \x20\x20\x20\x20\x20\x20v7 = icmp.le v6, v1\n\
+         \x20\x20\x20\x20bb1(v5: int:s64, v6: int:s64):\n\
+         \x20\x20\x20\x20\x20\x20v7: bool = icmp.le v6, v1\n\
          \x20\x20\x20\x20\x20\x20brif v7, bb2, bb3\n\
          \n\
          \x20\x20\x20\x20bb2:\n\
-         \x20\x20\x20\x20\x20\x20v9 = mul v5, v6\n\
-         \x20\x20\x20\x20\x20\x20v10 = sub v6, v2\n\
+         \x20\x20\x20\x20\x20\x20v9: int:s64 = mul v5, v6\n\
+         \x20\x20\x20\x20\x20\x20v10: int:s64 = sub v6, v2\n\
          \x20\x20\x20\x20\x20\x20continue v9, v10\n\
          \x20\x20}\n\
          \n\
@@ -301,12 +318,16 @@ fn display_nested_loop_region() {
 fn build_bitwise_ops() {
     let mut st = SymbolTable::new();
     let name = st.intern("bitwise");
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
     let mut func = Function::new(
         name,
-        vec![Type::Int, Type::Int],
+        vec![i64_type.clone(), i64_type.clone()],
         vec![],
         vec![],
-        Some(Type::Int),
+        Some(i64_type.clone()),
         None,
     );
     let mut builder = Builder::new(&mut func);
@@ -317,8 +338,8 @@ fn build_bitwise_ops() {
     builder.switch_to_block(entry);
 
     let mem0 = builder.add_block_arg(entry, Type::Mem);
-    let a = builder.param(0, Type::Int, None, Origin::synthetic());
-    let b = builder.param(1, Type::Int, None, Origin::synthetic());
+    let a = builder.param(0, i64_type.clone(), None, Origin::synthetic());
+    let b = builder.param(1, i64_type, None, Origin::synthetic());
     let v_and = builder.and(a.into(), b.into(), None, Origin::synthetic());
     let v_or = builder.or(a.into(), b.into(), None, Origin::synthetic());
     let v_xor = builder.xor(v_and.into(), v_or.into(), None, Origin::synthetic());
@@ -335,12 +356,16 @@ fn build_bitwise_ops() {
 fn display_shift_ops() {
     let mut st = SymbolTable::new();
     let name = st.intern("shifts");
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
     let mut func = Function::new(
         name,
-        vec![Type::Int, Type::Int],
+        vec![i64_type.clone(), i64_type.clone()],
         vec![],
         vec![],
-        Some(Type::Int),
+        Some(i64_type.clone()),
         None,
     );
     let mut builder = Builder::new(&mut func);
@@ -351,8 +376,8 @@ fn display_shift_ops() {
     builder.switch_to_block(entry);
 
     let mem0 = builder.add_block_arg(entry, Type::Mem);
-    let a = builder.param(0, Type::Int, None, Origin::synthetic());
-    let b = builder.param(1, Type::Int, None, Origin::synthetic());
+    let a = builder.param(0, i64_type.clone(), None, Origin::synthetic());
+    let b = builder.param(1, i64_type, None, Origin::synthetic());
     let _v_shl = builder.shl(a.into(), b.into(), None, Origin::synthetic());
     let v_shr = builder.shr(a.into(), b.into(), None, Origin::synthetic());
     builder.ret(Some(v_shr.into()), mem0.into(), Origin::synthetic());
@@ -361,12 +386,12 @@ fn display_shift_ops() {
     let output = format!("{}", func.display(&st));
     assert_eq!(
         output,
-        "func @shifts(int, int) -> int {\n\
+        "func @shifts(int:s64, int:s64) -> int:s64 {\n\
          \x20\x20bb0(v0: mem):\n\
-         \x20\x20\x20\x20v1 = param 0\n\
-         \x20\x20\x20\x20v2 = param 1\n\
-         \x20\x20\x20\x20v3 = shl v1, v2\n\
-         \x20\x20\x20\x20v4 = shr v1, v2\n\
+         \x20\x20\x20\x20v1: int:s64 = param 0\n\
+         \x20\x20\x20\x20v2: int:s64 = param 1\n\
+         \x20\x20\x20\x20v3: int:s64 = shl v1, v2\n\
+         \x20\x20\x20\x20v4: int:s64 = shr v1, v2\n\
          \x20\x20\x20\x20ret v4, v0\n\
          }"
     );
@@ -376,12 +401,16 @@ fn display_shift_ops() {
 fn display_division_ops() {
     let mut st = SymbolTable::new();
     let name = st.intern("divs");
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
     let mut func = Function::new(
         name,
-        vec![Type::Int, Type::Int],
+        vec![i64_type.clone(), i64_type.clone()],
         vec![],
         vec![],
-        Some(Type::Int),
+        Some(i64_type.clone()),
         None,
     );
     let mut builder = Builder::new(&mut func);
@@ -392,8 +421,8 @@ fn display_division_ops() {
     builder.switch_to_block(entry);
 
     let mem0 = builder.add_block_arg(entry, Type::Mem);
-    let a = builder.param(0, Type::Int, None, Origin::synthetic());
-    let b = builder.param(1, Type::Int, None, Origin::synthetic());
+    let a = builder.param(0, i64_type.clone(), None, Origin::synthetic());
+    let b = builder.param(1, i64_type, None, Origin::synthetic());
     let v_div = builder.div(a.into(), b.into(), None, Origin::synthetic());
     let v_rem = builder.rem(a.into(), b.into(), None, Origin::synthetic());
     let v_add = builder.add(v_div.into(), v_rem.into(), None, Origin::synthetic());
@@ -403,13 +432,13 @@ fn display_division_ops() {
     let output = format!("{}", func.display(&st));
     assert_eq!(
         output,
-        "func @divs(int, int) -> int {\n\
+        "func @divs(int:s64, int:s64) -> int:s64 {\n\
          \x20\x20bb0(v0: mem):\n\
-         \x20\x20\x20\x20v1 = param 0\n\
-         \x20\x20\x20\x20v2 = param 1\n\
-         \x20\x20\x20\x20v3 = div v1, v2\n\
-         \x20\x20\x20\x20v4 = rem v1, v2\n\
-         \x20\x20\x20\x20v5 = add v3, v4\n\
+         \x20\x20\x20\x20v1: int:s64 = param 0\n\
+         \x20\x20\x20\x20v2: int:s64 = param 1\n\
+         \x20\x20\x20\x20v3: int:s64 = div v1, v2\n\
+         \x20\x20\x20\x20v4: int:s64 = rem v1, v2\n\
+         \x20\x20\x20\x20v5: int:s64 = add v3, v4\n\
          \x20\x20\x20\x20ret v5, v0\n\
          }"
     );
@@ -419,9 +448,13 @@ fn display_division_ops() {
 fn build_ptradd() {
     let mut st = SymbolTable::new();
     let name = st.intern("ptr_arith");
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
     let mut func = Function::new(
         name,
-        vec![Type::Ptr(0), Type::Int],
+        vec![Type::Ptr(0), i64_type.clone()],
         vec![],
         vec![],
         Some(Type::Ptr(0)),
@@ -436,7 +469,7 @@ fn build_ptradd() {
 
     let mem0 = builder.add_block_arg(entry, Type::Mem);
     let ptr = builder.param(0, Type::Ptr(0), None, Origin::synthetic());
-    let off = builder.param(1, Type::Int, None, Origin::synthetic());
+    let off = builder.param(1, i64_type, None, Origin::synthetic());
     let result = builder.ptradd(ptr.into(), off.into(), 0, Origin::synthetic());
     builder.ret(Some(result.into()), mem0.into(), Origin::synthetic());
     builder.exit_region();
@@ -450,12 +483,16 @@ fn build_ptradd() {
 fn display_pointer_ops() {
     let mut st = SymbolTable::new();
     let name = st.intern("ptr_ops");
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
     let mut func = Function::new(
         name,
-        vec![Type::Ptr(0), Type::Ptr(0), Type::Int],
+        vec![Type::Ptr(0), Type::Ptr(0), i64_type.clone()],
         vec![],
         vec![],
-        Some(Type::Int),
+        Some(i64_type.clone()),
         None,
     );
     let mut builder = Builder::new(&mut func);
@@ -468,11 +505,11 @@ fn display_pointer_ops() {
     let mem0 = builder.add_block_arg(entry, Type::Mem);
     let p1 = builder.param(0, Type::Ptr(0), None, Origin::synthetic());
     let p2 = builder.param(1, Type::Ptr(0), None, Origin::synthetic());
-    let i = builder.param(2, Type::Int, None, Origin::synthetic());
+    let i = builder.param(2, i64_type, None, Origin::synthetic());
     let _pa = builder.ptradd(p1.into(), i.into(), 0, Origin::synthetic());
-    let _pd = builder.ptrdiff(p1.into(), p2.into(), Origin::synthetic());
-    let _pi = builder.ptrtoint(p1.into(), Origin::synthetic());
-    let _addr = builder.ptrtoaddr(p2.into(), Origin::synthetic());
+    let _pd = builder.ptrdiff(p1.into(), p2.into(), 64, Origin::synthetic());
+    let _pi = builder.ptrtoint(p1.into(), 64, Origin::synthetic());
+    let _addr = builder.ptrtoaddr(p2.into(), 64, Origin::synthetic());
     let _ip = builder.inttoptr(i.into(), 0, Origin::synthetic());
     builder.ret(Some(_pi.into()), mem0.into(), Origin::synthetic());
     builder.exit_region();
@@ -480,16 +517,16 @@ fn display_pointer_ops() {
     let output = format!("{}", func.display(&st));
     assert_eq!(
         output,
-        "func @ptr_ops(ptr, ptr, int) -> int {\n\
+        "func @ptr_ops(ptr, ptr, int:s64) -> int:s64 {\n\
          \x20\x20bb0(v0: mem):\n\
-         \x20\x20\x20\x20v1 = param 0\n\
-         \x20\x20\x20\x20v2 = param 1\n\
-         \x20\x20\x20\x20v3 = param 2\n\
-         \x20\x20\x20\x20v4 = ptradd v1, v3\n\
-         \x20\x20\x20\x20v5 = ptrdiff v1, v2\n\
-         \x20\x20\x20\x20v6 = ptrtoint v1\n\
-         \x20\x20\x20\x20v7 = ptrtoaddr v2\n\
-         \x20\x20\x20\x20v8 = inttoptr v3\n\
+         \x20\x20\x20\x20v1: ptr = param 0\n\
+         \x20\x20\x20\x20v2: ptr = param 1\n\
+         \x20\x20\x20\x20v3: int:s64 = param 2\n\
+         \x20\x20\x20\x20v4: ptr = ptradd v1, v3\n\
+         \x20\x20\x20\x20v5: int:s64 = ptrdiff v1, v2\n\
+         \x20\x20\x20\x20v6: int:u64 = ptrtoint v1\n\
+         \x20\x20\x20\x20v7: int:u64 = ptrtoaddr v2\n\
+         \x20\x20\x20\x20v8: ptr = inttoptr v3\n\
          \x20\x20\x20\x20ret v6, v0\n\
          }"
     );
@@ -627,15 +664,15 @@ fn display_float_ops() {
         output,
         "func @float_ops(f64, f64) -> f64 {\n\
          \x20\x20bb0(v0: mem):\n\
-         \x20\x20\x20\x20v1 = param 0\n\
-         \x20\x20\x20\x20v2 = param 1\n\
-         \x20\x20\x20\x20v3 = fadd v1, v2\n\
-         \x20\x20\x20\x20v4 = fsub v1, v2\n\
-         \x20\x20\x20\x20v5 = fmul v1, v2\n\
-         \x20\x20\x20\x20v6 = fdiv v1, v2\n\
-         \x20\x20\x20\x20v7 = fneg v1\n\
-         \x20\x20\x20\x20v8 = fabs v1\n\
-         \x20\x20\x20\x20v9 = copysign v1, v2\n\
+         \x20\x20\x20\x20v1: f64 = param 0\n\
+         \x20\x20\x20\x20v2: f64 = param 1\n\
+         \x20\x20\x20\x20v3: f64 = fadd v1, v2\n\
+         \x20\x20\x20\x20v4: f64 = fsub v1, v2\n\
+         \x20\x20\x20\x20v5: f64 = fmul v1, v2\n\
+         \x20\x20\x20\x20v6: f64 = fdiv v1, v2\n\
+         \x20\x20\x20\x20v7: f64 = fneg v1\n\
+         \x20\x20\x20\x20v8: f64 = fabs v1\n\
+         \x20\x20\x20\x20v9: f64 = copysign v1, v2\n\
          \x20\x20\x20\x20ret v9, v0\n\
          }"
     );
@@ -645,12 +682,16 @@ fn display_float_ops() {
 fn build_atomic_ops() {
     let mut st = SymbolTable::new();
     let name = st.intern("atomic_test");
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
     let mut func = Function::new(
         name,
-        vec![Type::Ptr(0), Type::Int],
+        vec![Type::Ptr(0), i64_type.clone()],
         vec![],
         vec![],
-        Some(Type::Int),
+        Some(i64_type.clone()),
         None,
     );
     let mut builder = Builder::new(&mut func);
@@ -662,11 +703,11 @@ fn build_atomic_ops() {
 
     let mem0 = builder.add_block_arg(entry, Type::Mem);
     let ptr = builder.param(0, Type::Ptr(0), None, Origin::synthetic());
-    let val = builder.param(1, Type::Int, None, Origin::synthetic());
+    let val = builder.param(1, i64_type.clone(), None, Origin::synthetic());
 
     let (mem1, v_la) = builder.load_atomic(
         ptr.into(),
-        Type::Int,
+        i64_type.clone(),
         MemoryOrdering::Acquire,
         mem0.into(),
         Origin::synthetic(),
@@ -682,7 +723,7 @@ fn build_atomic_ops() {
         AtomicRmwOp::Add,
         ptr.into(),
         val.into(),
-        Type::Int,
+        i64_type.clone(),
         MemoryOrdering::SeqCst,
         mem2.into(),
         Origin::synthetic(),
@@ -691,7 +732,7 @@ fn build_atomic_ops() {
         ptr.into(),
         v_la.into(),
         val.into(),
-        Type::Int,
+        i64_type,
         MemoryOrdering::AcqRel,
         MemoryOrdering::Acquire,
         mem3.into(),
@@ -722,12 +763,16 @@ fn build_atomic_ops() {
 fn display_atomic_ops() {
     let mut st = SymbolTable::new();
     let name = st.intern("atomic_ops");
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
     let mut func = Function::new(
         name,
-        vec![Type::Ptr(0), Type::Int],
+        vec![Type::Ptr(0), i64_type.clone()],
         vec![],
         vec![],
-        Some(Type::Int),
+        Some(i64_type.clone()),
         None,
     );
     let mut builder = Builder::new(&mut func);
@@ -739,10 +784,10 @@ fn display_atomic_ops() {
 
     let mem0 = builder.add_block_arg(entry, Type::Mem);
     let ptr = builder.param(0, Type::Ptr(0), None, Origin::synthetic());
-    let val = builder.param(1, Type::Int, None, Origin::synthetic());
+    let val = builder.param(1, i64_type.clone(), None, Origin::synthetic());
     let (mem1, _la) = builder.load_atomic(
         ptr.into(),
-        Type::Int,
+        i64_type.clone(),
         MemoryOrdering::Acquire,
         mem0.into(),
         Origin::synthetic(),
@@ -758,7 +803,7 @@ fn display_atomic_ops() {
         AtomicRmwOp::Add,
         ptr.into(),
         val.into(),
-        Type::Int,
+        i64_type.clone(),
         MemoryOrdering::SeqCst,
         mem2.into(),
         Origin::synthetic(),
@@ -767,7 +812,7 @@ fn display_atomic_ops() {
         ptr.into(),
         _la.into(),
         val.into(),
-        Type::Int,
+        i64_type,
         MemoryOrdering::AcqRel,
         MemoryOrdering::Acquire,
         mem3.into(),
@@ -780,15 +825,15 @@ fn display_atomic_ops() {
     let output = format!("{}", func.display(&st));
     assert_eq!(
         output,
-        "func @atomic_ops(ptr, int) -> int {\n\
+        "func @atomic_ops(ptr, int:s64) -> int:s64 {\n\
          \x20\x20bb0(v0: mem):\n\
-         \x20\x20\x20\x20v1 = param 0\n\
-         \x20\x20\x20\x20v2 = param 1\n\
-         \x20\x20\x20\x20v3, v4 = load.atomic.acquire v1, v0\n\
-         \x20\x20\x20\x20v5 = store.atomic.release v2, v1, v3\n\
-         \x20\x20\x20\x20v6, v7 = rmw.add.seqcst v1, v2, v5\n\
-         \x20\x20\x20\x20v8, v9 = cmpxchg.acqrel.acquire v1, v4, v2, v6\n\
-         \x20\x20\x20\x20v10 = fence.seqcst v8\n\
+         \x20\x20\x20\x20v1: ptr = param 0\n\
+         \x20\x20\x20\x20v2: int:s64 = param 1\n\
+         \x20\x20\x20\x20v3: mem, v4: int:s64 = load.atomic.acquire v1, v0\n\
+         \x20\x20\x20\x20v5: mem = store.atomic.release v2, v1, v3\n\
+         \x20\x20\x20\x20v6: mem, v7: int:s64 = rmw.add.seqcst v1, v2, v5\n\
+         \x20\x20\x20\x20v8: mem, v9: int:s64 = cmpxchg.acqrel.acquire v1, v4, v2, v6\n\
+         \x20\x20\x20\x20v10: mem = fence.seqcst v8\n\
          \x20\x20\x20\x20ret v9, v10\n\
          }"
     );
@@ -798,12 +843,20 @@ fn display_atomic_ops() {
 fn build_select_and_bool_to_int() {
     let mut st = SymbolTable::new();
     let name = st.intern("select_test");
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
+    let u64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Unsigned,
+    });
     let mut func = Function::new(
         name,
-        vec![Type::Int, Type::Int],
+        vec![i64_type.clone(), i64_type.clone()],
         vec![],
         vec![],
-        Some(Type::Int),
+        Some(i64_type.clone()),
         None,
     );
     let mut builder = Builder::new(&mut func);
@@ -814,24 +867,24 @@ fn build_select_and_bool_to_int() {
     builder.switch_to_block(entry);
 
     let mem0 = builder.add_block_arg(entry, Type::Mem);
-    let a = builder.param(0, Type::Int, None, Origin::synthetic());
-    let b = builder.param(1, Type::Int, None, Origin::synthetic());
+    let a = builder.param(0, i64_type.clone(), None, Origin::synthetic());
+    let b = builder.param(1, i64_type.clone(), None, Origin::synthetic());
     let cmp = builder.icmp(ICmpOp::Gt, a.into(), b.into(), Origin::synthetic());
     let sel = builder.select(
         cmp.into(),
         a.into(),
         b.into(),
-        Type::Int,
+        i64_type.clone(),
         Origin::synthetic(),
     );
-    let b2i = builder.bool_to_int(cmp.into(), Origin::synthetic());
+    let b2i = builder.bool_to_int(cmp.into(), 64, Origin::synthetic());
     let _sum = builder.add(sel.into(), b2i.into(), None, Origin::synthetic());
     builder.ret(Some(sel.into()), mem0.into(), Origin::synthetic());
     builder.exit_region();
 
     assert_eq!(func.instructions[2].ty, Type::Bool);
-    assert_eq!(func.instructions[3].ty, Type::Int);
-    assert_eq!(func.instructions[4].ty, Type::Int);
+    assert_eq!(func.instructions[3].ty, i64_type.clone());
+    assert_eq!(func.instructions[4].ty, u64_type);
     assert!(matches!(
         func.instructions[2].op,
         Op::ICmp(ICmpOp::Gt, _, _)
@@ -844,12 +897,16 @@ fn build_select_and_bool_to_int() {
 fn display_select_and_bool_to_int() {
     let mut st = SymbolTable::new();
     let name = st.intern("sel");
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
     let mut func = Function::new(
         name,
-        vec![Type::Int, Type::Int],
+        vec![i64_type.clone(), i64_type.clone()],
         vec![],
         vec![],
-        Some(Type::Int),
+        Some(i64_type.clone()),
         None,
     );
     let mut builder = Builder::new(&mut func);
@@ -860,30 +917,30 @@ fn display_select_and_bool_to_int() {
     builder.switch_to_block(entry);
 
     let mem0 = builder.add_block_arg(entry, Type::Mem);
-    let a = builder.param(0, Type::Int, None, Origin::synthetic());
-    let b = builder.param(1, Type::Int, None, Origin::synthetic());
+    let a = builder.param(0, i64_type.clone(), None, Origin::synthetic());
+    let b = builder.param(1, i64_type.clone(), None, Origin::synthetic());
     let cmp = builder.icmp(ICmpOp::Lt, a.into(), b.into(), Origin::synthetic());
     let _sel = builder.select(
         cmp.into(),
         a.into(),
         b.into(),
-        Type::Int,
+        i64_type,
         Origin::synthetic(),
     );
-    let b2i = builder.bool_to_int(cmp.into(), Origin::synthetic());
+    let b2i = builder.bool_to_int(cmp.into(), 64, Origin::synthetic());
     builder.ret(Some(b2i.into()), mem0.into(), Origin::synthetic());
     builder.exit_region();
 
     let output = format!("{}", func.display(&st));
     assert_eq!(
         output,
-        "func @sel(int, int) -> int {\n\
+        "func @sel(int:s64, int:s64) -> int:s64 {\n\
          \x20\x20bb0(v0: mem):\n\
-         \x20\x20\x20\x20v1 = param 0\n\
-         \x20\x20\x20\x20v2 = param 1\n\
-         \x20\x20\x20\x20v3 = icmp.lt v1, v2\n\
-         \x20\x20\x20\x20v4 = select v3, v1, v2\n\
-         \x20\x20\x20\x20v5 = bool_to_int v3\n\
+         \x20\x20\x20\x20v1: int:s64 = param 0\n\
+         \x20\x20\x20\x20v2: int:s64 = param 1\n\
+         \x20\x20\x20\x20v3: bool = icmp.lt v1, v2\n\
+         \x20\x20\x20\x20v4: int:s64 = select v3, v1, v2\n\
+         \x20\x20\x20\x20v5: int:u64 = bool_to_int v3\n\
          \x20\x20\x20\x20ret v5, v0\n\
          }"
     );
@@ -908,10 +965,14 @@ fn build_symbol_addr() {
     let mut module = Module::new("test");
     let malloc_sym = module.intern("malloc");
     let caller_sym = module.intern("caller");
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
 
     let mut func = Function::new(
         caller_sym,
-        vec![Type::Int],
+        vec![i64_type.clone()],
         vec![],
         vec![],
         Some(Type::Ptr(0)),
@@ -925,7 +986,7 @@ fn build_symbol_addr() {
     builder.switch_to_block(entry);
 
     let mem0 = builder.add_block_arg(entry, Type::Mem);
-    let size = builder.param(0, Type::Int, None, Origin::synthetic());
+    let size = builder.param(0, i64_type, None, Origin::synthetic());
     let addr = builder.symbol_addr(malloc_sym, Origin::synthetic());
     let (mem1, Some(result)) = builder.call(
         addr.into(),
@@ -995,12 +1056,16 @@ use crate::verifier::{verify_function, verify_module};
 fn build_valid_add_module() -> Module {
     let mut module = Module::new("test");
     let name = module.intern("add");
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
     let mut func = Function::new(
         name,
-        vec![Type::Int, Type::Int],
+        vec![i64_type.clone(), i64_type.clone()],
         vec![],
         vec![],
-        Some(Type::Int),
+        Some(i64_type.clone()),
         None,
     );
     let mut b = Builder::new(&mut func);
@@ -1009,8 +1074,8 @@ fn build_valid_add_module() -> Module {
     let bb = b.create_block();
     b.switch_to_block(bb);
     let mem0 = b.add_block_arg(bb, Type::Mem);
-    let a = b.param(0, Type::Int, None, Origin::synthetic());
-    let p1 = b.param(1, Type::Int, None, Origin::synthetic());
+    let a = b.param(0, i64_type.clone(), None, Origin::synthetic());
+    let p1 = b.param(1, i64_type, None, Origin::synthetic());
     let sum = b.add(a.into(), p1.into(), None, Origin::synthetic());
     b.ret(Some(sum.into()), mem0.into(), Origin::synthetic());
     b.exit_region();
@@ -1029,12 +1094,16 @@ fn verify_valid_add_function() {
 fn verify_valid_multi_block() {
     let mut st = SymbolTable::new();
     let name = st.intern("max");
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
     let mut func = Function::new(
         name,
-        vec![Type::Int, Type::Int],
+        vec![i64_type.clone(), i64_type.clone()],
         vec![],
         vec![],
-        Some(Type::Int),
+        Some(i64_type.clone()),
         None,
     );
     let mut b = Builder::new(&mut func);
@@ -1047,8 +1116,8 @@ fn verify_valid_multi_block() {
 
     b.switch_to_block(bb0);
     let mem0 = b.add_block_arg(bb0, Type::Mem);
-    let a = b.param(0, Type::Int, None, Origin::synthetic());
-    let p1 = b.param(1, Type::Int, None, Origin::synthetic());
+    let a = b.param(0, i64_type.clone(), None, Origin::synthetic());
+    let p1 = b.param(1, i64_type, None, Origin::synthetic());
     let cmp = b.icmp(ICmpOp::Gt, a.into(), p1.into(), Origin::synthetic());
     b.brif(cmp.into(), bb1, vec![], bb2, vec![], Origin::synthetic());
 
@@ -1067,7 +1136,18 @@ fn verify_valid_multi_block() {
 fn verify_valid_loop_region() {
     let mut st = SymbolTable::new();
     let name = st.intern("factorial");
-    let mut func = Function::new(name, vec![Type::Int], vec![], vec![], Some(Type::Int), None);
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
+    let mut func = Function::new(
+        name,
+        vec![i64_type.clone()],
+        vec![],
+        vec![],
+        Some(i64_type.clone()),
+        None,
+    );
     let mut b = Builder::new(&mut func);
 
     let root = b.create_region(RegionKind::Function);
@@ -1083,13 +1163,13 @@ fn verify_valid_loop_region() {
     let bb3 = b.create_block();
 
     b.switch_to_block(bb0);
-    let n = b.param(0, Type::Int, None, Origin::synthetic());
-    let one = b.iconst(1, Origin::synthetic());
-    let init = b.iconst(1, Origin::synthetic());
+    let n = b.param(0, i64_type.clone(), None, Origin::synthetic());
+    let one = b.iconst(1, 64, IntSignedness::Signed, Origin::synthetic());
+    let init = b.iconst(1, 64, IntSignedness::Signed, Origin::synthetic());
     b.br(bb1, vec![init.into(), one.into()], Origin::synthetic());
 
-    let acc = b.add_block_arg(bb1, Type::Int);
-    let i = b.add_block_arg(bb1, Type::Int);
+    let acc = b.add_block_arg(bb1, i64_type.clone());
+    let i = b.add_block_arg(bb1, i64_type);
     b.switch_to_block(bb1);
     let cmp = b.icmp(ICmpOp::Le, i.into(), n.into(), Origin::synthetic());
     b.brif(cmp.into(), bb2, vec![], bb3, vec![], Origin::synthetic());
@@ -1111,28 +1191,51 @@ fn verify_valid_loop_region() {
 fn verify_detects_wrong_arith_operand_type() {
     let mut st = SymbolTable::new();
     let name = st.intern("bad_add");
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
     let mut func = Function::new(
         name,
-        vec![Type::Int, Type::Int],
+        vec![i64_type.clone(), i64_type.clone()],
         vec![],
         vec![],
-        Some(Type::Int),
+        Some(i64_type.clone()),
         None,
     );
-    let mut b = Builder::new(&mut func);
-    let root = b.create_region(RegionKind::Function);
-    b.enter_region(root);
-    let bb = b.create_block();
-    b.switch_to_block(bb);
 
-    let mem0 = b.add_block_arg(bb, Type::Mem);
-    let a = b.param(0, Type::Int, None, Origin::synthetic());
-    let p1 = b.param(1, Type::Int, None, Origin::synthetic());
-    // icmp returns Bool — passing it to Add should be flagged.
-    let cmp = b.icmp(ICmpOp::Gt, a.into(), p1.into(), Origin::synthetic());
-    b.add(cmp.into(), p1.into(), None, Origin::synthetic());
-    b.ret(Some(a.into()), mem0.into(), Origin::synthetic());
-    b.exit_region();
+    let (bb, _mem0, _a, p1, cmp) = {
+        let mut b = Builder::new(&mut func);
+        let root = b.create_region(RegionKind::Function);
+        b.enter_region(root);
+        let bb = b.create_block();
+        b.switch_to_block(bb);
+
+        let mem0 = b.add_block_arg(bb, Type::Mem);
+        let a = b.param(0, i64_type.clone(), None, Origin::synthetic());
+        let p1 = b.param(1, i64_type.clone(), None, Origin::synthetic());
+        let cmp = b.icmp(ICmpOp::Gt, a.into(), p1.into(), Origin::synthetic());
+
+        b.ret(Some(a.into()), mem0.into(), Origin::synthetic());
+        b.exit_region();
+        (bb, mem0, a, p1, cmp)
+    };
+
+    // Manually insert invalid Add instruction with Bool operand before the ret
+    let ret_idx = func.blocks[bb.index() as usize].inst_start
+        + func.blocks[bb.index() as usize].inst_count
+        - 1;
+    func.instructions.insert(
+        ret_idx as usize,
+        Instruction {
+            op: Op::Add(cmp.into(), p1.into()),
+            ty: i64_type,
+            secondary_ty: None,
+            origin: Origin::synthetic(),
+            result_annotation: None,
+        },
+    );
+    func.blocks[bb.index() as usize].inst_count += 1;
 
     let result = verify_function(&func, &st);
     assert!(!result.is_ok(), "expected errors");
@@ -1149,13 +1252,24 @@ fn verify_detects_wrong_arith_operand_type() {
 fn verify_detects_missing_terminator() {
     let mut st = SymbolTable::new();
     let name = st.intern("no_term");
-    let mut func = Function::new(name, vec![Type::Int], vec![], vec![], Some(Type::Int), None);
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
+    let mut func = Function::new(
+        name,
+        vec![i64_type.clone()],
+        vec![],
+        vec![],
+        Some(i64_type.clone()),
+        None,
+    );
     let mut b = Builder::new(&mut func);
     let root = b.create_region(RegionKind::Function);
     b.enter_region(root);
     let bb = b.create_block();
     b.switch_to_block(bb);
-    b.param(0, Type::Int, None, Origin::synthetic());
+    b.param(0, i64_type, None, Origin::synthetic());
     // No terminator
     b.exit_region();
 
@@ -1174,7 +1288,18 @@ fn verify_detects_missing_terminator() {
 fn verify_detects_load_non_ptr() {
     let mut st = SymbolTable::new();
     let name = st.intern("bad_load");
-    let mut func = Function::new(name, vec![Type::Int], vec![], vec![], Some(Type::Int), None);
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
+    let mut func = Function::new(
+        name,
+        vec![i64_type.clone()],
+        vec![],
+        vec![],
+        Some(i64_type.clone()),
+        None,
+    );
     let mut b = Builder::new(&mut func);
     let root = b.create_region(RegionKind::Function);
     b.enter_region(root);
@@ -1182,12 +1307,12 @@ fn verify_detects_load_non_ptr() {
     b.switch_to_block(bb);
 
     let mem0 = b.add_block_arg(bb, Type::Mem);
-    let a = b.param(0, Type::Int, None, Origin::synthetic());
+    let a = b.param(0, i64_type.clone(), None, Origin::synthetic());
     // Load from Int instead of Ptr — should be flagged.
     let v = b.load(
         a.into(),
         4,
-        Type::Int,
+        i64_type,
         mem0.into(),
         None,
         Origin::synthetic(),
@@ -1210,18 +1335,29 @@ fn verify_detects_load_non_ptr() {
 fn verify_detects_branch_arg_count_mismatch() {
     let mut st = SymbolTable::new();
     let name = st.intern("bad_br");
-    let mut func = Function::new(name, vec![Type::Int], vec![], vec![], Some(Type::Int), None);
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
+    let mut func = Function::new(
+        name,
+        vec![i64_type.clone()],
+        vec![],
+        vec![],
+        Some(i64_type.clone()),
+        None,
+    );
     let mut b = Builder::new(&mut func);
     let root = b.create_region(RegionKind::Function);
     b.enter_region(root);
 
     let bb0 = b.create_block();
     let bb1 = b.create_block();
-    let _arg = b.add_block_arg(bb1, Type::Int);
+    let _arg = b.add_block_arg(bb1, i64_type.clone());
 
     b.switch_to_block(bb0);
     let mem0 = b.add_block_arg(bb0, Type::Mem);
-    let a = b.param(0, Type::Int, None, Origin::synthetic());
+    let a = b.param(0, i64_type, None, Origin::synthetic());
     // Branch to bb1 which expects 1 arg, but pass 0.
     b.br(bb1, vec![], Origin::synthetic());
 
@@ -1237,39 +1373,6 @@ fn verify_detects_branch_arg_count_mismatch() {
             .iter()
             .any(|e| e.message.contains("passes 0 args, expected 1")),
         "should flag branch arg count mismatch: {result}"
-    );
-}
-
-#[test]
-fn verify_detects_annotation_on_non_int() {
-    let mut st = SymbolTable::new();
-    let name = st.intern("bad_ann");
-    let mut func = Function::new(
-        name,
-        vec![Type::Ptr(0)],
-        vec![Some(Annotation::Signed(32))],
-        vec![],
-        Some(Type::Ptr(0)),
-        None,
-    );
-    let mut b = Builder::new(&mut func);
-    let root = b.create_region(RegionKind::Function);
-    b.enter_region(root);
-    let bb = b.create_block();
-    b.switch_to_block(bb);
-    let mem0 = b.add_block_arg(bb, Type::Mem);
-    let p = b.param(0, Type::Ptr(0), None, Origin::synthetic());
-    b.ret(Some(p.into()), mem0.into(), Origin::synthetic());
-    b.exit_region();
-
-    let result = verify_function(&func, &st);
-    assert!(!result.is_ok(), "expected errors");
-    assert!(
-        result
-            .errors
-            .iter()
-            .any(|e| e.message.contains("integer annotation on non-Int")),
-        "should flag annotation on Ptr: {result}"
     );
 }
 
@@ -1297,12 +1400,16 @@ fn verify_detects_duplicate_function_names() {
 fn display_min_max() {
     let mut st = SymbolTable::new();
     let name = st.intern("minmax");
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
     let mut func = Function::new(
         name,
-        vec![Type::Int, Type::Int],
+        vec![i64_type.clone(), i64_type.clone()],
         vec![],
         vec![],
-        Some(Type::Int),
+        Some(i64_type.clone()),
         None,
     );
     let mut builder = Builder::new(&mut func);
@@ -1313,8 +1420,8 @@ fn display_min_max() {
     builder.switch_to_block(entry);
 
     let mem0 = builder.add_block_arg(entry, Type::Mem);
-    let a = builder.param(0, Type::Int, None, Origin::synthetic());
-    let b = builder.param(1, Type::Int, None, Origin::synthetic());
+    let a = builder.param(0, i64_type.clone(), None, Origin::synthetic());
+    let b = builder.param(1, i64_type.clone(), None, Origin::synthetic());
     let v_min = builder.min(a.into(), b.into(), None, Origin::synthetic());
     let v_max = builder.max(a.into(), b.into(), None, Origin::synthetic());
     let _sum = builder.add(v_min.into(), v_max.into(), None, Origin::synthetic());
@@ -1323,19 +1430,19 @@ fn display_min_max() {
 
     assert!(matches!(func.instructions[2].op, Op::Min(_, _)));
     assert!(matches!(func.instructions[3].op, Op::Max(_, _)));
-    assert_eq!(func.instructions[2].ty, Type::Int);
-    assert_eq!(func.instructions[3].ty, Type::Int);
+    assert_eq!(func.instructions[2].ty, i64_type);
+    assert_eq!(func.instructions[3].ty, i64_type);
 
     let output = format!("{}", func.display(&st));
     assert_eq!(
         output,
-        "func @minmax(int, int) -> int {\n\
+        "func @minmax(int:s64, int:s64) -> int:s64 {\n\
          \x20\x20bb0(v0: mem):\n\
-         \x20\x20\x20\x20v1 = param 0\n\
-         \x20\x20\x20\x20v2 = param 1\n\
-         \x20\x20\x20\x20v3 = min v1, v2\n\
-         \x20\x20\x20\x20v4 = max v1, v2\n\
-         \x20\x20\x20\x20v5 = add v3, v4\n\
+         \x20\x20\x20\x20v1: int:s64 = param 0\n\
+         \x20\x20\x20\x20v2: int:s64 = param 1\n\
+         \x20\x20\x20\x20v3: int:s64 = min v1, v2\n\
+         \x20\x20\x20\x20v4: int:s64 = max v1, v2\n\
+         \x20\x20\x20\x20v5: int:s64 = add v3, v4\n\
          \x20\x20\x20\x20ret v5, v0\n\
          }"
     );
@@ -1351,12 +1458,16 @@ fn display_min_max() {
 fn memssa_store_load_threading() {
     let mut st = SymbolTable::new();
     let name = st.intern("memssa_basic");
+    let i32_type = Type::Int(IntAnnotation {
+        bit_width: 32,
+        signedness: IntSignedness::Signed,
+    });
     let mut func = Function::new(
         name,
-        vec![Type::Int, Type::Ptr(0)],
+        vec![i32_type.clone(), Type::Ptr(0)],
         vec![],
         vec![],
-        Some(Type::Int),
+        Some(i32_type.clone()),
         None,
     );
     let mut b = Builder::new(&mut func);
@@ -1367,7 +1478,7 @@ fn memssa_store_load_threading() {
     b.switch_to_block(bb);
 
     let mem0 = b.add_block_arg(bb, Type::Mem);
-    let val = b.param(0, Type::Int, None, Origin::synthetic());
+    let val = b.param(0, i32_type.clone(), None, Origin::synthetic());
     let ptr = b.param(1, Type::Ptr(0), None, Origin::synthetic());
     // store produces mem1
     let mem1 = b.store(val.into(), ptr.into(), 4, mem0.into(), Origin::synthetic());
@@ -1375,7 +1486,7 @@ fn memssa_store_load_threading() {
     let loaded = b.load(
         ptr.into(),
         4,
-        Type::Int,
+        i32_type.clone(),
         mem1.into(),
         None,
         Origin::synthetic(),
@@ -1387,7 +1498,7 @@ fn memssa_store_load_threading() {
     // Verify store result is Mem
     assert_eq!(func.instructions[2].ty, Type::Mem);
     // Verify load result is Int (not Mem — load is a MemoryUse)
-    assert_eq!(func.instructions[3].ty, Type::Int);
+    assert_eq!(func.instructions[3].ty, i32_type);
     assert_eq!(func.instructions[3].secondary_ty, None);
 
     let result = verify_function(&func, &st);
@@ -1398,12 +1509,16 @@ fn memssa_store_load_threading() {
 fn memssa_multi_result_load_atomic() {
     let mut st = SymbolTable::new();
     let name = st.intern("atomic_load");
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
     let mut func = Function::new(
         name,
         vec![Type::Ptr(0)],
         vec![],
         vec![],
-        Some(Type::Int),
+        Some(i64_type.clone()),
         None,
     );
     let mut b = Builder::new(&mut func);
@@ -1417,7 +1532,7 @@ fn memssa_multi_result_load_atomic() {
     let ptr = b.param(0, Type::Ptr(0), None, Origin::synthetic());
     let (mem1, data) = b.load_atomic(
         ptr.into(),
-        Type::Int,
+        i64_type.clone(),
         MemoryOrdering::Acquire,
         mem0.into(),
         Origin::synthetic(),
@@ -1427,7 +1542,7 @@ fn memssa_multi_result_load_atomic() {
 
     let inst = &func.instructions[1];
     assert_eq!(inst.ty, Type::Mem);
-    assert_eq!(inst.secondary_ty, Some(Type::Int));
+    assert_eq!(inst.secondary_ty, Some(i64_type));
     assert!(data.is_secondary_result());
     assert!(!mem1.is_secondary_result());
 
@@ -1439,12 +1554,16 @@ fn memssa_multi_result_load_atomic() {
 fn memssa_block_arg_phi() {
     let mut st = SymbolTable::new();
     let name = st.intern("mem_phi");
+    let i32_type = Type::Int(IntAnnotation {
+        bit_width: 32,
+        signedness: IntSignedness::Signed,
+    });
     let mut func = Function::new(
         name,
-        vec![Type::Bool, Type::Int, Type::Ptr(0)],
+        vec![Type::Bool, i32_type.clone(), Type::Ptr(0)],
         vec![],
         vec![],
-        Some(Type::Int),
+        Some(i32_type.clone()),
         None,
     );
     let mut b = Builder::new(&mut func);
@@ -1461,7 +1580,7 @@ fn memssa_block_arg_phi() {
     b.switch_to_block(bb0);
     let mem0 = b.add_block_arg(bb0, Type::Mem);
     let cond = b.param(0, Type::Bool, None, Origin::synthetic());
-    let val = b.param(1, Type::Int, None, Origin::synthetic());
+    let val = b.param(1, i32_type.clone(), None, Origin::synthetic());
     let ptr = b.param(2, Type::Ptr(0), None, Origin::synthetic());
     b.brif(cond.into(), bb1, vec![], bb2, vec![], Origin::synthetic());
 
@@ -1480,7 +1599,7 @@ fn memssa_block_arg_phi() {
     let loaded = b.load(
         ptr.into(),
         4,
-        Type::Int,
+        i32_type,
         mem_phi.into(),
         None,
         Origin::synthetic(),
@@ -1497,12 +1616,16 @@ fn memssa_block_arg_phi() {
 fn memssa_display_store_load() {
     let mut st = SymbolTable::new();
     let name = st.intern("sl");
+    let i32_type = Type::Int(IntAnnotation {
+        bit_width: 32,
+        signedness: IntSignedness::Signed,
+    });
     let mut func = Function::new(
         name,
-        vec![Type::Int, Type::Ptr(0)],
+        vec![i32_type.clone(), Type::Ptr(0)],
         vec![],
         vec![],
-        Some(Type::Int),
+        Some(i32_type.clone()),
         None,
     );
     let mut b = Builder::new(&mut func);
@@ -1513,13 +1636,13 @@ fn memssa_display_store_load() {
     b.switch_to_block(bb);
 
     let mem0 = b.add_block_arg(bb, Type::Mem);
-    let val = b.param(0, Type::Int, None, Origin::synthetic());
+    let val = b.param(0, i32_type.clone(), None, Origin::synthetic());
     let ptr = b.param(1, Type::Ptr(0), None, Origin::synthetic());
     let mem1 = b.store(val.into(), ptr.into(), 4, mem0.into(), Origin::synthetic());
     let loaded = b.load(
         ptr.into(),
         4,
-        Type::Int,
+        i32_type,
         mem1.into(),
         None,
         Origin::synthetic(),
@@ -1530,12 +1653,12 @@ fn memssa_display_store_load() {
     let output = format!("{}", func.display(&st));
     assert_eq!(
         output,
-        "func @sl(int, ptr) -> int {\n\
+        "func @sl(int:s32, ptr) -> int:s32 {\n\
          \x20\x20bb0(v0: mem):\n\
-         \x20\x20\x20\x20v1 = param 0\n\
-         \x20\x20\x20\x20v2 = param 1\n\
-         \x20\x20\x20\x20v3 = store.4 v1, v2, v0\n\
-         \x20\x20\x20\x20v4 = load.4 v2, v3\n\
+         \x20\x20\x20\x20v1: int:s32 = param 0\n\
+         \x20\x20\x20\x20v2: ptr = param 1\n\
+         \x20\x20\x20\x20v3: mem = store.4 v1, v2, v0\n\
+         \x20\x20\x20\x20v4: int:s32 = load.4 v2, v3\n\
          \x20\x20\x20\x20ret v4, v3\n\
          }"
     );
@@ -1545,12 +1668,16 @@ fn memssa_display_store_load() {
 fn build_merge() {
     let mut st = SymbolTable::new();
     let name = st.intern("merge_test");
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
     let mut func = Function::new(
         name,
-        vec![Type::Int, Type::Int],
+        vec![i64_type.clone(), i64_type.clone()],
         vec![],
         vec![],
-        Some(Type::Int),
+        Some(i64_type.clone()),
         None,
     );
     let mut b = Builder::new(&mut func);
@@ -1561,24 +1688,35 @@ fn build_merge() {
     b.switch_to_block(bb);
 
     let mem0 = b.add_block_arg(bb, Type::Mem);
-    let a = b.param(0, Type::Int, None, Origin::synthetic());
-    let lo = b.param(1, Type::Int, None, Origin::synthetic());
+    let a = b.param(0, i64_type.clone(), None, Origin::synthetic());
+    let lo = b.param(1, i64_type.clone(), None, Origin::synthetic());
     let merged = b.merge(a.into(), lo.into(), 64, Origin::synthetic());
     b.ret(Some(merged.into()), mem0.into(), Origin::synthetic());
     b.exit_region();
 
     assert!(matches!(func.instructions[2].op, Op::Merge(_, _, 64)));
-    assert_eq!(func.instructions[2].ty, Type::Int);
+    assert_eq!(func.instructions[2].ty, i64_type);
 
     let output = format!("{}", func.display(&st));
-    assert!(output.contains("v3 = merge.64 v1, v2"));
+    assert!(output.contains("merge.64 v1, v2"));
 }
 
 #[test]
 fn build_split() {
     let mut st = SymbolTable::new();
     let name = st.intern("split_test");
-    let mut func = Function::new(name, vec![Type::Int], vec![], vec![], Some(Type::Int), None);
+    let i128_type = Type::Int(IntAnnotation {
+        bit_width: 128,
+        signedness: IntSignedness::Signed,
+    });
+    let mut func = Function::new(
+        name,
+        vec![i128_type.clone()],
+        vec![],
+        vec![],
+        Some(i128_type.clone()),
+        None,
+    );
     let mut b = Builder::new(&mut func);
 
     let root = b.create_region(RegionKind::Function);
@@ -1587,7 +1725,7 @@ fn build_split() {
     b.switch_to_block(bb);
 
     let mem0 = b.add_block_arg(bb, Type::Mem);
-    let wide = b.param(0, Type::Int, None, Origin::synthetic());
+    let wide = b.param(0, i128_type.clone(), None, Origin::synthetic());
     let (hi, lo) = b.split(wide.into(), 64, Origin::synthetic());
 
     // hi is primary result, lo is secondary
@@ -1598,23 +1736,27 @@ fn build_split() {
     b.exit_region();
 
     let inst = &func.instructions[1];
-    assert_eq!(inst.ty, Type::Int);
-    assert_eq!(inst.secondary_ty, Some(Type::Int));
+    assert_eq!(inst.ty, i128_type);
+    assert_eq!(inst.secondary_ty, Some(i128_type));
 
     let output = format!("{}", func.display(&st));
-    assert!(output.contains("v2, v3 = split.64 v1"));
+    assert!(output.contains("split.64 v1"));
 }
 
 #[test]
 fn build_clmul() {
     let mut st = SymbolTable::new();
     let name = st.intern("clmul_test");
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
     let mut func = Function::new(
         name,
-        vec![Type::Int, Type::Int],
+        vec![i64_type.clone(), i64_type.clone()],
         vec![],
         vec![],
-        Some(Type::Int),
+        Some(i64_type.clone()),
         None,
     );
     let mut b = Builder::new(&mut func);
@@ -1625,29 +1767,37 @@ fn build_clmul() {
     b.switch_to_block(bb);
 
     let mem0 = b.add_block_arg(bb, Type::Mem);
-    let a = b.param(0, Type::Int, None, Origin::synthetic());
-    let bv = b.param(1, Type::Int, None, Origin::synthetic());
+    let a = b.param(0, i64_type.clone(), None, Origin::synthetic());
+    let bv = b.param(1, i64_type.clone(), None, Origin::synthetic());
     let result = b.clmul(a.into(), bv.into(), Origin::synthetic());
     b.ret(Some(result.into()), mem0.into(), Origin::synthetic());
     b.exit_region();
 
     assert!(matches!(func.instructions[2].op, Op::Clmul(_, _)));
-    assert_eq!(func.instructions[2].ty, Type::Int);
+    assert_eq!(func.instructions[2].ty, i64_type);
 
     let output = format!("{}", func.display(&st));
-    assert!(output.contains("v3 = clmul v1, v2"));
+    assert!(output.contains("clmul v1, v2"));
 }
 
 #[test]
 fn test_struct_type_display() {
-    let struct_ty = Type::Struct(vec![Type::Int, Type::Bool, Type::Byte(4)]);
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
+    let struct_ty = Type::Struct(vec![i64_type, Type::Bool, Type::Byte(4)]);
     let display = format!("{:?}", struct_ty);
     assert!(display.contains("Struct"));
 }
 
 #[test]
 fn test_array_type_display() {
-    let array_ty = Type::Array(Box::new(Type::Int), 10);
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
+    let array_ty = Type::Array(Box::new(i64_type), 10);
     let display = format!("{:?}", array_ty);
     assert!(display.contains("Array"));
 }
@@ -1656,13 +1806,17 @@ fn test_array_type_display() {
 fn test_extractvalue_basic() {
     let mut st = SymbolTable::new();
     let name = st.intern("extract_test");
-    let struct_ty = Type::Struct(vec![Type::Int, Type::Bool]);
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
+    let struct_ty = Type::Struct(vec![i64_type.clone(), Type::Bool]);
     let mut func = Function::new(
         name,
         vec![struct_ty.clone()],
         vec![],
         vec![],
-        Some(Type::Int),
+        Some(i64_type.clone()),
         None,
     );
     let mut b = Builder::new(&mut func);
@@ -1674,13 +1828,19 @@ fn test_extractvalue_basic() {
 
     let mem0 = b.add_block_arg(bb, Type::Mem);
     let s = b.param(0, struct_ty, None, Origin::synthetic());
-    let field0 = b.extract_value(s.into(), vec![0], Type::Int, None, Origin::synthetic());
+    let field0 = b.extract_value(
+        s.into(),
+        vec![0],
+        i64_type.clone(),
+        None,
+        Origin::synthetic(),
+    );
     b.ret(Some(field0.into()), mem0.into(), Origin::synthetic());
     b.exit_region();
 
     assert_eq!(func.instructions.len(), 3);
     assert!(matches!(func.instructions[1].op, Op::ExtractValue(_, _)));
-    assert_eq!(func.instructions[1].ty, Type::Int);
+    assert_eq!(func.instructions[1].ty, i64_type);
 
     let output = format!("{}", func.display(&st));
     assert!(output.contains("extractvalue"));
@@ -1690,10 +1850,14 @@ fn test_extractvalue_basic() {
 fn test_insertvalue_basic() {
     let mut st = SymbolTable::new();
     let name = st.intern("insert_test");
-    let struct_ty = Type::Struct(vec![Type::Int, Type::Bool]);
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
+    let struct_ty = Type::Struct(vec![i64_type.clone(), Type::Bool]);
     let mut func = Function::new(
         name,
-        vec![struct_ty.clone(), Type::Int],
+        vec![struct_ty.clone(), i64_type.clone()],
         vec![],
         vec![],
         Some(struct_ty.clone()),
@@ -1708,7 +1872,7 @@ fn test_insertvalue_basic() {
 
     let mem0 = b.add_block_arg(bb, Type::Mem);
     let s = b.param(0, struct_ty.clone(), None, Origin::synthetic());
-    let val = b.param(1, Type::Int, None, Origin::synthetic());
+    let val = b.param(1, i64_type, None, Origin::synthetic());
     let result = b.insert_value(s.into(), val.into(), vec![0], None, Origin::synthetic());
     b.ret(Some(result.into()), mem0.into(), Origin::synthetic());
     b.exit_region();
@@ -1725,13 +1889,17 @@ fn test_insertvalue_basic() {
 fn test_extractvalue_array() {
     let mut st = SymbolTable::new();
     let name = st.intern("extract_array_test");
-    let array_ty = Type::Array(Box::new(Type::Int), 5);
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
+    let array_ty = Type::Array(Box::new(i64_type.clone()), 5);
     let mut func = Function::new(
         name,
         vec![array_ty.clone()],
         vec![],
         vec![],
-        Some(Type::Int),
+        Some(i64_type.clone()),
         None,
     );
     let mut b = Builder::new(&mut func);
@@ -1743,23 +1911,33 @@ fn test_extractvalue_array() {
 
     let mem0 = b.add_block_arg(bb, Type::Mem);
     let arr = b.param(0, array_ty, None, Origin::synthetic());
-    let elem = b.extract_value(arr.into(), vec![2], Type::Int, None, Origin::synthetic());
+    let elem = b.extract_value(
+        arr.into(),
+        vec![2],
+        i64_type.clone(),
+        None,
+        Origin::synthetic(),
+    );
     b.ret(Some(elem.into()), mem0.into(), Origin::synthetic());
     b.exit_region();
 
     assert_eq!(func.instructions.len(), 3);
     assert!(matches!(func.instructions[1].op, Op::ExtractValue(_, _)));
-    assert_eq!(func.instructions[1].ty, Type::Int);
+    assert_eq!(func.instructions[1].ty, i64_type);
 }
 
 #[test]
 fn test_insertvalue_array() {
     let mut st = SymbolTable::new();
     let name = st.intern("insert_array_test");
-    let array_ty = Type::Array(Box::new(Type::Int), 5);
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
+    let array_ty = Type::Array(Box::new(i64_type.clone()), 5);
     let mut func = Function::new(
         name,
-        vec![array_ty.clone(), Type::Int],
+        vec![array_ty.clone(), i64_type.clone()],
         vec![],
         vec![],
         Some(array_ty.clone()),
@@ -1774,7 +1952,7 @@ fn test_insertvalue_array() {
 
     let mem0 = b.add_block_arg(bb, Type::Mem);
     let arr = b.param(0, array_ty.clone(), None, Origin::synthetic());
-    let val = b.param(1, Type::Int, None, Origin::synthetic());
+    let val = b.param(1, i64_type, None, Origin::synthetic());
     let result = b.insert_value(arr.into(), val.into(), vec![3], None, Origin::synthetic());
     b.ret(Some(result.into()), mem0.into(), Origin::synthetic());
     b.exit_region();
@@ -1788,41 +1966,16 @@ fn test_insertvalue_array() {
 fn test_dontcare_annotation_display() {
     let mut st = SymbolTable::new();
     let name = st.intern("test_dc");
-    let dc32 = Some(Annotation::DontCare(32));
+    let i32_dc = Type::Int(IntAnnotation {
+        bit_width: 32,
+        signedness: IntSignedness::DontCare,
+    });
     let mut func = Function::new(
         name,
-        vec![Type::Int],
-        vec![dc32],
+        vec![i32_dc.clone()],
         vec![],
-        Some(Type::Int),
-        dc32,
-    );
-    let mut b = Builder::new(&mut func);
-
-    let root = b.create_region(RegionKind::Function);
-    b.enter_region(root);
-    let bb = b.create_block();
-    b.switch_to_block(bb);
-    let mem0 = b.add_block_arg(bb, Type::Mem);
-    let a = b.param(0, Type::Int, dc32, Origin::synthetic());
-    b.ret(Some(a.into()), mem0.into(), Origin::synthetic());
-    b.exit_region();
-
-    let output = format!("{}", func.display(&st));
-    assert!(output.contains(":i32"), "should display :i32 annotation");
-}
-
-#[test]
-fn verify_detects_dontcare_zero() {
-    let mut st = SymbolTable::new();
-    let name = st.intern("bad_dc");
-    let dc0 = Some(Annotation::DontCare(0));
-    let mut func = Function::new(
-        name,
-        vec![Type::Int],
-        vec![dc0],
         vec![],
-        Some(Type::Int),
+        Some(i32_dc.clone()),
         None,
     );
     let mut b = Builder::new(&mut func);
@@ -1832,7 +1985,41 @@ fn verify_detects_dontcare_zero() {
     let bb = b.create_block();
     b.switch_to_block(bb);
     let mem0 = b.add_block_arg(bb, Type::Mem);
-    let a = b.param(0, Type::Int, None, Origin::synthetic());
+    let a = b.param(0, i32_dc, None, Origin::synthetic());
+    b.ret(Some(a.into()), mem0.into(), Origin::synthetic());
+    b.exit_region();
+
+    let output = format!("{}", func.display(&st));
+    assert!(
+        output.contains("int:i32"),
+        "should display int:i32 for DontCare signedness"
+    );
+}
+
+#[test]
+fn verify_detects_dontcare_zero() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("bad_dc");
+    let i0_type = Type::Int(IntAnnotation {
+        bit_width: 0,
+        signedness: IntSignedness::DontCare,
+    });
+    let mut func = Function::new(
+        name,
+        vec![i0_type.clone()],
+        vec![],
+        vec![],
+        Some(i0_type.clone()),
+        None,
+    );
+    let mut b = Builder::new(&mut func);
+
+    let root = b.create_region(RegionKind::Function);
+    b.enter_region(root);
+    let bb = b.create_block();
+    b.switch_to_block(bb);
+    let mem0 = b.add_block_arg(bb, Type::Mem);
+    let a = b.param(0, i0_type, None, Origin::synthetic());
     b.ret(Some(a.into()), mem0.into(), Origin::synthetic());
     b.exit_region();
 
@@ -1842,8 +2029,8 @@ fn verify_detects_dontcare_zero() {
         result
             .errors
             .iter()
-            .any(|e| e.message.contains("DontCare(0)")),
-        "should reject DontCare(0)"
+            .any(|e| e.message.contains("bit_width") || e.message.contains("zero")),
+        "should reject zero bit width"
     );
 }
 
@@ -1851,9 +2038,13 @@ fn verify_detects_dontcare_zero() {
 fn mem_copy_builder_and_display() {
     let mut st = SymbolTable::new();
     let name = st.intern("test_memcpy");
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
     let mut func = Function::new(
         name,
-        vec![Type::Ptr(0), Type::Ptr(0), Type::Int],
+        vec![Type::Ptr(0), Type::Ptr(0), i64_type.clone()],
         vec![],
         vec![],
         None,
@@ -1869,7 +2060,7 @@ fn mem_copy_builder_and_display() {
     let mem0 = b.add_block_arg(bb, Type::Mem);
     let dst = b.param(0, Type::Ptr(0), None, Origin::synthetic());
     let src = b.param(1, Type::Ptr(0), None, Origin::synthetic());
-    let count = b.param(2, Type::Int, None, Origin::synthetic());
+    let count = b.param(2, i64_type, None, Origin::synthetic());
     let mem1 = b.mem_copy(
         dst.into(),
         src.into(),
@@ -1894,9 +2085,13 @@ fn mem_copy_builder_and_display() {
 fn mem_move_builder_and_display() {
     let mut st = SymbolTable::new();
     let name = st.intern("test_memmove");
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
     let mut func = Function::new(
         name,
-        vec![Type::Ptr(0), Type::Ptr(0), Type::Int],
+        vec![Type::Ptr(0), Type::Ptr(0), i64_type.clone()],
         vec![],
         vec![],
         None,
@@ -1912,7 +2107,7 @@ fn mem_move_builder_and_display() {
     let mem0 = b.add_block_arg(bb, Type::Mem);
     let dst = b.param(0, Type::Ptr(0), None, Origin::synthetic());
     let src = b.param(1, Type::Ptr(0), None, Origin::synthetic());
-    let count = b.param(2, Type::Int, None, Origin::synthetic());
+    let count = b.param(2, i64_type, None, Origin::synthetic());
     let mem1 = b.mem_move(
         dst.into(),
         src.into(),
@@ -1937,9 +2132,17 @@ fn mem_move_builder_and_display() {
 fn mem_set_builder_and_display() {
     let mut st = SymbolTable::new();
     let name = st.intern("test_memset");
+    let i8_type = Type::Int(IntAnnotation {
+        bit_width: 8,
+        signedness: IntSignedness::Unsigned,
+    });
+    let i64_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
     let mut func = Function::new(
         name,
-        vec![Type::Ptr(0), Type::Int, Type::Int],
+        vec![Type::Ptr(0), i8_type.clone(), i64_type.clone()],
         vec![],
         vec![],
         None,
@@ -1954,8 +2157,8 @@ fn mem_set_builder_and_display() {
 
     let mem0 = b.add_block_arg(bb, Type::Mem);
     let dst = b.param(0, Type::Ptr(0), None, Origin::synthetic());
-    let val = b.param(1, Type::Int, None, Origin::synthetic());
-    let count = b.param(2, Type::Int, None, Origin::synthetic());
+    let val = b.param(1, i8_type, None, Origin::synthetic());
+    let count = b.param(2, i64_type, None, Origin::synthetic());
     let mem1 = b.mem_set(
         dst.into(),
         val.into(),

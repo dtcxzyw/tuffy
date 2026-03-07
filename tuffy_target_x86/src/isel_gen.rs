@@ -3,9 +3,35 @@
 use crate::inst::{CondCode, MInst, OpSize};
 use crate::reg::Gpr;
 use tuffy_ir::instruction::{ICmpOp, Op};
-use tuffy_ir::types::Annotation;
+use tuffy_ir::types::IntAnnotation;
 use tuffy_ir::value::ValueRef;
 use tuffy_regalloc::VReg;
+
+fn get_int_annotation(func: &tuffy_ir::function::Function, val: ValueRef) -> Option<IntAnnotation> {
+    if val.is_block_arg() {
+        let ty = &func.block_args.get(val.index() as usize)?.ty;
+        match ty {
+            tuffy_ir::types::Type::Int(ann) => Some(*ann),
+            _ => None,
+        }
+    } else if val.is_secondary_result() {
+        let ty = func
+            .instructions
+            .get(val.inst_index() as usize)?
+            .secondary_ty
+            .as_ref()?;
+        match ty {
+            tuffy_ir::types::Type::Int(ann) => Some(*ann),
+            _ => None,
+        }
+    } else {
+        let ty = &func.instructions.get(val.index() as usize)?.ty;
+        match ty {
+            tuffy_ir::types::Type::Int(ann) => Some(*ann),
+            _ => None,
+        }
+    }
+}
 
 fn bits_to_opsize(bits: u32) -> OpSize {
     match bits {
@@ -16,10 +42,10 @@ fn bits_to_opsize(bits: u32) -> OpSize {
     }
 }
 
-fn ann_bits_to_opsize(ann: Option<Annotation>) -> OpSize {
+fn int_ann_to_opsize(ann: Option<IntAnnotation>) -> OpSize {
     match ann {
-        Some(Annotation::Signed(bits)) | Some(Annotation::Unsigned(bits)) => bits_to_opsize(bits),
-        _ => OpSize::S64,
+        Some(a) => bits_to_opsize(a.bit_width),
+        None => OpSize::S64,
     }
 }
 
@@ -145,7 +171,7 @@ fn gen_shr_signed(
     vref: ValueRef,
     lhs: VReg,
     rhs: VReg,
-    lhs_ann: Option<Annotation>,
+    lhs_ann: Option<IntAnnotation>,
 ) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::MovRR {
@@ -159,15 +185,7 @@ fn gen_shr_signed(
         dst: v1,
         src: rhs,
     });
-    let size_2 = match lhs_ann {
-        Some(Annotation::Signed(bits)) | Some(Annotation::Unsigned(bits)) => match bits {
-            8 => OpSize::S8,
-            16 => OpSize::S16,
-            32 => OpSize::S32,
-            _ => OpSize::S64,
-        },
-        _ => OpSize::S64,
-    };
+    let size_2 = int_ann_to_opsize(lhs_ann);
     ctx.out.push(MInst::SarRCL {
         size: size_2,
         dst: v0,
@@ -181,7 +199,7 @@ fn gen_shr_unsigned(
     vref: ValueRef,
     lhs: VReg,
     rhs: VReg,
-    lhs_ann: Option<Annotation>,
+    lhs_ann: Option<IntAnnotation>,
 ) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::MovRR {
@@ -195,15 +213,7 @@ fn gen_shr_unsigned(
         dst: v1,
         src: rhs,
     });
-    let size_2 = match lhs_ann {
-        Some(Annotation::Signed(bits)) | Some(Annotation::Unsigned(bits)) => match bits {
-            8 => OpSize::S8,
-            16 => OpSize::S16,
-            32 => OpSize::S32,
-            _ => OpSize::S64,
-        },
-        _ => OpSize::S64,
-    };
+    let size_2 = int_ann_to_opsize(lhs_ann);
     ctx.out.push(MInst::ShrRCL {
         size: size_2,
         dst: v0,
@@ -361,9 +371,9 @@ fn gen_icmp(
     lhs: VReg,
     rhs: VReg,
     cmp_op: ICmpOp,
-    lhs_ann: Option<Annotation>,
+    lhs_ann: Option<IntAnnotation>,
 ) -> Option<()> {
-    let size = ann_bits_to_opsize(lhs_ann);
+    let size = int_ann_to_opsize(lhs_ann);
     ctx.out.push(MInst::CmpRR {
         size,
         src1: lhs,
@@ -429,6 +439,7 @@ pub(super) fn try_select_generated(
     ctx: &mut super::IselCtx,
     vref: ValueRef,
     op: &Op,
+    func: &tuffy_ir::function::Function,
 ) -> Option<()> {
     match op {
         Op::Add(lhs, rhs) => {
@@ -469,35 +480,42 @@ pub(super) fn try_select_generated(
         Op::Shr(lhs, rhs) => {
             let l = ctx.ensure_in_reg(lhs.value)?;
             let r = ctx.ensure_in_reg(rhs.value)?;
-            match lhs.annotation {
-                Some(Annotation::Signed(_)) => gen_shr_signed(ctx, vref, l, r, lhs.annotation),
-                Some(Annotation::Unsigned(_)) => gen_shr_unsigned(ctx, vref, l, r, lhs.annotation),
-                _ => gen_shr_unsigned(ctx, vref, l, r, lhs.annotation),
+            let lhs_ann = get_int_annotation(func, lhs.value);
+            match lhs_ann {
+                Some(ann) if matches!(ann.signedness, tuffy_ir::types::IntSignedness::Signed) => {
+                    gen_shr_signed(ctx, vref, l, r, lhs_ann)
+                }
+                _ => gen_shr_unsigned(ctx, vref, l, r, lhs_ann),
             }
         }
         Op::Min(lhs, rhs) => {
             let l = ctx.ensure_in_reg(lhs.value)?;
             let r = ctx.ensure_in_reg(rhs.value)?;
-            let size = ann_bits_to_opsize(lhs.annotation);
-            match lhs.annotation {
-                Some(Annotation::Signed(_)) => gen_min_signed(ctx, vref, l, r, size),
-                Some(Annotation::Unsigned(_)) => gen_min_unsigned(ctx, vref, l, r, size),
+            let lhs_ann = get_int_annotation(func, lhs.value);
+            let size = int_ann_to_opsize(lhs_ann);
+            match lhs_ann {
+                Some(ann) if matches!(ann.signedness, tuffy_ir::types::IntSignedness::Signed) => {
+                    gen_min_signed(ctx, vref, l, r, size)
+                }
                 _ => gen_min_unsigned(ctx, vref, l, r, size),
             }
         }
         Op::Max(lhs, rhs) => {
             let l = ctx.ensure_in_reg(lhs.value)?;
             let r = ctx.ensure_in_reg(rhs.value)?;
-            let size = ann_bits_to_opsize(lhs.annotation);
-            match lhs.annotation {
-                Some(Annotation::Signed(_)) => gen_max_signed(ctx, vref, l, r, size),
-                Some(Annotation::Unsigned(_)) => gen_max_unsigned(ctx, vref, l, r, size),
+            let lhs_ann = get_int_annotation(func, lhs.value);
+            let size = int_ann_to_opsize(lhs_ann);
+            match lhs_ann {
+                Some(ann) if matches!(ann.signedness, tuffy_ir::types::IntSignedness::Signed) => {
+                    gen_max_signed(ctx, vref, l, r, size)
+                }
                 _ => gen_max_unsigned(ctx, vref, l, r, size),
             }
         }
         Op::CountOnes(val) => {
             let s = ctx.ensure_in_reg(val.value)?;
-            let size = ann_bits_to_opsize(val.annotation);
+            let val_ann = get_int_annotation(func, val.value);
+            let size = int_ann_to_opsize(val_ann);
             gen_count_ones(ctx, vref, s, size)
         }
         Op::CountLeadingZeros(val, bits) => {
@@ -507,7 +525,8 @@ pub(super) fn try_select_generated(
         }
         Op::CountTrailingZeros(val) => {
             let s = ctx.ensure_in_reg(val.value)?;
-            let size = ann_bits_to_opsize(val.annotation);
+            let val_ann = get_int_annotation(func, val.value);
+            let size = int_ann_to_opsize(val_ann);
             gen_count_trailing_zeros(ctx, vref, s, size)
         }
         Op::PtrAdd(ptr, offset) => {
@@ -523,7 +542,8 @@ pub(super) fn try_select_generated(
         Op::ICmp(cmp_op, lhs, rhs) => {
             let l = ctx.ensure_in_reg(lhs.value)?;
             let r = ctx.ensure_in_reg(rhs.value)?;
-            gen_icmp(ctx, vref, l, r, *cmp_op, lhs.annotation)
+            let lhs_ann = get_int_annotation(func, lhs.value);
+            gen_icmp(ctx, vref, l, r, *cmp_op, lhs_ann)
         }
         _ => None,
     }

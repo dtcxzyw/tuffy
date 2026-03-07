@@ -45,11 +45,29 @@ impl VectorType {
     }
 }
 
+/// Integer signedness for type annotations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum IntSignedness {
+    /// Only low N bits meaningful, high bits undef.
+    DontCare,
+    /// Value must be in signed N-bit range.
+    Signed,
+    /// Value must be in unsigned N-bit range.
+    Unsigned,
+}
+
+/// Integer type annotation with bit width and signedness.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct IntAnnotation {
+    pub bit_width: u32,
+    pub signedness: IntSignedness,
+}
+
 /// A type in the tuffy IR.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
-    /// Infinite precision integer. No fixed bitwidth.
-    Int,
+    /// Integer with explicit bit width and signedness annotation.
+    Int(IntAnnotation),
     /// Boolean (true/false). Distinct from integers.
     Bool,
     /// Zero-sized unit type. Represents Rust's `()`.
@@ -158,18 +176,12 @@ pub enum MemoryOrdering {
     SeqCst,
 }
 
-/// Range annotation on a value definition (result-side) or use edge (use-side).
+/// Annotation for pointer alignment hints.
 ///
 /// Result-side violation: the defining instruction produces poison.
 /// Use-side violation: the consuming instruction produces poison.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Annotation {
-    /// `:s<N>` — value must be in signed N-bit range `[-2^(N-1), 2^(N-1)-1]`.
-    Signed(u32),
-    /// `:u<N>` — value must be in unsigned N-bit range `[0, 2^N-1]`.
-    Unsigned(u32),
-    /// `:dc<N>` — only low N bits meaningful, high bits undef.
-    DontCare(u32),
     /// `:align<N>` — pointer alignment in bytes.
     Align(u32),
 }

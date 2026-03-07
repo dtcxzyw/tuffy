@@ -100,7 +100,7 @@ impl<'a> DisplayCtx<'a> {
 
 fn fmt_type(ty: &Type) -> String {
     match ty {
-        Type::Int => "int".to_string(),
+        Type::Int(ann) => format!("int:{}", fmt_int_annotation(ann)),
         Type::Bool => "bool".to_string(),
         Type::Unit => "unit".to_string(),
         Type::Byte(_) => "byte".to_string(),
@@ -126,11 +126,17 @@ fn fmt_type(ty: &Type) -> String {
     }
 }
 
+fn fmt_int_annotation(ann: &crate::types::IntAnnotation) -> String {
+    use crate::types::IntSignedness;
+    match ann.signedness {
+        IntSignedness::Signed => format!("s{}", ann.bit_width),
+        IntSignedness::Unsigned => format!("u{}", ann.bit_width),
+        IntSignedness::DontCare => format!("i{}", ann.bit_width),
+    }
+}
+
 fn fmt_annotation(ann: &Annotation) -> String {
     match ann {
-        Annotation::Signed(n) => format!(":s{n}"),
-        Annotation::Unsigned(n) => format!(":u{n}"),
-        Annotation::DontCare(n) => format!(":i{n}"),
         Annotation::Align(n) => format!(":align{n}"),
     }
 }

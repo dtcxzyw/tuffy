@@ -21,7 +21,7 @@ use tuffy_ir::builder::Builder;
 use tuffy_ir::function::{Function, RegionKind};
 use tuffy_ir::instruction::{ICmpOp, Operand, Origin};
 use tuffy_ir::module::SymbolTable;
-use tuffy_ir::types::{Annotation, Type};
+use tuffy_ir::types::{IntAnnotation, IntSignedness, Type};
 
 use std::collections::{HashMap, HashSet};
 
@@ -78,16 +78,19 @@ fn emit_elf_valid() {
 }
 
 fn build_add_func() -> (Function, SymbolTable) {
-    let s32 = Some(Annotation::Signed(32));
+    let i32_type = Type::Int(IntAnnotation {
+        bit_width: 32,
+        signedness: IntSignedness::Signed,
+    });
     let mut st = SymbolTable::new();
     let name = st.intern("add");
     let mut func = Function::new(
         name,
-        vec![Type::Int, Type::Int],
-        vec![s32, s32],
+        vec![i32_type.clone(), i32_type.clone()],
+        vec![None, None],
         vec![],
-        Some(Type::Int),
-        s32,
+        Some(i32_type.clone()),
+        None,
     );
     let mut builder = Builder::new(&mut func);
 
@@ -98,19 +101,10 @@ fn build_add_func() -> (Function, SymbolTable) {
     builder.switch_to_block(entry);
 
     let mem0 = builder.add_block_arg(entry, Type::Mem);
-    let a = builder.param(0, Type::Int, s32, Origin::synthetic());
-    let b = builder.param(1, Type::Int, s32, Origin::synthetic());
-    let sum = builder.add(
-        Operand::annotated(a, Annotation::Signed(32)),
-        Operand::annotated(b, Annotation::Signed(32)),
-        s32,
-        Origin::synthetic(),
-    );
-    builder.ret(
-        Some(Operand::annotated(sum, Annotation::Signed(32))),
-        mem0.into(),
-        Origin::synthetic(),
-    );
+    let a = builder.param(0, i32_type.clone(), None, Origin::synthetic());
+    let b = builder.param(1, i32_type.clone(), None, Origin::synthetic());
+    let sum = builder.add(a.into(), b.into(), None, Origin::synthetic());
+    builder.ret(Some(sum.into()), mem0.into(), Origin::synthetic());
 
     builder.exit_region();
 
@@ -161,16 +155,19 @@ fn encode_branch_labels_resolved() {
 /// else_bb:
 ///   ret %1
 fn build_branch_func() -> (Function, SymbolTable) {
-    let s32 = Some(Annotation::Signed(32));
+    let i32_type = Type::Int(IntAnnotation {
+        bit_width: 32,
+        signedness: IntSignedness::Signed,
+    });
     let mut st = SymbolTable::new();
     let name = st.intern("max");
     let mut func = Function::new(
         name,
-        vec![Type::Int, Type::Int],
-        vec![s32, s32],
+        vec![i32_type.clone(), i32_type.clone()],
+        vec![None, None],
         vec![],
-        Some(Type::Int),
-        s32,
+        Some(i32_type.clone()),
+        None,
     );
     let mut builder = Builder::new(&mut func);
 
@@ -183,8 +180,8 @@ fn build_branch_func() -> (Function, SymbolTable) {
 
     builder.switch_to_block(entry);
     let mem0 = builder.add_block_arg(entry, Type::Mem);
-    let a = builder.param(0, Type::Int, s32, Origin::synthetic());
-    let b = builder.param(1, Type::Int, s32, Origin::synthetic());
+    let a = builder.param(0, i32_type.clone(), None, Origin::synthetic());
+    let b = builder.param(1, i32_type, None, Origin::synthetic());
     let cmp = builder.icmp(ICmpOp::Gt, a.into(), b.into(), Origin::synthetic());
     builder.brif(
         cmp.into(),
@@ -210,7 +207,14 @@ fn build_branch_func() -> (Function, SymbolTable) {
 
 #[test]
 fn isel_sext_nonstandard_unsigned_width() {
-    let (func, symbols) = build_extend_func("sext_u17", Annotation::Unsigned(17), true);
+    let (func, symbols) = build_extend_func(
+        "sext_u17",
+        IntAnnotation {
+            bit_width: 17,
+            signedness: IntSignedness::Unsigned,
+        },
+        true,
+    );
     let captures: HashMap<u32, u32> = HashMap::new();
     let moves: HashMap<u32, u32> = HashMap::new();
     let result = isel::isel(&func, &symbols, &captures, &moves, &HashSet::new())
@@ -230,7 +234,14 @@ fn isel_sext_nonstandard_unsigned_width() {
 
 #[test]
 fn isel_sext_nonstandard_signed_is_noop() {
-    let (func, symbols) = build_extend_func("sext_s17", Annotation::Signed(17), true);
+    let (func, symbols) = build_extend_func(
+        "sext_s17",
+        IntAnnotation {
+            bit_width: 17,
+            signedness: IntSignedness::Signed,
+        },
+        true,
+    );
     let captures: HashMap<u32, u32> = HashMap::new();
     let moves: HashMap<u32, u32> = HashMap::new();
     let result = isel::isel(&func, &symbols, &captures, &moves, &HashSet::new())
@@ -247,7 +258,14 @@ fn isel_sext_nonstandard_signed_is_noop() {
 
 #[test]
 fn isel_zext_nonstandard_signed_width() {
-    let (func, symbols) = build_extend_func("zext_s13", Annotation::Signed(13), false);
+    let (func, symbols) = build_extend_func(
+        "zext_s13",
+        IntAnnotation {
+            bit_width: 13,
+            signedness: IntSignedness::Signed,
+        },
+        false,
+    );
     let captures: HashMap<u32, u32> = HashMap::new();
     let moves: HashMap<u32, u32> = HashMap::new();
     let result = isel::isel(&func, &symbols, &captures, &moves, &HashSet::new())
@@ -262,7 +280,14 @@ fn isel_zext_nonstandard_signed_width() {
 
 #[test]
 fn isel_zext_nonstandard_unsigned_is_noop() {
-    let (func, symbols) = build_extend_func("zext_u13", Annotation::Unsigned(13), false);
+    let (func, symbols) = build_extend_func(
+        "zext_u13",
+        IntAnnotation {
+            bit_width: 13,
+            signedness: IntSignedness::Unsigned,
+        },
+        false,
+    );
     let captures: HashMap<u32, u32> = HashMap::new();
     let moves: HashMap<u32, u32> = HashMap::new();
     let result = isel::isel(&func, &symbols, &captures, &moves, &HashSet::new())
@@ -305,7 +330,11 @@ fn build_annotated_wide_call_func() -> (Function, SymbolTable) {
     let caller = st.intern("caller_wide");
     let callee = st.intern("callee_wide");
 
-    let mut func = Function::new(caller, vec![], vec![], vec![], Some(Type::Int), None);
+    let ret_type = Type::Int(IntAnnotation {
+        bit_width: 128,
+        signedness: IntSignedness::Unsigned,
+    });
+    let mut func = Function::new(caller, vec![], vec![], vec![], Some(ret_type.clone()), None);
     let mut builder = Builder::new(&mut func);
 
     let root = builder.create_region(RegionKind::Function);
@@ -319,9 +348,9 @@ fn build_annotated_wide_call_func() -> (Function, SymbolTable) {
     let (call_mem, call_data) = builder.call(
         callee_addr.into(),
         vec![],
-        Type::Int,
+        ret_type,
         mem0.into(),
-        Some(Annotation::Unsigned(128)),
+        None,
         Origin::synthetic(),
     );
     let call_data = call_data.expect("non-void call should produce data result");
@@ -334,18 +363,21 @@ fn build_annotated_wide_call_func() -> (Function, SymbolTable) {
 }
 
 /// Build: fn name(a: int :ann) -> int { sext/zext a to 64 }
-fn build_extend_func(name: &str, ann: Annotation, is_sext: bool) -> (Function, SymbolTable) {
-    let s64 = Some(Annotation::Signed(64));
-    let src_ann = Some(ann);
+fn build_extend_func(name: &str, ann: IntAnnotation, is_sext: bool) -> (Function, SymbolTable) {
+    let src_type = Type::Int(ann);
+    let ret_type = Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Signed,
+    });
     let mut st = SymbolTable::new();
     let sym = st.intern(name);
     let mut func = Function::new(
         sym,
-        vec![Type::Int],
-        vec![src_ann],
+        vec![src_type.clone()],
+        vec![None],
         vec![],
-        Some(Type::Int),
-        s64,
+        Some(ret_type.clone()),
+        None,
     );
     let mut builder = Builder::new(&mut func);
 
@@ -356,14 +388,14 @@ fn build_extend_func(name: &str, ann: Annotation, is_sext: bool) -> (Function, S
     builder.switch_to_block(entry);
 
     let mem0 = builder.add_block_arg(entry, Type::Mem);
-    let a = builder.param(0, Type::Int, src_ann, Origin::synthetic());
+    let a = builder.param(0, src_type, None, Origin::synthetic());
     let extended = if is_sext {
-        builder.sext(Operand::annotated(a, ann), 64, Origin::synthetic())
+        builder.sext(Operand::new(a), 64, Origin::synthetic())
     } else {
-        builder.zext(Operand::annotated(a, ann), 64, Origin::synthetic())
+        builder.zext(Operand::new(a), 64, Origin::synthetic())
     };
     builder.ret(
-        Some(Operand::annotated(extended, Annotation::Signed(64))),
+        Some(Operand::new(extended)),
         mem0.into(),
         Origin::synthetic(),
     );

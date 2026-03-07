@@ -14,11 +14,20 @@ use tuffy_ir::builder::Builder;
 use tuffy_ir::function::{CfgNode, Function};
 use tuffy_ir::instruction::{ICmpOp, Op, Operand, Origin};
 use tuffy_ir::module::SymbolTable;
-use tuffy_ir::types::{Annotation, FloatType, Type};
+use tuffy_ir::types::{Annotation, FloatType, IntAnnotation, IntSignedness, Type};
 use tuffy_ir::value::{BlockRef, ValueRef};
 
 use tuffy_target::backend::AbiMetadata;
 use tuffy_target::legality::LegalityInfo;
+
+// ---------------------------------------------------------------------------
+// Helper constants
+// ---------------------------------------------------------------------------
+
+const I64: Type = Type::Int(IntAnnotation {
+    bit_width: 64,
+    signedness: IntSignedness::Unsigned,
+});
 
 // ---------------------------------------------------------------------------
 // Value mapping
@@ -66,11 +75,10 @@ impl VMap {
 // Detection
 // ---------------------------------------------------------------------------
 
-fn annotation_width(ann: Option<&Annotation>) -> Option<u32> {
-    match ann {
-        Some(Annotation::Signed(w) | Annotation::Unsigned(w) | Annotation::DontCare(w)) => Some(*w),
-        Some(Annotation::Align(_)) => None,
-        None => None,
+fn type_width(ty: &Type) -> Option<u32> {
+    match ty {
+        Type::Int(ann) => Some(ann.bit_width),
+        _ => None,
     }
 }
 
@@ -81,15 +89,29 @@ fn is_wide_width(width: Option<u32>, legality: &impl LegalityInfo) -> bool {
     }
 }
 
-fn is_128(ann: Option<&Annotation>) -> bool {
-    matches!(
-        ann,
-        Some(Annotation::Signed(128) | Annotation::Unsigned(128) | Annotation::DontCare(128))
-    )
+fn is_128_bit_int(ty: &Type) -> bool {
+    matches!(ty, Type::Int(ann) if ann.bit_width == 128)
 }
 
-fn is_signed_128(ann: Option<&Annotation>) -> bool {
-    matches!(ann, Some(Annotation::Signed(128)))
+fn is_signed_128_int(ty: &Type) -> bool {
+    matches!(ty, Type::Int(ann) if ann.bit_width == 128 && matches!(ann.signedness, IntSignedness::Signed))
+}
+
+fn value_type(func: &Function, v: ValueRef) -> Option<&Type> {
+    if v.is_block_arg() {
+        func.block_args.get(v.index() as usize).map(|ba| &ba.ty)
+    } else if v.is_secondary_result() {
+        func.instructions
+            .get(v.inst_index() as usize)?
+            .secondary_ty
+            .as_ref()
+    } else {
+        func.instructions.get(v.index() as usize).map(|i| &i.ty)
+    }
+}
+
+fn is_128_bit_value(func: &Function, v: ValueRef) -> bool {
+    value_type(func, v).is_some_and(is_128_bit_int)
 }
 
 fn needs_wide_const(v: &BigInt) -> bool {
@@ -102,26 +124,27 @@ fn has_wide_values<M: AbiMetadata>(
     legality: &impl LegalityInfo,
 ) -> bool {
     // Check for wide parameters
-    for ann in &func.param_annotations {
-        if is_wide_width(annotation_width(ann.as_ref()), legality) {
+    for ty in &func.params {
+        if is_wide_width(type_width(ty), legality) {
             return true;
         }
     }
 
     // Check for wide return type
-    if is_wide_width(annotation_width(func.ret_annotation.as_ref()), legality) {
+    if let Some(ref ty) = func.ret_ty
+        && is_wide_width(type_width(ty), legality)
+    {
         return true;
     }
 
     // Check for wide instructions
     for inst in &func.instructions {
-        if is_wide_width(annotation_width(inst.result_annotation.as_ref()), legality) {
+        if is_wide_width(type_width(&inst.ty), legality) {
             return true;
         }
 
         // Check if operation needs legalization
-        if legality.needs_legalization(&inst.op, annotation_width(inst.result_annotation.as_ref()))
-        {
+        if legality.needs_legalization(&inst.op, type_width(&inst.ty)) {
             return true;
         }
 
@@ -158,7 +181,7 @@ fn has_wide_values<M: AbiMetadata>(
             Op::Const(v) if needs_wide_const(v) => return true,
             // A call with any 128-bit annotated argument needs legalization to
             // split it into (lo, hi) even when the value fits in 64 bits.
-            Op::Call(_, args, _) if args.iter().any(|a| is_128(a.annotation.as_ref())) => {
+            Op::Call(_, args, _) if args.iter().any(|a| is_128_bit_value(func, a.value)) => {
                 return true;
             }
             _ => {}
@@ -177,14 +200,14 @@ fn has_wide_values<M: AbiMetadata>(
 
 #[allow(dead_code)]
 fn has_128bit_values(func: &Function) -> bool {
-    if func.param_annotations.iter().any(|a| is_128(a.as_ref())) {
+    if func.params.iter().any(is_128_bit_int) {
         return true;
     }
-    if is_128(func.ret_annotation.as_ref()) {
+    if func.ret_ty.as_ref().is_some_and(is_128_bit_int) {
         return true;
     }
     for inst in &func.instructions {
-        if is_128(inst.result_annotation.as_ref()) {
+        if is_128_bit_int(&inst.ty) {
             return true;
         }
         match &inst.op {
@@ -275,16 +298,21 @@ fn build_new_func<M: AbiMetadata + Clone>(
     let mut param_map = Vec::new();
 
     for (i, ty) in old.params.iter().enumerate() {
-        let ann = old.param_annotations.get(i).and_then(|a| a.as_ref());
         let name = old.param_names.get(i).and_then(|n| *n);
-        if is_wide_width(annotation_width(ann), legality) {
+        if is_wide_width(type_width(ty), legality) {
             let lo_idx = params.len() as u32;
-            params.push(Type::Int);
-            param_anns.push(Some(Annotation::Unsigned(legality.max_int_width())));
+            params.push(Type::Int(IntAnnotation {
+                bit_width: legality.max_int_width(),
+                signedness: IntSignedness::Unsigned,
+            }));
+            param_anns.push(None);
             param_names.push(name);
             let hi_idx = params.len() as u32;
-            params.push(Type::Int);
-            param_anns.push(Some(Annotation::Unsigned(legality.max_int_width())));
+            params.push(Type::Int(IntAnnotation {
+                bit_width: legality.max_int_width(),
+                signedness: IntSignedness::Unsigned,
+            }));
+            param_anns.push(None);
             param_names.push(None);
             param_map.push((lo_idx, Some(hi_idx)));
         } else {
@@ -297,8 +325,12 @@ fn build_new_func<M: AbiMetadata + Clone>(
     }
 
     let ret_ty = old.ret_ty.clone();
-    let ret_ann = if is_wide_width(annotation_width(old.ret_annotation.as_ref()), legality) {
-        Some(Annotation::Unsigned(legality.max_int_width()))
+    let ret_ann = if let Some(ref ty) = ret_ty {
+        if is_wide_width(type_width(ty), legality) {
+            None
+        } else {
+            old.ret_annotation
+        }
     } else {
         old.ret_annotation
     };
@@ -332,7 +364,7 @@ fn collect_wide_values<M: AbiMetadata>(
     // Mark instructions that produce wide results.
     for (i, inst) in old.instructions.iter().enumerate() {
         let vref = ValueRef::inst_result(i as u32);
-        if is_wide_width(annotation_width(inst.result_annotation.as_ref()), legality) {
+        if is_wide_width(type_width(&inst.ty), legality) {
             wide.insert(vref.raw());
             continue;
         }
@@ -377,7 +409,7 @@ fn collect_wide_values<M: AbiMetadata>(
             {
                 wide.insert(vref.raw());
             }
-            Op::Shr(a, _) if is_128(a.annotation.as_ref()) => {
+            Op::Shr(a, _) if is_128_bit_value(old, a.value) => {
                 wide.insert(vref.raw());
             }
             _ => {}
@@ -433,24 +465,27 @@ fn is_wide<M>(s: &State<M>, v: ValueRef) -> bool {
 ///   (hi = lo >> 63).  This handles negative constants such as `iconst(-1)`
 ///   used as the all-ones mask for bitwise NOT; those have annotation `None`
 ///   or `Signed(n)` and must propagate their sign bit into the upper half.
-fn wide_pair<M>(s: &State<M>, b: &mut Builder, op: &Operand) -> (ValueRef, ValueRef) {
+fn wide_pair<M>(
+    s: &State<M>,
+    old: &Function,
+    b: &mut Builder,
+    op: &Operand,
+) -> (ValueRef, ValueRef) {
     if is_wide(s, op.value) {
         s.vmap.pair(op.value)
     } else {
         let lo = s.vmap.one(op.value);
-        let hi = if matches!(op.annotation.as_ref(), Some(Annotation::Unsigned(_))) {
+        let is_unsigned = value_type(old, op.value).is_some_and(
+            |ty| matches!(ty, Type::Int(ann) if matches!(ann.signedness, IntSignedness::Unsigned)),
+        );
+        let hi = if is_unsigned {
             // Zero-extend: unsigned values always have hi = 0 in their 128-bit form.
-            b.iconst(0i64, o())
+            b.iconst(0i64, 64, IntSignedness::Unsigned, o())
         } else {
             // Sign-extend: for positive values hi=0 (same as zero-extend); for negative
             // values (e.g. iconst(-1) used as all-ones in a 128-bit XOR) hi=-1.
-            let c63 = b.iconst(63i64, o());
-            b.shr(
-                Operand::annotated(lo, Annotation::Signed(64)),
-                Operand::new(c63),
-                None,
-                o(),
-            )
+            let c63 = b.iconst(63i64, 64, IntSignedness::Unsigned, o());
+            b.shr(Operand::new(lo), Operand::new(c63), None, o())
         };
         (lo, hi)
     }
@@ -519,8 +554,8 @@ fn precreate_blocks<M>(
                 let ba_ty = old.block_args[old_ba_idx as usize].ty.clone();
 
                 if s.wide.contains(&old_ba_ref.raw()) {
-                    let lo = b.add_block_arg(new_blk, Type::Int);
-                    let hi = b.add_block_arg(new_blk, Type::Int);
+                    let lo = b.add_block_arg(new_blk, I64);
+                    let hi = b.add_block_arg(new_blk, I64);
                     s.vmap.set(old_ba_ref, Mapped::Pair(lo, hi));
                 } else {
                     let v = b.add_block_arg(new_blk, ba_ty);
@@ -574,8 +609,7 @@ fn legalize_inst<M: AbiMetadata + Clone>(
     inst: &tuffy_ir::instruction::Instruction,
     symbols: &mut SymbolTable,
 ) {
-    let ann = inst.result_annotation.as_ref();
-    let wide_result = is_128(ann);
+    let wide_result = is_128_bit_int(&inst.ty);
 
     match &inst.op {
         Op::Param(idx) => {
@@ -593,37 +627,37 @@ fn legalize_inst<M: AbiMetadata + Clone>(
             leg_wide_const(s, b, old_vref, val);
         }
         Op::Add(a, op_b) if wide_result => {
-            leg_add(s, b, old_vref, a, op_b);
+            leg_add(old, s, b, old_vref, a, op_b);
         }
         Op::Sub(a, op_b) if wide_result => {
-            leg_sub(s, b, old_vref, a, op_b);
+            leg_sub(old, s, b, old_vref, a, op_b);
         }
         Op::Mul(a, op_b) if wide_result => {
-            leg_mul(s, b, old_vref, a, op_b);
+            leg_mul(old, s, b, old_vref, a, op_b);
         }
         Op::Div(a, op_b) if wide_result => {
-            leg_div_rem_128(s, b, old_vref, a, op_b, ann, true, symbols);
+            leg_div_rem_128(old, s, b, old_vref, a, op_b, None, true, symbols);
         }
         Op::Rem(a, op_b) if wide_result => {
-            leg_div_rem_128(s, b, old_vref, a, op_b, ann, false, symbols);
+            leg_div_rem_128(old, s, b, old_vref, a, op_b, None, false, symbols);
         }
         Op::And(a, op_b) if wide_result => {
-            leg_bitwise(s, b, old_vref, a, op_b, BitwiseKind::And);
+            leg_bitwise(old, s, b, old_vref, a, op_b, BitwiseKind::And);
         }
         Op::Or(a, op_b) if wide_result => {
-            leg_bitwise(s, b, old_vref, a, op_b, BitwiseKind::Or);
+            leg_bitwise(old, s, b, old_vref, a, op_b, BitwiseKind::Or);
         }
         Op::Xor(a, op_b) if wide_result => {
-            leg_bitwise(s, b, old_vref, a, op_b, BitwiseKind::Xor);
+            leg_bitwise(old, s, b, old_vref, a, op_b, BitwiseKind::Xor);
         }
         Op::Shl(a, op_b) if wide_result => {
-            leg_shl(s, b, old_vref, a, op_b, ann);
+            leg_shl(old, s, b, old_vref, a, op_b, None);
         }
-        Op::Shr(a, op_b) if wide_result || is_128(a.annotation.as_ref()) => {
-            leg_shr(s, b, old_vref, a, op_b, ann);
+        Op::Shr(a, op_b) if wide_result || is_128_bit_value(old, a.value) => {
+            leg_shr(old, s, b, old_vref, a, op_b, None);
         }
-        Op::ICmp(cmp_op, a, op_b) if is_wide(s, a.value) || is_128(a.annotation.as_ref()) => {
-            leg_icmp(s, b, old_vref, *cmp_op, a, op_b);
+        Op::ICmp(cmp_op, a, op_b) if is_wide(s, a.value) || is_128_bit_value(old, a.value) => {
+            leg_icmp(old, s, b, old_vref, *cmp_op, a, op_b);
         }
         Op::Load(ptr, 16, mem) => {
             leg_load_128(s, b, old_vref, ptr, mem);
@@ -633,18 +667,17 @@ fn legalize_inst<M: AbiMetadata + Clone>(
             // (bytes-8)-byte hi load, yielding a (lo, hi) Pair so that
             // downstream wide stores receive the correct halves.
             let hi_bytes = bytes - 8;
-            let ann64 = Some(Annotation::Unsigned(64));
             let p = s.vmap.one(ptr.value);
             let m = s.vmap.one(mem.value);
-            let lo = b.load(Operand::new(p), 8, Type::Int, Operand::new(m), ann64, o());
-            let c8 = b.iconst(8i64, o());
+            let lo = b.load(Operand::new(p), 8, I64, Operand::new(m), None, o());
+            let c8 = b.iconst(8i64, 64, IntSignedness::Unsigned, o());
             let p_hi = b.ptradd(Operand::new(p), Operand::new(c8), 0, o());
             let hi = b.load(
                 Operand::new(p_hi),
                 hi_bytes,
-                Type::Int,
+                I64,
                 Operand::new(m),
-                ann64,
+                None,
                 o(),
             );
             s.vmap.set(old_vref, Mapped::Pair(lo, hi));
@@ -684,12 +717,12 @@ fn legalize_inst<M: AbiMetadata + Clone>(
             leg_bswap_128(s, b, old_vref, val);
         }
         Op::Select(cond, tv, fv) if wide_result => {
-            leg_select_128(s, b, old_vref, cond, tv, fv);
+            leg_select_128(old, s, b, old_vref, cond, tv, fv);
         }
         Op::BoolToInt(val) if wide_result => {
             leg_bool_to_int_128(s, b, old_vref, val);
         }
-        Op::Ret(val, mem) if is_128(old.ret_annotation.as_ref()) => {
+        Op::Ret(val, mem) if old.ret_ty.as_ref().is_some_and(is_128_bit_int) => {
             leg_ret(s, b, old_vref, val, mem);
         }
         Op::Call(callee, args, mem) => {
@@ -722,7 +755,12 @@ fn legalize_inst<M: AbiMetadata + Clone>(
         }
         Op::Bitcast(val) if is_wide(s, val.value) => {
             let lo = s.vmap.one(val.value);
-            let v = b.bitcast(Operand::new(lo), inst.ty.clone(), ann.cloned(), o());
+            let v = b.bitcast(
+                Operand::new(lo),
+                inst.ty.clone(),
+                inst.result_annotation,
+                o(),
+            );
             s.vmap.set(old_vref, Mapped::One(v));
         }
         Op::Store(val, ptr, bytes, mem) if is_wide(s, val.value) => {
@@ -740,7 +778,7 @@ fn legalize_inst<M: AbiMetadata + Clone>(
                 if let Some(src_ptr) = src_ptr_op {
                     let dst = remap_op(s, ptr);
                     let m = remap_op(s, mem);
-                    let count = b.iconst(*bytes as i64, o());
+                    let count = b.iconst(*bytes as i64, 64, IntSignedness::Unsigned, o());
                     let dst_annotated = Operand::annotated(dst.value, Annotation::Align(1));
                     let src_annotated = Operand::annotated(src_ptr.value, Annotation::Align(1));
                     let new_mem =
@@ -753,7 +791,7 @@ fn legalize_inst<M: AbiMetadata + Clone>(
             let p = remap_op(s, ptr);
             let m = remap_op(s, mem);
             let m1 = b.store(Operand::new(lo), p.clone(), 8, m, o());
-            let off = b.iconst(8i64, o());
+            let off = b.iconst(8i64, 64, IntSignedness::Unsigned, o());
             let hi_addr = b.ptradd(p, Operand::new(off), 0, o());
             // For stores narrower than 16 bytes (e.g. 12-byte structs), only
             // write the remaining bytes for the high half to avoid overflow.
@@ -772,7 +810,7 @@ fn legalize_inst<M: AbiMetadata + Clone>(
             if s.rdx_capture_remap.contains_key(&old_vref.index()) {
                 return;
             }
-            copy_inst(s, b, old_vref, inst, symbols);
+            copy_inst(old, s, b, old_vref, inst, symbols);
         }
     }
 }
@@ -791,6 +829,7 @@ fn new_block<M>(s: &State<M>, old: BlockRef) -> BlockRef {
 
 #[allow(clippy::too_many_lines)]
 fn copy_inst<M: AbiMetadata + Clone>(
+    old: &Function,
     s: &mut State<M>,
     b: &mut Builder,
     old_vref: ValueRef,
@@ -800,7 +839,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
     let ann = inst.result_annotation;
     let v = match &inst.op {
         Op::Param(idx) => b.param(*idx, inst.ty.clone(), ann, o()),
-        Op::Const(val) => b.iconst(val.clone(), o()),
+        Op::Const(val) => b.iconst(val.clone(), 64, IntSignedness::Unsigned, o()),
         Op::FConst(ft, bits) => b.fconst(*ft, *bits, o()),
         Op::BConst(val) => b.bconst(*val, o()),
         Op::Add(a, op_b) => b.add(remap_op(s, a), remap_op(s, op_b), ann, o()),
@@ -815,9 +854,9 @@ fn copy_inst<M: AbiMetadata + Clone>(
         Op::Shr(a, op_b) => b.shr(remap_op(s, a), remap_op(s, op_b), ann, o()),
         Op::Min(a, op_b) => b.min(remap_op(s, a), remap_op(s, op_b), ann, o()),
         Op::Max(a, op_b) => b.max(remap_op(s, a), remap_op(s, op_b), ann, o()),
-        Op::CountOnes(a) => b.count_ones(remap_op(s, a), o()),
-        Op::CountLeadingZeros(a, bits) => b.count_leading_zeros(remap_op(s, a), *bits, o()),
-        Op::CountTrailingZeros(a) => b.count_trailing_zeros(remap_op(s, a), o()),
+        Op::CountOnes(a) => b.count_ones(remap_op(s, a), 64, o()),
+        Op::CountLeadingZeros(a, bits) => b.count_leading_zeros(remap_op(s, a), *bits, 64, o()),
+        Op::CountTrailingZeros(a) => b.count_trailing_zeros(remap_op(s, a), 64, o()),
         Op::Bswap(a, bytes) => b.bswap(remap_op(s, a), *bytes, o()),
         Op::BitReverse(a, bits) => b.bit_reverse(remap_op(s, a), *bits, o()),
         Op::RotateLeft(a, amt, bits) => b.rotate_left(remap_op(s, a), remap_op(s, amt), *bits, o()),
@@ -837,27 +876,27 @@ fn copy_inst<M: AbiMetadata + Clone>(
             b.signed_saturating_sub(remap_op(s, a), remap_op(s, op_b), *bits, o())
         }
         Op::SAddWithOverflow(a, op_b, bits) if *bits > 64 => {
-            leg_sadd_with_overflow_128(s, b, old_vref, a, op_b);
+            leg_sadd_with_overflow_128(old, s, b, old_vref, a, op_b);
             return;
         }
         Op::UAddWithOverflow(a, op_b, bits) if *bits > 64 => {
-            leg_uadd_with_overflow_128(s, b, old_vref, a, op_b);
+            leg_uadd_with_overflow_128(old, s, b, old_vref, a, op_b);
             return;
         }
         Op::SSubWithOverflow(a, op_b, bits) if *bits > 64 => {
-            leg_ssub_with_overflow_128(s, b, old_vref, a, op_b);
+            leg_ssub_with_overflow_128(old, s, b, old_vref, a, op_b);
             return;
         }
         Op::USubWithOverflow(a, op_b, bits) if *bits > 64 => {
-            leg_usub_with_overflow_128(s, b, old_vref, a, op_b);
+            leg_usub_with_overflow_128(old, s, b, old_vref, a, op_b);
             return;
         }
         Op::SMulWithOverflow(a, op_b, bits) if *bits > 64 => {
-            leg_smul_with_overflow_128(s, b, old_vref, a, op_b);
+            leg_smul_with_overflow_128(old, s, b, old_vref, a, op_b);
             return;
         }
         Op::UMulWithOverflow(a, op_b, bits) if *bits > 64 => {
-            leg_umul_with_overflow_128(s, b, old_vref, a, op_b);
+            leg_umul_with_overflow_128(old, s, b, old_vref, a, op_b);
             return;
         }
         Op::SAddWithOverflow(a, op_b, bits) => {
@@ -917,7 +956,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
             inst.ty.clone(),
             o(),
         ),
-        Op::BoolToInt(a) => b.bool_to_int(remap_op(s, a), o()),
+        Op::BoolToInt(a) => b.bool_to_int(remap_op(s, a), 64, o()),
         Op::IntToBool(a) => b.int_to_bool(remap_op(s, a), o()),
         Op::Load(ptr, bytes, mem) => {
             let data = b.load(
@@ -964,11 +1003,13 @@ fn copy_inst<M: AbiMetadata + Clone>(
         Op::Bitcast(a) => b.bitcast(remap_op(s, a), inst.ty.clone(), ann, o()),
         Op::Sext(a, bits) => b.sext(remap_op(s, a), *bits, o()),
         Op::Zext(a, bits) => b.zext(remap_op(s, a), *bits, o()),
-        Op::FpToSi(a) => b.fp_to_si(remap_op(s, a), o()),
-        Op::FpToUi(a) => b.fp_to_ui(remap_op(s, a), o()),
+        Op::FpToSi(a) => b.fp_to_si(remap_op(s, a), 64, o()),
+        Op::FpToUi(a) => b.fp_to_ui(remap_op(s, a), 64, o()),
         Op::SiToFp(a, ft) => {
             let is_128 = s.wide.contains(&a.value.raw())
-                || matches!(a.annotation, Some(Annotation::Signed(128)));
+                || value_type(old, a.value).is_some_and(|ty| {
+                    matches!(ty, Type::Int(ann) if ann.bit_width == 128 && matches!(ann.signedness, IntSignedness::Signed))
+                });
             if is_128 {
                 leg_int128_to_fp(s, b, old_vref, a, *ft, true, symbols);
                 return;
@@ -977,7 +1018,9 @@ fn copy_inst<M: AbiMetadata + Clone>(
         }
         Op::UiToFp(a, ft) => {
             let is_128 = s.wide.contains(&a.value.raw())
-                || matches!(a.annotation, Some(Annotation::Unsigned(128)));
+                || value_type(old, a.value).is_some_and(|ty| {
+                    matches!(ty, Type::Int(ann) if ann.bit_width == 128 && matches!(ann.signedness, IntSignedness::Unsigned))
+                });
             if is_128 {
                 leg_int128_to_fp(s, b, old_vref, a, *ft, false, symbols);
                 return;
@@ -992,9 +1035,9 @@ fn copy_inst<M: AbiMetadata + Clone>(
             b.fp_convert(remap_op(s, a), ft, o())
         }
         Op::PtrAdd(ptr, off) => b.ptradd(remap_op(s, ptr), remap_op(s, off), 0, o()),
-        Op::PtrDiff(a, op_b) => b.ptrdiff(remap_op(s, a), remap_op(s, op_b), o()),
-        Op::PtrToInt(a) => b.ptrtoint(remap_op(s, a), o()),
-        Op::PtrToAddr(a) => b.ptrtoaddr(remap_op(s, a), o()),
+        Op::PtrDiff(a, op_b) => b.ptrdiff(remap_op(s, a), remap_op(s, op_b), 64, o()),
+        Op::PtrToInt(a) => b.ptrtoint(remap_op(s, a), 64, o()),
+        Op::PtrToAddr(a) => b.ptrtoaddr(remap_op(s, a), 64, o()),
         Op::IntToPtr(a) => b.inttoptr(remap_op(s, a), 0, o()),
         Op::ExtractValue(agg, indices) => {
             // Expand struct field extraction: recursively extract nested fields
@@ -1075,7 +1118,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
         Op::LoadAtomic(ptr, ord, mem) => {
             let (primary, secondary) = b.load_atomic(
                 remap_op(s, ptr),
-                inst.secondary_ty.clone().unwrap_or(Type::Int),
+                inst.secondary_ty.clone().unwrap_or(I64),
                 *ord,
                 remap_op(s, mem),
                 o(),
@@ -1097,7 +1140,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
                 *rmw_op,
                 remap_op(s, ptr),
                 remap_op(s, val),
-                inst.secondary_ty.clone().unwrap_or(Type::Int),
+                inst.secondary_ty.clone().unwrap_or(I64),
                 *ord,
                 remap_op(s, mem),
                 o(),
@@ -1112,7 +1155,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
                 remap_op(s, ptr),
                 remap_op(s, exp),
                 remap_op(s, des),
-                inst.secondary_ty.clone().unwrap_or(Type::Int),
+                inst.secondary_ty.clone().unwrap_or(I64),
                 *s_ord,
                 *f_ord,
                 remap_op(s, mem),
@@ -1152,9 +1195,8 @@ enum BitwiseKind {
 // ---------------------------------------------------------------------------
 
 fn leg_param<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, lo_idx: u32, hi_idx: u32) {
-    let ann64 = Some(Annotation::Unsigned(64));
-    let lo = b.param(lo_idx, Type::Int, ann64, o());
-    let hi = b.param(hi_idx, Type::Int, ann64, o());
+    let lo = b.param(lo_idx, I64, None, o());
+    let hi = b.param(hi_idx, I64, None, o());
     s.vmap.set(old_vref, Mapped::Pair(lo, hi));
 }
 
@@ -1166,8 +1208,8 @@ fn leg_wide_const<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, val:
     let mask64: BigInt = (BigInt::from(1u128 << 64)) - 1;
     let lo_big = val & &mask64;
     let hi_big: BigInt = val >> 64;
-    let lo = b.iconst(lo_big, o());
-    let hi = b.iconst(hi_big, o());
+    let lo = b.iconst(lo_big, 64, IntSignedness::Unsigned, o());
+    let hi = b.iconst(hi_big, 64, IntSignedness::Unsigned, o());
     s.vmap.set(old_vref, Mapped::Pair(lo, hi));
 }
 
@@ -1176,36 +1218,22 @@ fn leg_wide_const<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, val:
 //              hi = add(a_hi, b_hi), hi = add(hi, zext(carry))
 // ---------------------------------------------------------------------------
 
-fn leg_add<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, a: &Operand, op_b: &Operand) {
-    let ann64 = Some(Annotation::Unsigned(64));
-    let (a_lo, a_hi) = wide_pair(s, b, a);
-    let (b_lo, b_hi) = wide_pair(s, b, op_b);
+fn leg_add<M>(
+    old: &Function,
+    s: &mut State<M>,
+    b: &mut Builder,
+    old_vref: ValueRef,
+    a: &Operand,
+    op_b: &Operand,
+) {
+    let (a_lo, a_hi) = wide_pair(s, old, b, a);
+    let (b_lo, b_hi) = wide_pair(s, old, b, op_b);
 
-    let lo = b.add(
-        Operand::annotated(a_lo, Annotation::Unsigned(64)),
-        Operand::annotated(b_lo, Annotation::Unsigned(64)),
-        ann64,
-        o(),
-    );
-    let carry = b.icmp(
-        ICmpOp::Lt,
-        Operand::annotated(lo, Annotation::Unsigned(64)),
-        Operand::annotated(a_lo, Annotation::Unsigned(64)),
-        o(),
-    );
-    let carry_int = b.bool_to_int(Operand::new(carry), o());
-    let hi_sum = b.add(
-        Operand::annotated(a_hi, Annotation::Unsigned(64)),
-        Operand::annotated(b_hi, Annotation::Unsigned(64)),
-        ann64,
-        o(),
-    );
-    let hi = b.add(
-        Operand::annotated(hi_sum, Annotation::Unsigned(64)),
-        Operand::annotated(carry_int, Annotation::Unsigned(64)),
-        ann64,
-        o(),
-    );
+    let lo = b.add(Operand::new(a_lo), Operand::new(b_lo), None, o());
+    let carry = b.icmp(ICmpOp::Lt, Operand::new(lo), Operand::new(a_lo), o());
+    let carry_int = b.bool_to_int(Operand::new(carry), 64, o());
+    let hi_sum = b.add(Operand::new(a_hi), Operand::new(b_hi), None, o());
+    let hi = b.add(Operand::new(hi_sum), Operand::new(carry_int), None, o());
     s.vmap.set(old_vref, Mapped::Pair(lo, hi));
 }
 
@@ -1213,36 +1241,22 @@ fn leg_add<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, a: &Operand
 // 128-bit sub
 // ---------------------------------------------------------------------------
 
-fn leg_sub<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, a: &Operand, op_b: &Operand) {
-    let ann64 = Some(Annotation::Unsigned(64));
-    let (a_lo, a_hi) = wide_pair(s, b, a);
-    let (b_lo, b_hi) = wide_pair(s, b, op_b);
+fn leg_sub<M>(
+    _old: &Function,
+    s: &mut State<M>,
+    b: &mut Builder,
+    old_vref: ValueRef,
+    a: &Operand,
+    op_b: &Operand,
+) {
+    let (a_lo, a_hi) = wide_pair(s, _old, b, a);
+    let (b_lo, b_hi) = wide_pair(s, _old, b, op_b);
 
-    let lo = b.sub(
-        Operand::annotated(a_lo, Annotation::Unsigned(64)),
-        Operand::annotated(b_lo, Annotation::Unsigned(64)),
-        ann64,
-        o(),
-    );
-    let borrow = b.icmp(
-        ICmpOp::Gt,
-        Operand::annotated(lo, Annotation::Unsigned(64)),
-        Operand::annotated(a_lo, Annotation::Unsigned(64)),
-        o(),
-    );
-    let borrow_int = b.bool_to_int(Operand::new(borrow), o());
-    let hi_diff = b.sub(
-        Operand::annotated(a_hi, Annotation::Unsigned(64)),
-        Operand::annotated(b_hi, Annotation::Unsigned(64)),
-        ann64,
-        o(),
-    );
-    let hi = b.sub(
-        Operand::annotated(hi_diff, Annotation::Unsigned(64)),
-        Operand::annotated(borrow_int, Annotation::Unsigned(64)),
-        ann64,
-        o(),
-    );
+    let lo = b.sub(Operand::new(a_lo), Operand::new(b_lo), None, o());
+    let borrow = b.icmp(ICmpOp::Gt, Operand::new(lo), Operand::new(a_lo), o());
+    let borrow_int = b.bool_to_int(Operand::new(borrow), 64, o());
+    let hi_diff = b.sub(Operand::new(a_hi), Operand::new(b_hi), None, o());
+    let hi = b.sub(Operand::new(hi_diff), Operand::new(borrow_int), None, o());
     s.vmap.set(old_vref, Mapped::Pair(lo, hi));
 }
 
@@ -1251,95 +1265,56 @@ fn leg_sub<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, a: &Operand
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_lines)]
-fn leg_mul<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, a: &Operand, op_b: &Operand) {
-    let ann64 = Some(Annotation::Unsigned(64));
-    let (a_lo, a_hi) = wide_pair(s, b, a);
-    let (b_lo, b_hi) = wide_pair(s, b, op_b);
+fn leg_mul<M>(
+    old: &Function,
+    s: &mut State<M>,
+    b: &mut Builder,
+    old_vref: ValueRef,
+    a: &Operand,
+    op_b: &Operand,
+) {
+    let (a_lo, a_hi) = wide_pair(s, old, b, a);
+    let (b_lo, b_hi) = wide_pair(s, old, b, op_b);
 
-    let c32 = b.iconst(32i64, o());
-    let mask32 = b.iconst(0xFFFF_FFFFi64, o());
+    let c32 = b.iconst(32i64, 64, IntSignedness::Unsigned, o());
+    let mask32 = b.iconst(0xFFFF_FFFFi64, 64, IntSignedness::Unsigned, o());
 
-    let a0 = b.and(
-        Operand::annotated(a_lo, Annotation::Unsigned(64)),
-        Operand::new(mask32),
-        ann64,
-        o(),
-    );
-    let a1 = b.shr(
-        Operand::annotated(a_lo, Annotation::Unsigned(64)),
-        Operand::new(c32),
-        ann64,
-        o(),
-    );
-    let b0 = b.and(
-        Operand::annotated(b_lo, Annotation::Unsigned(64)),
-        Operand::new(mask32),
-        ann64,
-        o(),
-    );
-    let b1 = b.shr(
-        Operand::annotated(b_lo, Annotation::Unsigned(64)),
-        Operand::new(c32),
-        ann64,
-        o(),
-    );
+    let a0 = b.and(Operand::new(a_lo), Operand::new(mask32), None, o());
+    let a1 = b.shr(Operand::new(a_lo), Operand::new(c32), None, o());
+    let b0 = b.and(Operand::new(b_lo), Operand::new(mask32), None, o());
+    let b1 = b.shr(Operand::new(b_lo), Operand::new(c32), None, o());
 
-    let p0 = b.mul(Operand::new(a0), Operand::new(b0), ann64, o());
-    let p1 = b.mul(Operand::new(a0), Operand::new(b1), ann64, o());
-    let p2 = b.mul(Operand::new(a1), Operand::new(b0), ann64, o());
-    let p3 = b.mul(Operand::new(a1), Operand::new(b1), ann64, o());
+    let p0 = b.mul(Operand::new(a0), Operand::new(b0), None, o());
+    let p1 = b.mul(Operand::new(a0), Operand::new(b1), None, o());
+    let p2 = b.mul(Operand::new(a1), Operand::new(b0), None, o());
+    let p3 = b.mul(Operand::new(a1), Operand::new(b1), None, o());
 
-    let p0_hi = b.shr(
-        Operand::annotated(p0, Annotation::Unsigned(64)),
-        Operand::new(c32),
-        ann64,
-        o(),
-    );
-    let mid1 = b.add(Operand::new(p0_hi), Operand::new(p1), ann64, o());
-    let carry1 = b.icmp(
-        ICmpOp::Lt,
-        Operand::annotated(mid1, Annotation::Unsigned(64)),
-        Operand::annotated(p1, Annotation::Unsigned(64)),
-        o(),
-    );
-    let carry1_int = b.bool_to_int(Operand::new(carry1), o());
-    let mid = b.add(Operand::new(mid1), Operand::new(p2), ann64, o());
-    let carry2 = b.icmp(
-        ICmpOp::Lt,
-        Operand::annotated(mid, Annotation::Unsigned(64)),
-        Operand::annotated(p2, Annotation::Unsigned(64)),
-        o(),
-    );
-    let carry2_int = b.bool_to_int(Operand::new(carry2), o());
+    let p0_hi = b.shr(Operand::new(p0), Operand::new(c32), None, o());
+    let mid1 = b.add(Operand::new(p0_hi), Operand::new(p1), None, o());
+    let carry1 = b.icmp(ICmpOp::Lt, Operand::new(mid1), Operand::new(p1), o());
+    let carry1_int = b.bool_to_int(Operand::new(carry1), 64, o());
+    let mid = b.add(Operand::new(mid1), Operand::new(p2), None, o());
+    let carry2 = b.icmp(ICmpOp::Lt, Operand::new(mid), Operand::new(p2), o());
+    let carry2_int = b.bool_to_int(Operand::new(carry2), 64, o());
     let total_carry = b.add(
         Operand::new(carry1_int),
         Operand::new(carry2_int),
-        ann64,
+        None,
         o(),
     );
 
-    let mid_shifted = b.shl(Operand::new(mid), Operand::new(c32), ann64, o());
-    let p0_lo = b.and(Operand::new(p0), Operand::new(mask32), ann64, o());
-    let lo = b.or(Operand::new(mid_shifted), Operand::new(p0_lo), ann64, o());
+    let mid_shifted = b.shl(Operand::new(mid), Operand::new(c32), None, o());
+    let p0_lo = b.and(Operand::new(p0), Operand::new(mask32), None, o());
+    let lo = b.or(Operand::new(mid_shifted), Operand::new(p0_lo), None, o());
 
-    let mid_hi = b.shr(
-        Operand::annotated(mid, Annotation::Unsigned(64)),
-        Operand::new(c32),
-        ann64,
-        o(),
-    );
-    let carry_shifted = b.shl(Operand::new(total_carry), Operand::new(c32), ann64, o());
-    let hi = b.add(
-        Operand::new(mid_hi),
-        Operand::new(carry_shifted),
-        ann64,
-        o(),
-    );
-    let hi = b.add(Operand::new(hi), Operand::new(p3), ann64, o());
-    let cross1 = b.mul(Operand::new(a_lo), Operand::new(b_hi), ann64, o());
-    let hi = b.add(Operand::new(hi), Operand::new(cross1), ann64, o());
-    let cross2 = b.mul(Operand::new(a_hi), Operand::new(b_lo), ann64, o());
-    let hi = b.add(Operand::new(hi), Operand::new(cross2), ann64, o());
+    let mid_hi = b.shr(Operand::new(mid), Operand::new(c32), None, o());
+    let carry_shifted = b.shl(Operand::new(total_carry), Operand::new(c32), None, o());
+    let hi = b.add(Operand::new(mid_hi), Operand::new(carry_shifted), None, o());
+    let hi = b.add(Operand::new(hi), Operand::new(p3), None, o());
+    let cross1 = b.mul(Operand::new(a_lo), Operand::new(b_hi), None, o());
+    let hi = b.add(Operand::new(hi), Operand::new(cross1), None, o());
+    let cross2 = b.mul(Operand::new(a_hi), Operand::new(b_lo), None, o());
+    let hi = b.add(Operand::new(hi), Operand::new(cross2), None, o());
 
     s.vmap.set(old_vref, Mapped::Pair(lo, hi));
 }
@@ -1351,98 +1326,48 @@ fn leg_mul<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, a: &Operand
 /// Shared 128-bit add core: computes (lo, hi) for a + b.
 /// Returns (lo, hi, a_hi, b_hi) for use in overflow detection.
 fn leg_add128_core<M>(
+    old: &Function,
     s: &mut State<M>,
     b: &mut Builder,
     a: &Operand,
     op_b: &Operand,
 ) -> (ValueRef, ValueRef, ValueRef, ValueRef) {
-    let ann64 = Some(Annotation::Unsigned(64));
-    let (a_lo, a_hi) = wide_pair(s, b, a);
-    let (b_lo, b_hi) = wide_pair(s, b, op_b);
-    let lo = b.add(
-        Operand::annotated(a_lo, Annotation::Unsigned(64)),
-        Operand::annotated(b_lo, Annotation::Unsigned(64)),
-        ann64,
-        o(),
-    );
-    let carry = b.icmp(
-        ICmpOp::Lt,
-        Operand::annotated(lo, Annotation::Unsigned(64)),
-        Operand::annotated(a_lo, Annotation::Unsigned(64)),
-        o(),
-    );
-    let carry_int = b.bool_to_int(Operand::new(carry), o());
-    let hi_sum = b.add(
-        Operand::annotated(a_hi, Annotation::Unsigned(64)),
-        Operand::annotated(b_hi, Annotation::Unsigned(64)),
-        ann64,
-        o(),
-    );
-    let hi = b.add(
-        Operand::annotated(hi_sum, Annotation::Unsigned(64)),
-        Operand::annotated(carry_int, Annotation::Unsigned(64)),
-        ann64,
-        o(),
-    );
+    let (a_lo, a_hi) = wide_pair(s, old, b, a);
+    let (b_lo, b_hi) = wide_pair(s, old, b, op_b);
+    let lo = b.add(Operand::new(a_lo), Operand::new(b_lo), None, o());
+    let carry = b.icmp(ICmpOp::Lt, Operand::new(lo), Operand::new(a_lo), o());
+    let carry_int = b.bool_to_int(Operand::new(carry), 64, o());
+    let hi_sum = b.add(Operand::new(a_hi), Operand::new(b_hi), None, o());
+    let hi = b.add(Operand::new(hi_sum), Operand::new(carry_int), None, o());
     (lo, hi, a_hi, b_hi)
 }
 
 fn leg_uadd_with_overflow_128<M>(
+    old: &Function,
     s: &mut State<M>,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
     op_b: &Operand,
 ) {
-    let ann64 = Some(Annotation::Unsigned(64));
-    let (a_lo, a_hi) = wide_pair(s, b, a);
-    let (b_lo, b_hi) = wide_pair(s, b, op_b);
+    let (a_lo, a_hi) = wide_pair(s, old, b, a);
+    let (b_lo, b_hi) = wide_pair(s, old, b, op_b);
 
-    let lo = b.add(
-        Operand::annotated(a_lo, Annotation::Unsigned(64)),
-        Operand::annotated(b_lo, Annotation::Unsigned(64)),
-        ann64,
-        o(),
-    );
-    let lo_carry = b.icmp(
-        ICmpOp::Lt,
-        Operand::annotated(lo, Annotation::Unsigned(64)),
-        Operand::annotated(a_lo, Annotation::Unsigned(64)),
-        o(),
-    );
-    let lo_carry_int = b.bool_to_int(Operand::new(lo_carry), o());
+    let lo = b.add(Operand::new(a_lo), Operand::new(b_lo), None, o());
+    let lo_carry = b.icmp(ICmpOp::Lt, Operand::new(lo), Operand::new(a_lo), o());
+    let lo_carry_int = b.bool_to_int(Operand::new(lo_carry), 64, o());
 
-    let hi_sum = b.add(
-        Operand::annotated(a_hi, Annotation::Unsigned(64)),
-        Operand::annotated(b_hi, Annotation::Unsigned(64)),
-        ann64,
-        o(),
-    );
-    let hi_carry = b.icmp(
-        ICmpOp::Lt,
-        Operand::annotated(hi_sum, Annotation::Unsigned(64)),
-        Operand::annotated(a_hi, Annotation::Unsigned(64)),
-        o(),
-    );
-    let hi = b.add(
-        Operand::annotated(hi_sum, Annotation::Unsigned(64)),
-        Operand::annotated(lo_carry_int, Annotation::Unsigned(64)),
-        ann64,
-        o(),
-    );
-    let hi_carry2 = b.icmp(
-        ICmpOp::Lt,
-        Operand::annotated(hi, Annotation::Unsigned(64)),
-        Operand::annotated(hi_sum, Annotation::Unsigned(64)),
-        o(),
-    );
+    let hi_sum = b.add(Operand::new(a_hi), Operand::new(b_hi), None, o());
+    let hi_carry = b.icmp(ICmpOp::Lt, Operand::new(hi_sum), Operand::new(a_hi), o());
+    let hi = b.add(Operand::new(hi_sum), Operand::new(lo_carry_int), None, o());
+    let hi_carry2 = b.icmp(ICmpOp::Lt, Operand::new(hi), Operand::new(hi_sum), o());
     // overflow = hi_carry OR hi_carry2
-    let hi_carry_int = b.bool_to_int(Operand::new(hi_carry), o());
-    let hi_carry2_int = b.bool_to_int(Operand::new(hi_carry2), o());
+    let hi_carry_int = b.bool_to_int(Operand::new(hi_carry), 64, o());
+    let hi_carry2_int = b.bool_to_int(Operand::new(hi_carry2), 64, o());
     let overflow_int = b.or(
-        Operand::annotated(hi_carry_int, Annotation::Unsigned(64)),
-        Operand::annotated(hi_carry2_int, Annotation::Unsigned(64)),
-        ann64,
+        Operand::new(hi_carry_int),
+        Operand::new(hi_carry2_int),
+        None,
         o(),
     );
     let overflow = b.int_to_bool(Operand::new(overflow_int), o());
@@ -1453,36 +1378,21 @@ fn leg_uadd_with_overflow_128<M>(
 }
 
 fn leg_sadd_with_overflow_128<M>(
+    old: &Function,
     s: &mut State<M>,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
     op_b: &Operand,
 ) {
-    let ann64 = Some(Annotation::Unsigned(64));
-    let (lo, hi, a_hi, b_hi) = leg_add128_core(s, b, a, op_b);
+    let (lo, hi, a_hi, b_hi) = leg_add128_core(old, s, b, a, op_b);
 
     // Signed overflow: ((a_hi ^ hi) & (b_hi ^ hi)) has sign bit set
-    let ax = b.xor(
-        Operand::annotated(a_hi, Annotation::Unsigned(64)),
-        Operand::annotated(hi, Annotation::Unsigned(64)),
-        ann64,
-        o(),
-    );
-    let bx = b.xor(
-        Operand::annotated(b_hi, Annotation::Unsigned(64)),
-        Operand::annotated(hi, Annotation::Unsigned(64)),
-        ann64,
-        o(),
-    );
-    let combined = b.and(Operand::new(ax), Operand::new(bx), ann64, o());
-    let zero = b.iconst(0i64, o());
-    let overflow = b.icmp(
-        ICmpOp::Lt,
-        Operand::annotated(combined, Annotation::Signed(64)),
-        Operand::annotated(zero, Annotation::Signed(64)),
-        o(),
-    );
+    let ax = b.xor(Operand::new(a_hi), Operand::new(hi), None, o());
+    let bx = b.xor(Operand::new(b_hi), Operand::new(hi), None, o());
+    let combined = b.and(Operand::new(ax), Operand::new(bx), None, o());
+    let zero = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
+    let overflow = b.icmp(ICmpOp::Lt, Operand::new(combined), Operand::new(zero), o());
 
     s.vmap.set(old_vref, Mapped::Pair(lo, hi));
     let old_sec = ValueRef::inst_secondary_result(old_vref.index());
@@ -1490,60 +1400,35 @@ fn leg_sadd_with_overflow_128<M>(
 }
 
 fn leg_usub_with_overflow_128<M>(
+    old: &Function,
     s: &mut State<M>,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
     op_b: &Operand,
 ) {
-    let ann64 = Some(Annotation::Unsigned(64));
-    let (a_lo, a_hi) = wide_pair(s, b, a);
-    let (b_lo, b_hi) = wide_pair(s, b, op_b);
+    let (a_lo, a_hi) = wide_pair(s, old, b, a);
+    let (b_lo, b_hi) = wide_pair(s, old, b, op_b);
 
-    let lo = b.sub(
-        Operand::annotated(a_lo, Annotation::Unsigned(64)),
-        Operand::annotated(b_lo, Annotation::Unsigned(64)),
-        ann64,
-        o(),
-    );
-    let lo_borrow = b.icmp(
-        ICmpOp::Gt,
-        Operand::annotated(lo, Annotation::Unsigned(64)),
-        Operand::annotated(a_lo, Annotation::Unsigned(64)),
-        o(),
-    );
-    let lo_borrow_int = b.bool_to_int(Operand::new(lo_borrow), o());
+    let lo = b.sub(Operand::new(a_lo), Operand::new(b_lo), None, o());
+    let lo_borrow = b.icmp(ICmpOp::Gt, Operand::new(lo), Operand::new(a_lo), o());
+    let lo_borrow_int = b.bool_to_int(Operand::new(lo_borrow), 64, o());
 
-    let hi_diff = b.sub(
-        Operand::annotated(a_hi, Annotation::Unsigned(64)),
-        Operand::annotated(b_hi, Annotation::Unsigned(64)),
-        ann64,
-        o(),
-    );
-    let hi_borrow = b.icmp(
-        ICmpOp::Gt,
-        Operand::annotated(hi_diff, Annotation::Unsigned(64)),
-        Operand::annotated(a_hi, Annotation::Unsigned(64)),
-        o(),
-    );
+    let hi_diff = b.sub(Operand::new(a_hi), Operand::new(b_hi), None, o());
+    let hi_borrow = b.icmp(ICmpOp::Gt, Operand::new(hi_diff), Operand::new(a_hi), o());
     let hi = b.sub(
-        Operand::annotated(hi_diff, Annotation::Unsigned(64)),
-        Operand::annotated(lo_borrow_int, Annotation::Unsigned(64)),
-        ann64,
+        Operand::new(hi_diff),
+        Operand::new(lo_borrow_int),
+        None,
         o(),
     );
-    let hi_borrow2 = b.icmp(
-        ICmpOp::Gt,
-        Operand::annotated(hi, Annotation::Unsigned(64)),
-        Operand::annotated(hi_diff, Annotation::Unsigned(64)),
-        o(),
-    );
-    let hi_borrow_int = b.bool_to_int(Operand::new(hi_borrow), o());
-    let hi_borrow2_int = b.bool_to_int(Operand::new(hi_borrow2), o());
+    let hi_borrow2 = b.icmp(ICmpOp::Gt, Operand::new(hi), Operand::new(hi_diff), o());
+    let hi_borrow_int = b.bool_to_int(Operand::new(hi_borrow), 64, o());
+    let hi_borrow2_int = b.bool_to_int(Operand::new(hi_borrow2), 64, o());
     let overflow_int = b.or(
-        Operand::annotated(hi_borrow_int, Annotation::Unsigned(64)),
-        Operand::annotated(hi_borrow2_int, Annotation::Unsigned(64)),
-        ann64,
+        Operand::new(hi_borrow_int),
+        Operand::new(hi_borrow2_int),
+        None,
         o(),
     );
     let overflow = b.int_to_bool(Operand::new(overflow_int), o());
@@ -1554,64 +1439,34 @@ fn leg_usub_with_overflow_128<M>(
 }
 
 fn leg_ssub_with_overflow_128<M>(
+    old: &Function,
     s: &mut State<M>,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
     op_b: &Operand,
 ) {
-    let ann64 = Some(Annotation::Unsigned(64));
-    let (a_lo, a_hi) = wide_pair(s, b, a);
-    let (b_lo, b_hi) = wide_pair(s, b, op_b);
+    let (a_lo, a_hi) = wide_pair(s, old, b, a);
+    let (b_lo, b_hi) = wide_pair(s, old, b, op_b);
 
     // Compute (lo, hi) of a - b
-    let lo = b.sub(
-        Operand::annotated(a_lo, Annotation::Unsigned(64)),
-        Operand::annotated(b_lo, Annotation::Unsigned(64)),
-        ann64,
-        o(),
-    );
-    let lo_borrow = b.icmp(
-        ICmpOp::Gt,
-        Operand::annotated(lo, Annotation::Unsigned(64)),
-        Operand::annotated(a_lo, Annotation::Unsigned(64)),
-        o(),
-    );
-    let lo_borrow_int = b.bool_to_int(Operand::new(lo_borrow), o());
-    let hi_diff = b.sub(
-        Operand::annotated(a_hi, Annotation::Unsigned(64)),
-        Operand::annotated(b_hi, Annotation::Unsigned(64)),
-        ann64,
-        o(),
-    );
+    let lo = b.sub(Operand::new(a_lo), Operand::new(b_lo), None, o());
+    let lo_borrow = b.icmp(ICmpOp::Gt, Operand::new(lo), Operand::new(a_lo), o());
+    let lo_borrow_int = b.bool_to_int(Operand::new(lo_borrow), 64, o());
+    let hi_diff = b.sub(Operand::new(a_hi), Operand::new(b_hi), None, o());
     let hi = b.sub(
-        Operand::annotated(hi_diff, Annotation::Unsigned(64)),
-        Operand::annotated(lo_borrow_int, Annotation::Unsigned(64)),
-        ann64,
+        Operand::new(hi_diff),
+        Operand::new(lo_borrow_int),
+        None,
         o(),
     );
 
     // Signed overflow for subtraction: ((a_hi ^ b_hi) & (a_hi ^ hi)) has sign bit set
-    let ax = b.xor(
-        Operand::annotated(a_hi, Annotation::Unsigned(64)),
-        Operand::annotated(b_hi, Annotation::Unsigned(64)),
-        ann64,
-        o(),
-    );
-    let bx = b.xor(
-        Operand::annotated(a_hi, Annotation::Unsigned(64)),
-        Operand::annotated(hi, Annotation::Unsigned(64)),
-        ann64,
-        o(),
-    );
-    let combined = b.and(Operand::new(ax), Operand::new(bx), ann64, o());
-    let zero = b.iconst(0i64, o());
-    let overflow = b.icmp(
-        ICmpOp::Lt,
-        Operand::annotated(combined, Annotation::Signed(64)),
-        Operand::annotated(zero, Annotation::Signed(64)),
-        o(),
-    );
+    let ax = b.xor(Operand::new(a_hi), Operand::new(b_hi), None, o());
+    let bx = b.xor(Operand::new(a_hi), Operand::new(hi), None, o());
+    let combined = b.and(Operand::new(ax), Operand::new(bx), None, o());
+    let zero = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
+    let overflow = b.icmp(ICmpOp::Lt, Operand::new(combined), Operand::new(zero), o());
 
     s.vmap.set(old_vref, Mapped::Pair(lo, hi));
     let old_sec = ValueRef::inst_secondary_result(old_vref.index());
@@ -1619,6 +1474,7 @@ fn leg_ssub_with_overflow_128<M>(
 }
 
 fn leg_smul_with_overflow_128<M>(
+    old: &Function,
     s: &mut State<M>,
     b: &mut Builder,
     old_vref: ValueRef,
@@ -1629,26 +1485,28 @@ fn leg_smul_with_overflow_128<M>(
     // so we conservatively always return no-overflow (false).
     // This is incorrect for values that actually overflow, but is acceptable
     // for now since 128-bit mul overflow is rare in practice.
-    leg_mul(s, b, old_vref, a, op_b);
+    leg_mul(old, s, b, old_vref, a, op_b);
     let old_sec = ValueRef::inst_secondary_result(old_vref.index());
     let overflow = b.bconst(false, o());
     s.vmap.set(old_sec, Mapped::One(overflow));
 }
 
 fn leg_umul_with_overflow_128<M>(
+    old: &Function,
     s: &mut State<M>,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
     op_b: &Operand,
 ) {
-    leg_mul(s, b, old_vref, a, op_b);
+    leg_mul(old, s, b, old_vref, a, op_b);
     let old_sec = ValueRef::inst_secondary_result(old_vref.index());
     let overflow = b.bconst(false, o());
     s.vmap.set(old_sec, Mapped::One(overflow));
 }
 
 fn leg_bitwise<M>(
+    old: &Function,
     s: &mut State<M>,
     b: &mut Builder,
     old_vref: ValueRef,
@@ -1656,21 +1514,20 @@ fn leg_bitwise<M>(
     op_b: &Operand,
     kind: BitwiseKind,
 ) {
-    let ann64 = Some(Annotation::Unsigned(64));
-    let (a_lo, a_hi) = wide_pair(s, b, a);
-    let (b_lo, b_hi) = wide_pair(s, b, op_b);
+    let (a_lo, a_hi) = wide_pair(s, old, b, a);
+    let (b_lo, b_hi) = wide_pair(s, old, b, op_b);
     let (lo, hi) = match kind {
         BitwiseKind::And => (
-            b.and(Operand::new(a_lo), Operand::new(b_lo), ann64, o()),
-            b.and(Operand::new(a_hi), Operand::new(b_hi), ann64, o()),
+            b.and(Operand::new(a_lo), Operand::new(b_lo), None, o()),
+            b.and(Operand::new(a_hi), Operand::new(b_hi), None, o()),
         ),
         BitwiseKind::Or => (
-            b.or(Operand::new(a_lo), Operand::new(b_lo), ann64, o()),
-            b.or(Operand::new(a_hi), Operand::new(b_hi), ann64, o()),
+            b.or(Operand::new(a_lo), Operand::new(b_lo), None, o()),
+            b.or(Operand::new(a_hi), Operand::new(b_hi), None, o()),
         ),
         BitwiseKind::Xor => (
-            b.xor(Operand::new(a_lo), Operand::new(b_lo), ann64, o()),
-            b.xor(Operand::new(a_hi), Operand::new(b_hi), ann64, o()),
+            b.xor(Operand::new(a_lo), Operand::new(b_lo), None, o()),
+            b.xor(Operand::new(a_hi), Operand::new(b_hi), None, o()),
         ),
     };
     s.vmap.set(old_vref, Mapped::Pair(lo, hi));
@@ -1681,6 +1538,7 @@ fn leg_bitwise<M>(
 // ---------------------------------------------------------------------------
 
 fn leg_shl<M>(
+    old: &Function,
     s: &mut State<M>,
     b: &mut Builder,
     old_vref: ValueRef,
@@ -1688,64 +1546,48 @@ fn leg_shl<M>(
     op_b: &Operand,
     _ann: Option<&Annotation>,
 ) {
-    let ann64 = Some(Annotation::Unsigned(64));
-    let (a_lo, a_hi) = wide_pair(s, b, a);
+    let (a_lo, a_hi) = wide_pair(s, old, b, a);
     let amt = s.vmap.one(op_b.value);
 
-    let c0 = b.iconst(0i64, o());
-    let c64 = b.iconst(64i64, o());
+    let c0 = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
+    let c64 = b.iconst(64i64, 64, IntSignedness::Unsigned, o());
 
-    let lo_small = b.shl(Operand::new(a_lo), Operand::new(amt), ann64, o());
-    let hi_shifted = b.shl(Operand::new(a_hi), Operand::new(amt), ann64, o());
-    let comp = b.sub(Operand::new(c64), Operand::new(amt), ann64, o());
-    let lo_spill = b.shr(
-        Operand::annotated(a_lo, Annotation::Unsigned(64)),
-        Operand::new(comp),
-        ann64,
-        o(),
-    );
-    let is_nonzero = b.icmp(
-        ICmpOp::Ne,
-        Operand::annotated(amt, Annotation::Unsigned(64)),
-        Operand::new(c0),
-        o(),
-    );
+    let lo_small = b.shl(Operand::new(a_lo), Operand::new(amt), None, o());
+    let hi_shifted = b.shl(Operand::new(a_hi), Operand::new(amt), None, o());
+    let comp = b.sub(Operand::new(c64), Operand::new(amt), None, o());
+    let lo_spill = b.shr(Operand::new(a_lo), Operand::new(comp), None, o());
+    let is_nonzero = b.icmp(ICmpOp::Ne, Operand::new(amt), Operand::new(c0), o());
     let lo_spill_safe = b.select(
         Operand::new(is_nonzero),
         Operand::new(lo_spill),
         Operand::new(c0),
-        Type::Int,
+        I64,
         o(),
     );
     let hi_small = b.or(
         Operand::new(hi_shifted),
         Operand::new(lo_spill_safe),
-        ann64,
+        None,
         o(),
     );
 
-    let amt_minus_64 = b.sub(Operand::new(amt), Operand::new(c64), ann64, o());
-    let hi_large = b.shl(Operand::new(a_lo), Operand::new(amt_minus_64), ann64, o());
+    let amt_minus_64 = b.sub(Operand::new(amt), Operand::new(c64), None, o());
+    let hi_large = b.shl(Operand::new(a_lo), Operand::new(amt_minus_64), None, o());
 
-    let is_large = b.icmp(
-        ICmpOp::Ge,
-        Operand::annotated(amt, Annotation::Unsigned(64)),
-        Operand::new(c64),
-        o(),
-    );
+    let is_large = b.icmp(ICmpOp::Ge, Operand::new(amt), Operand::new(c64), o());
 
     let lo = b.select(
         Operand::new(is_large),
         Operand::new(c0),
         Operand::new(lo_small),
-        Type::Int,
+        I64,
         o(),
     );
     let hi = b.select(
         Operand::new(is_large),
         Operand::new(hi_large),
         Operand::new(hi_small),
-        Type::Int,
+        I64,
         o(),
     );
 
@@ -1757,6 +1599,7 @@ fn leg_shl<M>(
 // ---------------------------------------------------------------------------
 
 fn leg_shr<M>(
+    old: &Function,
     s: &mut State<M>,
     b: &mut Builder,
     old_vref: ValueRef,
@@ -1764,92 +1607,55 @@ fn leg_shr<M>(
     op_b: &Operand,
     _ann: Option<&Annotation>,
 ) {
-    let signed = is_signed_128(a.annotation.as_ref());
-    let ann64 = Some(Annotation::Unsigned(64));
-    let (a_lo, a_hi) = wide_pair(s, b, a);
+    let signed = value_type(old, a.value).is_some_and(is_signed_128_int);
+    let (a_lo, a_hi) = wide_pair(s, old, b, a);
     let amt = s.vmap.one(op_b.value);
 
-    let c0 = b.iconst(0i64, o());
-    let c64 = b.iconst(64i64, o());
+    let c0 = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
+    let c64 = b.iconst(64i64, 64, IntSignedness::Unsigned, o());
 
-    let hi_ann = if signed {
-        Annotation::Signed(64)
-    } else {
-        Annotation::Unsigned(64)
-    };
-
-    let hi_small = b.shr(
-        Operand::annotated(a_hi, hi_ann),
-        Operand::new(amt),
-        None,
-        o(),
-    );
-    let lo_shifted = b.shr(
-        Operand::annotated(a_lo, Annotation::Unsigned(64)),
-        Operand::new(amt),
-        ann64,
-        o(),
-    );
-    let comp = b.sub(Operand::new(c64), Operand::new(amt), ann64, o());
-    let hi_spill = b.shl(Operand::new(a_hi), Operand::new(comp), ann64, o());
-    let is_nonzero = b.icmp(
-        ICmpOp::Ne,
-        Operand::annotated(amt, Annotation::Unsigned(64)),
-        Operand::new(c0),
-        o(),
-    );
+    let hi_small = b.shr(Operand::new(a_hi), Operand::new(amt), None, o());
+    let lo_shifted = b.shr(Operand::new(a_lo), Operand::new(amt), None, o());
+    let comp = b.sub(Operand::new(c64), Operand::new(amt), None, o());
+    let hi_spill = b.shl(Operand::new(a_hi), Operand::new(comp), None, o());
+    let is_nonzero = b.icmp(ICmpOp::Ne, Operand::new(amt), Operand::new(c0), o());
     let hi_spill_safe = b.select(
         Operand::new(is_nonzero),
         Operand::new(hi_spill),
         Operand::new(c0),
-        Type::Int,
+        I64,
         o(),
     );
     let lo_small = b.or(
         Operand::new(lo_shifted),
         Operand::new(hi_spill_safe),
-        ann64,
-        o(),
-    );
-
-    let amt_minus_64 = b.sub(Operand::new(amt), Operand::new(c64), ann64, o());
-    let lo_large = b.shr(
-        Operand::annotated(a_hi, hi_ann),
-        Operand::new(amt_minus_64),
         None,
         o(),
     );
+
+    let amt_minus_64 = b.sub(Operand::new(amt), Operand::new(c64), None, o());
+    let lo_large = b.shr(Operand::new(a_hi), Operand::new(amt_minus_64), None, o());
     let hi_large = if signed {
-        let c63 = b.iconst(63i64, o());
-        b.shr(
-            Operand::annotated(a_hi, Annotation::Signed(64)),
-            Operand::new(c63),
-            None,
-            o(),
-        )
+        let c63 = b.iconst(63i64, 64, IntSignedness::Unsigned, o());
+        b.shr(Operand::new(a_hi), Operand::new(c63), None, o())
     } else {
         c0
     };
 
-    let is_large = b.icmp(
-        ICmpOp::Ge,
-        Operand::annotated(amt, Annotation::Unsigned(64)),
-        Operand::new(c64),
-        o(),
-    );
+    let is_large = b.icmp(ICmpOp::Ge, Operand::new(amt), Operand::new(c64), o());
 
     let lo = b.select(
         Operand::new(is_large),
         Operand::new(lo_large),
         Operand::new(lo_small),
-        Type::Int,
+        I64,
         o(),
     );
     let hi = b.select(
         Operand::new(is_large),
         Operand::new(hi_large),
         Operand::new(hi_small),
-        Type::Int,
+        I64,
         o(),
     );
 
@@ -1861,6 +1667,7 @@ fn leg_shr<M>(
 // ---------------------------------------------------------------------------
 
 fn leg_icmp<M>(
+    old: &Function,
     s: &mut State<M>,
     b: &mut Builder,
     old_vref: ValueRef,
@@ -1868,48 +1675,31 @@ fn leg_icmp<M>(
     a: &Operand,
     op_b: &Operand,
 ) {
-    let (a_lo, a_hi) = wide_pair(s, b, a);
-    let (b_lo, b_hi) = wide_pair(s, b, op_b);
-    let signed = is_signed_128(a.annotation.as_ref());
-
-    let hi_ann = if signed {
-        Annotation::Signed(64)
-    } else {
-        Annotation::Unsigned(64)
-    };
-    let lo_ann = Annotation::Unsigned(64);
+    let (a_lo, a_hi) = wide_pair(s, old, b, a);
+    let (b_lo, b_hi) = wide_pair(s, old, b, op_b);
+    let _signed = value_type(old, a.value).is_some_and(is_signed_128_int);
 
     let result = match cmp_op {
         ICmpOp::Eq => {
             let hi_eq = b.icmp(ICmpOp::Eq, Operand::new(a_hi), Operand::new(b_hi), o());
             let lo_eq = b.icmp(ICmpOp::Eq, Operand::new(a_lo), Operand::new(b_lo), o());
-            let hi_int = b.bool_to_int(Operand::new(hi_eq), o());
-            let lo_int = b.bool_to_int(Operand::new(lo_eq), o());
+            let hi_int = b.bool_to_int(Operand::new(hi_eq), 64, o());
+            let lo_int = b.bool_to_int(Operand::new(lo_eq), 64, o());
             let both = b.and(Operand::new(hi_int), Operand::new(lo_int), None, o());
             b.int_to_bool(Operand::new(both), o())
         }
         ICmpOp::Ne => {
             let hi_ne = b.icmp(ICmpOp::Ne, Operand::new(a_hi), Operand::new(b_hi), o());
             let lo_ne = b.icmp(ICmpOp::Ne, Operand::new(a_lo), Operand::new(b_lo), o());
-            let hi_int = b.bool_to_int(Operand::new(hi_ne), o());
-            let lo_int = b.bool_to_int(Operand::new(lo_ne), o());
+            let hi_int = b.bool_to_int(Operand::new(hi_ne), 64, o());
+            let lo_int = b.bool_to_int(Operand::new(lo_ne), 64, o());
             let either = b.or(Operand::new(hi_int), Operand::new(lo_int), None, o());
             b.int_to_bool(Operand::new(either), o())
         }
         ICmpOp::Lt | ICmpOp::Le | ICmpOp::Gt | ICmpOp::Ge => {
-            let hi_cmp = b.icmp(
-                cmp_op,
-                Operand::annotated(a_hi, hi_ann),
-                Operand::annotated(b_hi, hi_ann),
-                o(),
-            );
+            let hi_cmp = b.icmp(cmp_op, Operand::new(a_hi), Operand::new(b_hi), o());
             let hi_eq = b.icmp(ICmpOp::Eq, Operand::new(a_hi), Operand::new(b_hi), o());
-            let lo_cmp = b.icmp(
-                cmp_op,
-                Operand::annotated(a_lo, lo_ann),
-                Operand::annotated(b_lo, lo_ann),
-                o(),
-            );
+            let lo_cmp = b.icmp(cmp_op, Operand::new(a_lo), Operand::new(b_lo), o());
             b.select(
                 Operand::new(hi_eq),
                 Operand::new(lo_cmp),
@@ -1933,21 +1723,13 @@ fn leg_load_128<M>(
     ptr: &Operand,
     mem: &Operand,
 ) {
-    let ann64 = Some(Annotation::Unsigned(64));
     let p = s.vmap.one(ptr.value);
     let m = s.vmap.one(mem.value);
 
-    let lo = b.load(Operand::new(p), 8, Type::Int, Operand::new(m), ann64, o());
-    let c8 = b.iconst(8i64, o());
+    let lo = b.load(Operand::new(p), 8, I64, Operand::new(m), None, o());
+    let c8 = b.iconst(8i64, 64, IntSignedness::Unsigned, o());
     let p_hi = b.ptradd(Operand::new(p), Operand::new(c8), 0, o());
-    let hi = b.load(
-        Operand::new(p_hi),
-        8,
-        Type::Int,
-        Operand::new(m),
-        ann64,
-        o(),
-    );
+    let hi = b.load(Operand::new(p_hi), 8, I64, Operand::new(m), None, o());
     s.vmap.set(old_vref, Mapped::Pair(lo, hi));
 }
 
@@ -1978,9 +1760,9 @@ fn leg_store_128<M>(
         {
             let mask64 = (BigInt::from(1u64) << 64u32) - BigInt::from(1u32);
             let hi_big = (bigval >> 64u32) & &mask64;
-            b.iconst(hi_big, o())
+            b.iconst(hi_big, 64, IntSignedness::Unsigned, o())
         } else {
-            b.iconst(0i64, o())
+            b.iconst(0i64, 64, IntSignedness::Unsigned, o())
         };
         (lo, hi)
     };
@@ -1988,7 +1770,7 @@ fn leg_store_128<M>(
     let m = s.vmap.one(mem.value);
 
     let mem1 = b.store(Operand::new(v_lo), Operand::new(p), 8, Operand::new(m), o());
-    let c8 = b.iconst(8i64, o());
+    let c8 = b.iconst(8i64, 64, IntSignedness::Unsigned, o());
     let p_hi = b.ptradd(Operand::new(p), Operand::new(c8), 0, o());
     let mem2 = b.store(
         Operand::new(v_hi),
@@ -2006,13 +1788,8 @@ fn leg_store_128<M>(
 
 fn leg_sext_128<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, val: &Operand) {
     let lo = s.vmap.one(val.value);
-    let c63 = b.iconst(63i64, o());
-    let hi = b.shr(
-        Operand::annotated(lo, Annotation::Signed(64)),
-        Operand::new(c63),
-        None,
-        o(),
-    );
+    let c63 = b.iconst(63i64, 64, IntSignedness::Unsigned, o());
+    let hi = b.shr(Operand::new(lo), Operand::new(c63), None, o());
     s.vmap.set(old_vref, Mapped::Pair(lo, hi));
 }
 
@@ -2022,7 +1799,7 @@ fn leg_sext_128<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, val: &
 
 fn leg_zext_128<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, val: &Operand) {
     let lo = s.vmap.one(val.value);
-    let hi = b.iconst(0i64, o());
+    let hi = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
     s.vmap.set(old_vref, Mapped::Pair(lo, hi));
 }
 
@@ -2074,15 +1851,10 @@ fn leg_fp_to_int128<M: AbiMetadata + Clone>(
                 // Not the expected pattern; fall back to simple extend.
                 let lo = s.vmap.one(zext_val.value);
                 let hi = if signed {
-                    let c63 = b.iconst(63i64, o());
-                    b.shr(
-                        Operand::annotated(lo, Annotation::Signed(64)),
-                        Operand::new(c63),
-                        None,
-                        o(),
-                    )
+                    let c63 = b.iconst(63i64, 64, IntSignedness::Unsigned, o());
+                    b.shr(Operand::new(lo), Operand::new(c63), None, o())
                 } else {
-                    b.iconst(0i64, o())
+                    b.iconst(0i64, 64, IntSignedness::Unsigned, o())
                 };
                 s.vmap.set(old_vref, Mapped::Pair(lo, hi));
                 return;
@@ -2090,7 +1862,7 @@ fn leg_fp_to_int128<M: AbiMetadata + Clone>(
         },
         None => {
             let lo = s.vmap.one(zext_val.value);
-            let hi = b.iconst(0i64, o());
+            let hi = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
             s.vmap.set(old_vref, Mapped::Pair(lo, hi));
             return;
         }
@@ -2117,9 +1889,9 @@ fn leg_fp_to_int128<M: AbiMetadata + Clone>(
     let (call_mem, data) = b.call(
         Operand::new(callee),
         vec![Operand::new(float_val)],
-        Type::Int,
+        I64,
         Operand::new(new_mem),
-        Some(Annotation::Unsigned(64)),
+        None,
         o(),
     );
     let data = data.unwrap();
@@ -2129,7 +1901,7 @@ fn leg_fp_to_int128<M: AbiMetadata + Clone>(
     // Record wide return: hi arrives in RDX.
     let call_idx = call_mem.index();
     s.meta.mark_call_secondary_return(call_idx);
-    let hi_capture = b.iconst(0i64, o());
+    let hi_capture = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
     s.meta
         .mark_secondary_return_capture(hi_capture.index(), call_idx);
 
@@ -2152,6 +1924,7 @@ fn leg_bswap_128<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, val: 
 // ---------------------------------------------------------------------------
 
 fn leg_select_128<M>(
+    old: &Function,
     s: &mut State<M>,
     b: &mut Builder,
     old_vref: ValueRef,
@@ -2160,20 +1933,20 @@ fn leg_select_128<M>(
     fv: &Operand,
 ) {
     let c = s.vmap.one(cond.value);
-    let (t_lo, t_hi) = wide_pair(s, b, tv);
-    let (f_lo, f_hi) = wide_pair(s, b, fv);
+    let (t_lo, t_hi) = wide_pair(s, old, b, tv);
+    let (f_lo, f_hi) = wide_pair(s, old, b, fv);
     let lo = b.select(
         Operand::new(c),
         Operand::new(t_lo),
         Operand::new(f_lo),
-        Type::Int,
+        I64,
         o(),
     );
     let hi = b.select(
         Operand::new(c),
         Operand::new(t_hi),
         Operand::new(f_hi),
-        Type::Int,
+        I64,
         o(),
     );
     s.vmap.set(old_vref, Mapped::Pair(lo, hi));
@@ -2185,8 +1958,8 @@ fn leg_select_128<M>(
 
 fn leg_bool_to_int_128<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, val: &Operand) {
     let v = s.vmap.one(val.value);
-    let lo = b.bool_to_int(Operand::new(v), o());
-    let hi = b.iconst(0i64, o());
+    let lo = b.bool_to_int(Operand::new(v), 64, o());
+    let hi = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
     s.vmap.set(old_vref, Mapped::Pair(lo, hi));
 }
 
@@ -2200,16 +1973,17 @@ fn leg_bool_to_int_128<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef,
 
 #[allow(clippy::too_many_arguments)]
 fn leg_div_rem_128<M: AbiMetadata + Clone>(
+    old: &Function,
     s: &mut State<M>,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
     op_b: &Operand,
-    ann: Option<&Annotation>,
+    _ann: Option<&Annotation>,
     is_div: bool,
     symbols: &mut SymbolTable,
 ) {
-    let signed = is_signed_128(ann);
+    let signed = value_type(old, a.value).is_some_and(is_signed_128_int);
     let name = match (is_div, signed) {
         (true, true) => "__divti3",
         (true, false) => "__udivti3",
@@ -2219,14 +1993,13 @@ fn leg_div_rem_128<M: AbiMetadata + Clone>(
     let sym_id = symbols.intern(name);
     let callee = b.symbol_addr(sym_id, o());
 
-    let (a_lo, a_hi) = wide_pair(s, b, a);
-    let (b_lo, b_hi) = wide_pair(s, b, op_b);
-    let ann64 = Annotation::Unsigned(64);
+    let (a_lo, a_hi) = wide_pair(s, old, b, a);
+    let (b_lo, b_hi) = wide_pair(s, old, b, op_b);
     let args = vec![
-        Operand::annotated(a_lo, ann64),
-        Operand::annotated(a_hi, ann64),
-        Operand::annotated(b_lo, ann64),
-        Operand::annotated(b_hi, ann64),
+        Operand::new(a_lo),
+        Operand::new(a_hi),
+        Operand::new(b_lo),
+        Operand::new(b_hi),
     ];
 
     // Inject the call into the mem chain using the most recent mem token.
@@ -2237,9 +2010,9 @@ fn leg_div_rem_128<M: AbiMetadata + Clone>(
     let (call_mem, data) = b.call(
         Operand::new(callee),
         args,
-        Type::Int,
+        I64,
         Operand::new(new_mem),
-        Some(Annotation::Unsigned(64)),
+        None,
         o(),
     );
     let data = data.unwrap();
@@ -2252,7 +2025,7 @@ fn leg_div_rem_128<M: AbiMetadata + Clone>(
     // that the hi half arrives in RDX.
     let call_idx = call_mem.index();
     s.meta.mark_call_secondary_return(call_idx);
-    let hi_capture = b.iconst(0i64, o());
+    let hi_capture = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
     s.meta
         .mark_secondary_return_capture(hi_capture.index(), call_idx);
 
@@ -2294,23 +2067,14 @@ fn leg_int128_to_fp<M: AbiMetadata + Clone>(
         // Compute the hi word: sign-extend for i128, zero for u128.
         let lo = s.vmap.one(a.value);
         let hi = if signed {
-            let c63 = b.iconst(63i64, o());
-            b.shr(
-                Operand::annotated(lo, Annotation::Signed(64)),
-                Operand::new(c63),
-                None,
-                o(),
-            )
+            let c63 = b.iconst(63i64, 64, IntSignedness::Unsigned, o());
+            b.shr(Operand::new(lo), Operand::new(c63), None, o())
         } else {
-            b.iconst(0i64, o())
+            b.iconst(0i64, 64, IntSignedness::Unsigned, o())
         };
         (lo, hi)
     };
-    let ann64 = Annotation::Unsigned(64);
-    let args = vec![
-        Operand::annotated(a_lo, ann64),
-        Operand::annotated(a_hi, ann64),
-    ];
+    let args = vec![Operand::new(a_lo), Operand::new(a_hi)];
 
     let old_mem = s
         .current_old_mem
@@ -2354,15 +2118,11 @@ fn leg_ret<M: AbiMetadata>(
             let hi = if let Some(src_idx) = s.old_meta.get_secondary_return_move(old_vref.index()) {
                 s.vmap.one(ValueRef::inst_result(src_idx))
             } else {
-                b.iconst(0i64, o())
+                b.iconst(0i64, 64, IntSignedness::Unsigned, o())
             };
             (lo, hi)
         };
-        let ret_inst = b.ret(
-            Some(Operand::annotated(lo, Annotation::Unsigned(64))),
-            Operand::new(m),
-            o(),
-        );
+        let ret_inst = b.ret(Some(Operand::new(lo)), Operand::new(m), o());
         let ret_idx = ret_inst.index();
         s.meta.mark_secondary_return_move(ret_idx, hi.index());
         s.vmap.set(old_vref, Mapped::One(ret_inst));
@@ -2395,9 +2155,9 @@ fn leg_call<M: AbiMetadata + Clone>(
     for arg in args {
         if is_wide(s, arg.value) {
             let (lo, hi) = s.vmap.pair(arg.value);
-            new_args.push(Operand::annotated(lo, Annotation::Unsigned(64)));
-            new_args.push(Operand::annotated(hi, Annotation::Unsigned(64)));
-        } else if is_128(arg.annotation.as_ref()) {
+            new_args.push(Operand::new(lo));
+            new_args.push(Operand::new(hi));
+        } else if is_128_bit_value(_old, arg.value) {
             let lo = remap_op(s, arg);
             // Compute hi (upper 64 bits of the 128-bit value).
             // For a constant, derive hi from the original BigInt to handle
@@ -2413,35 +2173,30 @@ fn leg_call<M: AbiMetadata + Clone>(
                 };
                 let mask64 = (BigInt::from(1u64) << 64u32) - BigInt::from(1u32);
                 let hi_big = (val >> 64u32) & &mask64;
-                b.iconst(hi_big, o())
-            } else if is_signed_128(arg.annotation.as_ref()) {
-                let c63 = b.iconst(63i64, o());
-                b.shr(
-                    Operand::annotated(lo.value, Annotation::Signed(64)),
-                    Operand::new(c63),
-                    None,
-                    o(),
-                )
+                b.iconst(hi_big, 64, IntSignedness::Unsigned, o())
+            } else if value_type(_old, arg.value).is_some_and(is_signed_128_int) {
+                let c63 = b.iconst(63i64, 64, IntSignedness::Unsigned, o());
+                b.shr(Operand::new(lo.value), Operand::new(c63), None, o())
             } else {
-                b.iconst(0i64, o())
+                b.iconst(0i64, 64, IntSignedness::Unsigned, o())
             };
-            new_args.push(Operand::annotated(lo.value, Annotation::Unsigned(64)));
-            new_args.push(Operand::annotated(hi, Annotation::Unsigned(64)));
+            new_args.push(Operand::new(lo.value));
+            new_args.push(Operand::new(hi));
         } else {
             new_args.push(remap_op(s, arg));
         }
     }
 
-    let wide_ret =
-        is_128(inst.result_annotation.as_ref()) || s.old_meta.is_wide_return_call(old_vref.index());
+    let wide_ret = inst.secondary_ty.as_ref().is_some_and(is_128_bit_int)
+        || s.old_meta.is_wide_return_call(old_vref.index());
     let ret_ty = if wide_ret {
-        Type::Int
+        I64
     } else {
         inst.secondary_ty.clone().unwrap_or(Type::Unit)
     };
 
     let ann = if wide_ret {
-        Some(Annotation::Unsigned(64))
+        None
     } else {
         inst.result_annotation
     };
@@ -2454,7 +2209,7 @@ fn leg_call<M: AbiMetadata + Clone>(
             let call_idx = mem_out.index();
             s.meta.mark_call_secondary_return(call_idx);
 
-            let hi_capture = b.iconst(0i64, o());
+            let hi_capture = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
             let hi_idx = hi_capture.index();
             s.meta.mark_secondary_return_capture(hi_idx, call_idx);
 
@@ -2472,7 +2227,7 @@ fn leg_call<M: AbiMetadata + Clone>(
             let new_call_idx = mem_out.index();
             s.meta.mark_call_secondary_return(new_call_idx);
 
-            let rdx_capture = b.iconst(0i64, o());
+            let rdx_capture = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
             s.meta
                 .mark_secondary_return_capture(rdx_capture.index(), new_call_idx);
 

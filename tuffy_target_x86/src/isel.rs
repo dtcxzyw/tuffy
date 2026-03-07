@@ -14,7 +14,7 @@ use num_traits::ToPrimitive;
 use tuffy_ir::function::{CfgNode, Function};
 use tuffy_ir::instruction::{ICmpOp, Op, Operand};
 use tuffy_ir::module::SymbolTable;
-use tuffy_ir::types::{Annotation, FloatType, Type};
+use tuffy_ir::types::{Annotation, FloatType, IntAnnotation, IntSignedness, Type};
 use tuffy_ir::value::ValueRef;
 use tuffy_regalloc::{PReg, VReg};
 use tuffy_target::isel::{CmpMap, IselResult, StackMap, VRegAlloc, VRegMap};
@@ -398,6 +398,33 @@ fn emit_partial_load(ctx: &mut IselCtx, base: VReg, base_offset: i32, dst: VReg,
     }
 }
 
+/// Extract IntAnnotation from a ValueRef's type.
+fn get_int_annotation(func: &Function, val: ValueRef) -> Option<IntAnnotation> {
+    if val.is_block_arg() {
+        let ty = &func.block_args.get(val.index() as usize)?.ty;
+        match ty {
+            Type::Int(ann) => Some(*ann),
+            _ => None,
+        }
+    } else if val.is_secondary_result() {
+        let ty = func
+            .instructions
+            .get(val.inst_index() as usize)?
+            .secondary_ty
+            .as_ref()?;
+        match ty {
+            Type::Int(ann) => Some(*ann),
+            _ => None,
+        }
+    } else {
+        let ty = &func.instructions.get(val.index() as usize)?.ty;
+        match ty {
+            Type::Int(ann) => Some(*ann),
+            _ => None,
+        }
+    }
+}
+
 /// Get the high 64 bits of a 128-bit value as a VReg.
 ///
 /// First checks the secondary result register (set by previous 128-bit ops).
@@ -405,7 +432,7 @@ fn emit_partial_load(ctx: &mut IselCtx, base: VReg, base_offset: i32, dst: VReg,
 fn ensure_hi_in_reg(
     ctx: &mut IselCtx,
     val: ValueRef,
-    annotation: Option<Annotation>,
+    annotation: Option<IntAnnotation>,
 ) -> Option<VReg> {
     let secondary = ValueRef::inst_secondary_result(val.index());
     if let Some(vreg) = ctx.regs.get(secondary) {
@@ -415,7 +442,10 @@ fn ensure_hi_in_reg(
     let lo = ctx.regs.get(val)?;
     let hi = ctx.alloc.alloc();
     match annotation {
-        Some(Annotation::Signed(_)) => {
+        Some(IntAnnotation {
+            signedness: IntSignedness::Signed,
+            ..
+        }) => {
             ctx.out.push(MInst::MovRR {
                 size: OpSize::S64,
                 dst: hi,
@@ -453,8 +483,8 @@ fn select_128bit_op(ctx: &mut IselCtx, vref: ValueRef, op: &Op, func: &Function)
         | Op::Mul(lhs, rhs) => {
             let lo_l = ctx.ensure_in_reg(lhs.value)?;
             let lo_r = ctx.ensure_in_reg(rhs.value)?;
-            let hi_l = ensure_hi_in_reg(ctx, lhs.value, lhs.annotation)?;
-            let hi_r = ensure_hi_in_reg(ctx, rhs.value, rhs.annotation)?;
+            let hi_l = ensure_hi_in_reg(ctx, lhs.value, get_int_annotation(func, lhs.value))?;
+            let hi_r = ensure_hi_in_reg(ctx, rhs.value, get_int_annotation(func, rhs.value))?;
 
             let lo_result = ctx.alloc.alloc();
             let hi_result = ctx.alloc.alloc();
@@ -629,26 +659,21 @@ fn select_128bit_op(ctx: &mut IselCtx, vref: ValueRef, op: &Op, func: &Function)
             let lo = ctx.ensure_in_reg(val.value)?;
             let lo_result = ctx.alloc.alloc();
             // Sign-extend lo based on source bit-width.
-            match val.annotation {
-                Some(Annotation::Signed(8))
-                | Some(Annotation::Unsigned(8))
-                | Some(Annotation::DontCare(8)) => {
+            let src_ann = get_int_annotation(func, val.value);
+            match src_ann.map(|a| a.bit_width) {
+                Some(8) => {
                     ctx.out.push(MInst::MovsxB {
                         dst: lo_result,
                         src: lo,
                     });
                 }
-                Some(Annotation::Signed(16))
-                | Some(Annotation::Unsigned(16))
-                | Some(Annotation::DontCare(16)) => {
+                Some(16) => {
                     ctx.out.push(MInst::MovsxW {
                         dst: lo_result,
                         src: lo,
                     });
                 }
-                Some(Annotation::Signed(32))
-                | Some(Annotation::Unsigned(32))
-                | Some(Annotation::DontCare(32)) => {
+                Some(32) => {
                     ctx.out.push(MInst::MovsxD {
                         dst: lo_result,
                         src: lo,
@@ -684,26 +709,21 @@ fn select_128bit_op(ctx: &mut IselCtx, vref: ValueRef, op: &Op, func: &Function)
             let lo = ctx.ensure_in_reg(val.value)?;
             let lo_result = ctx.alloc.alloc();
             // Zero-extend lo based on source bit-width.
-            match val.annotation {
-                Some(Annotation::Signed(8))
-                | Some(Annotation::Unsigned(8))
-                | Some(Annotation::DontCare(8)) => {
+            let src_ann = get_int_annotation(func, val.value);
+            match src_ann.map(|a| a.bit_width) {
+                Some(8) => {
                     ctx.out.push(MInst::MovzxB {
                         dst: lo_result,
                         src: lo,
                     });
                 }
-                Some(Annotation::Signed(16))
-                | Some(Annotation::Unsigned(16))
-                | Some(Annotation::DontCare(16)) => {
+                Some(16) => {
                     ctx.out.push(MInst::MovzxW {
                         dst: lo_result,
                         src: lo,
                     });
                 }
-                Some(Annotation::Signed(32))
-                | Some(Annotation::Unsigned(32))
-                | Some(Annotation::DontCare(32)) => {
+                Some(32) => {
                     ctx.out.push(MInst::MovRR {
                         size: OpSize::S32,
                         dst: lo_result,
@@ -750,24 +770,20 @@ enum ParamAbi {
 
 /// Classify where parameter `param_idx` goes under SysV x86-64 ABI,
 /// given the complete ordered parameter type list.
-fn is_wide_scalar_annotation(ann: Option<&Annotation>) -> bool {
-    matches!(
-        ann,
-        Some(Annotation::Signed(128) | Annotation::Unsigned(128))
-    )
+fn is_wide_scalar_type(ty: &Type) -> bool {
+    matches!(ty, Type::Int(IntAnnotation { bit_width: 128, .. }))
 }
 
 fn classify_param_abi(
     params: &[Type],
-    param_annotations: &[Option<Annotation>],
+    _param_annotations: &[Option<Annotation>],
     param_idx: usize,
 ) -> ParamAbi {
     let mut int_count = 0usize;
     let mut float_count = 0usize;
     let mut stack_idx: i32 = 0;
-    for (i, param_ty) in params.iter().enumerate().take(param_idx) {
-        let ann = param_annotations.get(i).and_then(|a| a.as_ref());
-        let is_wide = !matches!(param_ty, Type::Float(_)) && is_wide_scalar_annotation(ann);
+    for (_i, param_ty) in params.iter().enumerate().take(param_idx) {
+        let is_wide = !matches!(param_ty, Type::Float(_)) && is_wide_scalar_type(param_ty);
         match param_ty {
             Type::Float(_) => {
                 if float_count < MAX_XMM_ARGS {
@@ -816,8 +832,8 @@ struct CallAbiPlan {
 
 fn has_wide_scalar_annotation(func: &Function, inst_idx: u32) -> bool {
     matches!(
-        func.inst(inst_idx).result_annotation,
-        Some(Annotation::Signed(128) | Annotation::Unsigned(128))
+        func.inst(inst_idx).ty,
+        Type::Int(IntAnnotation { bit_width: 128, .. })
     )
 }
 
@@ -956,14 +972,13 @@ fn select_inst(
     // Try generated rules first (covers Add, Sub, Mul, Or, And, Xor,
     // Shl, Shr, Min, Max, CountOnes, CountLeadingZeros, CountTrailingZeros,
     // ICmp, PtrAdd, PtrDiff).
-    if isel_gen::try_select_generated(ctx, vref, op).is_some() {
+    if isel_gen::try_select_generated(ctx, vref, op, func).is_some() {
         return Some(());
     }
     match op {
         Op::Param(idx) => {
             let idx = *idx as usize;
-            let param_ann = func.param_annotations.get(idx).and_then(|a| a.as_ref());
-            let wide = is_wide_scalar_annotation(param_ann);
+            let wide = is_wide_scalar_type(&func.params[idx]);
             match classify_param_abi(&func.params, &func.param_annotations, idx) {
                 ParamAbi::Gpr(i) => {
                     let fixed = ctx.alloc.alloc_fixed(ARG_REGS[i].to_preg());
@@ -1292,7 +1307,8 @@ fn select_inst(
                     offset: base_offset,
                     src: val_vreg,
                 });
-                let hi_vreg = ensure_hi_in_reg(ctx, val.value, val.annotation)?;
+                let hi_vreg =
+                    ensure_hi_in_reg(ctx, val.value, get_int_annotation(func, val.value))?;
                 let hi_bytes = *bytes - 8;
                 if hi_bytes == 8 {
                     ctx.out.push(MInst::MovMR {
@@ -1379,11 +1395,11 @@ fn select_inst(
         }
 
         Op::Sext(val, _target_bits) => {
-            select_sext(ctx, vref, val)?;
+            select_sext(ctx, vref, val, func)?;
         }
 
         Op::Zext(val, _target_bits) => {
-            select_zext(ctx, vref, val)?;
+            select_zext(ctx, vref, val, func)?;
         }
 
         Op::FpToSi(val) | Op::FpToUi(val) => {
@@ -1410,10 +1426,8 @@ fn select_inst(
         }
 
         Op::SiToFp(val, ft) | Op::UiToFp(val, ft) => {
-            let is_i128 = matches!(
-                val.annotation,
-                Some(Annotation::Signed(128) | Annotation::Unsigned(128))
-            );
+            let val_ann = get_int_annotation(func, val.value);
+            let is_i128 = matches!(val_ann, Some(IntAnnotation { bit_width: 128, .. }));
 
             if is_i128 {
                 // i128 to float: not yet fully implemented
@@ -1426,7 +1440,13 @@ fn select_inst(
             let gpr_dst = ctx.alloc.alloc();
 
             let is_u64 = matches!(op, Op::UiToFp(..))
-                && matches!(val.annotation, Some(Annotation::Unsigned(64)) | None);
+                && matches!(
+                    val_ann,
+                    Some(IntAnnotation {
+                        bit_width: 64,
+                        signedness: IntSignedness::Unsigned,
+                    }) | None
+                );
 
             if is_u64 {
                 // u64 → float: values > i64::MAX need special handling.
@@ -1515,18 +1535,18 @@ fn select_inst(
                 // Without sign extension, a byte like 0xDA (-38 as i8) would be
                 // seen as 218 by the instruction, producing the wrong float result.
                 let src_for_fp = if matches!(op, Op::SiToFp(..)) {
-                    match val.annotation {
-                        Some(Annotation::Signed(8)) => {
+                    match val_ann.map(|a| a.bit_width) {
+                        Some(8) => {
                             let ext = ctx.alloc.alloc();
                             ctx.out.push(MInst::MovsxB { dst: ext, src });
                             ext
                         }
-                        Some(Annotation::Signed(16)) => {
+                        Some(16) => {
                             let ext = ctx.alloc.alloc();
                             ctx.out.push(MInst::MovsxW { dst: ext, src });
                             ext
                         }
-                        Some(Annotation::Signed(32)) => {
+                        Some(32) => {
                             let ext = ctx.alloc.alloc();
                             ctx.out.push(MInst::MovsxD { dst: ext, src });
                             ext
@@ -1583,10 +1603,10 @@ fn select_inst(
         }
 
         Op::Div(lhs, rhs) => {
-            select_divrem(ctx, vref, lhs, rhs, DivRemKind::Div)?;
+            select_divrem(ctx, vref, lhs, rhs, DivRemKind::Div, func)?;
         }
         Op::Rem(lhs, rhs) => {
-            select_divrem(ctx, vref, lhs, rhs, DivRemKind::Rem)?;
+            select_divrem(ctx, vref, lhs, rhs, DivRemKind::Rem, func)?;
         }
 
         Op::FAdd(lhs, rhs, _) => {
@@ -3323,33 +3343,29 @@ fn select_select(
     Some(())
 }
 
-fn select_sext(ctx: &mut IselCtx, vref: ValueRef, val: &Operand) -> Option<()> {
+fn select_sext(ctx: &mut IselCtx, vref: ValueRef, val: &Operand, func: &Function) -> Option<()> {
     let src = ctx.ensure_in_reg(val.value)?;
     let dst = ctx.alloc.alloc();
-    match val.annotation {
-        Some(Annotation::Signed(8))
-        | Some(Annotation::Unsigned(8))
-        | Some(Annotation::DontCare(8)) => {
+    let src_ann = get_int_annotation(func, val.value);
+    match src_ann.map(|a| a.bit_width) {
+        Some(8) => {
             ctx.out.push(MInst::MovsxB { dst, src });
         }
-        Some(Annotation::Signed(16))
-        | Some(Annotation::Unsigned(16))
-        | Some(Annotation::DontCare(16)) => {
+        Some(16) => {
             ctx.out.push(MInst::MovsxW { dst, src });
         }
-        Some(Annotation::Signed(32))
-        | Some(Annotation::Unsigned(32))
-        | Some(Annotation::DontCare(32)) => {
+        Some(32) => {
             ctx.out.push(MInst::MovsxD { dst, src });
         }
-        Some(Annotation::Signed(_)) | Some(Annotation::DontCare(_)) => {
+        Some(64) => {
             ctx.out.push(MInst::MovRR {
                 size: OpSize::S64,
                 dst,
                 src,
             });
         }
-        Some(Annotation::Unsigned(n)) => {
+        Some(n) => {
+            // Non-standard bit width: use shift-based sign extension
             let shift = 64 - n;
             ctx.out.push(MInst::MovRR {
                 size: OpSize::S64,
@@ -3367,60 +3383,40 @@ fn select_sext(ctx: &mut IselCtx, vref: ValueRef, val: &Operand) -> Option<()> {
                 imm: shift as u8,
             });
         }
-        _ => {
-            ctx.out.push(MInst::MovsxD { dst, src });
+        None => {
+            // No type information, default to 64-bit
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst,
+                src,
+            });
         }
     }
     ctx.regs.assign(vref, dst);
     Some(())
 }
 
-fn select_zext(ctx: &mut IselCtx, vref: ValueRef, val: &Operand) -> Option<()> {
+fn select_zext(ctx: &mut IselCtx, vref: ValueRef, val: &Operand, func: &Function) -> Option<()> {
     let src = ctx.ensure_in_reg(val.value)?;
     let dst = ctx.alloc.alloc();
-    match val.annotation {
-        Some(Annotation::Signed(8))
-        | Some(Annotation::Unsigned(8))
-        | Some(Annotation::DontCare(8)) => {
+    let src_ann = get_int_annotation(func, val.value);
+    match src_ann.map(|a| a.bit_width) {
+        Some(8) => {
             ctx.out.push(MInst::MovzxB { dst, src });
         }
-        Some(Annotation::Signed(16))
-        | Some(Annotation::Unsigned(16))
-        | Some(Annotation::DontCare(16)) => {
+        Some(16) => {
             ctx.out.push(MInst::MovzxW { dst, src });
         }
-        Some(Annotation::Signed(32))
-        | Some(Annotation::Unsigned(32))
-        | Some(Annotation::DontCare(32)) => {
+        Some(32) => {
             ctx.out.push(MInst::MovRR {
                 size: OpSize::S32,
                 dst,
                 src,
-            });
-        }
-        Some(Annotation::Unsigned(_)) | Some(Annotation::DontCare(_)) => {
-            ctx.out.push(MInst::MovRR {
-                size: OpSize::S64,
-                dst,
-                src,
-            });
-        }
-        Some(Annotation::Signed(n)) => {
-            let mask = (1i64 << n) - 1;
-            ctx.out.push(MInst::MovRR {
-                size: OpSize::S64,
-                dst,
-                src,
-            });
-            ctx.out.push(MInst::AndRI {
-                size: OpSize::S64,
-                dst,
-                imm: mask,
             });
         }
         _ => {
             ctx.out.push(MInst::MovRR {
-                size: OpSize::S32,
+                size: OpSize::S64,
                 dst,
                 src,
             });
@@ -3442,10 +3438,18 @@ fn select_divrem(
     lhs: &Operand,
     rhs: &Operand,
     kind: DivRemKind,
+    func: &Function,
 ) -> Option<()> {
     let lhs_vreg = ctx.ensure_in_reg(lhs.value)?;
     let rhs_vreg = ctx.ensure_in_reg(rhs.value)?;
-    let signed = matches!(lhs.annotation, Some(Annotation::Signed(_)));
+    let lhs_ann = get_int_annotation(func, lhs.value);
+    let signed = matches!(
+        lhs_ann,
+        Some(IntAnnotation {
+            signedness: IntSignedness::Signed,
+            ..
+        })
+    );
     let rem = matches!(kind, DivRemKind::Rem);
 
     let dst = ctx.alloc.alloc();
@@ -3460,8 +3464,14 @@ fn select_divrem(
     Some(())
 }
 
-fn icmp_to_cc(op: ICmpOp, ann: Option<Annotation>) -> CondCode {
-    let signed = matches!(ann, Some(Annotation::Signed(_)));
+fn icmp_to_cc(op: ICmpOp, ann: Option<IntAnnotation>) -> CondCode {
+    let signed = matches!(
+        ann,
+        Some(IntAnnotation {
+            signedness: IntSignedness::Signed,
+            ..
+        })
+    );
     match op {
         ICmpOp::Eq => CondCode::E,
         ICmpOp::Ne => CondCode::Ne,
