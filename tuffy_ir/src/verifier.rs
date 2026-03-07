@@ -304,6 +304,14 @@ impl<'a> FuncVerifier<'a> {
                     );
                 }
             }
+            Annotation::Int(_) => {
+                if !matches!(ty, Type::Int(_)) {
+                    self.result.error(
+                        loc.clone(),
+                        format!("{ctx}: int annotation on non-Int type {ty:?}"),
+                    );
+                }
+            }
         }
     }
 }

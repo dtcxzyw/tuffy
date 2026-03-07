@@ -186,4 +186,6 @@ pub enum MemoryOrdering {
 pub enum Annotation {
     /// `:align<N>` — pointer alignment in bytes.
     Align(u32),
+    /// Integer refinement: narrows bit width and/or signedness at use site.
+    Int(IntAnnotation),
 }

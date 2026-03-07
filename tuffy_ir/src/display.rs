@@ -139,6 +139,7 @@ fn fmt_int_annotation(ann: &crate::types::IntAnnotation) -> String {
 fn fmt_annotation(ann: &Annotation) -> String {
     match ann {
         Annotation::Align(n) => format!(":align{n}"),
+        Annotation::Int(int_ann) => format!(":{}", fmt_int_annotation(int_ann)),
     }
 }
 
