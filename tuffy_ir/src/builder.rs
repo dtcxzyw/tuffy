@@ -424,6 +424,16 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::FRem(a, b, flags), ty, None, origin, None)
     }
 
+    /// IEEE 754-2008 minNum.
+    pub fn fminnum(&mut self, a: Operand, b: Operand, ty: Type, origin: Origin) -> ValueRef {
+        self.push_inst(Op::FMinNum(a, b), ty, None, origin, None)
+    }
+
+    /// IEEE 754-2008 maxNum.
+    pub fn fmaxnum(&mut self, a: Operand, b: Operand, ty: Type, origin: Origin) -> ValueRef {
+        self.push_inst(Op::FMaxNum(a, b), ty, None, origin, None)
+    }
+
     /// Copy sign: magnitude from first operand, sign from second.
     pub fn copysign(&mut self, mag: Operand, sign: Operand, ty: Type, origin: Origin) -> ValueRef {
         self.push_inst(Op::CopySign(mag, sign), ty, None, origin, None)

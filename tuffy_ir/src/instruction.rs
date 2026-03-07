@@ -334,6 +334,10 @@ pub enum Op {
     FDiv(Operand, Operand, FpRewriteFlags),
     /// Floating point remainder: frem %a, %b
     FRem(Operand, Operand, FpRewriteFlags),
+    /// IEEE 754-2008 minNum: fminnum %a, %b
+    FMinNum(Operand, Operand),
+    /// IEEE 754-2008 maxNum: fmaxnum %a, %b
+    FMaxNum(Operand, Operand),
     /// Floating point negation: fneg %a
     FNeg(Operand),
     /// Floating point absolute value: fabs %a

@@ -1064,6 +1064,8 @@ fn copy_inst<M: AbiMetadata + Clone>(
             inst.ty.clone(),
             o(),
         ),
+        Op::FMinNum(a, op_b) => b.fminnum(remap_op(s, a), remap_op(s, op_b), inst.ty.clone(), o()),
+        Op::FMaxNum(a, op_b) => b.fmaxnum(remap_op(s, a), remap_op(s, op_b), inst.ty.clone(), o()),
         Op::FNeg(a) => b.fneg(remap_op(s, a), inst.ty.clone(), o()),
         Op::FAbs(a) => b.fabs(remap_op(s, a), inst.ty.clone(), o()),
         Op::CopySign(a, op_b) => {

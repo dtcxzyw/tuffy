@@ -350,6 +350,20 @@ fn fmt_inst(
                 ctx.fmt_operand(b)
             )
         }
+        Op::FMinNum(a, b) => {
+            format!(
+                "{v} = fminnum {}, {}",
+                ctx.fmt_operand(a),
+                ctx.fmt_operand(b)
+            )
+        }
+        Op::FMaxNum(a, b) => {
+            format!(
+                "{v} = fmaxnum {}, {}",
+                ctx.fmt_operand(a),
+                ctx.fmt_operand(b)
+            )
+        }
         Op::FNeg(a) => format!("{v} = fneg {}", ctx.fmt_operand(a)),
         Op::FAbs(a) => format!("{v} = fabs {}", ctx.fmt_operand(a)),
         Op::CopySign(mag, sign) => {
