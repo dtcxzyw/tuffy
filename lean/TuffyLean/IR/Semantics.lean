@@ -326,6 +326,18 @@ def evalFRem (a b : Float) : Float :=
   let t := if q ≥ 0.0 then q.floor else q.ceil
   a - t * b
 
+/-- IEEE 754-2008 minNum: NaN-suppressing minimum. -/
+def evalFMinNum (a b : Float) : Float :=
+  if a.isNaN then b
+  else if b.isNaN then a
+  else if a < b then a else b
+
+/-- IEEE 754-2008 maxNum: NaN-suppressing maximum. -/
+def evalFMaxNum (a b : Float) : Float :=
+  if a.isNaN then b
+  else if b.isNaN then a
+  else if a > b then a else b
+
 /-- Floating point negation. -/
 def evalFNeg (a : Float) : Float := -a
 
