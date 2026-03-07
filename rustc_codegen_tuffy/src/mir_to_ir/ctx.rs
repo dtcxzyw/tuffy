@@ -6,7 +6,7 @@ use tuffy_codegen::AbiMetadataBox;
 use tuffy_ir::builder::Builder;
 use tuffy_ir::instruction::{Operand, Origin};
 use tuffy_ir::module::{SymbolId, SymbolTable};
-use tuffy_ir::types::{Annotation, Type};
+use tuffy_ir::types::{Annotation, IntSignedness, Type};
 use tuffy_ir::value::{BlockRef, ValueRef};
 
 use super::StaticDataVec;
@@ -229,8 +229,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     /// If `val` is a Ptr or Bool, coerce it to Int.
     pub(super) fn coerce_to_int(&mut self, val: ValueRef) -> ValueRef {
         match self.builder.value_type(val) {
-            Some(Type::Ptr(_)) => self.builder.ptrtoaddr(val.into(), Origin::synthetic()),
-            Some(Type::Bool) => self.builder.bool_to_int(val.into(), Origin::synthetic()),
+            Some(Type::Ptr(_)) => self.builder.ptrtoaddr(val.into(), 64, Origin::synthetic()),
+            Some(Type::Bool) => self.builder.bool_to_int(val.into(), 64, Origin::synthetic()),
             _ => val,
         }
     }
@@ -238,7 +238,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     /// If `val` is an Int, insert inttoptr to coerce it to Ptr.
     pub(super) fn coerce_to_ptr(&mut self, val: ValueRef) -> ValueRef {
         match self.builder.value_type(val) {
-            Some(Type::Int) => self.builder.inttoptr(val.into(), 0, Origin::synthetic()),
+            Some(Type::Int(_)) => self.builder.inttoptr(val.into(), 0, Origin::synthetic()),
             _ => val,
         }
     }
@@ -297,7 +297,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // references to this local remain valid.
             match ir_ty {
                 Some(Type::Unit) | None => {
-                    let dummy = self.builder.iconst(0, Origin::synthetic());
+                    let dummy = self.builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
                     self.locals.set(local, dummy);
                     continue;
                 }
@@ -306,7 +306,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
             // Zero-sized ADTs also do not occupy a runtime slot.
             if type_size(self.tcx, ty).unwrap_or(0) == 0 {
-                let dummy = self.builder.iconst(0, Origin::synthetic());
+                let dummy = self.builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
                 self.locals.set(local, dummy);
                 continue;
             }
@@ -323,7 +323,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 param_idx += 1;
                 let metadata = self
                     .builder
-                    .param(param_idx, Type::Int, None, Origin::synthetic());
+                    .param(param_idx, default_int_type(), None, Origin::synthetic());
                 param_idx += 1;
                 self.locals.set(local, data_ptr);
                 self.fat_locals.set(local, metadata);
@@ -342,7 +342,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let local_slot = self.builder.stack_slot(sz as u32, Origin::synthetic());
 
                     // Copy data from caller's pointer to local
-                    let size_val = self.builder.iconst(sz as i64, Origin::synthetic());
+                    let size_val = self.builder.iconst(sz as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                     let align = 8; // TODO: compute proper alignment
                     let local_annotated = Operand::annotated(local_slot, Annotation::Align(align));
                     let ptr_annotated = Operand::annotated(ptr, Annotation::Align(align));

@@ -1,12 +1,12 @@
 use super::StaticDataVec;
-use super::types::{int_bitwidth, is_signed_int};
+use super::types::{int_bitwidth, is_signed_int, IntAnn};
 use num_bigint::BigInt;
 use rustc_middle::mir;
 use rustc_middle::ty::{self, Instance, TyCtxt};
 use tuffy_ir::builder::Builder;
 use tuffy_ir::instruction::{Operand as IrOperand, Origin};
 use tuffy_ir::module::SymbolTable;
-use tuffy_ir::types::{Annotation, FloatType, Type};
+use tuffy_ir::types::{Annotation, FloatType, IntSignedness, Type};
 use tuffy_ir::value::ValueRef;
 
 pub(super) fn translate_int_to_int_cast(
@@ -32,14 +32,14 @@ pub(super) fn translate_int_to_int_cast(
             let val64 = if src_bits < 64 {
                 if is_signed_int(src_ty) {
                     let shift_amt = 64 - src_bits;
-                    let sv = builder.iconst(shift_amt as i64, Origin::synthetic());
+                    let sv = builder.iconst(shift_amt as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                     let shifted = builder.shl(val.into(), sv.into(), None, Origin::synthetic());
-                    let sv2 = builder.iconst(shift_amt as i64, Origin::synthetic());
-                    let shifted_op = IrOperand::annotated(shifted, Annotation::Signed(64));
+                    let sv2 = builder.iconst(shift_amt as i64, 64, IntSignedness::DontCare, Origin::synthetic());
+                    let shifted_op = shifted.into());
                     builder.shr(shifted_op, sv2.into(), None, Origin::synthetic())
                 } else {
                     let mask = (BigInt::from(1u64) << src_bits) - 1;
-                    let mask_val = builder.iconst(mask, Origin::synthetic());
+                    let mask_val = builder.iconst(mask, 64, IntSignedness::DontCare, Origin::synthetic());
                     builder.and(val.into(), mask_val.into(), None, Origin::synthetic())
                 }
             } else {
@@ -53,15 +53,15 @@ pub(super) fn translate_int_to_int_cast(
         } else if is_signed_int(src_ty) && src_bits < dst_bits {
             // Sign-extend: shl by (dst - src), then arithmetic shr.
             let shift_amt = dst_bits - src_bits;
-            let shift_val = builder.iconst(shift_amt as i64, Origin::synthetic());
+            let shift_val = builder.iconst(shift_amt as i64, 64, IntSignedness::DontCare, Origin::synthetic());
             let shifted = builder.shl(val.into(), shift_val.into(), None, Origin::synthetic());
-            let shift_val2 = builder.iconst(shift_amt as i64, Origin::synthetic());
-            let shifted_op = IrOperand::annotated(shifted, Annotation::Signed(dst_bits));
+            let shift_val2 = builder.iconst(shift_amt as i64, 64, IntSignedness::DontCare, Origin::synthetic());
+            let shifted_op = shifted.into());
             Some(builder.shr(shifted_op, shift_val2.into(), None, Origin::synthetic()))
         } else if !is_signed_int(src_ty) && src_bits < 64 {
             // Zero-extend: mask off high bits.
             let mask = (BigInt::from(1) << src_bits) - 1;
-            let mask_val = builder.iconst(mask, Origin::synthetic());
+            let mask_val = builder.iconst(mask, 64, IntSignedness::DontCare, Origin::synthetic());
             Some(builder.and(val.into(), mask_val.into(), None, Origin::synthetic()))
         } else {
             Some(val)
@@ -69,7 +69,7 @@ pub(super) fn translate_int_to_int_cast(
     } else {
         // Narrowing cast: mask to target width.
         let mask = (BigInt::from(1) << dst_bits) - 1;
-        let mask_val = builder.iconst(mask, Origin::synthetic());
+        let mask_val = builder.iconst(mask, 64, IntSignedness::DontCare, Origin::synthetic());
         Some(builder.and(val.into(), mask_val.into(), None, Origin::synthetic()))
     }
 }
@@ -143,7 +143,7 @@ pub(super) fn translate_const<'tcx>(
                     let sym_id = symbols.intern(&sym_name);
                     let base = builder.symbol_addr(sym_id, Origin::synthetic());
                     if ptr_offset.bytes() > 0 {
-                        let off = builder.iconst(ptr_offset.bytes() as i64, Origin::synthetic());
+                        let off = builder.iconst(ptr_offset.bytes() as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                         Some(builder.add(base.into(), off.into(), None, Origin::synthetic()))
                     } else {
                         Some(base)
@@ -191,16 +191,16 @@ pub(super) fn translate_const<'tcx>(
                         let base = builder.symbol_addr(sym_id, Origin::synthetic());
                         Some(base)
                     } else {
-                        Some(builder.iconst(0, Origin::synthetic()))
+                        Some(builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic()))
                     }
                 }
                 rustc_middle::mir::interpret::GlobalAlloc::TypeId { .. } => {
-                    Some(builder.iconst(0, Origin::synthetic()))
+                    Some(builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic()))
                 }
             }
         }
         mir::ConstValue::Scalar(scalar) => translate_scalar(scalar, ty, builder),
-        mir::ConstValue::ZeroSized => Some(builder.iconst(0, Origin::synthetic())),
+        mir::ConstValue::ZeroSized => Some(builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())),
         mir::ConstValue::Slice { alloc_id, meta } => translate_const_slice(
             tcx,
             alloc_id,
@@ -390,22 +390,22 @@ pub(super) fn translate_scalar(
                 16 => BigInt::from(bits as i128),
                 _ => BigInt::from(bits as i128),
             };
-            Some(builder.iconst(val, Origin::synthetic()))
+            Some(builder.iconst(val, 64, IntSignedness::DontCare, Origin::synthetic()))
         }
         ty::Uint(_) => {
             // Unsigned: convert u128 directly to BigInt (always non-negative).
             let val = BigInt::from(bits);
-            Some(builder.iconst(val, Origin::synthetic()))
+            Some(builder.iconst(val, 64, IntSignedness::DontCare, Origin::synthetic()))
         }
         ty::Bool => Some(builder.bconst(bits != 0, Origin::synthetic())),
         ty::Char => {
             let val = BigInt::from(bits as u32);
-            Some(builder.iconst(val, Origin::synthetic()))
+            Some(builder.iconst(val, 64, IntSignedness::DontCare, Origin::synthetic()))
         }
         ty::Ref(..) | ty::RawPtr(..) | ty::FnPtr(..) => {
             // Scalar::Int reference/pointer (e.g., null pointer constant)
             let val = bits as i64;
-            Some(builder.iconst(val, Origin::synthetic()))
+            Some(builder.iconst(val, 64, IntSignedness::DontCare, Origin::synthetic()))
         }
         ty::Float(float_ty) => {
             let ft = match float_ty {
@@ -419,13 +419,13 @@ pub(super) fn translate_scalar(
             // Newtype structs (e.g., ExitCode(u8)) are represented as
             // scalars. Treat the raw bits as an unsigned integer.
             let val = BigInt::from(bits);
-            Some(builder.iconst(val, Origin::synthetic()))
+            Some(builder.iconst(val, 64, IntSignedness::DontCare, Origin::synthetic()))
         }
         ty::Tuple(_) => {
             // 1-tuples optimized to scalars by MIR (e.g., const (42_i32,)).
             // Treat the raw bits as an unsigned integer.
             let val = BigInt::from(bits);
-            Some(builder.iconst(val, Origin::synthetic()))
+            Some(builder.iconst(val, 64, IntSignedness::DontCare, Origin::synthetic()))
         }
         _ => None,
     }
@@ -466,7 +466,7 @@ pub(super) fn translate_const_slice<'tcx>(
     let ptr_val = builder.symbol_addr(sym_id, Origin::synthetic());
 
     // Emit the length as a separate constant.
-    let len_val = builder.iconst(meta as i64, Origin::synthetic());
+    let len_val = builder.iconst(meta as i64, 64, IntSignedness::DontCare, Origin::synthetic());
 
     // Store both components. The "value" of this slice is the pointer;
     // the length is stored as the next local via the fat_locals mechanism.

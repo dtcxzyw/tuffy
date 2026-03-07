@@ -5,7 +5,7 @@ use rustc_middle::ty::{self, Instance, TyCtxt, TypeVisitableExt};
 use rustc_span::source_map::Spanned;
 
 use tuffy_ir::instruction::{Operand as IrOperand, Origin};
-use tuffy_ir::types::{Annotation, Type};
+use tuffy_ir::types::{Annotation, IntSignedness, Type};
 use tuffy_ir::value::ValueRef;
 
 use super::ctx::TranslationCtx;
@@ -246,12 +246,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let arg_ty =
                             self.monomorphize(arg.node.ty(&self.mir.local_decls, self.tcx));
                         if let Some(sz) = type_size(self.tcx, arg_ty) {
-                            if sz <= 16 && matches!(translate_ty(self.tcx, arg_ty), Some(Type::Int))
+                            if sz <= 16 && matches!(translate_ty(self.tcx, arg_ty), Some(Type::Int(_)))
                             {
                                 self.builder.load(
                                     v.into(),
                                     sz as u32,
-                                    Type::Int,
+                                    default_int_type(),
                                     self.current_mem.into(),
                                     None,
                                     Origin::synthetic(),
@@ -399,7 +399,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     result_val
                                 } else {
                                     let off =
-                                        self.builder.iconst(offset as i64, Origin::synthetic());
+                                        self.builder.iconst(offset as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                                     self.builder.ptradd(
                                         result_val.into(),
                                         off.into(),
@@ -410,7 +410,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 let word = self.builder.load(
                                     src_addr.into(),
                                     chunk,
-                                    Type::Int,
+                                    default_int_type(),
                                     self.current_mem.into(),
                                     None,
                                     Origin::synthetic(),
@@ -419,7 +419,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     slot
                                 } else {
                                     let off =
-                                        self.builder.iconst(offset as i64, Origin::synthetic());
+                                        self.builder.iconst(offset as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                                     self.builder.ptradd(
                                         slot.into(),
                                         off.into(),
@@ -572,7 +572,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         // The fat pointer lives in a stack slot.  The vtable
                         // pointer is the second word (offset 8).
                         if let Some(base) = self.locals.get(place.local) {
-                            let off8 = self.builder.iconst(8, Origin::synthetic());
+                            let off8 = self.builder.iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
                             let vtable_addr = self.builder.ptradd(
                                 base.into(),
                                 off8.into(),
@@ -597,7 +597,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         // vtable from offset 8.
                         if let Some((addr, _)) = self.translate_place_to_addr(place) {
                             let addr = self.coerce_to_ptr(addr);
-                            let off8 = self.builder.iconst(8, Origin::synthetic());
+                            let off8 = self.builder.iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
                             let vtable_addr = self.builder.ptradd(
                                 addr.into(),
                                 off8.into(),
@@ -627,14 +627,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // rustc's InstanceKind::Virtual idx already includes the 3
                 // metadata entries, so the byte offset is simply idx * 8.
                 let offset = idx * 8;
-                let off_val = self.builder.iconst(offset as i64, Origin::synthetic());
+                let off_val = self.builder.iconst(offset as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                 let fn_addr =
                     self.builder
                         .ptradd(vtable.into(), off_val.into(), 0, Origin::synthetic());
                 let fn_ptr = self.builder.load(
                     fn_addr.into(),
                     8,
-                    Type::Int,
+                    default_int_type(),
                     self.current_mem.into(),
                     None,
                     Origin::synthetic(),
@@ -794,12 +794,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let addr = if offset == 0 {
                             base
                         } else {
-                            let off = self.builder.iconst(offset as i64, Origin::synthetic());
+                            let off = self.builder.iconst(offset as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                             self.builder
                                 .ptradd(base.into(), off.into(), 0, Origin::synthetic())
                         };
                         if fsz <= 8 {
-                            let fty = translate_ty(self.tcx, ft).unwrap_or(Type::Int);
+                            let fty = translate_ty(self.tcx, ft).unwrap_or(default_int_type());
                             let val = self.builder.load(
                                 addr.into(),
                                 fsz as u32,
@@ -814,13 +814,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             let w0 = self.builder.load(
                                 addr.into(),
                                 8,
-                                Type::Int,
+                                default_int_type(),
                                 self.current_mem.into(),
                                 None,
                                 Origin::synthetic(),
                             );
                             ir_args.push(w0.into());
-                            let off8 = self.builder.iconst(8, Origin::synthetic());
+                            let off8 = self.builder.iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
                             let a1 = self.builder.ptradd(
                                 addr.into(),
                                 off8.into(),
@@ -830,7 +830,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             let w1 = self.builder.load(
                                 a1.into(),
                                 8,
-                                Type::Int,
+                                default_int_type(),
                                 self.current_mem.into(),
                                 None,
                                 Origin::synthetic(),
@@ -860,7 +860,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         v = self.builder.load(
                             v.into(),
                             arg_size as u32,
-                            Type::Int,
+                            default_int_type(),
                             self.current_mem.into(),
                             None,
                             Origin::synthetic(),
@@ -894,20 +894,20 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let w0 = self.builder.load(
                         v.into(),
                         8,
-                        Type::Int,
+                        default_int_type(),
                         self.current_mem.into(),
                         None,
                         Origin::synthetic(),
                     );
                     ir_args.push(w0.into());
-                    let off8 = self.builder.iconst(8, Origin::synthetic());
+                    let off8 = self.builder.iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
                     let hi_addr =
                         self.builder
                             .ptradd(v.into(), off8.into(), 0, Origin::synthetic());
                     let w1 = self.builder.load(
                         hi_addr.into(),
                         8,
-                        Type::Int,
+                        default_int_type(),
                         self.current_mem.into(),
                         None,
                         Origin::synthetic(),
@@ -934,20 +934,20 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             let w0 = self.builder.load(
                                 v.into(),
                                 8,
-                                Type::Int,
+                                default_int_type(),
                                 self.current_mem.into(),
                                 None,
                                 Origin::synthetic(),
                             );
                             ir_args.push(w0.into());
-                            let off8 = self.builder.iconst(8, Origin::synthetic());
+                            let off8 = self.builder.iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
                             let hi_addr =
                                 self.builder
                                     .ptradd(v.into(), off8.into(), 0, Origin::synthetic());
                             let w1 = self.builder.load(
                                 hi_addr.into(),
                                 8,
-                                Type::Int,
+                                default_int_type(),
                                 self.current_mem.into(),
                                 None,
                                 Origin::synthetic(),
@@ -955,7 +955,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             ir_args.push(w1.into());
                         } else {
                             let ann =
-                                translate_annotation(arg_ty).unwrap_or(Annotation::Unsigned(128));
+                                translate_annotation(arg_ty).unwrap_or(IntAnn::Unsigned(128));
                             ir_args.push(IrOperand::annotated(v, ann));
                         }
                     } else if arg_size == 16
@@ -968,20 +968,20 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let w0 = self.builder.load(
                             v.into(),
                             8,
-                            Type::Int,
+                            default_int_type(),
                             self.current_mem.into(),
                             None,
                             Origin::synthetic(),
                         );
                         ir_args.push(w0.into());
-                        let off8 = self.builder.iconst(8, Origin::synthetic());
+                        let off8 = self.builder.iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
                         let hi_addr =
                             self.builder
                                 .ptradd(v.into(), off8.into(), 0, Origin::synthetic());
                         let w1 = self.builder.load(
                             hi_addr.into(),
                             8,
-                            Type::Int,
+                            default_int_type(),
                             self.current_mem.into(),
                             None,
                             Origin::synthetic(),
@@ -997,7 +997,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             let tmp = self
                                 .builder
                                 .stack_slot(arg_size as u32, Origin::synthetic());
-                            let count = self.builder.iconst(arg_size as i64, Origin::synthetic());
+                            let count = self.builder.iconst(arg_size as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                             let tmp_annotated = IrOperand::annotated(tmp, Annotation::Align(align));
                             let v_annotated = IrOperand::annotated(v, Annotation::Align(align));
                             let new_mem = self.builder.mem_copy(
@@ -1052,7 +1052,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             }
                         };
                         if let Some(mir::ConstValue::Slice { meta, .. }) = resolved {
-                            let len_val = self.builder.iconst(meta as i64, Origin::synthetic());
+                            let len_val = self.builder.iconst(meta as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                             ir_args.push(len_val.into());
                         } else if let Some(mir::ConstValue::Indirect { alloc_id, offset }) =
                             resolved
@@ -1070,7 +1070,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     );
                                 let len =
                                     u64::from_le_bytes(len_bytes.try_into().unwrap_or([0u8; 8]));
-                                let len_val = self.builder.iconst(len as i64, Origin::synthetic());
+                                let len_val = self.builder.iconst(len as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                                 ir_args.push(len_val.into());
                             }
                         }
@@ -1122,7 +1122,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // Indirect call through a function pointer in a local.
             fn_ptr
         } else {
-            self.builder.iconst(0, Origin::synthetic())
+            self.builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
         };
         let call_ret_ty = translate_ty(self.tcx, dest_ty).unwrap_or(Type::Unit);
         let call_ret_ann = None;
@@ -1137,7 +1137,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         self.current_mem = call_mem;
         // For non-void calls, call_data is Some(data_vref).
         // For void calls, call_data is None — use a dummy zero.
-        let call_vref = call_data.unwrap_or_else(|| self.builder.iconst(0, Origin::synthetic()));
+        let call_vref = call_data.unwrap_or_else(|| self.builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic()));
 
         if has_call_dest_proj {
             // Destination has projections (e.g. `_5.fld0 = fn1()`).
@@ -1151,7 +1151,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         // Copy it to the projected destination address.
                         let count = self
                             .builder
-                            .iconst(call_proj_size as i64, Origin::synthetic());
+                            .iconst(call_proj_size as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                         let addr_annotated = IrOperand::annotated(addr, Annotation::Align(1));
                         let sret_annotated = IrOperand::annotated(sret, Annotation::Align(1));
                         self.current_mem = self.builder.mem_copy(
@@ -1216,11 +1216,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // capture it via a placeholder instruction.
             let call_idx = call_mem.index();
             self.abi_metadata.mark_call_secondary_return(call_idx);
-            let rdx_capture = self.builder.iconst(0, Origin::synthetic());
+            let rdx_capture = self.builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
             self.abi_metadata
                 .mark_secondary_return_capture(rdx_capture.index(), call_idx);
             // Store RDX (secondary return) at offset 8.
-            let off8 = self.builder.iconst(8, Origin::synthetic());
+            let off8 = self.builder.iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
             let hi_addr = self
                 .builder
                 .ptradd(slot.into(), off8.into(), 0, Origin::synthetic());

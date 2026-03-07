@@ -26,7 +26,7 @@ use tuffy_ir::builder::Builder;
 use tuffy_ir::function::{Function, RegionKind};
 use tuffy_ir::instruction::Origin;
 use tuffy_ir::module::{SymbolId, SymbolTable};
-use tuffy_ir::types::Type;
+use tuffy_ir::types::{IntSignedness, Type};
 
 /// Static data entry: (symbol_id, bytes, relocations).
 /// Relocations are (offset_in_bytes, target_symbol_name) for function pointers in vtables.
@@ -133,7 +133,7 @@ pub fn translate_function<'tcx>(
                 // as two register-sized values: data pointer + metadata
                 // (length or vtable pointer).  Add a second Int param.
                 if is_fat_ptr(tcx, ty) {
-                    params.push(Type::Int);
+                    params.push(default_int_type());
                     param_anns.push(None);
                     param_names.push(None);
                 }
@@ -443,7 +443,7 @@ pub fn translate_function<'tcx>(
                                 Origin::synthetic(),
                             );
                             if let Some(meta) = ctx.fat_locals.get(local) {
-                                let off8 = ctx.builder.iconst(8, Origin::synthetic());
+                                let off8 = ctx.builder.iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
                                 let meta_addr = ctx.builder.ptradd(
                                     slot.into(),
                                     off8.into(),

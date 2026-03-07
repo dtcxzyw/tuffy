@@ -4,11 +4,11 @@ use rustc_middle::mir::{self, Operand};
 use rustc_middle::ty;
 
 use tuffy_ir::instruction::{AtomicRmwOp, ICmpOp, Operand as IrOperand, Origin};
-use tuffy_ir::types::{Annotation, FloatType, MemoryOrdering, Type};
+use tuffy_ir::types::{Annotation, FloatType, IntSignedness, MemoryOrdering, Type};
 use tuffy_ir::value::ValueRef;
 
 use super::ctx::TranslationCtx;
-use super::types::{type_align, type_size};
+use super::types::{default_int_type, type_align, type_size, IntAnn};
 
 /// Parse memory ordering from atomic intrinsic name suffix.
 fn parse_atomic_ordering(name: &str) -> MemoryOrdering {
@@ -61,7 +61,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // ctpop: population count (count set bits).
             "ctpop" => {
                 if let Some(&v) = ir_args.first() {
-                    let result = self.builder.count_ones(v.into(), Origin::synthetic());
+                    let result = self.builder.count_ones(v.into(), 64, Origin::synthetic());
                     self.locals.set(destination_local, result);
                 }
                 true
@@ -78,7 +78,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         .unwrap_or(64);
                     let result =
                         self.builder
-                            .count_leading_zeros(v.into(), bits, Origin::synthetic());
+                            .count_leading_zeros(v.into(), bits, bits, Origin::synthetic());
                     self.locals.set(destination_local, result);
                 }
                 true
@@ -89,7 +89,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 if let Some(&v) = ir_args.first() {
                     let result = self
                         .builder
-                        .count_trailing_zeros(v.into(), Origin::synthetic());
+                        .count_trailing_zeros(v.into(), 64, Origin::synthetic());
                     self.locals.set(destination_local, result);
                 }
                 true
@@ -170,7 +170,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             "size_of" => {
                 if let Some(t) = substs.first().and_then(|a| a.as_type()) {
                     let sz = type_size(tcx, t).unwrap_or(0);
-                    let result = self.builder.iconst(sz as i64, Origin::synthetic());
+                    let result = self.builder.iconst(sz as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                     self.locals.set(destination_local, result);
                 }
                 true
@@ -180,7 +180,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             "min_align_of" | "pref_align_of" => {
                 if let Some(t) = substs.first().and_then(|a| a.as_type()) {
                     let align = type_align(tcx, t).unwrap_or(1);
-                    let result = self.builder.iconst(align as i64, Origin::synthetic());
+                    let result = self.builder.iconst(align as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                     self.locals.set(destination_local, result);
                 }
                 true
@@ -206,7 +206,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     self.locals.set(destination_local, len);
                                 } else {
                                     let esz =
-                                        self.builder.iconst(elem_sz as i64, Origin::synthetic());
+                                        self.builder.iconst(elem_sz as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                                     let result = self.builder.mul(
                                         len.into(),
                                         esz.into(),
@@ -216,7 +216,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     self.locals.set(destination_local, result);
                                 }
                             } else {
-                                let result = self.builder.iconst(0, Origin::synthetic());
+                                let result = self.builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
                                 self.locals.set(destination_local, result);
                             }
                         } else {
@@ -225,21 +225,21 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 if ir_args.len() >= 2 {
                                     self.locals.set(destination_local, ir_args[1]);
                                 } else {
-                                    let result = self.builder.iconst(0, Origin::synthetic());
+                                    let result = self.builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
                                     self.locals.set(destination_local, result);
                                 }
                             } else {
                                 // dyn Trait: read size from vtable (fallback to 0 for now).
-                                let result = self.builder.iconst(0, Origin::synthetic());
+                                let result = self.builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
                                 self.locals.set(destination_local, result);
                             }
                         }
                     } else if let Some(sz) = type_size(tcx, t) {
                         // Sized type: compile-time constant.
-                        let result = self.builder.iconst(sz as i64, Origin::synthetic());
+                        let result = self.builder.iconst(sz as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                         self.locals.set(destination_local, result);
                     } else {
-                        let result = self.builder.iconst(0, Origin::synthetic());
+                        let result = self.builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
                         self.locals.set(destination_local, result);
                     }
                 }
@@ -250,7 +250,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             "min_align_of_val" | "align_of_val" => {
                 if let Some(t) = substs.first().and_then(|a| a.as_type()) {
                     let align = type_align(tcx, t).unwrap_or(1);
-                    let result = self.builder.iconst(align as i64, Origin::synthetic());
+                    let result = self.builder.iconst(align as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                     self.locals.set(destination_local, result);
                 }
                 true
@@ -269,7 +269,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let byte_offset = if elem_size == 1 {
                         offset
                     } else {
-                        let sz = self.builder.iconst(elem_size as i64, Origin::synthetic());
+                        let sz = self.builder.iconst(elem_size as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                         self.builder
                             .mul(offset.into(), sz.into(), None, Origin::synthetic())
                     };
@@ -288,7 +288,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let ptr2 = self.coerce_to_ptr(ir_args[1]);
                     let diff = self
                         .builder
-                        .ptrdiff(ptr1.into(), ptr2.into(), Origin::synthetic());
+                        .ptrdiff(ptr1.into(), ptr2.into(), 64, Origin::synthetic());
                     let elem_size = substs
                         .first()
                         .and_then(|a| a.as_type())
@@ -297,7 +297,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let result = if elem_size <= 1 {
                         diff
                     } else {
-                        let sz = self.builder.iconst(elem_size as i64, Origin::synthetic());
+                        let sz = self.builder.iconst(elem_size as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                         self.builder
                             .div(diff.into(), sz.into(), None, Origin::synthetic())
                     };
@@ -456,7 +456,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         .and_then(|t| type_size(tcx, t))
                         .map(|sz| (sz * 8) as i64)
                         .unwrap_or(64);
-                    let bits_val = self.builder.iconst(bits, Origin::synthetic());
+                    let bits_val = self.builder.iconst(bits, 64, IntSignedness::DontCare, Origin::synthetic());
                     let complement =
                         self.builder
                             .sub(bits_val.into(), c.into(), None, Origin::synthetic());
@@ -559,7 +559,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let byte_count = if elem_size == 1 {
                     count
                 } else {
-                    let sz = self.builder.iconst(elem_size as i64, Origin::synthetic());
+                    let sz = self.builder.iconst(elem_size as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                     self.builder
                         .mul(count.into(), sz.into(), None, Origin::synthetic())
                 };
@@ -585,7 +585,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let byte_count = if elem_size == 1 {
                     count
                 } else {
-                    let sz = self.builder.iconst(elem_size as i64, Origin::synthetic());
+                    let sz = self.builder.iconst(elem_size as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                     self.builder
                         .mul(count.into(), sz.into(), None, Origin::synthetic())
                 };
@@ -612,7 +612,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let byte_count = if elem_size == 1 {
                     count
                 } else {
-                    let sz = self.builder.iconst(elem_size as i64, Origin::synthetic());
+                    let sz = self.builder.iconst(elem_size as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                     self.builder
                         .mul(count.into(), sz.into(), None, Origin::synthetic())
                 };
@@ -635,21 +635,21 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 }
                 let a = ir_args[0];
                 let b = ir_args[1];
-                let sz = self.builder.iconst(elem_size as i64, Origin::synthetic());
+                let sz = self.builder.iconst(elem_size as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                 let sym_id = self.symbols.intern("memcmp");
                 let callee = self.builder.symbol_addr(sym_id, Origin::synthetic());
                 let (mem_out, data) = self.builder.call(
                     callee.into(),
                     vec![a.into(), b.into(), sz.into()],
-                    Type::Int,
+                    default_int_type(),
                     current_mem.into(),
                     None,
                     Origin::synthetic(),
                 );
                 // raw_eq returns bool (0 or 1): true when memcmp returns 0.
                 let cmp_result =
-                    data.unwrap_or_else(|| self.builder.iconst(0, Origin::synthetic()));
-                let zero = self.builder.iconst(0, Origin::synthetic());
+                    data.unwrap_or_else(|| self.builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic()));
+                let zero = self.builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
                 let eq = self.builder.icmp(
                     tuffy_ir::instruction::ICmpOp::Eq,
                     cmp_result.into(),
@@ -675,7 +675,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let (xa, ya) = if off == 0 {
                         (x, y)
                     } else {
-                        let o = self.builder.iconst(off as i64, Origin::synthetic());
+                        let o = self.builder.iconst(off as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                         (
                             self.builder
                                 .ptradd(x.into(), o.into(), 0, Origin::synthetic()),
@@ -686,7 +686,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let vx = self.builder.load(
                         xa.into(),
                         chunk,
-                        Type::Int,
+                        default_int_type(),
                         mem.into(),
                         None,
                         Origin::synthetic(),
@@ -694,7 +694,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let vy = self.builder.load(
                         ya.into(),
                         chunk,
-                        Type::Int,
+                        default_int_type(),
                         mem.into(),
                         None,
                         Origin::synthetic(),
@@ -730,7 +730,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let ordering = parse_atomic_ordering(name);
                 let (new_mem, val) = self.builder.load_atomic(
                     ptr.into(),
-                    Type::Int,
+                    default_int_type(),
                     ordering,
                     current_mem.into(),
                     Origin::synthetic(),
@@ -771,7 +771,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     ptr.into(),
                     expected.into(),
                     new_val.into(),
-                    Type::Int,
+                    default_int_type(),
                     ordering,
                     ordering,
                     current_mem.into(),
@@ -796,7 +796,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         new_mem.into(),
                         Origin::synthetic(),
                     );
-                    let bool_off = self.builder.iconst(elem_size as i64, Origin::synthetic());
+                    let bool_off = self.builder.iconst(elem_size as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                     let bool_ptr =
                         self.builder
                             .ptradd(slot.into(), bool_off.into(), 0, Origin::synthetic());
@@ -826,7 +826,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     AtomicRmwOp::Xchg,
                     ptr.into(),
                     new_val.into(),
-                    Type::Int,
+                    default_int_type(),
                     ordering,
                     current_mem.into(),
                     Origin::synthetic(),
@@ -873,7 +873,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         AtomicRmwOp::Add,
                         ptr.into(),
                         operand.into(),
-                        Type::Int,
+                        default_int_type(),
                         ordering,
                         current_mem.into(),
                         Origin::synthetic(),
@@ -885,7 +885,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         AtomicRmwOp::Sub,
                         ptr.into(),
                         operand.into(),
-                        Type::Int,
+                        default_int_type(),
                         ordering,
                         current_mem.into(),
                         Origin::synthetic(),
@@ -897,7 +897,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         AtomicRmwOp::And,
                         ptr.into(),
                         operand.into(),
-                        Type::Int,
+                        default_int_type(),
                         ordering,
                         current_mem.into(),
                         Origin::synthetic(),
@@ -909,7 +909,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         AtomicRmwOp::Or,
                         ptr.into(),
                         operand.into(),
-                        Type::Int,
+                        default_int_type(),
                         ordering,
                         current_mem.into(),
                         Origin::synthetic(),
@@ -921,7 +921,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         AtomicRmwOp::Xor,
                         ptr.into(),
                         operand.into(),
-                        Type::Int,
+                        default_int_type(),
                         ordering,
                         current_mem.into(),
                         Origin::synthetic(),
@@ -932,7 +932,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // Unsupported ops: nand, max, min, umax, umin — use atomic load/store.
                     let (mem1, old) = self.builder.load_atomic(
                         ptr.into(),
-                        Type::Int,
+                        default_int_type(),
                         ordering,
                         current_mem.into(),
                         Origin::synthetic(),
@@ -942,52 +942,52 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let a =
                             self.builder
                                 .and(old.into(), operand.into(), None, Origin::synthetic());
-                        let all_ones = self.builder.iconst(-1, Origin::synthetic());
+                        let all_ones = self.builder.iconst(-1, 64, IntSignedness::DontCare, Origin::synthetic());
                         self.builder
                             .xor(a.into(), all_ones.into(), None, Origin::synthetic())
                     } else if name.starts_with("atomic_umax") {
                         let bits = (elem_size * 8) as u32;
                         let gt = self.builder.icmp(
                             ICmpOp::Gt,
-                            IrOperand::annotated(old, Annotation::Unsigned(bits)),
-                            IrOperand::annotated(operand, Annotation::Unsigned(bits)),
+                            old.into()),
+                            operand.into()),
                             Origin::synthetic(),
                         );
                         self.builder.select(
                             gt.into(),
                             old.into(),
                             operand.into(),
-                            Type::Int,
+                            default_int_type(),
                             Origin::synthetic(),
                         )
                     } else if name.starts_with("atomic_umin") {
                         let bits = (elem_size * 8) as u32;
                         let lt = self.builder.icmp(
                             ICmpOp::Lt,
-                            IrOperand::annotated(old, Annotation::Unsigned(bits)),
-                            IrOperand::annotated(operand, Annotation::Unsigned(bits)),
+                            old.into()),
+                            operand.into()),
                             Origin::synthetic(),
                         );
                         self.builder.select(
                             lt.into(),
                             old.into(),
                             operand.into(),
-                            Type::Int,
+                            default_int_type(),
                             Origin::synthetic(),
                         )
                     } else if name.starts_with("atomic_max") {
                         let bits = (elem_size * 8) as u32;
                         let gt = self.builder.icmp(
                             ICmpOp::Gt,
-                            IrOperand::annotated(old, Annotation::Signed(bits)),
-                            IrOperand::annotated(operand, Annotation::Signed(bits)),
+                            old.into()),
+                            operand.into()),
                             Origin::synthetic(),
                         );
                         self.builder.select(
                             gt.into(),
                             old.into(),
                             operand.into(),
-                            Type::Int,
+                            default_int_type(),
                             Origin::synthetic(),
                         )
                     } else {
@@ -995,15 +995,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let bits = (elem_size * 8) as u32;
                         let lt = self.builder.icmp(
                             ICmpOp::Lt,
-                            IrOperand::annotated(old, Annotation::Signed(bits)),
-                            IrOperand::annotated(operand, Annotation::Signed(bits)),
+                            old.into()),
+                            operand.into()),
                             Origin::synthetic(),
                         );
                         self.builder.select(
                             lt.into(),
                             old.into(),
                             operand.into(),
-                            Type::Int,
+                            default_int_type(),
                             Origin::synthetic(),
                         )
                     };

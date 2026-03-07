@@ -6,6 +6,30 @@ use rustc_middle::ty::{self, TyCtxt};
 
 use tuffy_ir::types::{Annotation, FloatType, IntAnnotation, IntSignedness, Type};
 
+/// Local helper for integer annotations during MIR translation.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum IntAnn {
+    Signed(u32),
+    Unsigned(u32),
+    DontCare(u32),
+}
+
+impl IntAnn {
+    pub(super) fn bit_width(&self) -> u32 {
+        match self {
+            IntAnn::Signed(n) | IntAnn::Unsigned(n) | IntAnn::DontCare(n) => *n,
+        }
+    }
+}
+
+/// Helper to create a default Int type (64-bit, DontCare signedness).
+pub(super) fn default_int_type() -> Type {
+    Type::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::DontCare,
+    })
+}
+
 /// Look up the fully-monomorphized layout for a type, or return `None` on failure.
 ///
 /// All layout queries in this module use fully-monomorphized types, so this
