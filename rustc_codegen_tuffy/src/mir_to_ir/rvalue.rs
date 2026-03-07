@@ -463,6 +463,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 niche_discr.into(),
                                 untag_discr.into(),
                                 default_int_type(),
+                                default_int_annotation(),
                                 Origin::synthetic(),
                             ))
                         } else {
@@ -500,6 +501,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 variant_idx.into(),
                                 untag_discr.into(),
                                 default_int_type(),
+                                default_int_annotation(),
                                 Origin::synthetic(),
                             ))
                         }
@@ -1513,6 +1515,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 zero.into(),
                                 raw.into(),
                                 default_int_type(),
+                                default_int_annotation(),
                                 Origin::synthetic(),
                             );
                             let corrected = self.builder.select(
@@ -1520,6 +1523,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 i64_max.into(),
                                 corrected.into(),
                                 default_int_type(),
+                                default_int_annotation(),
                                 Origin::synthetic(),
                             );
                             if bit_width < 64 {
@@ -1589,6 +1593,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     hi_c.into(),
                                     clamped.into(),
                                     default_int_type(),
+                                    default_int_annotation(),
                                     Origin::synthetic(),
                                 );
                                 self.builder.select(
@@ -1596,6 +1601,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     zero.into(),
                                     clamped.into(),
                                     default_int_type(),
+                                    default_int_annotation(),
                                     Origin::synthetic(),
                                 )
                             } else {
@@ -1643,6 +1649,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     result_large.into(),
                                     raw.into(),
                                     default_int_type(),
+                                    default_int_annotation(),
                                     Origin::synthetic(),
                                 );
                                 let tentative = self.builder.select(
@@ -1650,6 +1657,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     max_u64.into(),
                                     tentative.into(),
                                     default_int_type(),
+                                    default_int_annotation(),
                                     Origin::synthetic(),
                                 );
                                 // NaN or negative → 0 (NaN check must come after is_huge
@@ -1682,6 +1690,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     zero.into(),
                                     tentative.into(),
                                     default_int_type(),
+                                    default_int_annotation(),
                                     Origin::synthetic(),
                                 );
                                 self.builder.select(
@@ -1689,6 +1698,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     zero.into(),
                                     tentative.into(),
                                     default_int_type(),
+                                    default_int_annotation(),
                                     Origin::synthetic(),
                                 )
                             }

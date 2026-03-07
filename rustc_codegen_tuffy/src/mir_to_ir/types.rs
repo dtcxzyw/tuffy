@@ -51,6 +51,14 @@ pub(super) fn default_int_type() -> Type {
     Type::Int
 }
 
+/// Helper to create a default Int annotation (64-bit, DontCare signedness).
+pub(super) fn default_int_annotation() -> Option<Annotation> {
+    Some(Annotation::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::DontCare,
+    }))
+}
+
 /// Look up the fully-monomorphized layout for a type, or return `None` on failure.
 ///
 /// All layout queries in this module use fully-monomorphized types, so this

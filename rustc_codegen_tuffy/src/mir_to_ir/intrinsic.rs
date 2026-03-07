@@ -8,7 +8,7 @@ use tuffy_ir::types::{Annotation, FloatType, IntAnnotation, IntSignedness, Memor
 use tuffy_ir::value::ValueRef;
 
 use super::ctx::TranslationCtx;
-use super::types::{default_int_type, type_align, type_size};
+use super::types::{default_int_annotation, default_int_type, type_align, type_size};
 
 const I64: IntAnnotation = IntAnnotation {
     bit_width: 64,
@@ -738,6 +738,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     default_int_type(),
                     ordering,
                     current_mem.into(),
+                    default_int_annotation(),
                     Origin::synthetic(),
                 );
                 self.locals.set(destination_local, val);
@@ -780,6 +781,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     ordering,
                     ordering,
                     current_mem.into(),
+                    default_int_annotation(),
                     Origin::synthetic(),
                 );
 
@@ -834,6 +836,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     default_int_type(),
                     ordering,
                     current_mem.into(),
+                    default_int_annotation(),
                     Origin::synthetic(),
                 );
                 self.locals.set(destination_local, old);
@@ -881,6 +884,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         default_int_type(),
                         ordering,
                         current_mem.into(),
+                        default_int_annotation(),
                         Origin::synthetic(),
                     );
                     self.locals.set(destination_local, old);
@@ -893,6 +897,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         default_int_type(),
                         ordering,
                         current_mem.into(),
+                        default_int_annotation(),
                         Origin::synthetic(),
                     );
                     self.locals.set(destination_local, old);
@@ -905,6 +910,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         default_int_type(),
                         ordering,
                         current_mem.into(),
+                        default_int_annotation(),
                         Origin::synthetic(),
                     );
                     self.locals.set(destination_local, old);
@@ -917,6 +923,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         default_int_type(),
                         ordering,
                         current_mem.into(),
+                        default_int_annotation(),
                         Origin::synthetic(),
                     );
                     self.locals.set(destination_local, old);
@@ -929,6 +936,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         default_int_type(),
                         ordering,
                         current_mem.into(),
+                        default_int_annotation(),
                         Origin::synthetic(),
                     );
                     self.locals.set(destination_local, old);
@@ -940,6 +948,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         default_int_type(),
                         ordering,
                         current_mem.into(),
+                        default_int_annotation(),
                         Origin::synthetic(),
                     );
 
@@ -963,6 +972,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             old.into(),
                             operand.into(),
                             default_int_type(),
+                            default_int_annotation(),
                             Origin::synthetic(),
                         )
                     } else if name.starts_with("atomic_umin") {
@@ -978,6 +988,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             old.into(),
                             operand.into(),
                             default_int_type(),
+                            default_int_annotation(),
                             Origin::synthetic(),
                         )
                     } else if name.starts_with("atomic_max") {
@@ -993,6 +1004,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             old.into(),
                             operand.into(),
                             default_int_type(),
+                            default_int_annotation(),
                             Origin::synthetic(),
                         )
                     } else {
@@ -1009,6 +1021,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             old.into(),
                             operand.into(),
                             default_int_type(),
+                            default_int_annotation(),
                             Origin::synthetic(),
                         )
                     };
