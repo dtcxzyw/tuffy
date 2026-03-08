@@ -107,6 +107,33 @@ vN = xor vA, vB
 Bitwise XOR on infinite precision two's complement integers.
 **Semantics**: `evalXor(a, b) = Int.xor a b`
 
+### `band`
+
+```
+vN = band vA, vB
+```
+
+Boolean AND (logical conjunction). Both operands must be Bool type.
+**Semantics**: `evalBAnd(a, b) = a && b`
+
+### `bor`
+
+```
+vN = bor vA, vB
+```
+
+Boolean OR (logical disjunction). Both operands must be Bool type.
+**Semantics**: `evalBOr(a, b) = a || b`
+
+### `bxor`
+
+```
+vN = bxor vA, vB
+```
+
+Boolean XOR (logical exclusive or). Both operands must be Bool type.
+**Semantics**: `evalBXor(a, b) = xor a b`
+
 ### `shl`
 
 ```
