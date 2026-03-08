@@ -360,12 +360,21 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     Origin::synthetic(),
                 );
                 param_idx += 1;
-                let metadata = self.builder.param(
-                    param_idx,
-                    Type::Int,
-                    int_annotation_for_bytes(8),
-                    Origin::synthetic(),
-                );
+
+                // Determine metadata type: Int for slices/str, Ptr for trait objects
+                let (meta_ty, meta_ann) = match ty.kind() {
+                    ty::TyKind::Ref(_, pointee, _) | ty::TyKind::RawPtr(pointee, _) => {
+                        match pointee.kind() {
+                            ty::TyKind::Dynamic(..) => (Type::Ptr(0), None),
+                            _ => (Type::Int, int_annotation_for_bytes(8)),
+                        }
+                    }
+                    _ => (Type::Int, int_annotation_for_bytes(8)),
+                };
+
+                let metadata =
+                    self.builder
+                        .param(param_idx, meta_ty, meta_ann, Origin::synthetic());
                 param_idx += 1;
                 self.locals.set(local, data_ptr);
                 self.fat_locals.set(local, metadata);

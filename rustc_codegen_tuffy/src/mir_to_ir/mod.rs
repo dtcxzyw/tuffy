@@ -159,10 +159,19 @@ pub fn translate_function<'tcx>(
                 param_names.push(all_names.get(i).copied().flatten());
                 // Fat pointer types (&str, &[T], &dyn Trait) are passed
                 // as two register-sized values: data pointer + metadata
-                // (length or vtable pointer).  Add a second Int param.
+                // (length or vtable pointer).
                 if is_fat_ptr(tcx, ty) {
-                    params.push(Type::Int);
-                    param_anns.push(default_int_annotation());
+                    let (meta_ty, meta_ann) = match ty.kind() {
+                        ty::TyKind::Ref(_, pointee, _) | ty::TyKind::RawPtr(pointee, _) => {
+                            match pointee.kind() {
+                                ty::TyKind::Dynamic(..) => (Type::Ptr(0), None),
+                                _ => (Type::Int, default_int_annotation()),
+                            }
+                        }
+                        _ => (Type::Int, default_int_annotation()),
+                    };
+                    params.push(meta_ty);
+                    param_anns.push(meta_ann);
                     param_names.push(None);
                 }
             }
