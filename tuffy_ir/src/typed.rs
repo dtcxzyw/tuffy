@@ -72,6 +72,10 @@ impl IntValue {
     pub fn is_secondary_result(self) -> bool {
         self.0.is_secondary_result()
     }
+
+    pub fn index(self) -> u32 {
+        self.0.index()
+    }
 }
 
 impl BoolValue {
@@ -90,6 +94,10 @@ impl BoolValue {
 
     pub fn is_secondary_result(self) -> bool {
         self.0.is_secondary_result()
+    }
+
+    pub fn index(self) -> u32 {
+        self.0.index()
     }
 }
 
@@ -110,6 +118,10 @@ impl FloatValue {
     pub fn is_secondary_result(self) -> bool {
         self.0.is_secondary_result()
     }
+
+    pub fn index(self) -> u32 {
+        self.0.index()
+    }
 }
 
 impl PtrValue {
@@ -128,6 +140,10 @@ impl PtrValue {
 
     pub fn is_secondary_result(self) -> bool {
         self.0.is_secondary_result()
+    }
+
+    pub fn index(self) -> u32 {
+        self.0.index()
     }
 }
 
@@ -148,6 +164,10 @@ impl MemValue {
     pub fn is_secondary_result(self) -> bool {
         self.0.is_secondary_result()
     }
+
+    pub fn index(self) -> u32 {
+        self.0.index()
+    }
 }
 
 impl UnitValue {
@@ -167,6 +187,10 @@ impl UnitValue {
     pub fn is_secondary_result(self) -> bool {
         self.0.is_secondary_result()
     }
+
+    pub fn index(self) -> u32 {
+        self.0.index()
+    }
 }
 
 impl ByteValue {
@@ -185,6 +209,10 @@ impl ByteValue {
 
     pub fn is_secondary_result(self) -> bool {
         self.0.is_secondary_result()
+    }
+
+    pub fn index(self) -> u32 {
+        self.0.index()
     }
 }
 
@@ -526,5 +554,48 @@ impl From<UnitOperand> for Operand {
 impl From<ByteOperand> for Operand {
     fn from(op: ByteOperand) -> Self {
         op.0
+    }
+}
+
+// Conversions from typed values to ValueRef
+impl From<IntValue> for ValueRef {
+    fn from(v: IntValue) -> Self {
+        v.0
+    }
+}
+
+impl From<BoolValue> for ValueRef {
+    fn from(v: BoolValue) -> Self {
+        v.0
+    }
+}
+
+impl From<FloatValue> for ValueRef {
+    fn from(v: FloatValue) -> Self {
+        v.0
+    }
+}
+
+impl From<PtrValue> for ValueRef {
+    fn from(v: PtrValue) -> Self {
+        v.0
+    }
+}
+
+impl From<MemValue> for ValueRef {
+    fn from(v: MemValue) -> Self {
+        v.0
+    }
+}
+
+impl From<UnitValue> for ValueRef {
+    fn from(v: UnitValue) -> Self {
+        v.0
+    }
+}
+
+impl From<ByteValue> for ValueRef {
+    fn from(v: ByteValue) -> Self {
+        v.0
     }
 }
