@@ -334,7 +334,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 None,
                                 Origin::synthetic(),
                             );
-                            self.current_mem = call_mem;
+                            self.current_mem = call_mem.raw();
                         }
                     } else {
                         let drop_instance = ty::Instance::resolve_drop_in_place(self.tcx, drop_ty);
@@ -451,7 +451,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     None,
                                     Origin::synthetic(),
                                 );
-                                self.current_mem = call_mem;
+                                self.current_mem = call_mem.raw();
                             }
                         }
                     }

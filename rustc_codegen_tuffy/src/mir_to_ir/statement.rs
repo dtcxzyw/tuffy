@@ -1162,7 +1162,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 Some(Annotation::Int(I64)),
                                 Origin::synthetic(),
                             );
-                            self.current_mem = mem_out;
+                            self.current_mem = mem_out.raw();
                         }
                     }
                     NonDivergingIntrinsic::Assume(_) => {

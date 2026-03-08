@@ -1208,7 +1208,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             call_ret_ann,
             Origin::synthetic(),
         );
-        self.current_mem = call_mem;
+        self.current_mem = call_mem.raw();
         // For non-void calls, call_data is Some(data_vref).
         // For void calls, call_data is None — use a dummy zero.
         let call_vref = call_data.unwrap_or_else(|| {
@@ -1302,7 +1302,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 .raw();
             // Mark the call as having a secondary return in RDX and
             // capture it via a placeholder instruction.
-            let call_idx = call_mem.index();
+            let call_idx = call_mem.raw().index();
             self.abi_metadata.mark_call_secondary_return(call_idx);
             let rdx_capture =
                 self.builder

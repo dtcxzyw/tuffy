@@ -1488,7 +1488,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
                 inst.result_annotation,
                 o(),
             );
-            s.vmap.set(old_vref, Mapped::One(primary));
+            s.vmap.set(old_vref, Mapped::One(primary.raw()));
             let old_sec = ValueRef::inst_secondary_result(old_vref.index());
             s.vmap.set(old_sec, Mapped::One(secondary));
             return;
@@ -1513,7 +1513,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
                 inst.result_annotation,
                 o(),
             );
-            s.vmap.set(old_vref, Mapped::One(primary));
+            s.vmap.set(old_vref, Mapped::One(primary.raw()));
             let old_sec = ValueRef::inst_secondary_result(old_vref.index());
             s.vmap.set(old_sec, Mapped::One(secondary));
             return;
@@ -1530,7 +1530,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
                 inst.result_annotation,
                 o(),
             );
-            s.vmap.set(old_vref, Mapped::One(primary));
+            s.vmap.set(old_vref, Mapped::One(primary.raw()));
             let old_sec = ValueRef::inst_secondary_result(old_vref.index());
             s.vmap.set(old_sec, Mapped::One(secondary));
             return;
@@ -2467,10 +2467,10 @@ fn leg_fp_to_int128<M: AbiMetadata + Clone>(
     );
     let data = data.unwrap();
 
-    s.vmap.set(old_mem, Mapped::One(call_mem));
+    s.vmap.set(old_mem, Mapped::One(call_mem.raw()));
 
     // Record wide return: hi arrives in RDX.
-    let call_idx = call_mem.index();
+    let call_idx = call_mem.raw().index();
     s.meta.mark_call_secondary_return(call_idx);
     let hi_capture = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
     s.meta
@@ -2582,11 +2582,11 @@ fn leg_div_rem_128<M: AbiMetadata + Clone>(
 
     // Redirect all subsequent users of old_mem to call_mem so that later
     // stores/calls pick up the updated mem without rewriting their operands.
-    s.vmap.set(old_mem, Mapped::One(call_mem));
+    s.vmap.set(old_mem, Mapped::One(call_mem.raw()));
 
     // Record the secondary-register return so the register allocator knows
     // that the hi half arrives in RDX.
-    let call_idx = call_mem.index();
+    let call_idx = call_mem.raw().index();
     s.meta.mark_call_secondary_return(call_idx);
     let hi_capture = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
     s.meta
@@ -2653,7 +2653,7 @@ fn leg_int128_to_fp<M: AbiMetadata + Clone>(
     );
     let data = data.unwrap();
 
-    s.vmap.set(old_mem, Mapped::One(call_mem));
+    s.vmap.set(old_mem, Mapped::One(call_mem.raw()));
     s.vmap.set(old_vref, Mapped::One(data));
 }
 
@@ -2765,11 +2765,11 @@ fn leg_call<M: AbiMetadata + Clone>(
     };
 
     let (mem_out, data_out) = b.call(c.into(), new_args, ret_ty, m.into(), ann, o());
-    s.vmap.set(old_vref, Mapped::One(mem_out));
+    s.vmap.set(old_vref, Mapped::One(mem_out.raw()));
 
     if wide_ret {
         if let Some(data) = data_out {
-            let call_idx = mem_out.index();
+            let call_idx = mem_out.raw().index();
             s.meta.mark_call_secondary_return(call_idx);
 
             let hi_capture = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
@@ -2787,7 +2787,7 @@ fn leg_call<M: AbiMetadata + Clone>(
 
         let old_call_idx = old_vref.index();
         if s.old_meta.has_secondary_return(old_call_idx) {
-            let new_call_idx = mem_out.index();
+            let new_call_idx = mem_out.raw().index();
             s.meta.mark_call_secondary_return(new_call_idx);
 
             let rdx_capture = b.iconst(0i64, 64, IntSignedness::Unsigned, o());

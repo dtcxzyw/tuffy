@@ -1151,7 +1151,7 @@ impl<'a> Builder<'a> {
         mem: MemOperand,
         ann: Option<Annotation>,
         origin: Origin,
-    ) -> (ValueRef, ValueRef) {
+    ) -> (MemValue, ValueRef) {
         let primary = self.push_inst_with_secondary(
             Op::LoadAtomic(ptr.raw().into(), ordering, mem),
             Type::Mem,
@@ -1161,7 +1161,7 @@ impl<'a> Builder<'a> {
             ann,
         );
         let secondary = ValueRef::inst_secondary_result(primary.index());
-        (primary, secondary)
+        (MemValue::new(primary, self.func), secondary)
     }
 
     /// Atomic store value to pointer. Returns mem token.
@@ -1195,7 +1195,7 @@ impl<'a> Builder<'a> {
         mem: MemOperand,
         ann: Option<Annotation>,
         origin: Origin,
-    ) -> (ValueRef, ValueRef) {
+    ) -> (MemValue, ValueRef) {
         let primary = self.push_inst_with_secondary(
             Op::AtomicRmw(op, ptr.raw().into(), val, ordering, mem),
             Type::Mem,
@@ -1205,7 +1205,7 @@ impl<'a> Builder<'a> {
             ann,
         );
         let secondary = ValueRef::inst_secondary_result(primary.index());
-        (primary, secondary)
+        (MemValue::new(primary, self.func), secondary)
     }
 
     /// Atomic compare-and-exchange. Returns (mem_out, old_value).
@@ -1221,7 +1221,7 @@ impl<'a> Builder<'a> {
         mem: MemOperand,
         ann: Option<Annotation>,
         origin: Origin,
-    ) -> (ValueRef, ValueRef) {
+    ) -> (MemValue, ValueRef) {
         let primary = self.push_inst_with_secondary(
             Op::AtomicCmpXchg(
                 ptr.raw().into(),
@@ -1238,7 +1238,7 @@ impl<'a> Builder<'a> {
             ann,
         );
         let secondary = ValueRef::inst_secondary_result(primary.index());
-        (primary, secondary)
+        (MemValue::new(primary, self.func), secondary)
     }
 
     /// Memory fence. Returns mem token.
@@ -1269,7 +1269,7 @@ impl<'a> Builder<'a> {
         mem: MemOperand,
         ann: Option<Annotation>,
         origin: Origin,
-    ) -> (ValueRef, Option<ValueRef>) {
+    ) -> (MemValue, Option<ValueRef>) {
         if ret_ty == Type::Unit {
             let primary = self.push_inst(
                 Op::Call(callee.raw().into(), args, mem),
@@ -1278,7 +1278,7 @@ impl<'a> Builder<'a> {
                 origin,
                 None,
             );
-            (primary, None)
+            (MemValue::new(primary, self.func), None)
         } else {
             let primary = self.push_inst_with_secondary(
                 Op::Call(callee.raw().into(), args, mem),
@@ -1289,7 +1289,7 @@ impl<'a> Builder<'a> {
                 ann,
             );
             let secondary = ValueRef::inst_secondary_result(primary.index());
-            (primary, Some(secondary))
+            (MemValue::new(primary, self.func), Some(secondary))
         }
     }
 

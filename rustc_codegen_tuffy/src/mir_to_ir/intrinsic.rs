@@ -741,7 +741,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     Origin::synthetic(),
                 );
                 self.locals.set(destination_local, eq.raw());
-                Some(mem_out)
+                Some(mem_out.raw())
             }
 
             // typed_swap_nonoverlapping<T>(x, y) — swap values at two pointers.
@@ -822,7 +822,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     Origin::synthetic(),
                 );
                 self.locals.set(destination_local, val);
-                Some(new_mem)
+                Some(new_mem.raw())
             }
 
             // atomic_store_relaxed, atomic_store_release, atomic_store_seqcst
@@ -902,7 +902,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     Some(mem3.raw())
                 } else {
                     self.locals.set(destination_local, actual_old);
-                    Some(new_mem)
+                    Some(new_mem.raw())
                 }
             }
 
@@ -925,7 +925,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     Origin::synthetic(),
                 );
                 self.locals.set(destination_local, old);
-                Some(new_mem)
+                Some(new_mem.raw())
             }
 
             // atomic_fence_*, atomic_singlethreadfence_* → fence instruction
@@ -973,7 +973,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         Origin::synthetic(),
                     );
                     self.locals.set(destination_local, old);
-                    Some(new_mem)
+                    Some(new_mem.raw())
                 } else if name.starts_with("atomic_xsub") {
                     let (new_mem, old) = self.builder.atomic_rmw(
                         AtomicRmwOp::Sub,
@@ -986,7 +986,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         Origin::synthetic(),
                     );
                     self.locals.set(destination_local, old);
-                    Some(new_mem)
+                    Some(new_mem.raw())
                 } else if name.starts_with("atomic_and") {
                     let (new_mem, old) = self.builder.atomic_rmw(
                         AtomicRmwOp::And,
@@ -999,7 +999,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         Origin::synthetic(),
                     );
                     self.locals.set(destination_local, old);
-                    Some(new_mem)
+                    Some(new_mem.raw())
                 } else if name.starts_with("atomic_or") {
                     let (new_mem, old) = self.builder.atomic_rmw(
                         AtomicRmwOp::Or,
@@ -1012,7 +1012,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         Origin::synthetic(),
                     );
                     self.locals.set(destination_local, old);
-                    Some(new_mem)
+                    Some(new_mem.raw())
                 } else if name.starts_with("atomic_xor") {
                     let (new_mem, old) = self.builder.atomic_rmw(
                         AtomicRmwOp::Xor,
@@ -1025,7 +1025,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         Origin::synthetic(),
                     );
                     self.locals.set(destination_local, old);
-                    Some(new_mem)
+                    Some(new_mem.raw())
                 } else {
                     // Unsupported ops: nand, max, min, umax, umin — use atomic load/store.
                     let (mem1, old) = self.builder.load_atomic(
