@@ -2070,3 +2070,32 @@ fn mem_set_builder_and_display() {
         "should display 'memset': {output}"
     );
 }
+
+#[test]
+fn test_boolean_ops() {
+    let mut module = Module::new("test");
+    let name = module.intern("test_bool_ops");
+    let mut func = Function::new(name, vec![], vec![], vec![], Some(Type::Bool), None);
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+
+    let entry = builder.create_block();
+    builder.switch_to_block(entry);
+
+    let mem0 = builder.add_block_arg(entry, Type::Mem, None);
+    let t = builder.bconst(true, Origin::synthetic());
+    let f = builder.bconst(false, Origin::synthetic());
+
+    let and_result = builder.band(t.into(), f.into(), Origin::synthetic());
+    let _or_result = builder.bor(t.into(), f.into(), Origin::synthetic());
+    let _xor_result = builder.bxor(t.into(), f.into(), Origin::synthetic());
+
+    builder.ret(Some(and_result.into()), mem0.into(), Origin::synthetic());
+    builder.exit_region();
+
+    module.add_function(func);
+    let result = crate::verifier::verify_module(&module);
+    assert!(result.is_ok(), "expected no errors: {result}");
+}
