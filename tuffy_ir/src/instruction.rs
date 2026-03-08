@@ -176,6 +176,12 @@ pub enum Op {
     Or(Operand, Operand),
     /// Bitwise XOR: xor %a, %b
     Xor(Operand, Operand),
+    /// Boolean AND: band %a, %b
+    BAnd(Operand, Operand),
+    /// Boolean OR: bor %a, %b
+    BOr(Operand, Operand),
+    /// Boolean XOR: bxor %a, %b
+    BXor(Operand, Operand),
     /// Left shift: shl %a, %b (poison if shift amount < 0)
     Shl(Operand, Operand),
     /// Right shift: shr %a, %b (poison if shift amount < 0).

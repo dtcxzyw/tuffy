@@ -347,6 +347,15 @@ fn fmt_inst(
         Op::Xor(a, b) => {
             format!("{v} = xor {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
         }
+        Op::BAnd(a, b) => {
+            format!("{v} = band {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+        }
+        Op::BOr(a, b) => {
+            format!("{v} = bor {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+        }
+        Op::BXor(a, b) => {
+            format!("{v} = bxor {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+        }
         Op::Shl(a, b) => {
             format!("{v} = shl {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
         }

@@ -398,6 +398,33 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::Xor(a, b), Type::Int, None, origin, res_ann)
     }
 
+    /// Boolean AND.
+    pub fn band(&mut self, a: Operand, b: Operand, origin: Origin) -> ValueRef {
+        let _ty = self
+            .value_type(a.value)
+            .filter(|t| matches!(t, Type::Bool))
+            .expect("band operand must be Bool type");
+        self.push_inst(Op::BAnd(a, b), Type::Bool, None, origin, None)
+    }
+
+    /// Boolean OR.
+    pub fn bor(&mut self, a: Operand, b: Operand, origin: Origin) -> ValueRef {
+        let _ty = self
+            .value_type(a.value)
+            .filter(|t| matches!(t, Type::Bool))
+            .expect("bor operand must be Bool type");
+        self.push_inst(Op::BOr(a, b), Type::Bool, None, origin, None)
+    }
+
+    /// Boolean XOR.
+    pub fn bxor(&mut self, a: Operand, b: Operand, origin: Origin) -> ValueRef {
+        let _ty = self
+            .value_type(a.value)
+            .filter(|t| matches!(t, Type::Bool))
+            .expect("bxor operand must be Bool type");
+        self.push_inst(Op::BXor(a, b), Type::Bool, None, origin, None)
+    }
+
     /// Left shift (poison if shift amount is negative).
     pub fn shl(
         &mut self,

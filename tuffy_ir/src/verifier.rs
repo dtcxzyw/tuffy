@@ -420,6 +420,20 @@ impl FuncVerifier<'_> {
                 self.check_int_type(&inst.ty, "int arith result", &loc);
             }
 
+            // Boolean binary ops: both Bool, result Bool.
+            Op::BAnd(a, b) | Op::BOr(a, b) | Op::BXor(a, b) => {
+                self.check_operand(a, &loc);
+                self.check_operand(b, &loc);
+                self.expect_bool(a, "boolean op lhs", &loc);
+                self.expect_bool(b, "boolean op rhs", &loc);
+                if inst.ty != Type::Bool {
+                    self.result.error(
+                        loc.clone(),
+                        format!("boolean op must produce Bool, got {:?}", inst.ty),
+                    );
+                }
+            }
+
             Op::CountOnes(a) => {
                 self.check_operand(a, &loc);
                 self.expect_int(a, "count_ones", &loc);
