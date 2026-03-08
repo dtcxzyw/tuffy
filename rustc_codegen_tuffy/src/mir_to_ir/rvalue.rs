@@ -8,11 +8,6 @@ use super::constant::*;
 use super::ctx::TranslationCtx;
 use super::types::*;
 
-const I64: IntAnnotation = IntAnnotation {
-    bit_width: 64,
-    signedness: IntSignedness::DontCare,
-};
-
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     pub(super) fn translate_place_to_addr(
         &mut self,
@@ -201,7 +196,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let byte_offset = self.builder.mul(
                         idx_val.into(),
                         size_val.into(),
-                        I64,
+                        IntAnnotation { bit_width: 64, signedness: IntSignedness::DontCare },
                         Origin::synthetic(),
                     );
                     addr = self.builder.ptradd(
@@ -479,7 +474,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             let relative = self.builder.sub(
                                 tag_val.into(),
                                 ns.into(),
-                                I64,
+                                IntAnnotation { bit_width: 64, signedness: IntSignedness::DontCare },
                                 Origin::synthetic(),
                             );
                             let start_c = self
@@ -488,7 +483,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             let variant_idx = self.builder.add(
                                 relative.into(),
                                 start_c.into(),
-                                I64,
+                                IntAnnotation { bit_width: 64, signedness: IntSignedness::DontCare },
                                 Origin::synthetic(),
                             );
                             // Check relative < num_niche (unsigned).
@@ -992,7 +987,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             ) => n,
                             None => 64,
                         };
-                        let sum = self.builder.add(l_op, r_op, I64, Origin::synthetic());
+                        let sum = self.builder.add(l_op, r_op, IntAnnotation { bit_width: 64, signedness: IntSignedness::DontCare }, Origin::synthetic());
                         match res_ann {
                             Some(IntAnn::Signed(_)) => self.builder.sext(
                                 sum.into(),
@@ -1016,7 +1011,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             ) => n,
                             None => 64,
                         };
-                        let diff = self.builder.sub(l_op, r_op, I64, Origin::synthetic());
+                        let diff = self.builder.sub(l_op, r_op, IntAnnotation { bit_width: 64, signedness: IntSignedness::DontCare }, Origin::synthetic());
                         match res_ann {
                             Some(IntAnn::Signed(_)) => self.builder.sext(
                                 diff.into(),
@@ -1040,7 +1035,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             ) => n,
                             None => 64,
                         };
-                        let prod = self.builder.mul(l_op, r_op, I64, Origin::synthetic());
+                        let prod = self.builder.mul(l_op, r_op, IntAnnotation { bit_width: 64, signedness: IntSignedness::DontCare }, Origin::synthetic());
                         match res_ann {
                             Some(IntAnn::Signed(_)) => self.builder.sext(
                                 prod.into(),
@@ -1058,40 +1053,28 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // Unchecked variants: the caller guarantees no overflow so the
                     // result can carry a full Signed/Unsigned annotation directly.
                     BinOp::AddUnchecked => {
-                        let bits = match res_ann {
-                            Some(IntAnn::Signed(n) | IntAnn::Unsigned(n) | IntAnn::DontCare(n)) => n,
-                            None => 64,
-                        };
-                        let sum = self.builder.add(l_op, r_op, I64, Origin::synthetic());
-                        match res_ann {
-                            Some(IntAnn::Signed(_)) => self.builder.sext(sum.into(), bits, Origin::synthetic()),
-                            Some(IntAnn::Unsigned(_)) => self.builder.zext(sum.into(), bits, Origin::synthetic()),
-                            _ => sum,
-                        }
+                        let ann = res_ann.map(|a| match a {
+                            IntAnn::Signed(n) => IntAnnotation { bit_width: n, signedness: IntSignedness::Signed },
+                            IntAnn::Unsigned(n) => IntAnnotation { bit_width: n, signedness: IntSignedness::Unsigned },
+                            IntAnn::DontCare(n) => IntAnnotation { bit_width: n, signedness: IntSignedness::DontCare },
+                        }).unwrap_or(IntAnnotation { bit_width: 64, signedness: IntSignedness::DontCare });
+                        self.builder.add(l_op, r_op, ann, Origin::synthetic())
                     }
                     BinOp::SubUnchecked => {
-                        let bits = match res_ann {
-                            Some(IntAnn::Signed(n) | IntAnn::Unsigned(n) | IntAnn::DontCare(n)) => n,
-                            None => 64,
-                        };
-                        let diff = self.builder.sub(l_op, r_op, I64, Origin::synthetic());
-                        match res_ann {
-                            Some(IntAnn::Signed(_)) => self.builder.sext(diff.into(), bits, Origin::synthetic()),
-                            Some(IntAnn::Unsigned(_)) => self.builder.zext(diff.into(), bits, Origin::synthetic()),
-                            _ => diff,
-                        }
+                        let ann = res_ann.map(|a| match a {
+                            IntAnn::Signed(n) => IntAnnotation { bit_width: n, signedness: IntSignedness::Signed },
+                            IntAnn::Unsigned(n) => IntAnnotation { bit_width: n, signedness: IntSignedness::Unsigned },
+                            IntAnn::DontCare(n) => IntAnnotation { bit_width: n, signedness: IntSignedness::DontCare },
+                        }).unwrap_or(IntAnnotation { bit_width: 64, signedness: IntSignedness::DontCare });
+                        self.builder.sub(l_op, r_op, ann, Origin::synthetic())
                     }
                     BinOp::MulUnchecked => {
-                        let bits = match res_ann {
-                            Some(IntAnn::Signed(n) | IntAnn::Unsigned(n) | IntAnn::DontCare(n)) => n,
-                            None => 64,
-                        };
-                        let prod = self.builder.mul(l_op, r_op, I64, Origin::synthetic());
-                        match res_ann {
-                            Some(IntAnn::Signed(_)) => self.builder.sext(prod.into(), bits, Origin::synthetic()),
-                            Some(IntAnn::Unsigned(_)) => self.builder.zext(prod.into(), bits, Origin::synthetic()),
-                            _ => prod,
-                        }
+                        let ann = res_ann.map(|a| match a {
+                            IntAnn::Signed(n) => IntAnnotation { bit_width: n, signedness: IntSignedness::Signed },
+                            IntAnn::Unsigned(n) => IntAnnotation { bit_width: n, signedness: IntSignedness::Unsigned },
+                            IntAnn::DontCare(n) => IntAnnotation { bit_width: n, signedness: IntSignedness::DontCare },
+                        }).unwrap_or(IntAnnotation { bit_width: 64, signedness: IntSignedness::DontCare });
+                        self.builder.mul(l_op, r_op, ann, Origin::synthetic())
                     }
                     // Checked arithmetic: emit a multi-result IR intrinsic that
                     // produces (wrapping_result: Int, overflow: Bool).  The primary
@@ -1270,7 +1253,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             self.builder.sub(
                                 gt_int.into(),
                                 lt_int.into(),
-                                I64,
+                                IntAnnotation { bit_width: 64, signedness: IntSignedness::DontCare },
                                 Origin::synthetic(),
                             )
                         } else {
@@ -1288,7 +1271,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             self.builder.sub(
                                 gt_int.into(),
                                 lt_int.into(),
-                                I64,
+                                IntAnnotation { bit_width: 64, signedness: IntSignedness::DontCare },
                                 Origin::synthetic(),
                             )
                         }
@@ -1300,7 +1283,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let masked = self.builder.and(
                             shift_val.into(),
                             mask_val.into(),
-                            I64,
+                            IntAnnotation { bit_width: 64, signedness: IntSignedness::DontCare },
                             Origin::synthetic(),
                         );
                         let masked_op = IrOperand {
@@ -1315,9 +1298,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         self.builder
                             .shl(l_op, masked_op, ann, Origin::synthetic())
                     }
-                    BinOp::BitOr => self.builder.or(l_op, r_op, I64, Origin::synthetic()),
-                    BinOp::BitAnd => self.builder.and(l_op, r_op, I64, Origin::synthetic()),
-                    BinOp::BitXor => self.builder.xor(l_op, r_op, I64, Origin::synthetic()),
+                    BinOp::BitOr => self.builder.or(l_op, r_op, IntAnnotation { bit_width: 64, signedness: IntSignedness::DontCare }, Origin::synthetic()),
+                    BinOp::BitAnd => self.builder.and(l_op, r_op, IntAnnotation { bit_width: 64, signedness: IntSignedness::DontCare }, Origin::synthetic()),
+                    BinOp::BitXor => self.builder.xor(l_op, r_op, IntAnnotation { bit_width: 64, signedness: IntSignedness::DontCare }, Origin::synthetic()),
                     BinOp::Shr | BinOp::ShrUnchecked => {
                         let shift_val = r_op.value;
                         let lhs_bits = type_size(self.tcx, lhs_mir_ty).unwrap_or(8) as i64 * 8;
@@ -1325,7 +1308,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let masked = self.builder.and(
                             shift_val.into(),
                             mask_val.into(),
-                            I64,
+                            IntAnnotation { bit_width: 64, signedness: IntSignedness::DontCare },
                             Origin::synthetic(),
                         );
                         let masked_op = IrOperand {
@@ -1340,8 +1323,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         self.builder
                             .shr(l_op, masked_op, ann, Origin::synthetic())
                     }
-                    BinOp::Div => self.builder.div(l_op, r_op, I64, Origin::synthetic()),
-                    BinOp::Rem => self.builder.rem(l_op, r_op, I64, Origin::synthetic()),
+                    BinOp::Div => self.builder.div(l_op, r_op, IntAnnotation { bit_width: 64, signedness: IntSignedness::DontCare }, Origin::synthetic()),
+                    BinOp::Rem => self.builder.rem(l_op, r_op, IntAnnotation { bit_width: 64, signedness: IntSignedness::DontCare }, Origin::synthetic()),
                     BinOp::Offset => {
                         // ptr.wrapping_offset(count) = ptr + count * sizeof(T).
                         let l_raw = self.translate_operand(lhs)?;
@@ -1360,7 +1343,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             let size_val =
                                 self.builder.iconst(elem_size as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                             self.builder
-                                .mul(r.into(), size_val.into(), I64, Origin::synthetic())
+                                .mul(r.into(), size_val.into(), IntAnnotation { bit_width: 64, signedness: IntSignedness::DontCare }, Origin::synthetic())
                         };
                         let ptr = self.coerce_to_ptr(l_raw);
                         self.builder
@@ -1672,7 +1655,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 let result_large = self.builder.or(
                                     raw_shifted.into(),
                                     sign_bit.into(),
-                                    I64,
+                                    IntAnnotation { bit_width: 64, signedness: IntSignedness::DontCare },
                                     Origin::synthetic(),
                                 );
                                 let max_u64 = self.builder.iconst(-1_i64, 64, IntSignedness::DontCare, Origin::synthetic());
@@ -1712,7 +1695,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 let sign_masked = self.builder.and(
                                     sign.into(),
                                     one.into(),
-                                    I64,
+                                    IntAnnotation { bit_width: 64, signedness: IntSignedness::DontCare },
                                     Origin::synthetic(),
                                 );
                                 let is_neg = self
@@ -2468,7 +2451,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let one = self.builder.iconst(1, 64, IntSignedness::DontCare, Origin::synthetic());
                     return Some(
                         self.builder
-                            .xor(int_v.into(), one.into(), I64, Origin::synthetic()),
+                            .xor(int_v.into(), one.into(), IntAnnotation { bit_width: 64, signedness: IntSignedness::DontCare }, Origin::synthetic()),
                     );
                 }
                 let bits = match not_ann {
@@ -2486,7 +2469,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         self.builder.xor(
                             int_v.into(),
                             one.into(),
-                            I64,
+                            IntAnnotation { bit_width: 64, signedness: IntSignedness::DontCare },
                             Origin::synthetic(),
                         )
                     }
