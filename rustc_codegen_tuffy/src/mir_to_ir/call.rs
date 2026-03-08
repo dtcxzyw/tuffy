@@ -407,7 +407,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     chunk,
                                     default_int_type(),
                                     self.current_mem.into(),
-                                    None,
+                                    int_annotation_for_bytes(chunk),
                                     Origin::synthetic(),
                                 );
                                 let dst_addr = if offset == 0 {
@@ -631,7 +631,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     8,
                     default_int_type(),
                     self.current_mem.into(),
-                    None,
+                    int_annotation_for_bytes(8),
                     Origin::synthetic(),
                 );
                 Some(fn_ptr)
@@ -811,7 +811,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 8,
                                 default_int_type(),
                                 self.current_mem.into(),
-                                None,
+                                int_annotation_for_bytes(8),
                                 Origin::synthetic(),
                             );
                             ir_args.push(w0.into());
@@ -827,7 +827,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 8,
                                 default_int_type(),
                                 self.current_mem.into(),
-                                None,
+                                int_annotation_for_bytes(8),
                                 Origin::synthetic(),
                             );
                             ir_args.push(w1.into());
@@ -889,7 +889,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         8,
                         default_int_type(),
                         self.current_mem.into(),
-                        None,
+                        int_annotation_for_bytes(8),
                         Origin::synthetic(),
                     );
                     ir_args.push(w0.into());
@@ -902,7 +902,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         8,
                         default_int_type(),
                         self.current_mem.into(),
-                        None,
+                        int_annotation_for_bytes(8),
                         Origin::synthetic(),
                     );
                     ir_args.push(w1.into());
@@ -929,7 +929,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 8,
                                 default_int_type(),
                                 self.current_mem.into(),
-                                None,
+                                int_annotation_for_bytes(8),
                                 Origin::synthetic(),
                             );
                             ir_args.push(w0.into());
@@ -942,7 +942,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 8,
                                 default_int_type(),
                                 self.current_mem.into(),
-                                None,
+                                int_annotation_for_bytes(8),
                                 Origin::synthetic(),
                             );
                             ir_args.push(w1.into());
@@ -967,7 +967,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             8,
                             default_int_type(),
                             self.current_mem.into(),
-                            None,
+                            int_annotation_for_bytes(8),
                             Origin::synthetic(),
                         );
                         ir_args.push(w0.into());
@@ -980,7 +980,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             8,
                             default_int_type(),
                             self.current_mem.into(),
-                            None,
+                            int_annotation_for_bytes(8),
                             Origin::synthetic(),
                         );
                         ir_args.push(w1.into());
@@ -1122,7 +1122,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             self.builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
         };
         let call_ret_ty = translate_ty(self.tcx, dest_ty).unwrap_or(Type::Unit);
-        let call_ret_ann = None;
+        let call_ret_ann = if matches!(call_ret_ty, Type::Int) {
+            translate_annotation(dest_ty)
+        } else {
+            None
+        };
         let (call_mem, call_data) = self.builder.call(
             callee_val.into(),
             ir_args,

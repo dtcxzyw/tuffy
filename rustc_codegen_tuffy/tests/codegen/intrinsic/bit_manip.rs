@@ -13,20 +13,15 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @bitreverse_u32(%x: int) -> int {
+// CHECK: func @bitreverse_u32(%x: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int = param %x
-// CHECK:     v2: int = bit_reverse.32 v1
+// CHECK:     v1: int:u32 = param %x
+// CHECK:     v2: int:u32 = bit_reverse.32 v1
 // CHECK:     br bb1(v0)
 // CHECK:
 // CHECK:   bb1(v4: mem):
 // CHECK:     ret v2, v4
 // CHECK: }
-// CHECK:
-// CHECK: warning: IR verification failed for bitreverse_u32, emitting stub
-// CHECK:   verification failed with 2 error(s):
-// CHECK:   [func @bitreverse_u32] param 0: Int type requires annotation
-// CHECK:   [func @bitreverse_u32] return type: Int type requires annotation
 // CHECK:
 // CHECK: fn bswap_u32(_1: u32) -> u32 {
 // CHECK:     debug x => _1;
@@ -42,20 +37,15 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @bswap_u32(%x: int) -> int {
+// CHECK: func @bswap_u32(%x: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int = param %x
-// CHECK:     v2: int = bswap.4 v1
+// CHECK:     v1: int:u32 = param %x
+// CHECK:     v2: int:u32 = bswap.4 v1
 // CHECK:     br bb1(v0)
 // CHECK:
 // CHECK:   bb1(v4: mem):
 // CHECK:     ret v2, v4
 // CHECK: }
-// CHECK:
-// CHECK: warning: IR verification failed for bswap_u32, emitting stub
-// CHECK:   verification failed with 2 error(s):
-// CHECK:   [func @bswap_u32] param 0: Int type requires annotation
-// CHECK:   [func @bswap_u32] return type: Int type requires annotation
 // CHECK:
 // CHECK: fn ctlz_u32(_1: u32) -> u32 {
 // CHECK:     debug x => _1;
@@ -71,20 +61,15 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @ctlz_u32(%x: int) -> int {
+// CHECK: func @ctlz_u32(%x: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int = param %x
+// CHECK:     v1: int:u32 = param %x
 // CHECK:     v2: int:u32 = count_leading_zeros.32 v1
 // CHECK:     br bb1(v0)
 // CHECK:
 // CHECK:   bb1(v4: mem):
 // CHECK:     ret v2, v4
 // CHECK: }
-// CHECK:
-// CHECK: warning: IR verification failed for ctlz_u32, emitting stub
-// CHECK:   verification failed with 2 error(s):
-// CHECK:   [func @ctlz_u32] param 0: Int type requires annotation
-// CHECK:   [func @ctlz_u32] return type: Int type requires annotation
 // CHECK:
 // CHECK: fn ctpop_u32(_1: u32) -> u32 {
 // CHECK:     debug x => _1;
@@ -100,20 +85,15 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @ctpop_u32(%x: int) -> int {
+// CHECK: func @ctpop_u32(%x: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int = param %x
+// CHECK:     v1: int:u32 = param %x
 // CHECK:     v2: int:u64 = count_ones v1
 // CHECK:     br bb1(v0)
 // CHECK:
 // CHECK:   bb1(v4: mem):
 // CHECK:     ret v2, v4
 // CHECK: }
-// CHECK:
-// CHECK: warning: IR verification failed for ctpop_u32, emitting stub
-// CHECK:   verification failed with 2 error(s):
-// CHECK:   [func @ctpop_u32] param 0: Int type requires annotation
-// CHECK:   [func @ctpop_u32] return type: Int type requires annotation
 // CHECK:
 // CHECK: fn cttz_u32(_1: u32) -> u32 {
 // CHECK:     debug x => _1;
@@ -129,20 +109,15 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @cttz_u32(%x: int) -> int {
+// CHECK: func @cttz_u32(%x: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int = param %x
+// CHECK:     v1: int:u32 = param %x
 // CHECK:     v2: int:u64 = count_trailing_zeros v1
 // CHECK:     br bb1(v0)
 // CHECK:
 // CHECK:   bb1(v4: mem):
 // CHECK:     ret v2, v4
 // CHECK: }
-// CHECK:
-// CHECK: warning: IR verification failed for cttz_u32, emitting stub
-// CHECK:   verification failed with 2 error(s):
-// CHECK:   [func @cttz_u32] param 0: Int type requires annotation
-// CHECK:   [func @cttz_u32] return type: Int type requires annotation
 // CHECK:
 
 #![crate_type = "lib"]

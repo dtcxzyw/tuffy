@@ -330,11 +330,13 @@ impl FuncVerifier<'_> {
         let loc = self.inst_loc(bi, ii);
 
         // Check result-side annotation validity.
-        // For multi-result instructions (Call), the annotation applies
-        // to the secondary result, not the primary (which is Mem).
         if let Some(ref ann) = inst.result_annotation {
-            let check_ty = inst.secondary_ty.as_ref().unwrap_or(&inst.ty);
-            self.check_annotation(ann, check_ty, "result annotation", &loc);
+            self.check_annotation(ann, &inst.ty, "result annotation", &loc);
+        }
+        if let Some(ref ann) = inst.secondary_result_annotation
+            && let Some(ref sec_ty) = inst.secondary_ty
+        {
+            self.check_annotation(ann, sec_ty, "secondary result annotation", &loc);
         }
 
         // Validate that Int results have annotations (skip terminators).
@@ -347,7 +349,7 @@ impl FuncVerifier<'_> {
             }
             if let Some(ref sec_ty) = inst.secondary_ty
                 && matches!(sec_ty, Type::Int)
-                && inst.result_annotation.is_none()
+                && inst.secondary_result_annotation.is_none()
             {
                 self.result.error(
                     loc.clone(),

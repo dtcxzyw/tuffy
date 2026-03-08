@@ -28,16 +28,16 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @use_large() -> int {
+// CHECK: func @use_large() -> int:u64 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:i64 = iconst 0
 // CHECK:     v2: ptr = stack_slot 24
 // CHECK:     v3: mem = store.24 v1, v2, v0
-// CHECK:     v4: int = load.8 v2, v3
+// CHECK:     v4: int:i64 = load.8 v2, v3
 // CHECK:     v5: int:i64 = iconst 8
 // CHECK:     v6: ptr = ptradd v2, v5
-// CHECK:     v7: int = load.8 v6, v3
-// CHECK:     v8: int:u64, v9: bool = uadd_overflow.64 v4, v7
+// CHECK:     v7: int:i64 = load.8 v6, v3
+// CHECK:     v8: int:u64, v9: bool = uadd_overflow.64 v4:u64, v7:u64
 // CHECK:     v10: int:u64 = bool_to_int v9
 // CHECK:     v11: int:i64 = iconst 0
 // CHECK:     v12: bool = icmp.eq v10, v11
@@ -46,8 +46,8 @@
 // CHECK:   bb1(v14: mem):
 // CHECK:     v15: int:i64 = iconst 16
 // CHECK:     v16: ptr = ptradd v2, v15
-// CHECK:     v17: int = load.8 v16, v14
-// CHECK:     v18: int:u64, v19: bool = uadd_overflow.64 v8, v17
+// CHECK:     v17: int:i64 = load.8 v16, v14
+// CHECK:     v18: int:u64, v19: bool = uadd_overflow.64 v8, v17:u64
 // CHECK:     v20: int:u64 = bool_to_int v19
 // CHECK:     v21: int:i64 = iconst 0
 // CHECK:     v22: bool = icmp.eq v20, v21
@@ -62,12 +62,6 @@
 // CHECK:   bb4(v28: mem):
 // CHECK:     trap
 // CHECK: }
-// CHECK:
-// CHECK: warning: IR verification failed for use_large, emitting stub
-// CHECK:   verification failed with 3 error(s):
-// CHECK:   [func @use_large] return type: Int type requires annotation
-// CHECK:   [func @use_large, bb0, inst 7] result annotation: int annotation on non-Int type Bool
-// CHECK:   [func @use_large, bb1, inst 3] result annotation: int annotation on non-Int type Bool
 // CHECK:
 
 #![crate_type = "lib"]

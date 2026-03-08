@@ -6,7 +6,7 @@ use rustc_middle::ty::{self, Instance, TyCtxt};
 use tuffy_ir::builder::Builder;
 use tuffy_ir::instruction::Origin;
 use tuffy_ir::module::SymbolTable;
-use tuffy_ir::types::{FloatType, IntAnnotation, IntSignedness, Type};
+use tuffy_ir::types::{Annotation, FloatType, IntAnnotation, IntSignedness, Type};
 use tuffy_ir::value::ValueRef;
 
 const I64: IntAnnotation = IntAnnotation {
@@ -38,10 +38,11 @@ pub(super) fn translate_int_to_int_cast(
                 if is_signed_int(src_ty) {
                     let shift_amt = 64 - src_bits;
                     let sv = builder.iconst(shift_amt as i64, 64, IntSignedness::DontCare, Origin::synthetic());
-                    let shifted = builder.shl(val.into(), sv.into(), None, Origin::synthetic());
+                    let ann = Some(Annotation::Int(IntAnnotation { bit_width: 64, signedness: IntSignedness::Signed }));
+                    let shifted = builder.shl(val.into(), sv.into(), ann, Origin::synthetic());
                     let sv2 = builder.iconst(shift_amt as i64, 64, IntSignedness::DontCare, Origin::synthetic());
                     let shifted_op = shifted.into();
-                    builder.shr(shifted_op, sv2.into(), None, Origin::synthetic())
+                    builder.shr(shifted_op, sv2.into(), ann, Origin::synthetic())
                 } else {
                     let mask = (BigInt::from(1u64) << src_bits) - 1;
                     let mask_val = builder.iconst(mask, 64, IntSignedness::DontCare, Origin::synthetic());
@@ -59,10 +60,11 @@ pub(super) fn translate_int_to_int_cast(
             // Sign-extend: shl by (dst - src), then arithmetic shr.
             let shift_amt = dst_bits - src_bits;
             let shift_val = builder.iconst(shift_amt as i64, 64, IntSignedness::DontCare, Origin::synthetic());
-            let shifted = builder.shl(val.into(), shift_val.into(), None, Origin::synthetic());
+            let ann = Some(Annotation::Int(IntAnnotation { bit_width: dst_bits, signedness: IntSignedness::Signed }));
+            let shifted = builder.shl(val.into(), shift_val.into(), ann, Origin::synthetic());
             let shift_val2 = builder.iconst(shift_amt as i64, 64, IntSignedness::DontCare, Origin::synthetic());
             let shifted_op = shifted.into();
-            Some(builder.shr(shifted_op, shift_val2.into(), None, Origin::synthetic()))
+            Some(builder.shr(shifted_op, shift_val2.into(), ann, Origin::synthetic()))
         } else if !is_signed_int(src_ty) && src_bits < 64 {
             // Zero-extend: mask off high bits.
             let mask = (BigInt::from(1) << src_bits) - 1;

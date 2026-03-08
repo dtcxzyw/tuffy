@@ -66,6 +66,8 @@ pub struct Instruction {
     pub origin: Origin,
     /// Result-side annotation. Violation causes this instruction to produce poison.
     pub result_annotation: Option<Annotation>,
+    /// Secondary result annotation (for instructions with secondary_ty).
+    pub secondary_result_annotation: Option<Annotation>,
 }
 
 impl Instruction {

@@ -3,7 +3,7 @@ use super::types::*;
 use rustc_middle::mir::{self, BinOp, CastKind, Operand, Place, Rvalue, StatementKind};
 use rustc_middle::ty;
 use tuffy_ir::instruction::Origin;
-use tuffy_ir::types::{IntAnnotation, IntSignedness, Type};
+use tuffy_ir::types::{Annotation, IntAnnotation, IntSignedness, Type};
 use tuffy_ir::value::ValueRef;
 
 const I64: IntAnnotation = IntAnnotation {
@@ -255,7 +255,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                         chunk,
                                                         default_int_type(),
                                                         self.current_mem.into(),
-                                                        None,
+                                                        int_annotation_for_bytes(chunk),
                                                         Origin::synthetic(),
                                                     );
                                                     let dst_addr = if byte_off == 0 {
@@ -398,7 +398,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                         chunk,
                                                         default_int_type(),
                                                         self.current_mem.into(),
-                                                        None,
+                                                        int_annotation_for_bytes(chunk),
                                                         Origin::synthetic(),
                                                     );
                                                     let dst_addr = if byte_off == 0 {
@@ -617,7 +617,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                             chunk,
                                             default_int_type(),
                                             self.current_mem.into(),
-                                            None,
+                                            int_annotation_for_bytes(chunk),
                                             Origin::synthetic(),
                                         );
                                         let dst_addr = if off == 0 {
@@ -738,7 +738,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                             chunk,
                                             default_int_type(),
                                             self.current_mem.into(),
-                                            None,
+                                            int_annotation_for_bytes(chunk),
                                             Origin::synthetic(),
                                         );
                                         let dst_addr = if byte_off == 0 {
@@ -977,7 +977,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 8,
                                 default_int_type(),
                                 self.current_mem.into(),
-                                None,
+                                int_annotation_for_bytes(8),
                                 Origin::synthetic(),
                             );
                             self.cast_fat_meta.set(place.local, meta);
@@ -1028,7 +1028,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 vec![dst_v.into(), src_v.into(), byte_count.into()],
                                 default_int_type(),
                                 self.current_mem.into(),
-                                None,
+                                Some(Annotation::Int(I64)),
                                 Origin::synthetic(),
                             );
                             self.current_mem = mem_out;

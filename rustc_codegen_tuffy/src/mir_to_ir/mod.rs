@@ -18,6 +18,8 @@ use ctx::{
 };
 use types::*;
 
+use tuffy_ir::types::{Annotation, IntAnnotation, IntSignedness};
+
 use rustc_middle::mir::{self, BasicBlock, Operand, Rvalue, StatementKind, TerminatorKind};
 use rustc_middle::ty::{self, Instance, TyCtxt, TypeVisitableExt};
 
@@ -26,7 +28,7 @@ use tuffy_ir::builder::Builder;
 use tuffy_ir::function::{Function, RegionKind};
 use tuffy_ir::instruction::Origin;
 use tuffy_ir::module::{SymbolId, SymbolTable};
-use tuffy_ir::types::{IntSignedness, Type};
+use tuffy_ir::types::Type;
 
 /// Static data entry: (symbol_id, bytes, relocations).
 /// Relocations are (offset_in_bytes, target_symbol_name) for function pointers in vtables.
@@ -95,7 +97,21 @@ pub fn translate_function<'tcx>(
         (Some(Type::Ptr(0)), None)
     } else {
         let ty = translate_ty(tcx, ret_mir_ty).filter(|t| !matches!(t, Type::Unit));
-        (ty, translate_annotation(ret_mir_ty))
+        let ann = if matches!(ty, Some(Type::Int)) {
+            int_bitwidth(ret_mir_ty).and_then(|bw| {
+                Some(Annotation::Int(IntAnnotation {
+                    bit_width: bw,
+                    signedness: if is_signed_int(ret_mir_ty) {
+                        IntSignedness::Signed
+                    } else {
+                        IntSignedness::Unsigned
+                    },
+                }))
+            })
+        } else {
+            translate_annotation(ret_mir_ty)
+        };
+        (ty, ann)
     };
 
     let mut symbols = SymbolTable::new();
@@ -119,10 +135,22 @@ pub fn translate_function<'tcx>(
             Some(Type::Unit) | None => continue,
             Some(ir_ty) => {
                 let sz = type_size(tcx, ty).unwrap_or(0);
+                let is_int = matches!(ir_ty, Type::Int);
                 // For >16 byte parameters, the caller passes a pointer per x86-64 ABI.
                 let param_ty = if sz > 16 { Type::Ptr(0) } else { ir_ty };
                 let param_ann = if sz > 16 {
                     None
+                } else if is_int {
+                    int_bitwidth(ty).and_then(|bw| {
+                        Some(Annotation::Int(IntAnnotation {
+                            bit_width: bw,
+                            signedness: if is_signed_int(ty) {
+                                IntSignedness::Signed
+                            } else {
+                                IntSignedness::Unsigned
+                            },
+                        }))
+                    })
                 } else {
                     translate_annotation(ty)
                 };
@@ -134,7 +162,7 @@ pub fn translate_function<'tcx>(
                 // (length or vtable pointer).  Add a second Int param.
                 if is_fat_ptr(tcx, ty) {
                     params.push(default_int_type());
-                    param_anns.push(None);
+                    param_anns.push(default_int_annotation());
                     param_names.push(None);
                 }
             }

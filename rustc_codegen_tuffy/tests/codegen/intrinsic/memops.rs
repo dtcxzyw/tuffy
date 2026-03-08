@@ -53,11 +53,11 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @_RINvNtCsiYoX4ApF2vj_4core3ptr11write_byteshECsfeiporauljY_6memops(%dst: ptr, %val: int, %count: int) {
+// CHECK: func @_RINvNtCsiYoX4ApF2vj_4core3ptr11write_byteshECsfeiporauljY_6memops(%dst: ptr, %val: int:u8, %count: int:u64) {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param %dst
-// CHECK:     v2: int = param %val
-// CHECK:     v3: int = param %count
+// CHECK:     v2: int:u8 = param %val
+// CHECK:     v3: int:u64 = param %count
 // CHECK:     v4: ptr = stack_slot 1
 // CHECK:     v5: int:i64 = iconst 0
 // CHECK:     v6: int:i64 = iconst 0
@@ -80,7 +80,7 @@
 // CHECK:
 // CHECK:   bb3(v21: mem):
 // CHECK:     v22: int:i64 = iconst 0
-// CHECK:     v23: bool = icmp.eq v3, v22
+// CHECK:     v23: bool = icmp.eq v3, v22:u64
 // CHECK:     v24: int:u64 = bool_to_int v23
 // CHECK:     v25: mem = store.1 v24, v4, v21
 // CHECK:     br bb4(v25)
@@ -98,11 +98,6 @@
 // CHECK:   bb7(v34: mem):
 // CHECK:     ret v34
 // CHECK: }
-// CHECK:
-// CHECK: warning: IR verification failed for _RINvNtCsiYoX4ApF2vj_4core3ptr11write_byteshECsfeiporauljY_6memops, emitting stub
-// CHECK:   verification failed with 2 error(s):
-// CHECK:   [func @_RINvNtCsiYoX4ApF2vj_4core3ptr11write_byteshECsfeiporauljY_6memops] param 1: Int type requires annotation
-// CHECK:   [func @_RINvNtCsiYoX4ApF2vj_4core3ptr11write_byteshECsfeiporauljY_6memops] param 2: Int type requires annotation
 // CHECK:
 // CHECK: fn std::ptr::copy_nonoverlapping(_1: *const T, _2: *mut T, _3: usize) -> () {
 // CHECK:     debug src => _1;
@@ -144,11 +139,11 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @_RINvNtCsiYoX4ApF2vj_4core3ptr19copy_nonoverlappinghECsfeiporauljY_6memops(%src: ptr, %dst: ptr, %count: int) {
+// CHECK: func @_RINvNtCsiYoX4ApF2vj_4core3ptr19copy_nonoverlappinghECsfeiporauljY_6memops(%src: ptr, %dst: ptr, %count: int:u64) {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param %src
 // CHECK:     v2: ptr = param %dst
-// CHECK:     v3: int = param %count
+// CHECK:     v3: int:u64 = param %count
 // CHECK:     v4: int:i64 = iconst 0
 // CHECK:     v5: int:i64 = iconst 0
 // CHECK:     v6: bool = icmp.eq v4, v5
@@ -165,10 +160,6 @@
 // CHECK:     v14: mem, v15: int = call v13(v2, v1, v3), v12 -> int
 // CHECK:     ret v14
 // CHECK: }
-// CHECK:
-// CHECK: warning: IR verification failed for _RINvNtCsiYoX4ApF2vj_4core3ptr19copy_nonoverlappinghECsfeiporauljY_6memops, emitting stub
-// CHECK:   verification failed with 1 error(s):
-// CHECK:   [func @_RINvNtCsiYoX4ApF2vj_4core3ptr19copy_nonoverlappinghECsfeiporauljY_6memops] param 2: Int type requires annotation
 // CHECK:
 // CHECK: fn std::ptr::copy(_1: *const T, _2: *mut T, _3: usize) -> () {
 // CHECK:     debug src => _1;
@@ -228,11 +219,11 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @_RINvNtCsiYoX4ApF2vj_4core3ptr4copyhECsfeiporauljY_6memops(%src: ptr, %dst: ptr, %count: int) {
+// CHECK: func @_RINvNtCsiYoX4ApF2vj_4core3ptr4copyhECsfeiporauljY_6memops(%src: ptr, %dst: ptr, %count: int:u64) {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param %src
 // CHECK:     v2: ptr = param %dst
-// CHECK:     v3: int = param %count
+// CHECK:     v3: int:u64 = param %count
 // CHECK:     v4: ptr = stack_slot 1
 // CHECK:     v5: int:i64 = iconst 0
 // CHECK:     v6: int:i64 = iconst 0
@@ -255,7 +246,7 @@
 // CHECK:
 // CHECK:   bb3(v21: mem):
 // CHECK:     v22: int:i64 = iconst 0
-// CHECK:     v23: bool = icmp.eq v3, v22
+// CHECK:     v23: bool = icmp.eq v3, v22:u64
 // CHECK:     v24: int:u64 = bool_to_int v23
 // CHECK:     v25: mem = store.1 v24, v4, v21
 // CHECK:     br bb4(v25)
@@ -273,10 +264,6 @@
 // CHECK:   bb7(v34: mem):
 // CHECK:     ret v34
 // CHECK: }
-// CHECK:
-// CHECK: warning: IR verification failed for _RINvNtCsiYoX4ApF2vj_4core3ptr4copyhECsfeiporauljY_6memops, emitting stub
-// CHECK:   verification failed with 1 error(s):
-// CHECK:   [func @_RINvNtCsiYoX4ApF2vj_4core3ptr4copyhECsfeiporauljY_6memops] param 2: Int type requires annotation
 // CHECK:
 // CHECK: fn std::ptr::const_ptr::<impl *const T>::is_aligned_to(_1: *const T, _2: usize) -> bool {
 // CHECK:     debug self => _1;
@@ -394,10 +381,10 @@
 // CHECK: data @.Lstr.1 = "is_aligned_to: align is not a power-of-two"
 // CHECK: data @.Lloc_file.2 = "/usr/local/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/panic.rs"
 // CHECK: data @.Lloc.3 = "\0\0\0\0\0\0\0\0l\0\0\0\0\0\0\0>\0\0\0\t\0\0\0"
-// CHECK: func @_RNvMNtNtCsiYoX4ApF2vj_4core3ptr9const_ptrPu13is_aligned_toCsfeiporauljY_6memops(%self: ptr, %align: int) -> bool {
+// CHECK: func @_RNvMNtNtCsiYoX4ApF2vj_4core3ptr9const_ptrPu13is_aligned_toCsfeiporauljY_6memops(%self: ptr, %align: int:u64) -> bool {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param %self
-// CHECK:     v2: int = param %align
+// CHECK:     v2: int:u64 = param %align
 // CHECK:     v3: ptr = stack_slot 16
 // CHECK:     v4: ptr = stack_slot 16
 // CHECK:     v5: int:u64 = count_ones v2
@@ -406,52 +393,49 @@
 // CHECK:   bb1(v7: mem):
 // CHECK:     v8: int:u64 = ptrtoaddr v1
 // CHECK:     v9: int:i64 = iconst 1
-// CHECK:     v10: int:u64 = sub v2, v9
-// CHECK:     v11: int:u64 = and v8, v10
-// CHECK:     v12: int:i64 = iconst 0
-// CHECK:     v13: bool = icmp.eq v11, v12
-// CHECK:     v14: int:u64 = bool_to_int v13
-// CHECK:     v15: bool = int_to_bool v14
-// CHECK:     ret v15, v7
+// CHECK:     v10: int:u64 = sub v2, v9:u64
+// CHECK:     v11: int:u64 = zext v10, 64
+// CHECK:     v12: int:u64 = and v8, v11
+// CHECK:     v13: int:i64 = iconst 0
+// CHECK:     v14: bool = icmp.eq v12, v13:u64
+// CHECK:     v15: int:u64 = bool_to_int v14
+// CHECK:     v16: bool = int_to_bool v15
+// CHECK:     ret v16, v7
 // CHECK:
-// CHECK:   bb2(v17: mem):
-// CHECK:     v18: ptr = symbol_addr @.Lstr.0
-// CHECK:     v19: int:i64 = iconst 42
+// CHECK:   bb2(v18: mem):
+// CHECK:     v19: ptr = symbol_addr @.Lstr.0
 // CHECK:     v20: int:i64 = iconst 42
-// CHECK:     v21: mem = store.8 v18, v4, v17
-// CHECK:     v22: int:i64 = iconst 8
-// CHECK:     v23: ptr = ptradd v4, v22
-// CHECK:     v24: mem = store.8 v20, v23, v21
-// CHECK:     v25: int:i64 = iconst 42
-// CHECK:     v26: int:i64 = iconst 8
-// CHECK:     v27: ptr = ptradd v4, v26
-// CHECK:     v28: mem = store.8 v25, v27, v24
-// CHECK:     v29: ptr = load.8 v4, v28
-// CHECK:     v30: int:u64 = ptrtoaddr v29
-// CHECK:     v31: ptr = symbol_addr @.Lstr.1
-// CHECK:     v32: int:i64 = iconst 42
-// CHECK:     v33: mem = store.8 v30, v3, v28
-// CHECK:     v34: int:i64 = iconst 0
-// CHECK:     v35: int:i64 = iconst 8
-// CHECK:     v36: ptr = ptradd v3, v35
-// CHECK:     v37: mem = store.8 v34, v36, v33
-// CHECK:     v38: ptr = symbol_addr @.Lloc.3
-// CHECK:     v39: ptr = symbol_addr @_RNvNtCsiYoX4ApF2vj_4core9panicking9panic_fmt
-// CHECK:     v40: mem = call v39(v38), v37
-// CHECK:     v41: int:i64 = iconst 0
+// CHECK:     v21: int:i64 = iconst 42
+// CHECK:     v22: mem = store.8 v19, v4, v18
+// CHECK:     v23: int:i64 = iconst 8
+// CHECK:     v24: ptr = ptradd v4, v23
+// CHECK:     v25: mem = store.8 v21, v24, v22
+// CHECK:     v26: int:i64 = iconst 42
+// CHECK:     v27: int:i64 = iconst 8
+// CHECK:     v28: ptr = ptradd v4, v27
+// CHECK:     v29: mem = store.8 v26, v28, v25
+// CHECK:     v30: ptr = load.8 v4, v29
+// CHECK:     v31: int:u64 = ptrtoaddr v30
+// CHECK:     v32: ptr = symbol_addr @.Lstr.1
+// CHECK:     v33: int:i64 = iconst 42
+// CHECK:     v34: mem = store.8 v31, v3, v29
+// CHECK:     v35: int:i64 = iconst 0
+// CHECK:     v36: int:i64 = iconst 8
+// CHECK:     v37: ptr = ptradd v3, v36
+// CHECK:     v38: mem = store.8 v35, v37, v34
+// CHECK:     v39: ptr = symbol_addr @.Lloc.3
+// CHECK:     v40: ptr = symbol_addr @_RNvNtCsiYoX4ApF2vj_4core9panicking9panic_fmt
+// CHECK:     v41: mem = call v40(v39), v38
+// CHECK:     v42: int:i64 = iconst 0
 // CHECK:     unreachable
 // CHECK:
-// CHECK:   bb3(v43: mem):
-// CHECK:     v44: int:i64 = iconst 4294967295
-// CHECK:     v45: int:u64 = and v5, v44
-// CHECK:     v46: int:i64 = iconst 1
-// CHECK:     v47: bool = icmp.eq v45, v46
-// CHECK:     brif v47, bb1(v43), bb2(v43)
+// CHECK:   bb3(v44: mem):
+// CHECK:     v45: int:i64 = iconst 4294967295
+// CHECK:     v46: int:u64 = and v5, v45
+// CHECK:     v47: int:i64 = iconst 1
+// CHECK:     v48: bool = icmp.eq v46, v47
+// CHECK:     brif v48, bb1(v44), bb2(v44)
 // CHECK: }
-// CHECK:
-// CHECK: warning: IR verification failed for _RNvMNtNtCsiYoX4ApF2vj_4core3ptr9const_ptrPu13is_aligned_toCsfeiporauljY_6memops, emitting stub
-// CHECK:   verification failed with 1 error(s):
-// CHECK:   [func @_RNvMNtNtCsiYoX4ApF2vj_4core3ptr9const_ptrPu13is_aligned_toCsfeiporauljY_6memops] param 1: Int type requires annotation
 // CHECK:
 // CHECK: fn std::intrinsics::cold_path() -> () {
 // CHECK:     let mut _0: ();
@@ -619,10 +603,10 @@
 // CHECK: data @.Lstr.5 = "unsafe precondition(s) violated: ptr::write_bytes requires that the destination pointer is aligned and non-null\n\nThis indicates a bug in the program. This Undefined Behavior check is optional, and cannot be relied on for safety."
 // CHECK: data @.Lloc_file.6 = "/usr/local/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ub_checks.rs"
 // CHECK: data @.Lloc.7 = "\0\0\0\0\0\0\0\0p\0\0\0\0\0\0\0I\0\0\0\x15\0\0\0"
-// CHECK: func @_RNvNvNtCsiYoX4ApF2vj_4core3ptr11write_bytes18precondition_checkCsfeiporauljY_6memops(%self: ptr, %align: int, %is_zst: bool) {
+// CHECK: func @_RNvNvNtCsiYoX4ApF2vj_4core3ptr11write_bytes18precondition_checkCsfeiporauljY_6memops(%self: ptr, %align: int:u64, %is_zst: bool) {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param %self
-// CHECK:     v2: int = param %align
+// CHECK:     v2: int:u64 = param %align
 // CHECK:     v3: bool = param %is_zst
 // CHECK:     v4: ptr = stack_slot 16
 // CHECK:     v5: ptr = stack_slot 16
@@ -678,7 +662,7 @@
 // CHECK:   bb6(v50: mem):
 // CHECK:     v51: int:u64 = ptrtoaddr v1
 // CHECK:     v52: int:i64 = iconst 0
-// CHECK:     v53: bool = icmp.eq v51, v52
+// CHECK:     v53: bool = icmp.eq v51, v52:u64
 // CHECK:     v54: int:u64 = bool_to_int v53
 // CHECK:     v55: int:i64 = iconst 1
 // CHECK:     v56: int:u64 = xor v54, v55
@@ -696,10 +680,6 @@
 // CHECK:     v67: bool = icmp.eq v65, v66
 // CHECK:     brif v67, bb4(v62), bb3(v62)
 // CHECK: }
-// CHECK:
-// CHECK: warning: IR verification failed for _RNvNvNtCsiYoX4ApF2vj_4core3ptr11write_bytes18precondition_checkCsfeiporauljY_6memops, emitting stub
-// CHECK:   verification failed with 1 error(s):
-// CHECK:   [func @_RNvNvNtCsiYoX4ApF2vj_4core3ptr11write_bytes18precondition_checkCsfeiporauljY_6memops] param 1: Int type requires annotation
 // CHECK:
 // CHECK: fn std::ptr::copy_nonoverlapping::precondition_check(_1: *const (), _2: *mut (), _3: usize, _4: usize, _5: usize) -> () {
 // CHECK:     debug src => _1;
@@ -981,13 +961,13 @@
 // CHECK: data @.Lstr.9 = "unsafe precondition(s) violated: ptr::copy_nonoverlapping requires that both pointer arguments are aligned and non-null and the specified memory ranges do not overlap\n\nThis indicates a bug in the program. This Undefined Behavior check is optional, and cannot be relied on for safety."
 // CHECK: data @.Lloc_file.10 = "/usr/local/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ub_checks.rs"
 // CHECK: data @.Lloc.11 = "\0\0\0\0\0\0\0\0p\0\0\0\0\0\0\0I\0\0\0\x15\0\0\0"
-// CHECK: func @_RNvNvNtCsiYoX4ApF2vj_4core3ptr19copy_nonoverlapping18precondition_checkCsfeiporauljY_6memops(%self: ptr, %dst: ptr, %size: int, %count: int, %count: int) {
+// CHECK: func @_RNvNvNtCsiYoX4ApF2vj_4core3ptr19copy_nonoverlapping18precondition_checkCsfeiporauljY_6memops(%self: ptr, %dst: ptr, %size: int:u64, %count: int:u64, %count: int:u64) {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param %self
 // CHECK:     v2: ptr = param %dst
-// CHECK:     v3: int = param %size
-// CHECK:     v4: int = param %count
-// CHECK:     v5: int = param %count
+// CHECK:     v3: int:u64 = param %size
+// CHECK:     v4: int:u64 = param %count
+// CHECK:     v5: int:u64 = param %count
 // CHECK:     v6: ptr = stack_slot 1
 // CHECK:     v7: ptr = stack_slot 16
 // CHECK:     v8: ptr = stack_slot 16
@@ -1002,7 +982,7 @@
 // CHECK:
 // CHECK:   bb2(v16: mem):
 // CHECK:     v17: int:i64 = iconst 0
-// CHECK:     v18: bool = icmp.eq v3, v17
+// CHECK:     v18: bool = icmp.eq v3, v17:u64
 // CHECK:     v19: int:u64 = bool_to_int v18
 // CHECK:     v20: mem = store.1 v19, v6, v16
 // CHECK:     br bb3(v20)
@@ -1080,7 +1060,7 @@
 // CHECK:   bb14(v84: mem):
 // CHECK:     v85: int:u64 = ptrtoaddr v1
 // CHECK:     v86: int:i64 = iconst 0
-// CHECK:     v87: bool = icmp.eq v85, v86
+// CHECK:     v87: bool = icmp.eq v85, v86:u64
 // CHECK:     v88: int:u64 = bool_to_int v87
 // CHECK:     v89: int:i64 = iconst 1
 // CHECK:     v90: int:u64 = xor v88, v89
@@ -1116,7 +1096,7 @@
 // CHECK:   bb19(v115: mem):
 // CHECK:     v116: int:u64 = ptrtoaddr v2
 // CHECK:     v117: int:i64 = iconst 0
-// CHECK:     v118: bool = icmp.eq v116, v117
+// CHECK:     v118: bool = icmp.eq v116, v117:u64
 // CHECK:     v119: int:u64 = bool_to_int v118
 // CHECK:     v120: int:i64 = iconst 1
 // CHECK:     v121: int:u64 = xor v119, v120
@@ -1142,12 +1122,6 @@
 // CHECK:     v139: bool = icmp.eq v137, v138
 // CHECK:     brif v139, bb9(v134), bb10(v134)
 // CHECK: }
-// CHECK:
-// CHECK: warning: IR verification failed for _RNvNvNtCsiYoX4ApF2vj_4core3ptr19copy_nonoverlapping18precondition_checkCsfeiporauljY_6memops, emitting stub
-// CHECK:   verification failed with 3 error(s):
-// CHECK:   [func @_RNvNvNtCsiYoX4ApF2vj_4core3ptr19copy_nonoverlapping18precondition_checkCsfeiporauljY_6memops] param 2: Int type requires annotation
-// CHECK:   [func @_RNvNvNtCsiYoX4ApF2vj_4core3ptr19copy_nonoverlapping18precondition_checkCsfeiporauljY_6memops] param 3: Int type requires annotation
-// CHECK:   [func @_RNvNvNtCsiYoX4ApF2vj_4core3ptr19copy_nonoverlapping18precondition_checkCsfeiporauljY_6memops] param 4: Int type requires annotation
 // CHECK:
 // CHECK: fn std::ptr::copy::precondition_check(_1: *const (), _2: *mut (), _3: usize, _4: bool) -> () {
 // CHECK:     debug src => _1;
@@ -1392,11 +1366,11 @@
 // CHECK: data @.Lstr.13 = "unsafe precondition(s) violated: ptr::copy requires that both pointer arguments are aligned and non-null\n\nThis indicates a bug in the program. This Undefined Behavior check is optional, and cannot be relied on for safety."
 // CHECK: data @.Lloc_file.14 = "/usr/local/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ub_checks.rs"
 // CHECK: data @.Lloc.15 = "\0\0\0\0\0\0\0\0p\0\0\0\0\0\0\0I\0\0\0\x15\0\0\0"
-// CHECK: func @_RNvNvNtCsiYoX4ApF2vj_4core3ptr4copy18precondition_checkCsfeiporauljY_6memops(%self: ptr, %align: ptr, %is_zst: int, %zero_size: bool) {
+// CHECK: func @_RNvNvNtCsiYoX4ApF2vj_4core3ptr4copy18precondition_checkCsfeiporauljY_6memops(%self: ptr, %align: ptr, %is_zst: int:u64, %zero_size: bool) {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param %self
 // CHECK:     v2: ptr = param %align
-// CHECK:     v3: int = param %is_zst
+// CHECK:     v3: int:u64 = param %is_zst
 // CHECK:     v4: bool = param %zero_size
 // CHECK:     v5: ptr = stack_slot 8
 // CHECK:     v6: ptr = stack_slot 8
@@ -1467,7 +1441,7 @@
 // CHECK:   bb8(v65: mem):
 // CHECK:     v66: int:u64 = ptrtoaddr v1
 // CHECK:     v67: int:i64 = iconst 0
-// CHECK:     v68: bool = icmp.eq v66, v67
+// CHECK:     v68: bool = icmp.eq v66, v67:u64
 // CHECK:     v69: int:u64 = bool_to_int v68
 // CHECK:     v70: int:i64 = iconst 1
 // CHECK:     v71: int:u64 = xor v69, v70
@@ -1494,7 +1468,7 @@
 // CHECK:   bb12(v88: mem):
 // CHECK:     v89: int:u64 = ptrtoaddr v2
 // CHECK:     v90: int:i64 = iconst 0
-// CHECK:     v91: bool = icmp.eq v89, v90
+// CHECK:     v91: bool = icmp.eq v89, v90:u64
 // CHECK:     v92: int:u64 = bool_to_int v91
 // CHECK:     v93: int:i64 = iconst 1
 // CHECK:     v94: int:u64 = xor v92, v93
@@ -1531,10 +1505,6 @@
 // CHECK:     v123: bool = icmp.eq v121, v122
 // CHECK:     brif v123, bb10(v117), bb12(v117)
 // CHECK: }
-// CHECK:
-// CHECK: warning: IR verification failed for _RNvNvNtCsiYoX4ApF2vj_4core3ptr4copy18precondition_checkCsfeiporauljY_6memops, emitting stub
-// CHECK:   verification failed with 1 error(s):
-// CHECK:   [func @_RNvNvNtCsiYoX4ApF2vj_4core3ptr4copy18precondition_checkCsfeiporauljY_6memops] param 2: Int type requires annotation
 // CHECK:
 // CHECK: fn core::ub_checks::maybe_is_nonoverlapping::runtime(_1: *const (), _2: *const (), _3: usize, _4: usize) -> bool {
 // CHECK:     debug src => _1;
@@ -1694,12 +1664,12 @@
 // CHECK:     0x30 │ 66 6c 6f 77 73 20 61 20 75 73 69 7a 65          │ flows a usize
 // CHECK: }
 // CHECK: data @.Lstr.16 = "is_nonoverlapping: `size_of::<T>() * count` overflows a usize"
-// CHECK: func @_RNvNvNtCsiYoX4ApF2vj_4core9ub_checks23maybe_is_nonoverlapping7runtimeCsfeiporauljY_6memops(%self: ptr, %rhs: ptr, %size: int, %count: int) -> bool {
+// CHECK: func @_RNvNvNtCsiYoX4ApF2vj_4core9ub_checks23maybe_is_nonoverlapping7runtimeCsfeiporauljY_6memops(%self: ptr, %rhs: ptr, %size: int:u64, %count: int:u64) -> bool {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param %self
 // CHECK:     v2: ptr = param %rhs
-// CHECK:     v3: int = param %size
-// CHECK:     v4: int = param %count
+// CHECK:     v3: int:u64 = param %size
+// CHECK:     v4: int:u64 = param %count
 // CHECK:     v5: ptr = stack_slot 8
 // CHECK:     v6: ptr = stack_slot 16
 // CHECK:     v7: int:u64 = ptrtoaddr v1
@@ -1737,7 +1707,7 @@
 // CHECK:     v37: mem = store.8 v36, v6, v35
 // CHECK:     v38: int:i64 = iconst 8
 // CHECK:     v39: ptr = ptradd v6, v38
-// CHECK:     v40: int = load.8 v39, v37
+// CHECK:     v40: int:i64 = load.8 v39, v37
 // CHECK:     v41: bool = icmp.lt v7, v8
 // CHECK:     v42: int:u64 = bool_to_int v41
 // CHECK:     v43: int:i64 = iconst 255
@@ -1748,27 +1718,23 @@
 // CHECK:
 // CHECK:   bb4(v48: mem):
 // CHECK:     v49: int:u64 = sub v8, v7
-// CHECK:     v50: mem = store.8 v49, v5, v48
-// CHECK:     br bb6(v50)
+// CHECK:     v50: int:u64 = zext v49, 64
+// CHECK:     v51: mem = store.8 v50, v5, v48
+// CHECK:     br bb6(v51)
 // CHECK:
-// CHECK:   bb5(v52: mem):
-// CHECK:     v53: int:u64 = sub v7, v8
-// CHECK:     v54: mem = store.8 v53, v5, v52
-// CHECK:     br bb6(v54)
+// CHECK:   bb5(v53: mem):
+// CHECK:     v54: int:u64 = sub v7, v8
+// CHECK:     v55: int:u64 = zext v54, 64
+// CHECK:     v56: mem = store.8 v55, v5, v53
+// CHECK:     br bb6(v56)
 // CHECK:
-// CHECK:   bb6(v56: mem):
-// CHECK:     v57: int = load.8 v5, v56
-// CHECK:     v58: bool = icmp.ge v57, v40
-// CHECK:     v59: int:u64 = bool_to_int v58
-// CHECK:     v60: bool = int_to_bool v59
-// CHECK:     ret v60, v56
+// CHECK:   bb6(v58: mem):
+// CHECK:     v59: int:u64 = load.8 v5, v58
+// CHECK:     v60: bool = icmp.ge v59, v40:u64
+// CHECK:     v61: int:u64 = bool_to_int v60
+// CHECK:     v62: bool = int_to_bool v61
+// CHECK:     ret v62, v58
 // CHECK: }
-// CHECK:
-// CHECK: warning: IR verification failed for _RNvNvNtCsiYoX4ApF2vj_4core9ub_checks23maybe_is_nonoverlapping7runtimeCsfeiporauljY_6memops, emitting stub
-// CHECK:   verification failed with 3 error(s):
-// CHECK:   [func @_RNvNvNtCsiYoX4ApF2vj_4core9ub_checks23maybe_is_nonoverlapping7runtimeCsfeiporauljY_6memops] param 2: Int type requires annotation
-// CHECK:   [func @_RNvNvNtCsiYoX4ApF2vj_4core9ub_checks23maybe_is_nonoverlapping7runtimeCsfeiporauljY_6memops] param 3: Int type requires annotation
-// CHECK:   [func @_RNvNvNtCsiYoX4ApF2vj_4core9ub_checks23maybe_is_nonoverlapping7runtimeCsfeiporauljY_6memops, bb0, inst 8] result annotation: int annotation on non-Int type Bool
 // CHECK:
 // CHECK: fn test_copy(_1: *mut u8, _2: *const u8) -> () {
 // CHECK:     debug dst => _1;

@@ -8,7 +8,8 @@ use tuffy_ir::types::{Annotation, FloatType, IntAnnotation, IntSignedness, Memor
 use tuffy_ir::value::ValueRef;
 
 use super::ctx::TranslationCtx;
-use super::types::{default_int_annotation, default_int_type, type_align, type_size};
+use super::types::int_annotation_for_bytes;
+use super::types::{default_int_annotation, default_int_type, translate_annotation, type_align, type_size};
 
 const I64: IntAnnotation = IntAnnotation {
     bit_width: 64,
@@ -453,12 +454,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let a = ir_args[0];
                     let b = ir_args[1];
                     let c = ir_args[2];
-                    let bits = substs
-                        .first()
-                        .and_then(|arg| arg.as_type())
+                    let ty = substs.first().and_then(|arg| arg.as_type());
+                    let bits = ty
                         .and_then(|t| type_size(tcx, t))
                         .map(|sz| (sz * 8) as i64)
                         .unwrap_or(64);
+                    let ann = ty.and_then(translate_annotation);
                     let bits_val = self.builder.iconst(bits, 64, IntSignedness::DontCare, Origin::synthetic());
                     let complement =
                         self.builder
@@ -466,11 +467,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let (hi, lo) = if name == "unchecked_funnel_shl" {
                         (
                             self.builder
-                                .shl(a.into(), c.into(), None, Origin::synthetic()),
+                                .shl(a.into(), c.into(), ann, Origin::synthetic()),
                             self.builder.shr(
                                 b.into(),
                                 complement.into(),
-                                None,
+                                ann,
                                 Origin::synthetic(),
                             ),
                         )
@@ -479,11 +480,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             self.builder.shl(
                                 a.into(),
                                 complement.into(),
-                                None,
+                                ann,
                                 Origin::synthetic(),
                             ),
                             self.builder
-                                .shr(b.into(), c.into(), None, Origin::synthetic()),
+                                .shr(b.into(), c.into(), ann, Origin::synthetic()),
                         )
                     };
                     let result = self
@@ -691,7 +692,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         chunk,
                         default_int_type(),
                         mem.into(),
-                        None,
+                        int_annotation_for_bytes(chunk),
                         Origin::synthetic(),
                     );
                     let vy = self.builder.load(
@@ -699,7 +700,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         chunk,
                         default_int_type(),
                         mem.into(),
-                        None,
+                        int_annotation_for_bytes(chunk),
                         Origin::synthetic(),
                     );
                     mem = self.builder.store(

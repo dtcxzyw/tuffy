@@ -87,12 +87,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // of reading garbage bytes beyond the stored value.
                     let load_size = size.min(8) as u32;
                     let load_ty = translate_ty(self.tcx, ret_mir_ty).unwrap_or(default_int_type());
+                    let ann = translate_annotation(ret_mir_ty);
                     let word0 = self.builder.load(
                         slot.into(),
                         load_size,
                         load_ty,
                         self.current_mem.into(),
-                        None,
+                        ann,
                         Origin::synthetic(),
                     );
 
@@ -115,7 +116,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             8,
                             default_int_type(),
                             self.current_mem.into(),
-                            None,
+                            int_annotation_for_bytes(8),
                             Origin::synthetic(),
                         );
                         let ret_inst = self.builder.ret(
@@ -153,7 +154,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     ret_size,
                                     default_int_type(),
                                     self.current_mem.into(),
-                                    None,
+                                    int_annotation_for_bytes(ret_size),
                                     Origin::synthetic(),
                                 )
                             }
@@ -493,7 +494,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     byte_size,
                     default_int_type(),
                     self.current_mem.into(),
-                    None,
+                    int_annotation_for_bytes(byte_size),
                     Origin::synthetic(),
                 );
             } else {

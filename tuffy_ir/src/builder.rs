@@ -199,6 +199,31 @@ impl<'a> Builder<'a> {
             secondary_ty,
             origin,
             result_annotation: ann,
+            secondary_result_annotation: None,
+        });
+        if let Some(bb) = self.current_block {
+            self.func.blocks[bb.index() as usize].inst_count += 1;
+        }
+        ValueRef::inst_result(idx)
+    }
+
+    fn push_inst_with_secondary(
+        &mut self,
+        op: Op,
+        ty: Type,
+        secondary_ty: Type,
+        origin: Origin,
+        ann: Option<Annotation>,
+        secondary_ann: Option<Annotation>,
+    ) -> ValueRef {
+        let idx = self.func.instructions.len() as u32;
+        self.func.instructions.push(Instruction {
+            op,
+            ty,
+            secondary_ty: Some(secondary_ty),
+            origin,
+            result_annotation: ann,
+            secondary_result_annotation: secondary_ann,
         });
         if let Some(bb) = self.current_block {
             self.func.blocks[bb.index() as usize].inst_count += 1;
@@ -844,12 +869,13 @@ impl<'a> Builder<'a> {
             bit_width: bits,
             signedness: IntSignedness::Signed,
         });
-        let primary = self.push_inst(
+        let primary = self.push_inst_with_secondary(
             Op::SAddWithOverflow(a, b, bits),
             Type::Int,
-            Some(Type::Bool),
+            Type::Bool,
             origin,
             Some(ann),
+            None,
         );
         let secondary = ValueRef::inst_secondary_result(primary.index());
         (primary, secondary)
@@ -868,12 +894,13 @@ impl<'a> Builder<'a> {
             bit_width: bits,
             signedness: IntSignedness::Unsigned,
         });
-        let primary = self.push_inst(
+        let primary = self.push_inst_with_secondary(
             Op::UAddWithOverflow(a, b, bits),
             Type::Int,
-            Some(Type::Bool),
+            Type::Bool,
             origin,
             Some(ann),
+            None,
         );
         let secondary = ValueRef::inst_secondary_result(primary.index());
         (primary, secondary)
@@ -892,12 +919,13 @@ impl<'a> Builder<'a> {
             bit_width: bits,
             signedness: IntSignedness::Signed,
         });
-        let primary = self.push_inst(
+        let primary = self.push_inst_with_secondary(
             Op::SSubWithOverflow(a, b, bits),
             Type::Int,
-            Some(Type::Bool),
+            Type::Bool,
             origin,
             Some(ann),
+            None,
         );
         let secondary = ValueRef::inst_secondary_result(primary.index());
         (primary, secondary)
@@ -916,12 +944,13 @@ impl<'a> Builder<'a> {
             bit_width: bits,
             signedness: IntSignedness::Unsigned,
         });
-        let primary = self.push_inst(
+        let primary = self.push_inst_with_secondary(
             Op::USubWithOverflow(a, b, bits),
             Type::Int,
-            Some(Type::Bool),
+            Type::Bool,
             origin,
             Some(ann),
+            None,
         );
         let secondary = ValueRef::inst_secondary_result(primary.index());
         (primary, secondary)
@@ -940,12 +969,13 @@ impl<'a> Builder<'a> {
             bit_width: bits,
             signedness: IntSignedness::Signed,
         });
-        let primary = self.push_inst(
+        let primary = self.push_inst_with_secondary(
             Op::SMulWithOverflow(a, b, bits),
             Type::Int,
-            Some(Type::Bool),
+            Type::Bool,
             origin,
             Some(ann),
+            None,
         );
         let secondary = ValueRef::inst_secondary_result(primary.index());
         (primary, secondary)
@@ -964,12 +994,13 @@ impl<'a> Builder<'a> {
             bit_width: bits,
             signedness: IntSignedness::Unsigned,
         });
-        let primary = self.push_inst(
+        let primary = self.push_inst_with_secondary(
             Op::UMulWithOverflow(a, b, bits),
             Type::Int,
-            Some(Type::Bool),
+            Type::Bool,
             origin,
             Some(ann),
+            None,
         );
         let secondary = ValueRef::inst_secondary_result(primary.index());
         (primary, secondary)
@@ -1080,11 +1111,12 @@ impl<'a> Builder<'a> {
         ann: Option<Annotation>,
         origin: Origin,
     ) -> (ValueRef, ValueRef) {
-        let primary = self.push_inst(
+        let primary = self.push_inst_with_secondary(
             Op::LoadAtomic(ptr, ordering, mem),
             Type::Mem,
-            Some(ty),
+            ty,
             origin,
+            None,
             ann,
         );
         let secondary = ValueRef::inst_secondary_result(primary.index());
@@ -1122,11 +1154,12 @@ impl<'a> Builder<'a> {
         ann: Option<Annotation>,
         origin: Origin,
     ) -> (ValueRef, ValueRef) {
-        let primary = self.push_inst(
+        let primary = self.push_inst_with_secondary(
             Op::AtomicRmw(op, ptr, val, ordering, mem),
             Type::Mem,
-            Some(ty),
+            ty,
             origin,
+            None,
             ann,
         );
         let secondary = ValueRef::inst_secondary_result(primary.index());
@@ -1147,11 +1180,12 @@ impl<'a> Builder<'a> {
         ann: Option<Annotation>,
         origin: Origin,
     ) -> (ValueRef, ValueRef) {
-        let primary = self.push_inst(
+        let primary = self.push_inst_with_secondary(
             Op::AtomicCmpXchg(ptr, expected, desired, success_ord, failure_ord, mem),
             Type::Mem,
-            Some(ty),
+            ty,
             origin,
+            None,
             ann,
         );
         let secondary = ValueRef::inst_secondary_result(primary.index());
@@ -1190,11 +1224,12 @@ impl<'a> Builder<'a> {
                 self.push_inst(Op::Call(callee, args, mem), Type::Mem, None, origin, None);
             (primary, None)
         } else {
-            let primary = self.push_inst(
+            let primary = self.push_inst_with_secondary(
                 Op::Call(callee, args, mem),
                 Type::Mem,
-                Some(ret_ty),
+                ret_ty,
                 origin,
+                None,
                 ann,
             );
             let secondary = ValueRef::inst_secondary_result(primary.index());

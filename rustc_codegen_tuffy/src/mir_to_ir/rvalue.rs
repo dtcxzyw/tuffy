@@ -1,7 +1,7 @@
 use rustc_middle::mir::{self, BinOp, CastKind, Operand, Place, PlaceElem, Rvalue};
 use rustc_middle::ty::{self, Instance, TypeVisitableExt};
 use tuffy_ir::instruction::{FCmpOp, ICmpOp, Operand as IrOperand, Origin};
-use tuffy_ir::types::{FloatType, FpRewriteFlags, IntAnnotation, IntSignedness, Type};
+use tuffy_ir::types::{Annotation, FloatType, FpRewriteFlags, IntAnnotation, IntSignedness, Type};
 use tuffy_ir::value::ValueRef;
 
 use super::constant::*;
@@ -92,7 +92,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         chunk,
                         default_int_type(),
                         self.current_mem.into(),
-                        None,
+                        int_annotation_for_bytes(chunk),
                         Origin::synthetic(),
                     );
                     let dst = if byte_off == 0 {
@@ -184,7 +184,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             8,
                             default_int_type(),
                             self.current_mem.into(),
-                            None,
+                            int_annotation_for_bytes(8),
                             Origin::synthetic(),
                         );
                         idx_val = loaded;
@@ -343,12 +343,17 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             return Some(addr);
         }
         let ty = translate_ty(self.tcx, projected_ty).unwrap_or(default_int_type());
+        let ann = if matches!(ty, Type::Int) {
+            int_annotation_for_bytes(bytes)
+        } else {
+            None
+        };
         let data = self.builder.load(
             addr.into(),
             bytes,
             ty,
             self.current_mem.into(),
-            None,
+            ann,
             Origin::synthetic(),
         );
         Some(data)
@@ -428,7 +433,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     tag_size,
                     default_int_type(),
                     self.current_mem.into(),
-                    None,
+                    int_annotation_for_bytes(tag_size),
                     Origin::synthetic(),
                 );
 
@@ -579,7 +584,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             8,
                             default_int_type(),
                             self.current_mem.into(),
-                            None,
+                            int_annotation_for_bytes(8),
                             Origin::synthetic(),
                         );
                         return Some(meta);
@@ -1263,7 +1268,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     }
                     BinOp::Shl | BinOp::ShlUnchecked => {
                         let shift_val = r_op.value;
-                        // Rust masks shift amounts to % bit_width.
                         let lhs_bits = type_size(self.tcx, lhs_mir_ty).unwrap_or(8) as i64 * 8;
                         let mask_val = self.builder.iconst(lhs_bits - 1, 64, IntSignedness::DontCare, Origin::synthetic());
                         let masked = self.builder.and(
@@ -1276,8 +1280,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             value: masked,
                             annotation: None,
                         };
+                        let ann = res_ann.map(|ia| match ia {
+                            IntAnn::Signed(n) => Annotation::Int(IntAnnotation { bit_width: n, signedness: IntSignedness::Signed }),
+                            IntAnn::Unsigned(n) => Annotation::Int(IntAnnotation { bit_width: n, signedness: IntSignedness::Unsigned }),
+                            IntAnn::DontCare(n) => Annotation::Int(IntAnnotation { bit_width: n, signedness: IntSignedness::DontCare }),
+                        });
                         self.builder
-                            .shl(l_op, masked_op, None, Origin::synthetic())
+                            .shl(l_op, masked_op, ann, Origin::synthetic())
                     }
                     BinOp::BitOr => self.builder.or(l_op, r_op, I64, Origin::synthetic()),
                     BinOp::BitAnd => self.builder.and(l_op, r_op, I64, Origin::synthetic()),
@@ -1296,8 +1305,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             value: masked,
                             annotation: None,
                         };
+                        let ann = res_ann.map(|ia| match ia {
+                            IntAnn::Signed(n) => Annotation::Int(IntAnnotation { bit_width: n, signedness: IntSignedness::Signed }),
+                            IntAnn::Unsigned(n) => Annotation::Int(IntAnnotation { bit_width: n, signedness: IntSignedness::Unsigned }),
+                            IntAnn::DontCare(n) => Annotation::Int(IntAnnotation { bit_width: n, signedness: IntSignedness::DontCare }),
+                        });
                         self.builder
-                            .shr(l_op, masked_op, None, Origin::synthetic())
+                            .shr(l_op, masked_op, ann, Origin::synthetic())
                     }
                     BinOp::Div => self.builder.div(l_op, r_op, I64, Origin::synthetic()),
                     BinOp::Rem => self.builder.rem(l_op, r_op, I64, Origin::synthetic()),
@@ -1364,7 +1378,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 8,
                                 default_int_type(),
                                 self.current_mem.into(),
-                                None,
+                                int_annotation_for_bytes(8),
                                 Origin::synthetic(),
                             )
                         } else {
@@ -1805,12 +1819,17 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 if src_size > 8 {
                                     let ir_ty =
                                         translate_ty(self.tcx, target_ty_mono).unwrap_or(default_int_type());
+                                    let ann = if matches!(ir_ty, Type::Int) {
+                                        int_annotation_for_bytes(target_size as u32)
+                                    } else {
+                                        None
+                                    };
                                     let data = self.builder.load(
                                         val.into(),
                                         target_size as u32,
                                         ir_ty,
                                         self.current_mem.into(),
-                                        None,
+                                        ann,
                                         Origin::synthetic(),
                                     );
                                     return Some(data);
@@ -1835,12 +1854,17 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         && matches!(target_ir_ty, Some(Type::Int | Type::Float(_)))
                                     {
                                         let load_ty = target_ir_ty.unwrap();
+                                        let ann = if matches!(load_ty, Type::Int) {
+                                            int_annotation_for_bytes(target_size as u32)
+                                        } else {
+                                            None
+                                        };
                                         let loaded = self.builder.load(
                                             val.into(),
                                             target_size as u32,
                                             load_ty,
                                             self.current_mem.into(),
-                                            None,
+                                            ann,
                                             Origin::synthetic(),
                                         );
                                         return Some(loaded);
@@ -2220,7 +2244,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 word_size,
                                 default_int_type(),
                                 self.current_mem.into(),
-                                None,
+                                int_annotation_for_bytes(word_size),
                                 Origin::synthetic(),
                             );
                             let dst = if byte_off == 0 {
@@ -2252,7 +2276,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             bytes,
                             default_int_type(),
                             self.current_mem.into(),
-                            None,
+                            int_annotation_for_bytes(bytes),
                             Origin::synthetic(),
                         );
                         self.current_mem = self.builder.store(
@@ -2315,7 +2339,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         8,
                         default_int_type(),
                         self.current_mem.into(),
-                        None,
+                        int_annotation_for_bytes(8),
                         Origin::synthetic(),
                     );
                     return Some(data);
@@ -2335,7 +2359,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         8,
                         default_int_type(),
                         self.current_mem.into(),
-                        None,
+                        int_annotation_for_bytes(8),
                         Origin::synthetic(),
                     );
                     return Some(data);
@@ -2379,7 +2403,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         sz,
                         default_int_type(),
                         self.current_mem.into(),
-                        None,
+                        int_annotation_for_bytes(sz),
                         Origin::synthetic(),
                     )
                 } else {
@@ -2437,7 +2461,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 sz,
                                 default_int_type(),
                                 self.current_mem.into(),
-                                None,
+                                int_annotation_for_bytes(sz),
                                 Origin::synthetic(),
                             );
                             let ones = self.builder.iconst(-1, 64, IntSignedness::DontCare, Origin::synthetic());

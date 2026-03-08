@@ -1257,6 +1257,7 @@ fn verify_detects_wrong_arith_operand_type() {
             secondary_ty: None,
             origin: Origin::synthetic(),
             result_annotation: None,
+            secondary_result_annotation: None,
         },
     );
     func.blocks[bb.index() as usize].inst_count += 1;

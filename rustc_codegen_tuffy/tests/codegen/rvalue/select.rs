@@ -23,11 +23,11 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @select_i64(%cond: bool, %a: int, %b: int) -> int {
+// CHECK: func @select_i64(%cond: bool, %a: int:s64, %b: int:s64) -> int:s64 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: bool = param %cond
-// CHECK:     v2: int = param %a
-// CHECK:     v3: int = param %b
+// CHECK:     v2: int:s64 = param %a
+// CHECK:     v3: int:s64 = param %b
 // CHECK:     v4: ptr = stack_slot 8
 // CHECK:     v5: int:u64 = bool_to_int v1
 // CHECK:     v6: int:i64 = iconst 255
@@ -45,15 +45,9 @@
 // CHECK:     br bb3(v15)
 // CHECK:
 // CHECK:   bb3(v17: mem):
-// CHECK:     v18: int = load.8 v4, v17
+// CHECK:     v18: int:s64 = load.8 v4, v17
 // CHECK:     ret v18, v17
 // CHECK: }
-// CHECK:
-// CHECK: warning: IR verification failed for select_i64, emitting stub
-// CHECK:   verification failed with 3 error(s):
-// CHECK:   [func @select_i64] param 1: Int type requires annotation
-// CHECK:   [func @select_i64] param 2: Int type requires annotation
-// CHECK:   [func @select_i64] return type: Int type requires annotation
 // CHECK:
 // CHECK: fn select_u32(_1: bool, _2: u32, _3: u32) -> u32 {
 // CHECK:     debug cond => _1;
@@ -79,11 +73,11 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @select_u32(%cond: bool, %a: int, %b: int) -> int {
+// CHECK: func @select_u32(%cond: bool, %a: int:u32, %b: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: bool = param %cond
-// CHECK:     v2: int = param %a
-// CHECK:     v3: int = param %b
+// CHECK:     v2: int:u32 = param %a
+// CHECK:     v3: int:u32 = param %b
 // CHECK:     v4: ptr = stack_slot 4
 // CHECK:     v5: int:u64 = bool_to_int v1
 // CHECK:     v6: int:i64 = iconst 255
@@ -101,15 +95,9 @@
 // CHECK:     br bb3(v15)
 // CHECK:
 // CHECK:   bb3(v17: mem):
-// CHECK:     v18: int = load.4 v4, v17
+// CHECK:     v18: int:u32 = load.4 v4, v17
 // CHECK:     ret v18, v17
 // CHECK: }
-// CHECK:
-// CHECK: warning: IR verification failed for select_u32, emitting stub
-// CHECK:   verification failed with 3 error(s):
-// CHECK:   [func @select_u32] param 1: Int type requires annotation
-// CHECK:   [func @select_u32] param 2: Int type requires annotation
-// CHECK:   [func @select_u32] return type: Int type requires annotation
 // CHECK:
 
 #![crate_type = "lib"]

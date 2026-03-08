@@ -9,19 +9,13 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @unchecked_add_u32(%a: int, %b: int) -> int {
+// CHECK: func @unchecked_add_u32(%a: int:u32, %b: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int = param %a
-// CHECK:     v2: int = param %b
+// CHECK:     v1: int:u32 = param %a
+// CHECK:     v2: int:u32 = param %b
 // CHECK:     v3: int:u64 = add v1, v2
 // CHECK:     ret v3, v0
 // CHECK: }
-// CHECK:
-// CHECK: warning: IR verification failed for unchecked_add_u32, emitting stub
-// CHECK:   verification failed with 3 error(s):
-// CHECK:   [func @unchecked_add_u32] param 0: Int type requires annotation
-// CHECK:   [func @unchecked_add_u32] param 1: Int type requires annotation
-// CHECK:   [func @unchecked_add_u32] return type: Int type requires annotation
 // CHECK:
 // CHECK: fn unchecked_mul_u32(_1: u32, _2: u32) -> u32 {
 // CHECK:     debug a => _1;
@@ -33,19 +27,13 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @unchecked_mul_u32(%a: int, %b: int) -> int {
+// CHECK: func @unchecked_mul_u32(%a: int:u32, %b: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int = param %a
-// CHECK:     v2: int = param %b
+// CHECK:     v1: int:u32 = param %a
+// CHECK:     v2: int:u32 = param %b
 // CHECK:     v3: int:u64 = mul v1, v2
 // CHECK:     ret v3, v0
 // CHECK: }
-// CHECK:
-// CHECK: warning: IR verification failed for unchecked_mul_u32, emitting stub
-// CHECK:   verification failed with 3 error(s):
-// CHECK:   [func @unchecked_mul_u32] param 0: Int type requires annotation
-// CHECK:   [func @unchecked_mul_u32] param 1: Int type requires annotation
-// CHECK:   [func @unchecked_mul_u32] return type: Int type requires annotation
 // CHECK:
 // CHECK: fn unchecked_shl_u32(_1: u32, _2: u32) -> u32 {
 // CHECK:     debug a => _1;
@@ -57,21 +45,15 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @unchecked_shl_u32(%a: int, %b: int) -> int {
+// CHECK: func @unchecked_shl_u32(%a: int:u32, %b: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int = param %a
-// CHECK:     v2: int = param %b
+// CHECK:     v1: int:u32 = param %a
+// CHECK:     v2: int:u32 = param %b
 // CHECK:     v3: int:i64 = iconst 31
 // CHECK:     v4: int:u64 = and v2, v3
-// CHECK:     v5: int = shl v1, v4
+// CHECK:     v5: int:u32 = shl v1, v4
 // CHECK:     ret v5, v0
 // CHECK: }
-// CHECK:
-// CHECK: warning: IR verification failed for unchecked_shl_u32, emitting stub
-// CHECK:   verification failed with 3 error(s):
-// CHECK:   [func @unchecked_shl_u32] param 0: Int type requires annotation
-// CHECK:   [func @unchecked_shl_u32] param 1: Int type requires annotation
-// CHECK:   [func @unchecked_shl_u32] return type: Int type requires annotation
 // CHECK:
 // CHECK: fn unchecked_shr_u32(_1: u32, _2: u32) -> u32 {
 // CHECK:     debug a => _1;
@@ -83,21 +65,15 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @unchecked_shr_u32(%a: int, %b: int) -> int {
+// CHECK: func @unchecked_shr_u32(%a: int:u32, %b: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int = param %a
-// CHECK:     v2: int = param %b
+// CHECK:     v1: int:u32 = param %a
+// CHECK:     v2: int:u32 = param %b
 // CHECK:     v3: int:i64 = iconst 31
 // CHECK:     v4: int:u64 = and v2, v3
-// CHECK:     v5: int = shr v1, v4
+// CHECK:     v5: int:u32 = shr v1, v4
 // CHECK:     ret v5, v0
 // CHECK: }
-// CHECK:
-// CHECK: warning: IR verification failed for unchecked_shr_u32, emitting stub
-// CHECK:   verification failed with 3 error(s):
-// CHECK:   [func @unchecked_shr_u32] param 0: Int type requires annotation
-// CHECK:   [func @unchecked_shr_u32] param 1: Int type requires annotation
-// CHECK:   [func @unchecked_shr_u32] return type: Int type requires annotation
 // CHECK:
 // CHECK: fn unchecked_sub_u32(_1: u32, _2: u32) -> u32 {
 // CHECK:     debug a => _1;
@@ -109,19 +85,13 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @unchecked_sub_u32(%a: int, %b: int) -> int {
+// CHECK: func @unchecked_sub_u32(%a: int:u32, %b: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int = param %a
-// CHECK:     v2: int = param %b
+// CHECK:     v1: int:u32 = param %a
+// CHECK:     v2: int:u32 = param %b
 // CHECK:     v3: int:u64 = sub v1, v2
 // CHECK:     ret v3, v0
 // CHECK: }
-// CHECK:
-// CHECK: warning: IR verification failed for unchecked_sub_u32, emitting stub
-// CHECK:   verification failed with 3 error(s):
-// CHECK:   [func @unchecked_sub_u32] param 0: Int type requires annotation
-// CHECK:   [func @unchecked_sub_u32] param 1: Int type requires annotation
-// CHECK:   [func @unchecked_sub_u32] return type: Int type requires annotation
 // CHECK:
 
 #![crate_type = "lib"]

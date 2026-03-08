@@ -59,6 +59,14 @@ pub(super) fn default_int_annotation() -> Option<Annotation> {
     }))
 }
 
+/// Helper to create an Int annotation for a given number of bytes.
+pub(super) fn int_annotation_for_bytes(bytes: u32) -> Option<Annotation> {
+    Some(Annotation::Int(IntAnnotation {
+        bit_width: bytes * 8,
+        signedness: IntSignedness::DontCare,
+    }))
+}
+
 /// Look up the fully-monomorphized layout for a type, or return `None` on failure.
 ///
 /// All layout queries in this module use fully-monomorphized types, so this
@@ -131,10 +139,19 @@ pub(super) fn translate_ty<'tcx>(_tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> Option
 }
 
 pub(super) fn translate_annotation(ty: ty::Ty<'_>) -> Option<Annotation> {
-    // Integer annotations are now part of Type::Int.
-    // This function only handles pointer alignment annotations.
     match ty.kind() {
-        ty::RawPtr(..) | ty::Ref(..) | ty::FnPtr(..) => None,
+        ty::Int(_) | ty::Uint(_) => {
+            int_bitwidth(ty).map(|bw| {
+                Annotation::Int(IntAnnotation {
+                    bit_width: bw,
+                    signedness: if is_signed_int(ty) {
+                        IntSignedness::Signed
+                    } else {
+                        IntSignedness::Unsigned
+                    },
+                })
+            })
+        }
         _ => None,
     }
 }

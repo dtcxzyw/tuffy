@@ -8,18 +8,13 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @narrow_i64_to_i32(%a: int) -> int {
+// CHECK: func @narrow_i64_to_i32(%a: int:s64) -> int:s32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int = param %a
+// CHECK:     v1: int:s64 = param %a
 // CHECK:     v2: int:i64 = iconst 4294967295
 // CHECK:     v3: int:u64 = and v1, v2
 // CHECK:     ret v3, v0
 // CHECK: }
-// CHECK:
-// CHECK: warning: IR verification failed for narrow_i64_to_i32, emitting stub
-// CHECK:   verification failed with 2 error(s):
-// CHECK:   [func @narrow_i64_to_i32] param 0: Int type requires annotation
-// CHECK:   [func @narrow_i64_to_i32] return type: Int type requires annotation
 // CHECK:
 // CHECK: fn widen_i32_to_i64(_1: i32) -> i64 {
 // CHECK:     debug a => _1;
@@ -30,20 +25,15 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @widen_i32_to_i64(%a: int) -> int {
+// CHECK: func @widen_i32_to_i64(%a: int:s32) -> int:s64 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int = param %a
+// CHECK:     v1: int:s32 = param %a
 // CHECK:     v2: int:i64 = iconst 32
-// CHECK:     v3: int = shl v1, v2
+// CHECK:     v3: int:s64 = shl v1, v2
 // CHECK:     v4: int:i64 = iconst 32
-// CHECK:     v5: int = shr v3, v4
+// CHECK:     v5: int:s64 = shr v3, v4
 // CHECK:     ret v5, v0
 // CHECK: }
-// CHECK:
-// CHECK: warning: IR verification failed for widen_i32_to_i64, emitting stub
-// CHECK:   verification failed with 2 error(s):
-// CHECK:   [func @widen_i32_to_i64] param 0: Int type requires annotation
-// CHECK:   [func @widen_i32_to_i64] return type: Int type requires annotation
 // CHECK:
 // CHECK: fn widen_u32_to_u64(_1: u32) -> u64 {
 // CHECK:     debug a => _1;
@@ -54,18 +44,13 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @widen_u32_to_u64(%a: int) -> int {
+// CHECK: func @widen_u32_to_u64(%a: int:u32) -> int:u64 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int = param %a
+// CHECK:     v1: int:u32 = param %a
 // CHECK:     v2: int:i64 = iconst 4294967295
 // CHECK:     v3: int:u64 = and v1, v2
 // CHECK:     ret v3, v0
 // CHECK: }
-// CHECK:
-// CHECK: warning: IR verification failed for widen_u32_to_u64, emitting stub
-// CHECK:   verification failed with 2 error(s):
-// CHECK:   [func @widen_u32_to_u64] param 0: Int type requires annotation
-// CHECK:   [func @widen_u32_to_u64] return type: Int type requires annotation
 // CHECK:
 
 #![crate_type = "lib"]

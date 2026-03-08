@@ -26,9 +26,9 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @switch_three(%x: int) -> int {
+// CHECK: func @switch_three(%x: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int = param %x
+// CHECK:     v1: int:u32 = param %x
 // CHECK:     v2: ptr = stack_slot 4
 // CHECK:     v3: int:i64 = iconst 4294967295
 // CHECK:     v4: int:u64 = and v1, v3
@@ -52,7 +52,7 @@
 // CHECK:     br bb4(v18)
 // CHECK:
 // CHECK:   bb4(v20: mem):
-// CHECK:     v21: int = load.4 v2, v20
+// CHECK:     v21: int:u32 = load.4 v2, v20
 // CHECK:     ret v21, v20
 // CHECK:
 // CHECK:   bb5(v23: mem):
@@ -60,11 +60,6 @@
 // CHECK:     v25: bool = icmp.eq v4, v24
 // CHECK:     brif v25, bb2(v23), bb1(v23)
 // CHECK: }
-// CHECK:
-// CHECK: warning: IR verification failed for switch_three, emitting stub
-// CHECK:   verification failed with 2 error(s):
-// CHECK:   [func @switch_three] param 0: Int type requires annotation
-// CHECK:   [func @switch_three] return type: Int type requires annotation
 // CHECK:
 
 #![crate_type = "lib"]

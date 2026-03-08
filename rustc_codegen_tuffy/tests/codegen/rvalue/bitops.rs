@@ -9,19 +9,13 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @bitand_u32(%a: int, %b: int) -> int {
+// CHECK: func @bitand_u32(%a: int:u32, %b: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int = param %a
-// CHECK:     v2: int = param %b
+// CHECK:     v1: int:u32 = param %a
+// CHECK:     v2: int:u32 = param %b
 // CHECK:     v3: int:u64 = and v1, v2
 // CHECK:     ret v3, v0
 // CHECK: }
-// CHECK:
-// CHECK: warning: IR verification failed for bitand_u32, emitting stub
-// CHECK:   verification failed with 3 error(s):
-// CHECK:   [func @bitand_u32] param 0: Int type requires annotation
-// CHECK:   [func @bitand_u32] param 1: Int type requires annotation
-// CHECK:   [func @bitand_u32] return type: Int type requires annotation
 // CHECK:
 // CHECK: fn bitor_u32(_1: u32, _2: u32) -> u32 {
 // CHECK:     debug a => _1;
@@ -33,19 +27,13 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @bitor_u32(%a: int, %b: int) -> int {
+// CHECK: func @bitor_u32(%a: int:u32, %b: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int = param %a
-// CHECK:     v2: int = param %b
+// CHECK:     v1: int:u32 = param %a
+// CHECK:     v2: int:u32 = param %b
 // CHECK:     v3: int:u64 = or v1, v2
 // CHECK:     ret v3, v0
 // CHECK: }
-// CHECK:
-// CHECK: warning: IR verification failed for bitor_u32, emitting stub
-// CHECK:   verification failed with 3 error(s):
-// CHECK:   [func @bitor_u32] param 0: Int type requires annotation
-// CHECK:   [func @bitor_u32] param 1: Int type requires annotation
-// CHECK:   [func @bitor_u32] return type: Int type requires annotation
 // CHECK:
 // CHECK: fn bitxor_u32(_1: u32, _2: u32) -> u32 {
 // CHECK:     debug a => _1;
@@ -57,19 +45,13 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @bitxor_u32(%a: int, %b: int) -> int {
+// CHECK: func @bitxor_u32(%a: int:u32, %b: int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int = param %a
-// CHECK:     v2: int = param %b
+// CHECK:     v1: int:u32 = param %a
+// CHECK:     v2: int:u32 = param %b
 // CHECK:     v3: int:u64 = xor v1, v2
 // CHECK:     ret v3, v0
 // CHECK: }
-// CHECK:
-// CHECK: warning: IR verification failed for bitxor_u32, emitting stub
-// CHECK:   verification failed with 3 error(s):
-// CHECK:   [func @bitxor_u32] param 0: Int type requires annotation
-// CHECK:   [func @bitxor_u32] param 1: Int type requires annotation
-// CHECK:   [func @bitxor_u32] return type: Int type requires annotation
 // CHECK:
 
 #![crate_type = "lib"]
