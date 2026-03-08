@@ -11,9 +11,7 @@
 // CHECK: func @narrow_i64_to_i32(%a: int:s64) -> int:s32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:s64 = param %a
-// CHECK:     v2: int:i64 = iconst 4294967295
-// CHECK:     v3: int:u64 = and v1, v2
-// CHECK:     ret v3, v0
+// CHECK:     ret v1, v0
 // CHECK: }
 // CHECK:
 // CHECK: fn widen_i32_to_i64(_1: i32) -> i64 {
@@ -28,11 +26,8 @@
 // CHECK: func @widen_i32_to_i64(%a: int:s32) -> int:s64 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:s32 = param %a
-// CHECK:     v2: int:i64 = iconst 32
-// CHECK:     v3: int:s64 = shl v1, v2
-// CHECK:     v4: int:i64 = iconst 32
-// CHECK:     v5: int:s64 = shr v3, v4
-// CHECK:     ret v5, v0
+// CHECK:     v2: int:s32 = sext v1, 32
+// CHECK:     ret v2, v0
 // CHECK: }
 // CHECK:
 // CHECK: fn widen_u32_to_u64(_1: u32) -> u64 {
@@ -47,9 +42,8 @@
 // CHECK: func @widen_u32_to_u64(%a: int:u32) -> int:u64 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u32 = param %a
-// CHECK:     v2: int:i64 = iconst 4294967295
-// CHECK:     v3: int:u64 = and v1, v2
-// CHECK:     ret v3, v0
+// CHECK:     v2: int:u32 = zext v1, 32
+// CHECK:     ret v2, v0
 // CHECK: }
 // CHECK:
 
