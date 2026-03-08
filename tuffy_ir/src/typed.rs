@@ -485,3 +485,46 @@ impl From<ByteValue> for ByteOperand {
         Self(Operand::new(v.0))
     }
 }
+
+// Conversions from typed operands to Operand
+impl From<IntOperand> for Operand {
+    fn from(op: IntOperand) -> Self {
+        op.0
+    }
+}
+
+impl From<BoolOperand> for Operand {
+    fn from(op: BoolOperand) -> Self {
+        op.0
+    }
+}
+
+impl From<FloatOperand> for Operand {
+    fn from(op: FloatOperand) -> Self {
+        op.0
+    }
+}
+
+impl From<PtrOperand> for Operand {
+    fn from(op: PtrOperand) -> Self {
+        op.0
+    }
+}
+
+impl From<MemOperand> for Operand {
+    fn from(op: MemOperand) -> Self {
+        op.0
+    }
+}
+
+impl From<UnitOperand> for Operand {
+    fn from(op: UnitOperand) -> Self {
+        op.0
+    }
+}
+
+impl From<ByteOperand> for Operand {
+    fn from(op: ByteOperand) -> Self {
+        op.0
+    }
+}

@@ -15,7 +15,11 @@ pub fn generate(spec: &IselSpec) -> String {
         writeln!(out, "{import}").unwrap();
     }
     writeln!(out, "use tuffy_ir::instruction::{{ICmpOp, Op}};").unwrap();
-    writeln!(out, "use tuffy_ir::types::Annotation;").unwrap();
+    writeln!(
+        out,
+        "use tuffy_ir::types::{{Annotation, IntAnnotation, IntSignedness}};"
+    )
+    .unwrap();
     writeln!(out, "use tuffy_ir::value::ValueRef;").unwrap();
     writeln!(out, "use tuffy_regalloc::VReg;").unwrap();
     writeln!(out).unwrap();
@@ -170,7 +174,8 @@ fn generate_rule_fn(out: &mut String, rule: &IselRule, metadata: &IselMetadata) 
             writeln!(out, "    ctx.regs.assign(vref, {var});").unwrap();
         }
         ResultKind::CmpFlags => {
-            writeln!(out, "    let cc = super::icmp_to_cc(cmp_op, lhs_ann);").unwrap();
+            writeln!(out, "    let int_ann = lhs_ann.and_then(|a| if let Annotation::Int(ia) = a {{ Some(ia) }} else {{ None }});").unwrap();
+            writeln!(out, "    let cc = super::icmp_to_cc(cmp_op, int_ann);").unwrap();
             writeln!(out, "    ctx.cmps.set(vref, cc);").unwrap();
         }
         ResultKind::None => {}
@@ -279,8 +284,9 @@ fn emit_inst(
                             .unwrap();
                         writeln!(
                             &mut alloc_buf,
-                            "        Some(Annotation::Signed(bits)) | Some(Annotation::Unsigned(bits)) => match bits {{"
-                        ).unwrap();
+                            "        Some(Annotation::Int(int_ann)) => match int_ann.bit_width {{"
+                        )
+                        .unwrap();
                         writeln!(&mut alloc_buf, "            8 => OpSize::S8,").unwrap();
                         writeln!(&mut alloc_buf, "            16 => OpSize::S16,").unwrap();
                         writeln!(&mut alloc_buf, "            32 => OpSize::S32,").unwrap();
@@ -381,7 +387,7 @@ fn generate_dispatch(out: &mut String, rules: &[IselRule]) {
         for (var, field) in &operand_names {
             writeln!(
                 out,
-                "            let {var} = ctx.ensure_in_reg({field}.value)?;"
+                "            let {var} = ctx.ensure_in_reg({field}.clone().raw().value)?;"
             )
             .unwrap();
         }
@@ -397,7 +403,7 @@ fn generate_dispatch(out: &mut String, rules: &[IselRule]) {
             let ann_regs = needs_annotation_params(rule);
             let ann_args: String = ann_regs
                 .iter()
-                .map(|r| format!(", {r}.annotation"))
+                .map(|r| format!(", {r}.clone().raw().annotation"))
                 .collect::<Vec<_>>()
                 .join("");
             writeln!(
@@ -409,7 +415,11 @@ fn generate_dispatch(out: &mut String, rules: &[IselRule]) {
         } else {
             // Multiple rules with annotation guards — dispatch on lhs annotation.
             let first_field = &operand_names[0].1;
-            writeln!(out, "            match {first_field}.annotation {{").unwrap();
+            writeln!(
+                out,
+                "            match {first_field}.clone().raw().annotation {{"
+            )
+            .unwrap();
 
             let mut has_any = false;
 
@@ -422,14 +432,14 @@ fn generate_dispatch(out: &mut String, rules: &[IselRule]) {
                 let ann_regs = needs_annotation_params(rule);
                 let ann_args: String = ann_regs
                     .iter()
-                    .map(|r| format!(", {r}.annotation"))
+                    .map(|r| format!(", {r}.clone().raw().annotation"))
                     .collect::<Vec<_>>()
                     .join("");
                 match guard {
                     AnnGuard::Signed => {
                         writeln!(
                             out,
-                            "                Some(Annotation::Signed(_)) => gen_{rule_name}(ctx, vref, {args}{ann_args}),",
+                            "                Some(Annotation::Int(IntAnnotation {{ signedness: IntSignedness::Signed, .. }})) => gen_{rule_name}(ctx, vref, {args}{ann_args}),",
                             rule_name = rule.name
                         )
                         .unwrap();
@@ -437,7 +447,7 @@ fn generate_dispatch(out: &mut String, rules: &[IselRule]) {
                     AnnGuard::Unsigned => {
                         writeln!(
                             out,
-                            "                Some(Annotation::Unsigned(_)) => gen_{rule_name}(ctx, vref, {args}{ann_args}),",
+                            "                Some(Annotation::Int(IntAnnotation {{ signedness: IntSignedness::Unsigned, .. }})) => gen_{rule_name}(ctx, vref, {args}{ann_args}),",
                             rule_name = rule.name
                         )
                         .unwrap();
@@ -471,7 +481,7 @@ fn generate_dispatch(out: &mut String, rules: &[IselRule]) {
                 let ann_regs = needs_annotation_params(default_rule);
                 let ann_args: String = ann_regs
                     .iter()
-                    .map(|r| format!(", {r}.annotation"))
+                    .map(|r| format!(", {r}.clone().raw().annotation"))
                     .collect::<Vec<_>>()
                     .join("");
                 writeln!(
@@ -491,11 +501,19 @@ fn generate_dispatch(out: &mut String, rules: &[IselRule]) {
     // ICmp arm.
     if let Some(rule) = icmp_rule {
         writeln!(out, "        Op::ICmp(cmp_op, lhs, rhs) => {{").unwrap();
-        writeln!(out, "            let l = ctx.ensure_in_reg(lhs.value)?;").unwrap();
-        writeln!(out, "            let r = ctx.ensure_in_reg(rhs.value)?;").unwrap();
         writeln!(
             out,
-            "            gen_{name}(ctx, vref, l, r, *cmp_op, lhs.annotation)",
+            "            let l = ctx.ensure_in_reg(lhs.clone().raw().value)?;"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "            let r = ctx.ensure_in_reg(rhs.clone().raw().value)?;"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "            gen_{name}(ctx, vref, l, r, *cmp_op, lhs.clone().raw().annotation)",
             name = rule.name
         )
         .unwrap();
@@ -516,6 +534,9 @@ fn op_variant_pattern(op_name: &str) -> &'static str {
         "Or" => "Op::Or(lhs, rhs)",
         "And" => "Op::And(lhs, rhs)",
         "Xor" => "Op::Xor(lhs, rhs)",
+        "BAnd" => "Op::BAnd(lhs, rhs)",
+        "BOr" => "Op::BOr(lhs, rhs)",
+        "BXor" => "Op::BXor(lhs, rhs)",
         "Shl" => "Op::Shl(lhs, rhs)",
         "Shr" => "Op::Shr(lhs, rhs)",
         "Min" => "Op::Min(lhs, rhs)",
@@ -532,8 +553,8 @@ fn op_variant_pattern(op_name: &str) -> &'static str {
 /// Map an IR op name to its operand variable names and field accessors.
 fn op_operand_names(op_name: &str) -> Vec<(String, String)> {
     match op_name {
-        "Add" | "Sub" | "Mul" | "Or" | "And" | "Xor" | "Shl" | "Shr" | "Min" | "Max"
-        | "PtrDiff" => {
+        "Add" | "Sub" | "Mul" | "Or" | "And" | "Xor" | "BAnd" | "BOr" | "BXor" | "Shl" | "Shr"
+        | "Min" | "Max" | "PtrDiff" => {
             vec![
                 ("l".to_string(), "lhs".to_string()),
                 ("r".to_string(), "rhs".to_string()),

@@ -324,111 +324,171 @@ fn fmt_inst(
             }
         }
         Op::Add(a, b) => {
-            format!("{v} = add {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+            format!(
+                "{v} = add {}, {}",
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
+            )
         }
         Op::Sub(a, b) => {
-            format!("{v} = sub {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+            format!(
+                "{v} = sub {}, {}",
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
+            )
         }
         Op::Mul(a, b) => {
-            format!("{v} = mul {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+            format!(
+                "{v} = mul {}, {}",
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
+            )
         }
         Op::Div(a, b) => {
-            format!("{v} = div {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+            format!(
+                "{v} = div {}, {}",
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
+            )
         }
         Op::Rem(a, b) => {
-            format!("{v} = rem {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+            format!(
+                "{v} = rem {}, {}",
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
+            )
         }
         Op::And(a, b) => {
-            format!("{v} = and {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+            format!(
+                "{v} = and {}, {}",
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
+            )
         }
         Op::Or(a, b) => {
-            format!("{v} = or {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+            format!(
+                "{v} = or {}, {}",
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
+            )
         }
         Op::Xor(a, b) => {
-            format!("{v} = xor {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+            format!(
+                "{v} = xor {}, {}",
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
+            )
         }
         Op::BAnd(a, b) => {
-            format!("{v} = band {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+            format!(
+                "{v} = band {}, {}",
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
+            )
         }
         Op::BOr(a, b) => {
-            format!("{v} = bor {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+            format!(
+                "{v} = bor {}, {}",
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
+            )
         }
         Op::BXor(a, b) => {
-            format!("{v} = bxor {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+            format!(
+                "{v} = bxor {}, {}",
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
+            )
         }
         Op::Shl(a, b) => {
-            format!("{v} = shl {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+            format!(
+                "{v} = shl {}, {}",
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
+            )
         }
         Op::Shr(a, b) => {
-            format!("{v} = shr {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+            format!(
+                "{v} = shr {}, {}",
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
+            )
         }
         Op::Min(a, b) => {
-            format!("{v} = min {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+            format!(
+                "{v} = min {}, {}",
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
+            )
         }
         Op::Max(a, b) => {
-            format!("{v} = max {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+            format!(
+                "{v} = max {}, {}",
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
+            )
         }
         Op::FAdd(a, b, flags) => {
             format!(
                 "{v} = fadd{} {}, {}",
                 fmt_fp_rewrite_flags(flags),
-                ctx.fmt_operand(a),
-                ctx.fmt_operand(b)
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
             )
         }
         Op::FSub(a, b, flags) => {
             format!(
                 "{v} = fsub{} {}, {}",
                 fmt_fp_rewrite_flags(flags),
-                ctx.fmt_operand(a),
-                ctx.fmt_operand(b)
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
             )
         }
         Op::FMul(a, b, flags) => {
             format!(
                 "{v} = fmul{} {}, {}",
                 fmt_fp_rewrite_flags(flags),
-                ctx.fmt_operand(a),
-                ctx.fmt_operand(b)
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
             )
         }
         Op::FDiv(a, b, flags) => {
             format!(
                 "{v} = fdiv{} {}, {}",
                 fmt_fp_rewrite_flags(flags),
-                ctx.fmt_operand(a),
-                ctx.fmt_operand(b)
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
             )
         }
         Op::FRem(a, b, flags) => {
             format!(
                 "{v} = frem{} {}, {}",
                 fmt_fp_rewrite_flags(flags),
-                ctx.fmt_operand(a),
-                ctx.fmt_operand(b)
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
             )
         }
         Op::FMinNum(a, b) => {
             format!(
                 "{v} = fminnum {}, {}",
-                ctx.fmt_operand(a),
-                ctx.fmt_operand(b)
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
             )
         }
         Op::FMaxNum(a, b) => {
             format!(
                 "{v} = fmaxnum {}, {}",
-                ctx.fmt_operand(a),
-                ctx.fmt_operand(b)
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
             )
         }
-        Op::FNeg(a) => format!("{v} = fneg {}", ctx.fmt_operand(a)),
-        Op::FAbs(a) => format!("{v} = fabs {}", ctx.fmt_operand(a)),
+        Op::FNeg(a) => format!("{v} = fneg {}", ctx.fmt_operand(&a.clone().raw())),
+        Op::FAbs(a) => format!("{v} = fabs {}", ctx.fmt_operand(&a.clone().raw())),
         Op::CopySign(mag, sign) => {
             format!(
                 "{v} = copysign {}, {}",
-                ctx.fmt_operand(mag),
-                ctx.fmt_operand(sign)
+                ctx.fmt_operand(&mag.clone().raw()),
+                ctx.fmt_operand(&sign.clone().raw())
             )
         }
         Op::Const(imm) => format!("{v} = iconst {imm}"),
@@ -438,22 +498,22 @@ fn fmt_inst(
             format!(
                 "{v} = icmp.{} {}, {}",
                 fmt_icmp_op(cmp),
-                ctx.fmt_operand(a),
-                ctx.fmt_operand(b)
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
             )
         }
         Op::FCmp(cmp, a, b) => {
             format!(
                 "{v} = fcmp.{} {}, {}",
                 fmt_fcmp_op(cmp),
-                ctx.fmt_operand(a),
-                ctx.fmt_operand(b)
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
             )
         }
         Op::Select(cond, tv, fv) => {
             format!(
                 "{v} = select {}, {}, {}",
-                ctx.fmt_operand(cond),
+                ctx.fmt_operand(&cond.clone().raw()),
                 ctx.fmt_operand(tv),
                 ctx.fmt_operand(fv)
             )
@@ -461,52 +521,52 @@ fn fmt_inst(
         Op::Load(ptr, bytes, mem) => {
             format!(
                 "{v} = load.{bytes} {}, {}",
-                ctx.fmt_operand(ptr),
-                ctx.fmt_operand(mem)
+                ctx.fmt_operand(&ptr.clone().raw()),
+                ctx.fmt_operand(&mem.clone().raw())
             )
         }
         Op::Store(val, ptr, bytes, mem) => {
             format!(
                 "{v} = store.{bytes} {}, {}, {}",
                 ctx.fmt_operand(val),
-                ctx.fmt_operand(ptr),
-                ctx.fmt_operand(mem)
+                ctx.fmt_operand(&ptr.clone().raw()),
+                ctx.fmt_operand(&mem.clone().raw())
             )
         }
         Op::StackSlot(bytes) => format!("{v} = stack_slot {bytes}"),
         Op::MemCopy(dst, src, count, mem) => {
             format!(
                 "{v} = memcopy {}, {}, {}, {}",
-                ctx.fmt_operand(dst),
-                ctx.fmt_operand(src),
-                ctx.fmt_operand(count),
-                ctx.fmt_operand(mem)
+                ctx.fmt_operand(&dst.clone().raw()),
+                ctx.fmt_operand(&src.clone().raw()),
+                ctx.fmt_operand(&count.clone().raw()),
+                ctx.fmt_operand(&mem.clone().raw())
             )
         }
         Op::MemMove(dst, src, count, mem) => {
             format!(
                 "{v} = memmove {}, {}, {}, {}",
-                ctx.fmt_operand(dst),
-                ctx.fmt_operand(src),
-                ctx.fmt_operand(count),
-                ctx.fmt_operand(mem)
+                ctx.fmt_operand(&dst.clone().raw()),
+                ctx.fmt_operand(&src.clone().raw()),
+                ctx.fmt_operand(&count.clone().raw()),
+                ctx.fmt_operand(&mem.clone().raw())
             )
         }
         Op::MemSet(dst, val, count, mem) => {
             format!(
                 "{v} = memset {}, {}, {}, {}",
-                ctx.fmt_operand(dst),
+                ctx.fmt_operand(&dst.clone().raw()),
                 ctx.fmt_operand(val),
-                ctx.fmt_operand(count),
-                ctx.fmt_operand(mem)
+                ctx.fmt_operand(&count.clone().raw()),
+                ctx.fmt_operand(&mem.clone().raw())
             )
         }
         Op::LoadAtomic(ptr, ord, mem) => {
             format!(
                 "{multi_v} = load.atomic.{} {}, {}",
                 fmt_memory_ordering(ord),
-                ctx.fmt_operand(ptr),
-                ctx.fmt_operand(mem)
+                ctx.fmt_operand(&ptr.clone().raw()),
+                ctx.fmt_operand(&mem.clone().raw())
             )
         }
         Op::StoreAtomic(val, ptr, ord, mem) => {
@@ -514,8 +574,8 @@ fn fmt_inst(
                 "{v} = store.atomic.{} {}, {}, {}",
                 fmt_memory_ordering(ord),
                 ctx.fmt_operand(val),
-                ctx.fmt_operand(ptr),
-                ctx.fmt_operand(mem)
+                ctx.fmt_operand(&ptr.clone().raw()),
+                ctx.fmt_operand(&mem.clone().raw())
             )
         }
         Op::AtomicRmw(rmw_op, ptr, val, ord, mem) => {
@@ -523,9 +583,9 @@ fn fmt_inst(
                 "{multi_v} = rmw.{}.{} {}, {}, {}",
                 fmt_atomic_rmw_op(rmw_op),
                 fmt_memory_ordering(ord),
-                ctx.fmt_operand(ptr),
+                ctx.fmt_operand(&ptr.clone().raw()),
                 ctx.fmt_operand(val),
-                ctx.fmt_operand(mem)
+                ctx.fmt_operand(&mem.clone().raw())
             )
         }
         Op::AtomicCmpXchg(ptr, expected, desired, succ, fail, mem) => {
@@ -533,17 +593,17 @@ fn fmt_inst(
                 "{multi_v} = cmpxchg.{}.{} {}, {}, {}, {}",
                 fmt_memory_ordering(succ),
                 fmt_memory_ordering(fail),
-                ctx.fmt_operand(ptr),
+                ctx.fmt_operand(&ptr.clone().raw()),
                 ctx.fmt_operand(expected),
                 ctx.fmt_operand(desired),
-                ctx.fmt_operand(mem)
+                ctx.fmt_operand(&mem.clone().raw())
             )
         }
         Op::Fence(ord, mem) => {
             format!(
                 "{v} = fence.{} {}",
                 fmt_memory_ordering(ord),
-                ctx.fmt_operand(mem)
+                ctx.fmt_operand(&mem.clone().raw())
             )
         }
         Op::SymbolAddr(sym_id) => {
@@ -562,45 +622,55 @@ fn fmt_inst(
                 };
                 format!(
                     "{multi_v} = call {}({}), {}{ret_suffix}",
-                    ctx.fmt_operand(callee),
+                    ctx.fmt_operand(&callee.clone().raw()),
                     ctx.fmt_operands(args),
-                    ctx.fmt_operand(mem)
+                    ctx.fmt_operand(&mem.clone().raw())
                 )
             } else {
                 // Void call: primary result is mem only
                 format!(
                     "{v} = call {}({}), {}",
-                    ctx.fmt_operand(callee),
+                    ctx.fmt_operand(&callee.clone().raw()),
                     ctx.fmt_operands(args),
-                    ctx.fmt_operand(mem)
+                    ctx.fmt_operand(&mem.clone().raw())
                 )
             }
         }
         Op::Bitcast(src) => format!("{v} = bitcast {}", ctx.fmt_operand(src)),
-        Op::Sext(src, bits) => format!("{v} = sext {}, {bits}", ctx.fmt_operand(src)),
-        Op::Zext(src, bits) => format!("{v} = zext {}, {bits}", ctx.fmt_operand(src)),
-        Op::FpToSi(src) => format!("{v} = fp_to_si {}", ctx.fmt_operand(src)),
-        Op::FpToUi(src) => format!("{v} = fp_to_ui {}", ctx.fmt_operand(src)),
-        Op::SiToFp(src, ft) => format!("{v} = si_to_fp {}, {ft:?}", ctx.fmt_operand(src)),
-        Op::UiToFp(src, ft) => format!("{v} = ui_to_fp {}, {ft:?}", ctx.fmt_operand(src)),
-        Op::FpConvert(src) => format!("{v} = fp_convert {}", ctx.fmt_operand(src)),
+        Op::Sext(src, bits) => {
+            format!("{v} = sext {}, {bits}", ctx.fmt_operand(&src.clone().raw()))
+        }
+        Op::Zext(src, bits) => {
+            format!("{v} = zext {}, {bits}", ctx.fmt_operand(&src.clone().raw()))
+        }
+        Op::FpToSi(src) => format!("{v} = fp_to_si {}", ctx.fmt_operand(&src.clone().raw())),
+        Op::FpToUi(src) => format!("{v} = fp_to_ui {}", ctx.fmt_operand(&src.clone().raw())),
+        Op::SiToFp(src, ft) => format!(
+            "{v} = si_to_fp {}, {ft:?}",
+            ctx.fmt_operand(&src.clone().raw())
+        ),
+        Op::UiToFp(src, ft) => format!(
+            "{v} = ui_to_fp {}, {ft:?}",
+            ctx.fmt_operand(&src.clone().raw())
+        ),
+        Op::FpConvert(src) => format!("{v} = fp_convert {}", ctx.fmt_operand(&src.clone().raw())),
         Op::PtrAdd(ptr, offset) => {
             format!(
                 "{v} = ptradd {}, {}",
-                ctx.fmt_operand(ptr),
-                ctx.fmt_operand(offset)
+                ctx.fmt_operand(&ptr.clone().raw()),
+                ctx.fmt_operand(&offset.clone().raw())
             )
         }
         Op::PtrDiff(a, b) => {
             format!(
                 "{v} = ptrdiff {}, {}",
-                ctx.fmt_operand(a),
-                ctx.fmt_operand(b)
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
             )
         }
-        Op::PtrToInt(ptr) => format!("{v} = ptrtoint {}", ctx.fmt_operand(ptr)),
-        Op::PtrToAddr(ptr) => format!("{v} = ptrtoaddr {}", ctx.fmt_operand(ptr)),
-        Op::IntToPtr(val) => format!("{v} = inttoptr {}", ctx.fmt_operand(val)),
+        Op::PtrToInt(ptr) => format!("{v} = ptrtoint {}", ctx.fmt_operand(&ptr.clone().raw())),
+        Op::PtrToAddr(ptr) => format!("{v} = ptrtoaddr {}", ctx.fmt_operand(&ptr.clone().raw())),
+        Op::IntToPtr(val) => format!("{v} = inttoptr {}", ctx.fmt_operand(&val.clone().raw())),
         Op::ExtractValue(agg, indices) => {
             let indices_str = indices
                 .iter()
@@ -627,8 +697,12 @@ fn fmt_inst(
             )
         }
         Op::Ret(val, mem) => match val {
-            Some(o) => format!("ret {}, {}", ctx.fmt_operand(o), ctx.fmt_operand(mem)),
-            None => format!("ret {}", ctx.fmt_operand(mem)),
+            Some(o) => format!(
+                "ret {}, {}",
+                ctx.fmt_operand(o),
+                ctx.fmt_operand(&mem.clone().raw())
+            ),
+            None => format!("ret {}", ctx.fmt_operand(&mem.clone().raw())),
         },
         Op::Br(target, args) => {
             if args.is_empty() {
@@ -638,7 +712,7 @@ fn fmt_inst(
             }
         }
         Op::BrIf(cond, then_bb, then_args, else_bb, else_args) => {
-            let cond_s = ctx.fmt_operand(cond);
+            let cond_s = ctx.fmt_operand(&cond.clone().raw());
             let then_s = fmt_branch_target(*then_bb, then_args, ctx);
             let else_s = fmt_branch_target(*else_bb, else_args, ctx);
             format!("brif {cond_s}, {then_s}, {else_s}")
@@ -658,115 +732,134 @@ fn fmt_inst(
             }
         }
         Op::CountOnes(val) => {
-            format!("{v} = count_ones {}", ctx.fmt_operand(val))
+            format!("{v} = count_ones {}", ctx.fmt_operand(&val.clone().raw()))
         }
         Op::CountLeadingZeros(val, bits) => {
-            format!("{v} = count_leading_zeros.{bits} {}", ctx.fmt_operand(val))
+            format!(
+                "{v} = count_leading_zeros.{bits} {}",
+                ctx.fmt_operand(&val.clone().raw())
+            )
         }
         Op::CountTrailingZeros(val) => {
-            format!("{v} = count_trailing_zeros {}", ctx.fmt_operand(val))
+            format!(
+                "{v} = count_trailing_zeros {}",
+                ctx.fmt_operand(&val.clone().raw())
+            )
         }
         Op::Bswap(val, bytes) => {
-            format!("{v} = bswap.{bytes} {}", ctx.fmt_operand(val))
+            format!(
+                "{v} = bswap.{bytes} {}",
+                ctx.fmt_operand(&val.clone().raw())
+            )
         }
         Op::BitReverse(val, bits) => {
-            format!("{v} = bit_reverse.{bits} {}", ctx.fmt_operand(val))
+            format!(
+                "{v} = bit_reverse.{bits} {}",
+                ctx.fmt_operand(&val.clone().raw())
+            )
         }
         Op::Merge(a, b, width) => {
             format!(
                 "{v} = merge.{width} {}, {}",
-                ctx.fmt_operand(a),
-                ctx.fmt_operand(b)
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
             )
         }
         Op::Clmul(a, b) => {
-            format!("{v} = clmul {}, {}", ctx.fmt_operand(a), ctx.fmt_operand(b))
+            format!(
+                "{v} = clmul {}, {}",
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
+            )
         }
         Op::Split(a, width) => {
-            format!("{multi_v} = split.{width} {}", ctx.fmt_operand(a))
+            format!(
+                "{multi_v} = split.{width} {}",
+                ctx.fmt_operand(&a.clone().raw())
+            )
         }
         Op::RotateLeft(val, amt, bits) => {
             format!(
                 "{v} = rotate_left.{bits} {}, {}",
-                ctx.fmt_operand(val),
-                ctx.fmt_operand(amt)
+                ctx.fmt_operand(&val.clone().raw()),
+                ctx.fmt_operand(&amt.clone().raw())
             )
         }
         Op::RotateRight(val, amt, bits) => {
             format!(
                 "{v} = rotate_right.{bits} {}, {}",
-                ctx.fmt_operand(val),
-                ctx.fmt_operand(amt)
+                ctx.fmt_operand(&val.clone().raw()),
+                ctx.fmt_operand(&amt.clone().raw())
             )
         }
         Op::SaturatingAdd(a, b, bits) => {
             format!(
                 "{v} = saturating_add.{bits} {}, {}",
-                ctx.fmt_operand(a),
-                ctx.fmt_operand(b)
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
             )
         }
         Op::SaturatingSub(a, b, bits) => {
             format!(
                 "{v} = saturating_sub.{bits} {}, {}",
-                ctx.fmt_operand(a),
-                ctx.fmt_operand(b)
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
             )
         }
         Op::SignedSaturatingAdd(a, b, bits) => {
             format!(
                 "{v} = ssaturating_add.{bits} {}, {}",
-                ctx.fmt_operand(a),
-                ctx.fmt_operand(b)
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
             )
         }
         Op::SignedSaturatingSub(a, b, bits) => {
             format!(
                 "{v} = ssaturating_sub.{bits} {}, {}",
-                ctx.fmt_operand(a),
-                ctx.fmt_operand(b)
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
             )
         }
         Op::SAddWithOverflow(a, b, bits) => {
             format!(
                 "{multi_v} = sadd_overflow.{bits} {}, {}",
-                ctx.fmt_operand(a),
-                ctx.fmt_operand(b)
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
             )
         }
         Op::UAddWithOverflow(a, b, bits) => {
             format!(
                 "{multi_v} = uadd_overflow.{bits} {}, {}",
-                ctx.fmt_operand(a),
-                ctx.fmt_operand(b)
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
             )
         }
         Op::SSubWithOverflow(a, b, bits) => {
             format!(
                 "{multi_v} = ssub_overflow.{bits} {}, {}",
-                ctx.fmt_operand(a),
-                ctx.fmt_operand(b)
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
             )
         }
         Op::USubWithOverflow(a, b, bits) => {
             format!(
                 "{multi_v} = usub_overflow.{bits} {}, {}",
-                ctx.fmt_operand(a),
-                ctx.fmt_operand(b)
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
             )
         }
         Op::SMulWithOverflow(a, b, bits) => {
             format!(
                 "{multi_v} = smul_overflow.{bits} {}, {}",
-                ctx.fmt_operand(a),
-                ctx.fmt_operand(b)
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
             )
         }
         Op::UMulWithOverflow(a, b, bits) => {
             format!(
                 "{multi_v} = umul_overflow.{bits} {}, {}",
-                ctx.fmt_operand(a),
-                ctx.fmt_operand(b)
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw())
             )
         }
         Op::Unreachable => "unreachable".to_string(),

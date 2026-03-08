@@ -423,7 +423,7 @@ fn collect_wide_values<M: AbiMetadata>(
             {
                 wide.insert(vref.raw());
             }
-            Op::Shr(a, _) if is_128_bit_value(old, a.value) => {
+            Op::Shr(a, _) if is_128_bit_value(old, a.clone().raw().value) => {
                 wide.insert(vref.raw());
             }
             _ => {}
@@ -642,48 +642,119 @@ fn legalize_inst<M: AbiMetadata + Clone>(
             leg_wide_const(s, b, old_vref, val);
         }
         Op::Add(a, op_b) if wide_result => {
-            leg_add(old, s, b, old_vref, a, op_b);
+            leg_add(old, s, b, old_vref, &a.clone().raw(), &op_b.clone().raw());
         }
         Op::Sub(a, op_b) if wide_result => {
-            leg_sub(old, s, b, old_vref, a, op_b);
+            leg_sub(old, s, b, old_vref, &a.clone().raw(), &op_b.clone().raw());
         }
         Op::Mul(a, op_b) if wide_result => {
-            leg_mul(old, s, b, old_vref, a, op_b);
+            leg_mul(old, s, b, old_vref, &a.clone().raw(), &op_b.clone().raw());
         }
         Op::Div(a, op_b) if wide_result => {
-            leg_div_rem_128(old, s, b, old_vref, a, op_b, None, true, symbols);
+            leg_div_rem_128(
+                old,
+                s,
+                b,
+                old_vref,
+                &a.clone().raw(),
+                &op_b.clone().raw(),
+                None,
+                true,
+                symbols,
+            );
         }
         Op::Rem(a, op_b) if wide_result => {
-            leg_div_rem_128(old, s, b, old_vref, a, op_b, None, false, symbols);
+            leg_div_rem_128(
+                old,
+                s,
+                b,
+                old_vref,
+                &a.clone().raw(),
+                &op_b.clone().raw(),
+                None,
+                false,
+                symbols,
+            );
         }
         Op::And(a, op_b) if wide_result => {
-            leg_bitwise(old, s, b, old_vref, a, op_b, BitwiseKind::And);
+            leg_bitwise(
+                old,
+                s,
+                b,
+                old_vref,
+                &a.clone().raw(),
+                &op_b.clone().raw(),
+                BitwiseKind::And,
+            );
         }
         Op::Or(a, op_b) if wide_result => {
-            leg_bitwise(old, s, b, old_vref, a, op_b, BitwiseKind::Or);
+            leg_bitwise(
+                old,
+                s,
+                b,
+                old_vref,
+                &a.clone().raw(),
+                &op_b.clone().raw(),
+                BitwiseKind::Or,
+            );
         }
         Op::Xor(a, op_b) if wide_result => {
-            leg_bitwise(old, s, b, old_vref, a, op_b, BitwiseKind::Xor);
+            leg_bitwise(
+                old,
+                s,
+                b,
+                old_vref,
+                &a.clone().raw(),
+                &op_b.clone().raw(),
+                BitwiseKind::Xor,
+            );
         }
         Op::Shl(a, op_b) if wide_result => {
-            leg_shl(old, s, b, old_vref, a, op_b, None);
+            leg_shl(
+                old,
+                s,
+                b,
+                old_vref,
+                &a.clone().raw(),
+                &op_b.clone().raw(),
+                None,
+            );
         }
-        Op::Shr(a, op_b) if wide_result || is_128_bit_value(old, a.value) => {
-            leg_shr(old, s, b, old_vref, a, op_b, None);
+        Op::Shr(a, op_b) if wide_result || is_128_bit_value(old, a.clone().raw().value) => {
+            leg_shr(
+                old,
+                s,
+                b,
+                old_vref,
+                &a.clone().raw(),
+                &op_b.clone().raw(),
+                None,
+            );
         }
-        Op::ICmp(cmp_op, a, op_b) if is_wide(s, a.value) || is_128_bit_value(old, a.value) => {
-            leg_icmp(old, s, b, old_vref, *cmp_op, a, op_b);
+        Op::ICmp(cmp_op, a, op_b)
+            if is_wide(s, a.clone().raw().value)
+                || is_128_bit_value(old, a.clone().raw().value) =>
+        {
+            leg_icmp(
+                old,
+                s,
+                b,
+                old_vref,
+                *cmp_op,
+                &a.clone().raw(),
+                &op_b.clone().raw(),
+            );
         }
         Op::Load(ptr, 16, mem) => {
-            leg_load_128(s, b, old_vref, ptr, mem);
+            leg_load_128(s, b, old_vref, &ptr.clone().raw(), &mem.clone().raw());
         }
         Op::Load(ptr, bytes, mem) if *bytes > 8 && *bytes < 16 => {
             // 9–15 byte load: split into an 8-byte lo load and a
             // (bytes-8)-byte hi load, yielding a (lo, hi) Pair so that
             // downstream wide stores receive the correct halves.
             let hi_bytes = bytes - 8;
-            let p = s.vmap.one(ptr.value);
-            let m = s.vmap.one(mem.value);
+            let p = s.vmap.one(ptr.clone().raw().value);
+            let m = s.vmap.one(mem.clone().raw().value);
             let lo = b.load(p.into(), 8, I64_TYPE, m.into(), None, o());
             let c8 = b.iconst(8i64, 64, IntSignedness::Unsigned, o());
             let p_hi = b.ptradd(Operand::new(p), c8.raw().into(), 0, o());
@@ -691,54 +762,78 @@ fn legalize_inst<M: AbiMetadata + Clone>(
             s.vmap.set(old_vref, Mapped::Pair(lo, hi));
         }
         Op::Store(val, ptr, 16, mem) => {
-            leg_store_128(old, s, b, old_vref, val, ptr, mem);
+            leg_store_128(
+                old,
+                s,
+                b,
+                old_vref,
+                val,
+                &ptr.clone().raw(),
+                &mem.clone().raw(),
+            );
         }
-        Op::Sext(val, 128) if is_wide(s, val.value) => {
+        Op::Sext(val, 128) if is_wide(s, val.clone().raw().value) => {
             // Sext/Zext from 128-bit to 128-bit is an identity: the source
             // already occupies a full (lo, hi) pair.
-            let (lo, hi) = s.vmap.pair(val.value);
+            let (lo, hi) = s.vmap.pair(val.clone().raw().value);
             s.vmap.set(old_vref, Mapped::Pair(lo, hi));
         }
-        Op::Zext(val, 128) if is_wide(s, val.value) => {
-            let (lo, hi) = s.vmap.pair(val.value);
+        Op::Zext(val, 128) if is_wide(s, val.clone().raw().value) => {
+            let (lo, hi) = s.vmap.pair(val.clone().raw().value);
             s.vmap.set(old_vref, Mapped::Pair(lo, hi));
         }
         Op::Sext(val, 128) => {
             // If the source is FpToSi, use the proper saturating compiler-rt call.
-            let ft = get_fp_to_int_float_type(val.value, old);
+            let ft = get_fp_to_int_float_type(val.clone().raw().value, old);
             if let Some(ft) = ft {
-                leg_fp_to_int128(s, b, old_vref, val, true, ft, old, symbols);
+                leg_fp_to_int128(s, b, old_vref, &val.clone().raw(), true, ft, old, symbols);
             } else {
-                leg_sext_128(s, b, old_vref, val);
+                leg_sext_128(s, b, old_vref, &val.clone().raw());
             }
         }
         Op::Zext(val, 128) => {
             // If the source is FpToUi, use the proper saturating compiler-rt call.
-            let ft = get_fp_to_int_float_type(val.value, old);
+            let ft = get_fp_to_int_float_type(val.clone().raw().value, old);
             if let Some(ft) = ft {
-                leg_fp_to_int128(s, b, old_vref, val, false, ft, old, symbols);
+                leg_fp_to_int128(s, b, old_vref, &val.clone().raw(), false, ft, old, symbols);
             } else {
-                leg_zext_128(s, b, old_vref, val);
+                leg_zext_128(s, b, old_vref, &val.clone().raw());
             }
         }
         Op::Bswap(val, 16) => {
-            leg_bswap_128(s, b, old_vref, val);
+            leg_bswap_128(s, b, old_vref, &val.clone().raw());
         }
         Op::Select(cond, tv, fv) if wide_result => {
-            leg_select_128(old, s, b, old_vref, cond, tv, fv);
+            leg_select_128(old, s, b, old_vref, &cond.clone().raw(), tv, fv);
         }
         Op::Ret(val, mem) if old.ret_ty.as_ref().is_some_and(is_128_bit_int) => {
-            leg_ret(s, b, old_vref, val, mem);
+            leg_ret(s, b, old_vref, val, &mem.clone().raw());
         }
         Op::Call(callee, args, mem) => {
-            leg_call(old, s, b, old_vref, inst, callee, args, mem);
+            leg_call(
+                old,
+                s,
+                b,
+                old_vref,
+                inst,
+                &callee.clone().raw(),
+                args,
+                &mem.clone().raw(),
+            );
         }
         Op::Br(target, args) => {
             leg_br(s, b, old_vref, *target, args);
         }
         Op::BrIf(cond, then_blk, then_args, else_blk, else_args) => {
             leg_brif(
-                s, b, old_vref, cond, *then_blk, then_args, *else_blk, else_args,
+                s,
+                b,
+                old_vref,
+                &cond.clone().raw(),
+                *then_blk,
+                then_args,
+                *else_blk,
+                else_args,
             );
         }
         Op::Continue(args) => {
@@ -748,13 +843,13 @@ fn legalize_inst<M: AbiMetadata + Clone>(
             leg_region_yield(s, b, old_vref, args);
         }
         // Truncation from 128-bit: just use the lo half.
-        Op::Sext(val, bits) if is_wide(s, val.value) && *bits < 128 => {
-            let lo = s.vmap.one(val.value);
+        Op::Sext(val, bits) if is_wide(s, val.clone().raw().value) && *bits < 128 => {
+            let lo = s.vmap.one(val.clone().raw().value);
             let v = b.sext(Operand::new(lo).into(), *bits, o()).raw();
             s.vmap.set(old_vref, Mapped::One(v));
         }
-        Op::Zext(val, bits) if is_wide(s, val.value) && *bits < 128 => {
-            let lo = s.vmap.one(val.value);
+        Op::Zext(val, bits) if is_wide(s, val.clone().raw().value) && *bits < 128 => {
+            let lo = s.vmap.one(val.clone().raw().value);
             let v = b.zext(Operand::new(lo).into(), *bits, o()).raw();
             s.vmap.set(old_vref, Mapped::One(v));
         }
@@ -776,13 +871,13 @@ fn legalize_inst<M: AbiMetadata + Clone>(
             if *bytes > 16 {
                 let src_ptr_op = match &old.inst(val.value.index()).op {
                     Op::Load(load_ptr, load_bytes, _) if *load_bytes >= *bytes => {
-                        Some(remap_op(s, load_ptr))
+                        Some(remap_op(s, &load_ptr.clone().raw()))
                     }
                     _ => None,
                 };
                 if let Some(src_ptr) = src_ptr_op {
-                    let dst = remap_op(s, ptr);
-                    let m = remap_op(s, mem);
+                    let dst = remap_op(s, &ptr.clone().raw());
+                    let m = remap_op(s, &mem.clone().raw());
                     let count = b.iconst(*bytes as i64, 64, IntSignedness::Unsigned, o());
                     let dst_annotated = Operand::annotated(dst.value, Annotation::Align(1));
                     let src_annotated = Operand::annotated(src_ptr.value, Annotation::Align(1));
@@ -792,8 +887,8 @@ fn legalize_inst<M: AbiMetadata + Clone>(
                 }
             }
             let (lo, hi) = s.vmap.pair(val.value);
-            let p = remap_op(s, ptr);
-            let m = remap_op(s, mem);
+            let p = remap_op(s, &ptr.clone().raw());
+            let m = remap_op(s, &mem.clone().raw());
             let m1 = b.store(Operand::new(lo), p.clone().into(), 8, m.into(), o());
             let off = b.iconst(8i64, 64, IntSignedness::Unsigned, o());
             let hi_addr = b.ptradd(p, off.into(), 0, o());
@@ -851,173 +946,257 @@ fn copy_inst<M: AbiMetadata + Clone>(
         Op::BConst(val) => b.bconst(*val, o()).raw(),
         Op::Add(a, op_b) => b
             .add(
-                remap_op(s, a).into(),
-                remap_op(s, op_b).into(),
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
                 int_ann,
                 o(),
             )
             .raw(),
         Op::Sub(a, op_b) => b
             .sub(
-                remap_op(s, a).into(),
-                remap_op(s, op_b).into(),
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
                 int_ann,
                 o(),
             )
             .raw(),
         Op::Mul(a, op_b) => b
             .mul(
-                remap_op(s, a).into(),
-                remap_op(s, op_b).into(),
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
                 int_ann,
                 o(),
             )
             .raw(),
         Op::Div(a, op_b) => b
             .div(
-                remap_op(s, a).into(),
-                remap_op(s, op_b).into(),
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
                 int_ann,
                 o(),
             )
             .raw(),
         Op::Rem(a, op_b) => b
             .rem(
-                remap_op(s, a).into(),
-                remap_op(s, op_b).into(),
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
                 int_ann,
                 o(),
             )
             .raw(),
         Op::And(a, op_b) => b
             .and(
-                remap_op(s, a).into(),
-                remap_op(s, op_b).into(),
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
                 int_ann,
                 o(),
             )
             .raw(),
         Op::Or(a, op_b) => b
             .or(
-                remap_op(s, a).into(),
-                remap_op(s, op_b).into(),
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
                 int_ann,
                 o(),
             )
             .raw(),
         Op::Xor(a, op_b) => b
             .xor(
-                remap_op(s, a).into(),
-                remap_op(s, op_b).into(),
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
                 int_ann,
                 o(),
             )
             .raw(),
         Op::BAnd(a, op_b) => b
-            .band(remap_op(s, a).into(), remap_op(s, op_b).into(), o())
+            .band(
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
+                o(),
+            )
             .raw(),
         Op::BOr(a, op_b) => b
-            .bor(remap_op(s, a).into(), remap_op(s, op_b).into(), o())
+            .bor(
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
+                o(),
+            )
             .raw(),
         Op::BXor(a, op_b) => b
-            .bxor(remap_op(s, a).into(), remap_op(s, op_b).into(), o())
+            .bxor(
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
+                o(),
+            )
             .raw(),
         Op::Shl(a, op_b) => b
-            .shl(remap_op(s, a).into(), remap_op(s, op_b).into(), ann, o())
+            .shl(
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
+                ann,
+                o(),
+            )
             .raw(),
         Op::Shr(a, op_b) => b
-            .shr(remap_op(s, a).into(), remap_op(s, op_b).into(), ann, o())
+            .shr(
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
+                ann,
+                o(),
+            )
             .raw(),
-        Op::Min(a, op_b) => b.min(remap_op(s, a), remap_op(s, op_b), ann, o()),
-        Op::Max(a, op_b) => b.max(remap_op(s, a), remap_op(s, op_b), ann, o()),
-        Op::CountOnes(a) => b.count_ones(remap_op(s, a).into(), 64, o()).raw(),
-        Op::CountLeadingZeros(a, bits) => b.count_leading_zeros(remap_op(s, a), *bits, 64, o()),
-        Op::CountTrailingZeros(a) => b.count_trailing_zeros(remap_op(s, a), 64, o()),
-        Op::Bswap(a, bytes) => b.bswap(remap_op(s, a).into(), *bytes, o()).raw(),
-        Op::BitReverse(a, bits) => b.bit_reverse(remap_op(s, a).into(), *bits, o()).raw(),
-        Op::RotateLeft(a, amt, bits) => b.rotate_left(remap_op(s, a), remap_op(s, amt), *bits, o()),
-        Op::RotateRight(a, amt, bits) => {
-            b.rotate_right(remap_op(s, a), remap_op(s, amt), *bits, o())
+        Op::Min(a, op_b) => b.min(
+            remap_op(s, &a.clone().raw()),
+            remap_op(s, &op_b.clone().raw()),
+            ann,
+            o(),
+        ),
+        Op::Max(a, op_b) => b.max(
+            remap_op(s, &a.clone().raw()),
+            remap_op(s, &op_b.clone().raw()),
+            ann,
+            o(),
+        ),
+        Op::CountOnes(a) => b
+            .count_ones(remap_op(s, &a.clone().raw()).into(), 64, o())
+            .raw(),
+        Op::CountLeadingZeros(a, bits) => {
+            b.count_leading_zeros(remap_op(s, &a.clone().raw()), *bits, 64, o())
         }
-        Op::SaturatingAdd(a, op_b, bits) => {
-            b.saturating_add(remap_op(s, a), remap_op(s, op_b), *bits, o())
-        }
-        Op::SaturatingSub(a, op_b, bits) => {
-            b.saturating_sub(remap_op(s, a), remap_op(s, op_b), *bits, o())
-        }
-        Op::SignedSaturatingAdd(a, op_b, bits) => {
-            b.signed_saturating_add(remap_op(s, a), remap_op(s, op_b), *bits, o())
-        }
-        Op::SignedSaturatingSub(a, op_b, bits) => {
-            b.signed_saturating_sub(remap_op(s, a), remap_op(s, op_b), *bits, o())
-        }
+        Op::CountTrailingZeros(a) => b.count_trailing_zeros(remap_op(s, &a.clone().raw()), 64, o()),
+        Op::Bswap(a, bytes) => b
+            .bswap(remap_op(s, &a.clone().raw()).into(), *bytes, o())
+            .raw(),
+        Op::BitReverse(a, bits) => b
+            .bit_reverse(remap_op(s, &a.clone().raw()).into(), *bits, o())
+            .raw(),
+        Op::RotateLeft(a, amt, bits) => b.rotate_left(
+            remap_op(s, &a.clone().raw()),
+            remap_op(s, &amt.clone().raw()),
+            *bits,
+            o(),
+        ),
+        Op::RotateRight(a, amt, bits) => b.rotate_right(
+            remap_op(s, &a.clone().raw()),
+            remap_op(s, &amt.clone().raw()),
+            *bits,
+            o(),
+        ),
+        Op::SaturatingAdd(a, op_b, bits) => b.saturating_add(
+            remap_op(s, &a.clone().raw()),
+            remap_op(s, &op_b.clone().raw()),
+            *bits,
+            o(),
+        ),
+        Op::SaturatingSub(a, op_b, bits) => b.saturating_sub(
+            remap_op(s, &a.clone().raw()),
+            remap_op(s, &op_b.clone().raw()),
+            *bits,
+            o(),
+        ),
+        Op::SignedSaturatingAdd(a, op_b, bits) => b.signed_saturating_add(
+            remap_op(s, &a.clone().raw()),
+            remap_op(s, &op_b.clone().raw()),
+            *bits,
+            o(),
+        ),
+        Op::SignedSaturatingSub(a, op_b, bits) => b.signed_saturating_sub(
+            remap_op(s, &a.clone().raw()),
+            remap_op(s, &op_b.clone().raw()),
+            *bits,
+            o(),
+        ),
         Op::SAddWithOverflow(a, op_b, bits) if *bits > 64 => {
-            leg_sadd_with_overflow_128(old, s, b, old_vref, a, op_b);
+            leg_sadd_with_overflow_128(old, s, b, old_vref, &a.clone().raw(), &op_b.clone().raw());
             return;
         }
         Op::UAddWithOverflow(a, op_b, bits) if *bits > 64 => {
-            leg_uadd_with_overflow_128(old, s, b, old_vref, a, op_b);
+            leg_uadd_with_overflow_128(old, s, b, old_vref, &a.clone().raw(), &op_b.clone().raw());
             return;
         }
         Op::SSubWithOverflow(a, op_b, bits) if *bits > 64 => {
-            leg_ssub_with_overflow_128(old, s, b, old_vref, a, op_b);
+            leg_ssub_with_overflow_128(old, s, b, old_vref, &a.clone().raw(), &op_b.clone().raw());
             return;
         }
         Op::USubWithOverflow(a, op_b, bits) if *bits > 64 => {
-            leg_usub_with_overflow_128(old, s, b, old_vref, a, op_b);
+            leg_usub_with_overflow_128(old, s, b, old_vref, &a.clone().raw(), &op_b.clone().raw());
             return;
         }
         Op::SMulWithOverflow(a, op_b, bits) if *bits > 64 => {
-            leg_smul_with_overflow_128(old, s, b, old_vref, a, op_b);
+            leg_smul_with_overflow_128(old, s, b, old_vref, &a.clone().raw(), &op_b.clone().raw());
             return;
         }
         Op::UMulWithOverflow(a, op_b, bits) if *bits > 64 => {
-            leg_umul_with_overflow_128(old, s, b, old_vref, a, op_b);
+            leg_umul_with_overflow_128(old, s, b, old_vref, &a.clone().raw(), &op_b.clone().raw());
             return;
         }
         Op::SAddWithOverflow(a, op_b, bits) => {
-            let (primary, secondary) =
-                b.sadd_with_overflow(remap_op(s, a), remap_op(s, op_b), *bits, o());
+            let (primary, secondary) = b.sadd_with_overflow(
+                remap_op(s, &a.clone().raw()),
+                remap_op(s, &op_b.clone().raw()),
+                *bits,
+                o(),
+            );
             s.vmap.set(old_vref, Mapped::One(primary));
             let old_sec = ValueRef::inst_secondary_result(old_vref.index());
             s.vmap.set(old_sec, Mapped::One(secondary));
             return;
         }
         Op::UAddWithOverflow(a, op_b, bits) => {
-            let (primary, secondary) =
-                b.uadd_with_overflow(remap_op(s, a), remap_op(s, op_b), *bits, o());
+            let (primary, secondary) = b.uadd_with_overflow(
+                remap_op(s, &a.clone().raw()),
+                remap_op(s, &op_b.clone().raw()),
+                *bits,
+                o(),
+            );
             s.vmap.set(old_vref, Mapped::One(primary));
             let old_sec = ValueRef::inst_secondary_result(old_vref.index());
             s.vmap.set(old_sec, Mapped::One(secondary));
             return;
         }
         Op::SSubWithOverflow(a, op_b, bits) => {
-            let (primary, secondary) =
-                b.ssub_with_overflow(remap_op(s, a), remap_op(s, op_b), *bits, o());
+            let (primary, secondary) = b.ssub_with_overflow(
+                remap_op(s, &a.clone().raw()),
+                remap_op(s, &op_b.clone().raw()),
+                *bits,
+                o(),
+            );
             s.vmap.set(old_vref, Mapped::One(primary));
             let old_sec = ValueRef::inst_secondary_result(old_vref.index());
             s.vmap.set(old_sec, Mapped::One(secondary));
             return;
         }
         Op::USubWithOverflow(a, op_b, bits) => {
-            let (primary, secondary) =
-                b.usub_with_overflow(remap_op(s, a), remap_op(s, op_b), *bits, o());
+            let (primary, secondary) = b.usub_with_overflow(
+                remap_op(s, &a.clone().raw()),
+                remap_op(s, &op_b.clone().raw()),
+                *bits,
+                o(),
+            );
             s.vmap.set(old_vref, Mapped::One(primary));
             let old_sec = ValueRef::inst_secondary_result(old_vref.index());
             s.vmap.set(old_sec, Mapped::One(secondary));
             return;
         }
         Op::SMulWithOverflow(a, op_b, bits) => {
-            let (primary, secondary) =
-                b.smul_with_overflow(remap_op(s, a), remap_op(s, op_b), *bits, o());
+            let (primary, secondary) = b.smul_with_overflow(
+                remap_op(s, &a.clone().raw()),
+                remap_op(s, &op_b.clone().raw()),
+                *bits,
+                o(),
+            );
             s.vmap.set(old_vref, Mapped::One(primary));
             let old_sec = ValueRef::inst_secondary_result(old_vref.index());
             s.vmap.set(old_sec, Mapped::One(secondary));
             return;
         }
         Op::UMulWithOverflow(a, op_b, bits) => {
-            let (primary, secondary) =
-                b.umul_with_overflow(remap_op(s, a), remap_op(s, op_b), *bits, o());
+            let (primary, secondary) = b.umul_with_overflow(
+                remap_op(s, &a.clone().raw()),
+                remap_op(s, &op_b.clone().raw()),
+                *bits,
+                o(),
+            );
             s.vmap.set(old_vref, Mapped::One(primary));
             let old_sec = ValueRef::inst_secondary_result(old_vref.index());
             s.vmap.set(old_sec, Mapped::One(secondary));
@@ -1026,21 +1205,21 @@ fn copy_inst<M: AbiMetadata + Clone>(
         Op::ICmp(cmp_op, a, op_b) => b
             .icmp(
                 *cmp_op,
-                remap_op(s, a).into(),
-                remap_op(s, op_b).into(),
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
                 o(),
             )
             .raw(),
         Op::FCmp(cmp_op, a, op_b) => b
             .fcmp(
                 *cmp_op,
-                remap_op(s, a).into(),
-                remap_op(s, op_b).into(),
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
                 o(),
             )
             .raw(),
         Op::Select(c, tv, fv) => b.select(
-            remap_op(s, c),
+            remap_op(s, &c.clone().raw()),
             remap_op(s, tv),
             remap_op(s, fv),
             inst.ty.clone(),
@@ -1049,10 +1228,10 @@ fn copy_inst<M: AbiMetadata + Clone>(
         ),
         Op::Load(ptr, bytes, mem) => {
             let data = b.load(
-                remap_op(s, ptr).into(),
+                remap_op(s, &ptr.clone().raw()).into(),
                 *bytes,
                 inst.ty.clone(),
-                remap_op(s, mem).into(),
+                remap_op(s, &mem.clone().raw()).into(),
                 ann,
                 o(),
             );
@@ -1062,76 +1241,103 @@ fn copy_inst<M: AbiMetadata + Clone>(
         Op::Store(val, ptr, bytes, mem) => b
             .store(
                 remap_op(s, val),
-                remap_op(s, ptr).into(),
+                remap_op(s, &ptr.clone().raw()).into(),
                 *bytes,
-                remap_op(s, mem).into(),
+                remap_op(s, &mem.clone().raw()).into(),
                 o(),
             )
             .raw(),
         Op::StackSlot(bytes) => b.stack_slot(*bytes, o()),
         Op::MemCopy(dst, src, count, mem) => b.mem_copy(
-            remap_op(s, dst),
-            remap_op(s, src),
-            remap_op(s, count),
-            remap_op(s, mem),
+            remap_op(s, &dst.clone().raw()),
+            remap_op(s, &src.clone().raw()),
+            remap_op(s, &count.clone().raw()),
+            remap_op(s, &mem.clone().raw()),
             o(),
         ),
         Op::MemMove(dst, src, count, mem) => b.mem_move(
-            remap_op(s, dst),
-            remap_op(s, src),
-            remap_op(s, count),
-            remap_op(s, mem),
+            remap_op(s, &dst.clone().raw()),
+            remap_op(s, &src.clone().raw()),
+            remap_op(s, &count.clone().raw()),
+            remap_op(s, &mem.clone().raw()),
             o(),
         ),
         Op::MemSet(dst, val, count, mem) => b.mem_set(
-            remap_op(s, dst),
+            remap_op(s, &dst.clone().raw()),
             remap_op(s, val),
-            remap_op(s, count),
-            remap_op(s, mem),
+            remap_op(s, &count.clone().raw()),
+            remap_op(s, &mem.clone().raw()),
             o(),
         ),
         Op::SymbolAddr(sym) => b.symbol_addr(*sym, o()).raw(),
         Op::Bitcast(a) => b.bitcast(remap_op(s, a), inst.ty.clone(), ann, o()),
-        Op::Sext(a, bits) => b.sext(remap_op(s, a).into(), *bits, o()).raw(),
-        Op::Zext(a, bits) => b.zext(remap_op(s, a).into(), *bits, o()).raw(),
-        Op::FpToSi(a) => b.fp_to_si(remap_op(s, a).into(), 64, o()).raw(),
-        Op::FpToUi(a) => b.fp_to_ui(remap_op(s, a).into(), 64, o()).raw(),
+        Op::Sext(a, bits) => b
+            .sext(remap_op(s, &a.clone().raw()).into(), *bits, o())
+            .raw(),
+        Op::Zext(a, bits) => b
+            .zext(remap_op(s, &a.clone().raw()).into(), *bits, o())
+            .raw(),
+        Op::FpToSi(a) => b
+            .fp_to_si(remap_op(s, &a.clone().raw()).into(), 64, o())
+            .raw(),
+        Op::FpToUi(a) => b
+            .fp_to_ui(remap_op(s, &a.clone().raw()).into(), 64, o())
+            .raw(),
         Op::SiToFp(a, ft) => {
-            let is_128 = s.wide.contains(&a.value.raw())
-                || value_annotation(old, a.value).is_some_and(|ann| {
+            let is_128 = s.wide.contains(&a.clone().raw().value.raw())
+                || value_annotation(old, a.clone().raw().value).is_some_and(|ann| {
                     matches!(ann, Annotation::Int(ia) if ia.bit_width == 128 && matches!(ia.signedness, IntSignedness::Signed))
                 });
             if is_128 {
-                leg_int128_to_fp(s, b, old_vref, a, *ft, true, symbols);
+                leg_int128_to_fp(s, b, old_vref, &a.clone().raw(), *ft, true, symbols);
                 return;
             }
-            b.si_to_fp(remap_op(s, a).into(), *ft, o()).raw()
+            b.si_to_fp(remap_op(s, &a.clone().raw()).into(), *ft, o())
+                .raw()
         }
         Op::UiToFp(a, ft) => {
-            let is_128 = s.wide.contains(&a.value.raw())
-                || value_annotation(old, a.value).is_some_and(|ann| {
+            let is_128 = s.wide.contains(&a.clone().raw().value.raw())
+                || value_annotation(old, a.clone().raw().value).is_some_and(|ann| {
                     matches!(ann, Annotation::Int(ia) if ia.bit_width == 128 && matches!(ia.signedness, IntSignedness::Unsigned))
                 });
             if is_128 {
-                leg_int128_to_fp(s, b, old_vref, a, *ft, false, symbols);
+                leg_int128_to_fp(s, b, old_vref, &a.clone().raw(), *ft, false, symbols);
                 return;
             }
-            b.ui_to_fp(remap_op(s, a).into(), *ft, o()).raw()
+            b.ui_to_fp(remap_op(s, &a.clone().raw()).into(), *ft, o())
+                .raw()
         }
         Op::FpConvert(a) => {
             let ft = match &inst.ty {
                 Type::Float(ft) => *ft,
                 _ => tuffy_ir::types::FloatType::F64,
             };
-            b.fp_convert(remap_op(s, a).into(), ft, o()).raw()
+            b.fp_convert(remap_op(s, &a.clone().raw()).into(), ft, o())
+                .raw()
         }
-        Op::PtrAdd(ptr, off) => b.ptradd(remap_op(s, ptr), remap_op(s, off), 0, o()),
+        Op::PtrAdd(ptr, off) => b.ptradd(
+            remap_op(s, &ptr.clone().raw()),
+            remap_op(s, &off.clone().raw()),
+            0,
+            o(),
+        ),
         Op::PtrDiff(a, op_b) => b
-            .ptrdiff(remap_op(s, a).into(), remap_op(s, op_b).into(), 64, o())
+            .ptrdiff(
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
+                64,
+                o(),
+            )
             .raw(),
-        Op::PtrToInt(a) => b.ptrtoint(remap_op(s, a).into(), 64, o()).raw(),
-        Op::PtrToAddr(a) => b.ptrtoaddr(remap_op(s, a).into(), 64, o()).raw(),
-        Op::IntToPtr(a) => b.inttoptr(remap_op(s, a).into(), 0, o()).raw(),
+        Op::PtrToInt(a) => b
+            .ptrtoint(remap_op(s, &a.clone().raw()).into(), 64, o())
+            .raw(),
+        Op::PtrToAddr(a) => b
+            .ptrtoaddr(remap_op(s, &a.clone().raw()).into(), 64, o())
+            .raw(),
+        Op::IntToPtr(a) => b
+            .inttoptr(remap_op(s, &a.clone().raw()).into(), 0, o())
+            .raw(),
         Op::ExtractValue(agg, indices) => {
             // Expand struct field extraction: recursively extract nested fields
             let current = remap_op(s, agg).value;
@@ -1152,7 +1358,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
         }
         Op::Ret(val, mem) => {
             let rv = val.as_ref().map(|v| remap_op(s, v));
-            let new_ret = b.ret(rv, remap_op(s, mem).into(), o());
+            let new_ret = b.ret(rv, remap_op(s, &mem.clone().raw()).into(), o());
             // Remap secondary-return move (non-i128 struct returns via RAX+RDX).
             if let Some(src_idx) = s.old_meta.get_secondary_return_move(old_vref.index()) {
                 let new_src = s.vmap.one(ValueRef::inst_result(src_idx));
@@ -1167,72 +1373,76 @@ fn copy_inst<M: AbiMetadata + Clone>(
             unreachable!("branch/call should be handled by dedicated leg_* function")
         }
         Op::FAdd(a, op_b, flags) => b.fadd(
-            remap_op(s, a),
-            remap_op(s, op_b),
+            remap_op(s, &a.clone().raw()),
+            remap_op(s, &op_b.clone().raw()),
             *flags,
             inst.ty.clone(),
             o(),
         ),
         Op::FSub(a, op_b, flags) => b.fsub(
-            remap_op(s, a),
-            remap_op(s, op_b),
+            remap_op(s, &a.clone().raw()),
+            remap_op(s, &op_b.clone().raw()),
             *flags,
             inst.ty.clone(),
             o(),
         ),
         Op::FMul(a, op_b, flags) => b.fmul(
-            remap_op(s, a),
-            remap_op(s, op_b),
+            remap_op(s, &a.clone().raw()),
+            remap_op(s, &op_b.clone().raw()),
             *flags,
             inst.ty.clone(),
             o(),
         ),
         Op::FDiv(a, op_b, flags) => b.fdiv(
-            remap_op(s, a),
-            remap_op(s, op_b),
+            remap_op(s, &a.clone().raw()),
+            remap_op(s, &op_b.clone().raw()),
             *flags,
             inst.ty.clone(),
             o(),
         ),
         Op::FRem(a, op_b, flags) => b.frem(
-            remap_op(s, a),
-            remap_op(s, op_b),
+            remap_op(s, &a.clone().raw()),
+            remap_op(s, &op_b.clone().raw()),
             *flags,
             inst.ty.clone(),
             o(),
         ),
         Op::FMinNum(a, op_b) => b
             .fminnum(
-                remap_op(s, a).into(),
-                remap_op(s, op_b).into(),
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
                 inst.ty.clone(),
                 o(),
             )
             .raw(),
         Op::FMaxNum(a, op_b) => b
             .fmaxnum(
-                remap_op(s, a).into(),
-                remap_op(s, op_b).into(),
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
                 inst.ty.clone(),
                 o(),
             )
             .raw(),
-        Op::FNeg(a) => b.fneg(remap_op(s, a).into(), inst.ty.clone(), o()).raw(),
-        Op::FAbs(a) => b.fabs(remap_op(s, a).into(), inst.ty.clone(), o()).raw(),
+        Op::FNeg(a) => b
+            .fneg(remap_op(s, &a.clone().raw()).into(), inst.ty.clone(), o())
+            .raw(),
+        Op::FAbs(a) => b
+            .fabs(remap_op(s, &a.clone().raw()).into(), inst.ty.clone(), o())
+            .raw(),
         Op::CopySign(a, op_b) => b
             .copysign(
-                remap_op(s, a).into(),
-                remap_op(s, op_b).into(),
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
                 inst.ty.clone(),
                 o(),
             )
             .raw(),
         Op::LoadAtomic(ptr, ord, mem) => {
             let (primary, secondary) = b.load_atomic(
-                remap_op(s, ptr),
+                remap_op(s, &ptr.clone().raw()),
                 inst.secondary_ty.clone().unwrap_or(I64_TYPE),
                 *ord,
-                remap_op(s, mem),
+                remap_op(s, &mem.clone().raw()),
                 inst.result_annotation,
                 o(),
             );
@@ -1243,19 +1453,19 @@ fn copy_inst<M: AbiMetadata + Clone>(
         }
         Op::StoreAtomic(val, ptr, ord, mem) => b.store_atomic(
             remap_op(s, val),
-            remap_op(s, ptr),
+            remap_op(s, &ptr.clone().raw()),
             *ord,
-            remap_op(s, mem),
+            remap_op(s, &mem.clone().raw()),
             o(),
         ),
         Op::AtomicRmw(rmw_op, ptr, val, ord, mem) => {
             let (primary, secondary) = b.atomic_rmw(
                 *rmw_op,
-                remap_op(s, ptr),
+                remap_op(s, &ptr.clone().raw()),
                 remap_op(s, val),
                 inst.secondary_ty.clone().unwrap_or(I64_TYPE),
                 *ord,
-                remap_op(s, mem),
+                remap_op(s, &mem.clone().raw()),
                 inst.result_annotation,
                 o(),
             );
@@ -1266,13 +1476,13 @@ fn copy_inst<M: AbiMetadata + Clone>(
         }
         Op::AtomicCmpXchg(ptr, exp, des, s_ord, f_ord, mem) => {
             let (primary, secondary) = b.atomic_cmpxchg(
-                remap_op(s, ptr),
+                remap_op(s, &ptr.clone().raw()),
                 remap_op(s, exp),
                 remap_op(s, des),
                 inst.secondary_ty.clone().unwrap_or(I64_TYPE),
                 *s_ord,
                 *f_ord,
-                remap_op(s, mem),
+                remap_op(s, &mem.clone().raw()),
                 inst.result_annotation,
                 o(),
             );
@@ -1281,15 +1491,26 @@ fn copy_inst<M: AbiMetadata + Clone>(
             s.vmap.set(old_sec, Mapped::One(secondary));
             return;
         }
-        Op::Fence(ord, mem) => b.fence(*ord, remap_op(s, mem).into(), o()).raw(),
+        Op::Fence(ord, mem) => b
+            .fence(*ord, remap_op(s, &mem.clone().raw()).into(), o())
+            .raw(),
         Op::Merge(a, b_op, width) => b
-            .merge(remap_op(s, a).into(), remap_op(s, b_op).into(), *width, o())
+            .merge(
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &b_op.clone().raw()).into(),
+                *width,
+                o(),
+            )
             .raw(),
         Op::Clmul(a, b_op) => b
-            .clmul(remap_op(s, a).into(), remap_op(s, b_op).into(), o())
+            .clmul(
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &b_op.clone().raw()).into(),
+                o(),
+            )
             .raw(),
         Op::Split(a, width) => {
-            let (hi, lo) = b.split(remap_op(s, a).into(), *width, o());
+            let (hi, lo) = b.split(remap_op(s, &a.clone().raw()).into(), *width, o());
             s.vmap.set(old_vref, Mapped::One(hi.raw()));
             let old_sec = ValueRef::inst_secondary_result(old_vref.index());
             s.vmap.set(old_sec, Mapped::One(lo.raw()));
@@ -2114,7 +2335,7 @@ fn leg_zext_128<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, val: &
 fn get_fp_to_int_float_type(vref: ValueRef, old: &Function) -> Option<FloatType> {
     let fp_operand = match old.instructions.get(vref.index() as usize) {
         Some(inst) => match &inst.op {
-            Op::FpToUi(a) | Op::FpToSi(a) => a.value,
+            Op::FpToUi(a) | Op::FpToSi(a) => a.clone().raw().value,
             _ => return None,
         },
         None => return None,
@@ -2152,7 +2373,7 @@ fn leg_fp_to_int128<M: AbiMetadata + Clone>(
     // Retrieve the float input to the FpToUi/FpToSi instruction.
     let fp_input_vref = match old.instructions.get(zext_val.value.index() as usize) {
         Some(inst) => match &inst.op {
-            Op::FpToUi(a) | Op::FpToSi(a) => a.value,
+            Op::FpToUi(a) | Op::FpToSi(a) => a.clone().raw().value,
             _ => {
                 // Not the expected pattern; fall back to simple extend.
                 let lo = s.vmap.one(zext_val.value);

@@ -467,10 +467,18 @@ fn select_128bit_op(ctx: &mut IselCtx, vref: ValueRef, op: &Op, func: &Function)
         | Op::Or(lhs, rhs)
         | Op::Xor(lhs, rhs)
         | Op::Mul(lhs, rhs) => {
-            let lo_l = ctx.ensure_in_reg(lhs.value)?;
-            let lo_r = ctx.ensure_in_reg(rhs.value)?;
-            let hi_l = ensure_hi_in_reg(ctx, lhs.value, get_int_annotation(func, lhs.value))?;
-            let hi_r = ensure_hi_in_reg(ctx, rhs.value, get_int_annotation(func, rhs.value))?;
+            let lo_l = ctx.ensure_in_reg(lhs.clone().raw().value)?;
+            let lo_r = ctx.ensure_in_reg(rhs.clone().raw().value)?;
+            let hi_l = ensure_hi_in_reg(
+                ctx,
+                lhs.clone().raw().value,
+                get_int_annotation(func, lhs.clone().raw().value),
+            )?;
+            let hi_r = ensure_hi_in_reg(
+                ctx,
+                rhs.clone().raw().value,
+                get_int_annotation(func, rhs.clone().raw().value),
+            )?;
 
             let lo_result = ctx.alloc.alloc();
             let hi_result = ctx.alloc.alloc();
@@ -642,10 +650,10 @@ fn select_128bit_op(ctx: &mut IselCtx, vref: ValueRef, op: &Op, func: &Function)
         }
 
         Op::Sext(val, _) => {
-            let lo = ctx.ensure_in_reg(val.value)?;
+            let lo = ctx.ensure_in_reg(val.clone().raw().value)?;
             let lo_result = ctx.alloc.alloc();
             // Sign-extend lo based on source bit-width.
-            let src_ann = get_int_annotation(func, val.value);
+            let src_ann = get_int_annotation(func, val.clone().raw().value);
             match src_ann.map(|a| a.bit_width) {
                 Some(8) => {
                     ctx.out.push(MInst::MovsxB {
@@ -692,10 +700,10 @@ fn select_128bit_op(ctx: &mut IselCtx, vref: ValueRef, op: &Op, func: &Function)
         }
 
         Op::Zext(val, _) => {
-            let lo = ctx.ensure_in_reg(val.value)?;
+            let lo = ctx.ensure_in_reg(val.clone().raw().value)?;
             let lo_result = ctx.alloc.alloc();
             // Zero-extend lo based on source bit-width.
-            let src_ann = get_int_annotation(func, val.value);
+            let src_ann = get_int_annotation(func, val.clone().raw().value);
             match src_ann.map(|a| a.bit_width) {
                 Some(8) => {
                     ctx.out.push(MInst::MovzxB {
@@ -965,7 +973,7 @@ fn select_inst(
     // Try generated rules first (covers Add, Sub, Mul, Or, And, Xor,
     // Shl, Shr, Min, Max, CountOnes, CountLeadingZeros, CountTrailingZeros,
     // ICmp, PtrAdd, PtrDiff).
-    if isel_gen::try_select_generated(ctx, vref, op, func).is_some() {
+    if isel_gen::try_select_generated(ctx, vref, op).is_some() {
         return Some(());
     }
     match op {
@@ -1132,8 +1140,8 @@ fn select_inst(
         }
 
         Op::BAnd(a, b) => {
-            let lhs = ctx.ensure_in_reg(a.value)?;
-            let rhs = ctx.ensure_in_reg(b.value)?;
+            let lhs = ctx.ensure_in_reg(a.clone().raw().value)?;
+            let rhs = ctx.ensure_in_reg(b.clone().raw().value)?;
             let dst = ctx.alloc.alloc();
             ctx.out.push(MInst::MovRR {
                 dst,
@@ -1149,8 +1157,8 @@ fn select_inst(
         }
 
         Op::BOr(a, b) => {
-            let lhs = ctx.ensure_in_reg(a.value)?;
-            let rhs = ctx.ensure_in_reg(b.value)?;
+            let lhs = ctx.ensure_in_reg(a.clone().raw().value)?;
+            let rhs = ctx.ensure_in_reg(b.clone().raw().value)?;
             let dst = ctx.alloc.alloc();
             ctx.out.push(MInst::MovRR {
                 dst,
@@ -1166,8 +1174,8 @@ fn select_inst(
         }
 
         Op::BXor(a, b) => {
-            let lhs = ctx.ensure_in_reg(a.value)?;
-            let rhs = ctx.ensure_in_reg(b.value)?;
+            let lhs = ctx.ensure_in_reg(a.clone().raw().value)?;
+            let rhs = ctx.ensure_in_reg(b.clone().raw().value)?;
             let dst = ctx.alloc.alloc();
             ctx.out.push(MInst::MovRR {
                 dst,
@@ -1214,7 +1222,13 @@ fn select_inst(
 
         Op::BrIf(cond, then_block, then_args, else_block, else_args) => {
             select_brif(
-                ctx, cond, then_block, then_args, else_block, else_args, func,
+                ctx,
+                &cond.clone().raw(),
+                then_block,
+                then_args,
+                else_block,
+                else_args,
+                func,
             )?;
         }
 
@@ -1286,7 +1300,15 @@ fn select_inst(
         }
 
         Op::Call(callee, args, _mem) => {
-            select_call(ctx, vref, callee, args, func, symbols, call_has_ret2)?;
+            select_call(
+                ctx,
+                vref,
+                &callee.clone().raw(),
+                args,
+                func,
+                symbols,
+                call_has_ret2,
+            )?;
         }
 
         Op::StackSlot(bytes) => {
@@ -1299,7 +1321,7 @@ fn select_inst(
                 let lo_dst = ctx.alloc.alloc();
                 let hi_dst = ctx.alloc.alloc();
                 let hi_bytes = *bytes - 8;
-                if let Some(offset) = ctx.stack.get(ptr.value) {
+                if let Some(offset) = ctx.stack.get(ptr.clone().raw().value) {
                     let rbp = ctx.alloc.alloc_fixed(Gpr::Rbp.to_preg());
                     ctx.out.push(MInst::MovRM {
                         size: OpSize::S64,
@@ -1309,7 +1331,7 @@ fn select_inst(
                     });
                     emit_partial_load(ctx, rbp, offset + 8, hi_dst, hi_bytes);
                 } else {
-                    let ptr_vreg = ctx.ensure_in_reg(ptr.value)?;
+                    let ptr_vreg = ctx.ensure_in_reg(ptr.clone().raw().value)?;
                     ctx.out.push(MInst::MovRM {
                         size: OpSize::S64,
                         dst: lo_dst,
@@ -1323,11 +1345,11 @@ fn select_inst(
                     .assign(ValueRef::inst_secondary_result(vref.index()), hi_dst);
             } else {
                 let dst = ctx.alloc.alloc();
-                if let Some(offset) = ctx.stack.get(ptr.value) {
+                if let Some(offset) = ctx.stack.get(ptr.clone().raw().value) {
                     let rbp = ctx.alloc.alloc_fixed(Gpr::Rbp.to_preg());
                     emit_partial_load(ctx, rbp, offset, dst, *bytes);
                 } else {
-                    let ptr_vreg = ctx.ensure_in_reg(ptr.value)?;
+                    let ptr_vreg = ctx.ensure_in_reg(ptr.clone().raw().value)?;
                     emit_partial_load(ctx, ptr_vreg, 0, dst, *bytes);
                 }
                 ctx.regs.assign(vref, dst);
@@ -1337,11 +1359,11 @@ fn select_inst(
         Op::Store(val, ptr, bytes, _mem) => {
             let val_vreg = ctx.ensure_in_reg(val.value)?;
             // Determine the base register and base offset for the target address.
-            let (base, base_offset) = if let Some(offset) = ctx.stack.get(ptr.value) {
+            let (base, base_offset) = if let Some(offset) = ctx.stack.get(ptr.clone().raw().value) {
                 let rbp = ctx.alloc.alloc_fixed(Gpr::Rbp.to_preg());
                 (rbp, offset)
             } else {
-                (ctx.ensure_in_reg(ptr.value)?, 0i32)
+                (ctx.ensure_in_reg(ptr.clone().raw().value)?, 0i32)
             };
             if *bytes >= 9 {
                 // 9-16 byte store: lo 8 bytes + remaining from hi half.
@@ -1371,15 +1393,25 @@ fn select_inst(
         }
 
         Op::MemCopy(dst, src, count, _mem) => {
-            select_memcopy(ctx, dst, src, count)?;
+            select_memcopy(
+                ctx,
+                &dst.clone().raw(),
+                &src.clone().raw(),
+                &count.clone().raw(),
+            )?;
         }
 
         Op::MemMove(dst, src, count, _mem) => {
-            select_memmove(ctx, dst, src, count)?;
+            select_memmove(
+                ctx,
+                &dst.clone().raw(),
+                &src.clone().raw(),
+                &count.clone().raw(),
+            )?;
         }
 
         Op::MemSet(dst, val, count, _mem) => {
-            select_memset(ctx, dst, val, count)?;
+            select_memset(ctx, &dst.clone().raw(), val, &count.clone().raw())?;
         }
 
         Op::Unreachable | Op::Trap => {
@@ -1387,11 +1419,21 @@ fn select_inst(
         }
 
         Op::Select(cond, tv, fv) => {
-            select_select(ctx, vref, cond, tv, fv)?;
+            select_select(ctx, vref, &cond.clone().raw(), tv, fv)?;
         }
 
-        Op::Bitcast(val) | Op::PtrToInt(val) | Op::PtrToAddr(val) | Op::IntToPtr(val) => {
+        Op::Bitcast(val) => {
             let src = ctx.ensure_in_reg(val.value)?;
+            ctx.regs.assign(vref, src);
+        }
+
+        Op::PtrToInt(val) | Op::PtrToAddr(val) => {
+            let src = ctx.ensure_in_reg(val.clone().raw().value)?;
+            ctx.regs.assign(vref, src);
+        }
+
+        Op::IntToPtr(val) => {
+            let src = ctx.ensure_in_reg(val.clone().raw().value)?;
             ctx.regs.assign(vref, src);
         }
 
@@ -1400,19 +1442,19 @@ fn select_inst(
         }
 
         Op::Sext(val, _target_bits) => {
-            select_sext(ctx, vref, val, func)?;
+            select_sext(ctx, vref, &val.clone().raw(), func)?;
         }
 
         Op::Zext(val, _target_bits) => {
-            select_zext(ctx, vref, val, func)?;
+            select_zext(ctx, vref, &val.clone().raw(), func)?;
         }
 
         Op::FpToSi(val) | Op::FpToUi(val) => {
-            let src_gpr = ctx.ensure_in_reg(val.value)?;
+            let src_gpr = ctx.ensure_in_reg(val.clone().raw().value)?;
             let dst = ctx.alloc.alloc();
             // Determine f32 vs f64 from the source value's type
             let double = !matches!(
-                func.value_type(val.value),
+                func.value_type(val.clone().raw().value),
                 Some(Type::Float(tuffy_ir::types::FloatType::F32))
             );
             // Float values live in GPRs as bit-patterns; move to XMM for conversion.
@@ -1431,7 +1473,7 @@ fn select_inst(
         }
 
         Op::SiToFp(val, ft) | Op::UiToFp(val, ft) => {
-            let val_ann = get_int_annotation(func, val.value);
+            let val_ann = get_int_annotation(func, val.clone().raw().value);
             let is_i128 = matches!(val_ann, Some(IntAnnotation { bit_width: 128, .. }));
 
             if is_i128 {
@@ -1440,7 +1482,7 @@ fn select_inst(
                 return None;
             }
 
-            let src = ctx.ensure_in_reg(val.value)?;
+            let src = ctx.ensure_in_reg(val.clone().raw().value)?;
             let double = !matches!(ft, tuffy_ir::types::FloatType::F32);
             let gpr_dst = ctx.alloc.alloc();
 
@@ -1578,10 +1620,10 @@ fn select_inst(
         }
 
         Op::FpConvert(val) => {
-            let src_gpr = ctx.ensure_in_reg(val.value)?;
+            let src_gpr = ctx.ensure_in_reg(val.clone().raw().value)?;
             // Determine source float type from the operand's type
             let src_double = !matches!(
-                func.value_type(val.value),
+                func.value_type(val.clone().raw().value),
                 Some(Type::Float(tuffy_ir::types::FloatType::F32))
             );
             // Float values live in GPRs; move to XMM, convert, move result back to GPR.
@@ -1608,15 +1650,29 @@ fn select_inst(
         }
 
         Op::Div(lhs, rhs) => {
-            select_divrem(ctx, vref, lhs, rhs, DivRemKind::Div, func)?;
+            select_divrem(
+                ctx,
+                vref,
+                &lhs.clone().raw(),
+                &rhs.clone().raw(),
+                DivRemKind::Div,
+                func,
+            )?;
         }
         Op::Rem(lhs, rhs) => {
-            select_divrem(ctx, vref, lhs, rhs, DivRemKind::Rem, func)?;
+            select_divrem(
+                ctx,
+                vref,
+                &lhs.clone().raw(),
+                &rhs.clone().raw(),
+                DivRemKind::Rem,
+                func,
+            )?;
         }
 
         Op::FAdd(lhs, rhs, _) => {
-            let l_gpr = ctx.ensure_in_reg(lhs.value)?;
-            let r_gpr = ctx.ensure_in_reg(rhs.value)?;
+            let l_gpr = ctx.ensure_in_reg(lhs.clone().raw().value)?;
+            let r_gpr = ctx.ensure_in_reg(rhs.clone().raw().value)?;
             let double = !matches!(inst_ty, Type::Float(tuffy_ir::types::FloatType::F32));
             let l_xmm = ctx.alloc.alloc_class(1);
             let r_xmm = ctx.alloc.alloc_class(1);
@@ -1647,8 +1703,8 @@ fn select_inst(
             ctx.regs.assign(vref, gpr_dst);
         }
         Op::FSub(lhs, rhs, _) => {
-            let l_gpr = ctx.ensure_in_reg(lhs.value)?;
-            let r_gpr = ctx.ensure_in_reg(rhs.value)?;
+            let l_gpr = ctx.ensure_in_reg(lhs.clone().raw().value)?;
+            let r_gpr = ctx.ensure_in_reg(rhs.clone().raw().value)?;
             let double = !matches!(inst_ty, Type::Float(tuffy_ir::types::FloatType::F32));
             let l_xmm = ctx.alloc.alloc_class(1);
             let r_xmm = ctx.alloc.alloc_class(1);
@@ -1679,8 +1735,8 @@ fn select_inst(
             ctx.regs.assign(vref, gpr_dst);
         }
         Op::FMul(lhs, rhs, _) => {
-            let l_gpr = ctx.ensure_in_reg(lhs.value)?;
-            let r_gpr = ctx.ensure_in_reg(rhs.value)?;
+            let l_gpr = ctx.ensure_in_reg(lhs.clone().raw().value)?;
+            let r_gpr = ctx.ensure_in_reg(rhs.clone().raw().value)?;
             let double = !matches!(inst_ty, Type::Float(tuffy_ir::types::FloatType::F32));
             let l_xmm = ctx.alloc.alloc_class(1);
             let r_xmm = ctx.alloc.alloc_class(1);
@@ -1711,8 +1767,8 @@ fn select_inst(
             ctx.regs.assign(vref, gpr_dst);
         }
         Op::FDiv(lhs, rhs, _) => {
-            let l_gpr = ctx.ensure_in_reg(lhs.value)?;
-            let r_gpr = ctx.ensure_in_reg(rhs.value)?;
+            let l_gpr = ctx.ensure_in_reg(lhs.clone().raw().value)?;
+            let r_gpr = ctx.ensure_in_reg(rhs.clone().raw().value)?;
             let double = !matches!(inst_ty, Type::Float(tuffy_ir::types::FloatType::F32));
             let l_xmm = ctx.alloc.alloc_class(1);
             let r_xmm = ctx.alloc.alloc_class(1);
@@ -1743,8 +1799,8 @@ fn select_inst(
             ctx.regs.assign(vref, gpr_dst);
         }
         Op::FMinNum(lhs, rhs) => {
-            let l_gpr = ctx.ensure_in_reg(lhs.value)?;
-            let r_gpr = ctx.ensure_in_reg(rhs.value)?;
+            let l_gpr = ctx.ensure_in_reg(lhs.clone().raw().value)?;
+            let r_gpr = ctx.ensure_in_reg(rhs.clone().raw().value)?;
             let double = !matches!(inst_ty, Type::Float(tuffy_ir::types::FloatType::F32));
             let l_xmm = ctx.alloc.alloc_class(1);
             let r_xmm = ctx.alloc.alloc_class(1);
@@ -1775,8 +1831,8 @@ fn select_inst(
             ctx.regs.assign(vref, gpr_dst);
         }
         Op::FMaxNum(lhs, rhs) => {
-            let l_gpr = ctx.ensure_in_reg(lhs.value)?;
-            let r_gpr = ctx.ensure_in_reg(rhs.value)?;
+            let l_gpr = ctx.ensure_in_reg(lhs.clone().raw().value)?;
+            let r_gpr = ctx.ensure_in_reg(rhs.clone().raw().value)?;
             let double = !matches!(inst_ty, Type::Float(tuffy_ir::types::FloatType::F32));
             let l_xmm = ctx.alloc.alloc_class(1);
             let r_xmm = ctx.alloc.alloc_class(1);
@@ -1807,10 +1863,10 @@ fn select_inst(
             ctx.regs.assign(vref, gpr_dst);
         }
         Op::FCmp(kind, lhs, rhs) => {
-            let l_gpr = ctx.ensure_in_reg(lhs.value)?;
-            let r_gpr = ctx.ensure_in_reg(rhs.value)?;
+            let l_gpr = ctx.ensure_in_reg(lhs.clone().raw().value)?;
+            let r_gpr = ctx.ensure_in_reg(rhs.clone().raw().value)?;
             let double = !matches!(
-                func.value_type(lhs.value),
+                func.value_type(lhs.clone().raw().value),
                 Some(Type::Float(tuffy_ir::types::FloatType::F32))
             );
             let l_xmm = ctx.alloc.alloc_class(1);
@@ -1836,7 +1892,7 @@ fn select_inst(
             ctx.regs.assign(vref, dst);
         }
         Op::FNeg(val) => {
-            let src = ctx.ensure_in_reg(val.value)?;
+            let src = ctx.ensure_in_reg(val.clone().raw().value)?;
             // Float values live in GPRs as bit-patterns; XOR the sign bit directly.
             let dst = ctx.alloc.alloc();
             let is_f32 = matches!(inst_ty, Type::Float(tuffy_ir::types::FloatType::F32));
@@ -1863,7 +1919,7 @@ fn select_inst(
             ctx.regs.assign(vref, dst);
         }
         Op::FAbs(val) => {
-            let src = ctx.ensure_in_reg(val.value)?;
+            let src = ctx.ensure_in_reg(val.clone().raw().value)?;
             let dst = ctx.alloc.alloc();
             let is_f32 = matches!(inst_ty, Type::Float(tuffy_ir::types::FloatType::F32));
             let clear_mask: i64 = if is_f32 {
@@ -1889,8 +1945,8 @@ fn select_inst(
             ctx.regs.assign(vref, dst);
         }
         Op::CopySign(mag, sign) => {
-            let mag_r = ctx.ensure_in_reg(mag.value)?;
-            let sign_r = ctx.ensure_in_reg(sign.value)?;
+            let mag_r = ctx.ensure_in_reg(mag.clone().raw().value)?;
+            let sign_r = ctx.ensure_in_reg(sign.clone().raw().value)?;
             let dst = ctx.alloc.alloc();
             let is_f32 = matches!(inst_ty, Type::Float(tuffy_ir::types::FloatType::F32));
             let sign_mask: i64 = if is_f32 {
@@ -1946,7 +2002,7 @@ fn select_inst(
         }
         Op::LoadAtomic(addr, _ty, _ordering) => {
             // Fallback: treat as regular load (x86 has strong memory model).
-            let base = ctx.ensure_in_reg(addr.value)?;
+            let base = ctx.ensure_in_reg(addr.clone().raw().value)?;
             let dst = ctx.alloc.alloc();
             ctx.out.push(MInst::MovRM {
                 size: OpSize::S64,
@@ -1962,7 +2018,7 @@ fn select_inst(
         Op::StoreAtomic(val, addr, _ordering, _mem) => {
             // Fallback: treat as regular store.
             let src = ctx.ensure_in_reg(val.value)?;
-            let base = ctx.ensure_in_reg(addr.value)?;
+            let base = ctx.ensure_in_reg(addr.clone().raw().value)?;
             ctx.out.push(MInst::MovMR {
                 size: OpSize::S64,
                 base,
@@ -1978,7 +2034,7 @@ fn select_inst(
         Op::Bswap(val, byte_count) => {
             if *byte_count > 8 {
                 // 128-bit bswap: swap two 64-bit halves and swap bytes within each
-                let ptr = ctx.ensure_in_reg(val.value)?;
+                let ptr = ctx.ensure_in_reg(val.clone().raw().value)?;
                 let lo = ctx.alloc.alloc();
                 let hi = ctx.alloc.alloc();
 
@@ -2023,7 +2079,7 @@ fn select_inst(
 
                 ctx.regs.assign(vref, ptr);
             } else {
-                let s = ctx.ensure_in_reg(val.value)?;
+                let s = ctx.ensure_in_reg(val.clone().raw().value)?;
                 let dst = ctx.alloc.alloc();
                 ctx.out.push(MInst::MovRR {
                     size: OpSize::S64,
@@ -2050,8 +2106,8 @@ fn select_inst(
 
         Op::RotateLeft(val, amt, bits) => {
             let size = bytes_to_opsize(bits / 8);
-            let v = ctx.ensure_in_reg(val.value)?;
-            let a = ctx.ensure_in_reg(amt.value)?;
+            let v = ctx.ensure_in_reg(val.clone().raw().value)?;
+            let a = ctx.ensure_in_reg(amt.clone().raw().value)?;
             let dst = ctx.alloc.alloc();
             ctx.out.push(MInst::MovRR { size, dst, src: v });
             let cl = ctx.alloc.alloc_fixed(Gpr::Rcx.to_preg());
@@ -2066,8 +2122,8 @@ fn select_inst(
 
         Op::RotateRight(val, amt, bits) => {
             let size = bytes_to_opsize(bits / 8);
-            let v = ctx.ensure_in_reg(val.value)?;
-            let a = ctx.ensure_in_reg(amt.value)?;
+            let v = ctx.ensure_in_reg(val.clone().raw().value)?;
+            let a = ctx.ensure_in_reg(amt.clone().raw().value)?;
             let dst = ctx.alloc.alloc();
             ctx.out.push(MInst::MovRR { size, dst, src: v });
             let cl = ctx.alloc.alloc_fixed(Gpr::Rcx.to_preg());
@@ -2082,7 +2138,7 @@ fn select_inst(
 
         Op::BitReverse(val, bits) => {
             // Byte-swap + reverse bits within each byte via shift-mask sequence
-            let s = ctx.ensure_in_reg(val.value)?;
+            let s = ctx.ensure_in_reg(val.clone().raw().value)?;
             let dst = ctx.alloc.alloc();
             ctx.out.push(MInst::MovRR {
                 size: OpSize::S64,
@@ -2177,8 +2233,8 @@ fn select_inst(
         }
 
         Op::SaturatingAdd(lhs, rhs, bits) => {
-            let l = ctx.ensure_in_reg(lhs.value)?;
-            let r = ctx.ensure_in_reg(rhs.value)?;
+            let l = ctx.ensure_in_reg(lhs.clone().raw().value)?;
+            let r = ctx.ensure_in_reg(rhs.clone().raw().value)?;
             let dst = ctx.alloc.alloc();
             ctx.out.push(MInst::MovRR {
                 size: OpSize::S64,
@@ -2247,8 +2303,8 @@ fn select_inst(
         }
 
         Op::SaturatingSub(lhs, rhs, bits) => {
-            let l = ctx.ensure_in_reg(lhs.value)?;
-            let r = ctx.ensure_in_reg(rhs.value)?;
+            let l = ctx.ensure_in_reg(lhs.clone().raw().value)?;
+            let r = ctx.ensure_in_reg(rhs.clone().raw().value)?;
             let dst = ctx.alloc.alloc();
             ctx.out.push(MInst::MovRR {
                 size: OpSize::S64,
@@ -2311,8 +2367,8 @@ fn select_inst(
         }
 
         Op::SignedSaturatingAdd(lhs, rhs, bits) => {
-            let l = ctx.ensure_in_reg(lhs.value)?;
-            let r = ctx.ensure_in_reg(rhs.value)?;
+            let l = ctx.ensure_in_reg(lhs.clone().raw().value)?;
+            let r = ctx.ensure_in_reg(rhs.clone().raw().value)?;
             let dst = ctx.alloc.alloc();
             ctx.out.push(MInst::MovRR {
                 size: OpSize::S64,
@@ -2393,8 +2449,8 @@ fn select_inst(
         }
 
         Op::SignedSaturatingSub(lhs, rhs, bits) => {
-            let l = ctx.ensure_in_reg(lhs.value)?;
-            let r = ctx.ensure_in_reg(rhs.value)?;
+            let l = ctx.ensure_in_reg(lhs.clone().raw().value)?;
+            let r = ctx.ensure_in_reg(rhs.clone().raw().value)?;
             let dst = ctx.alloc.alloc();
             ctx.out.push(MInst::MovRR {
                 size: OpSize::S64,
@@ -2475,8 +2531,8 @@ fn select_inst(
         }
 
         Op::SAddWithOverflow(lhs, rhs, bits) => {
-            let l = ctx.ensure_in_reg(lhs.value)?;
-            let r = ctx.ensure_in_reg(rhs.value)?;
+            let l = ctx.ensure_in_reg(lhs.clone().raw().value)?;
+            let r = ctx.ensure_in_reg(rhs.clone().raw().value)?;
             let result = ctx.alloc.alloc();
             let overflow = ctx.alloc.alloc();
             ctx.out.push(MInst::MovRR {
@@ -2561,8 +2617,8 @@ fn select_inst(
         }
 
         Op::UAddWithOverflow(lhs, rhs, bits) => {
-            let l = ctx.ensure_in_reg(lhs.value)?;
-            let r = ctx.ensure_in_reg(rhs.value)?;
+            let l = ctx.ensure_in_reg(lhs.clone().raw().value)?;
+            let r = ctx.ensure_in_reg(rhs.clone().raw().value)?;
             let result = ctx.alloc.alloc();
             let overflow = ctx.alloc.alloc();
             ctx.out.push(MInst::MovRR {
@@ -2622,8 +2678,8 @@ fn select_inst(
         }
 
         Op::SSubWithOverflow(lhs, rhs, bits) => {
-            let l = ctx.ensure_in_reg(lhs.value)?;
-            let r = ctx.ensure_in_reg(rhs.value)?;
+            let l = ctx.ensure_in_reg(lhs.clone().raw().value)?;
+            let r = ctx.ensure_in_reg(rhs.clone().raw().value)?;
             let result = ctx.alloc.alloc();
             let overflow = ctx.alloc.alloc();
             ctx.out.push(MInst::MovRR {
@@ -2708,8 +2764,8 @@ fn select_inst(
         }
 
         Op::USubWithOverflow(lhs, rhs, bits) => {
-            let l = ctx.ensure_in_reg(lhs.value)?;
-            let r = ctx.ensure_in_reg(rhs.value)?;
+            let l = ctx.ensure_in_reg(lhs.clone().raw().value)?;
+            let r = ctx.ensure_in_reg(rhs.clone().raw().value)?;
             let result = ctx.alloc.alloc();
             let overflow = ctx.alloc.alloc();
             ctx.out.push(MInst::MovRR {
@@ -2758,8 +2814,8 @@ fn select_inst(
         }
 
         Op::SMulWithOverflow(lhs, rhs, bits) => {
-            let l = ctx.ensure_in_reg(lhs.value)?;
-            let r = ctx.ensure_in_reg(rhs.value)?;
+            let l = ctx.ensure_in_reg(lhs.clone().raw().value)?;
+            let r = ctx.ensure_in_reg(rhs.clone().raw().value)?;
             let result = ctx.alloc.alloc();
             let overflow = ctx.alloc.alloc();
             ctx.out.push(MInst::MovRR {
@@ -2844,8 +2900,8 @@ fn select_inst(
         }
 
         Op::UMulWithOverflow(lhs, rhs, bits) => {
-            let l = ctx.ensure_in_reg(lhs.value)?;
-            let r = ctx.ensure_in_reg(rhs.value)?;
+            let l = ctx.ensure_in_reg(lhs.clone().raw().value)?;
+            let r = ctx.ensure_in_reg(rhs.clone().raw().value)?;
             let result = ctx.alloc.alloc();
             let overflow = ctx.alloc.alloc();
             ctx.out.push(MInst::MovRR {

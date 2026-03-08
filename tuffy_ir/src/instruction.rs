@@ -3,9 +3,7 @@
 use num_bigint::BigInt;
 
 use crate::module::SymbolId;
-use crate::typed::{
-    BoolOperand, ByteOperand, FloatOperand, IntOperand, MemOperand, PtrOperand, UnitOperand,
-};
+use crate::typed::{BoolOperand, FloatOperand, IntOperand, MemOperand, PtrOperand};
 use crate::types::{Annotation, FloatType, FpRewriteFlags, MemoryOrdering, Type};
 use crate::value::{BlockRef, ValueRef};
 
@@ -164,91 +162,91 @@ pub enum Op {
     /// Function parameter. Index into the parameter list.
     Param(u32),
     /// Integer addition: add %a, %b
-    Add(Operand, Operand),
+    Add(IntOperand, IntOperand),
     /// Integer subtraction: sub %a, %b
-    Sub(Operand, Operand),
+    Sub(IntOperand, IntOperand),
     /// Integer multiplication: mul %a, %b
-    Mul(Operand, Operand),
+    Mul(IntOperand, IntOperand),
     /// Integer division: div %a, %b (poison on div-by-zero)
-    Div(Operand, Operand),
+    Div(IntOperand, IntOperand),
     /// Integer remainder: rem %a, %b (poison on div-by-zero)
-    Rem(Operand, Operand),
+    Rem(IntOperand, IntOperand),
     /// Bitwise AND: and %a, %b
-    And(Operand, Operand),
+    And(IntOperand, IntOperand),
     /// Bitwise OR: or %a, %b
-    Or(Operand, Operand),
+    Or(IntOperand, IntOperand),
     /// Bitwise XOR: xor %a, %b
-    Xor(Operand, Operand),
+    Xor(IntOperand, IntOperand),
     /// Boolean AND: band %a, %b
-    BAnd(Operand, Operand),
+    BAnd(BoolOperand, BoolOperand),
     /// Boolean OR: bor %a, %b
-    BOr(Operand, Operand),
+    BOr(BoolOperand, BoolOperand),
     /// Boolean XOR: bxor %a, %b
-    BXor(Operand, Operand),
+    BXor(BoolOperand, BoolOperand),
     /// Left shift: shl %a, %b (poison if shift amount < 0)
-    Shl(Operand, Operand),
+    Shl(IntOperand, IntOperand),
     /// Right shift: shr %a, %b (poison if shift amount < 0).
     /// Signedness is a property of operand annotations, not the operation.
-    Shr(Operand, Operand),
+    Shr(IntOperand, IntOperand),
     /// Integer minimum: min %a, %b
-    Min(Operand, Operand),
+    Min(IntOperand, IntOperand),
     /// Integer maximum: max %a, %b
-    Max(Operand, Operand),
+    Max(IntOperand, IntOperand),
     /// Population count: count the number of set bits.
-    CountOnes(Operand),
+    CountOnes(IntOperand),
     /// Count leading zeros: truncate to n bits (mod 2^n), then count leading zero bits.
     /// n = 0 produces poison. Second field is the bit width.
-    CountLeadingZeros(Operand, u32),
+    CountLeadingZeros(IntOperand, u32),
     /// Count trailing zeros: number of zero bits after the least significant set bit.
     /// Defined for non-negative integers; negative values and zero produce poison.
-    CountTrailingZeros(Operand),
+    CountTrailingZeros(IntOperand),
     /// Byte-swap: reverse byte order of the low n bytes. n = 0 produces poison.
-    Bswap(Operand, u32),
+    Bswap(IntOperand, u32),
     /// Bit-reverse: reverse bit order of the low n bits. n = 0 produces poison.
-    BitReverse(Operand, u32),
+    BitReverse(IntOperand, u32),
     /// Merge: replace the low `width` bits of `a` with the low `width` bits of `b`.
     /// width = 0 produces poison.
-    Merge(Operand, Operand, u32),
+    Merge(IntOperand, IntOperand, u32),
     /// Split: decompose `a` at bit position `width`.
     /// Produces two results: hi = a >> width, lo = a mod 2^width.
     /// width = 0 produces poison. Multi-result instruction.
-    Split(Operand, u32),
+    Split(IntOperand, u32),
     /// Carry-less multiplication (polynomial multiplication over GF(2)).
     /// Uses XOR instead of addition for partial product accumulation.
     /// Negative inputs produce poison.
-    Clmul(Operand, Operand),
+    Clmul(IntOperand, IntOperand),
     /// Rotate left: rotate value left by amount in an n-bit field. n = 0 produces poison.
-    RotateLeft(Operand, Operand, u32),
+    RotateLeft(IntOperand, IntOperand, u32),
     /// Rotate right: rotate value right by amount in an n-bit field. n = 0 produces poison.
-    RotateRight(Operand, Operand, u32),
+    RotateRight(IntOperand, IntOperand, u32),
     /// Unsigned saturating addition in n bits. n = 0 produces poison.
-    SaturatingAdd(Operand, Operand, u32),
+    SaturatingAdd(IntOperand, IntOperand, u32),
     /// Unsigned saturating subtraction in n bits. n = 0 produces poison.
-    SaturatingSub(Operand, Operand, u32),
+    SaturatingSub(IntOperand, IntOperand, u32),
     /// Signed saturating addition in n bits. n = 0 produces poison.
     /// Result is clamped to [-(2^(n-1)), 2^(n-1)-1].
-    SignedSaturatingAdd(Operand, Operand, u32),
+    SignedSaturatingAdd(IntOperand, IntOperand, u32),
     /// Signed saturating subtraction in n bits. n = 0 produces poison.
     /// Result is clamped to [-(2^(n-1)), 2^(n-1)-1].
-    SignedSaturatingSub(Operand, Operand, u32),
+    SignedSaturatingSub(IntOperand, IntOperand, u32),
     /// Signed addition with overflow detection in n bits. n = 0 produces poison.
     /// Multi-result: primary = wrapping sum (Int), secondary = overflow flag (Bool).
-    SAddWithOverflow(Operand, Operand, u32),
+    SAddWithOverflow(IntOperand, IntOperand, u32),
     /// Unsigned addition with overflow detection in n bits. n = 0 produces poison.
     /// Multi-result: primary = wrapping sum (Int), secondary = overflow flag (Bool).
-    UAddWithOverflow(Operand, Operand, u32),
+    UAddWithOverflow(IntOperand, IntOperand, u32),
     /// Signed subtraction with overflow detection in n bits. n = 0 produces poison.
     /// Multi-result: primary = wrapping difference (Int), secondary = overflow flag (Bool).
-    SSubWithOverflow(Operand, Operand, u32),
+    SSubWithOverflow(IntOperand, IntOperand, u32),
     /// Unsigned subtraction with overflow detection in n bits. n = 0 produces poison.
     /// Multi-result: primary = wrapping difference (Int), secondary = overflow flag (Bool).
-    USubWithOverflow(Operand, Operand, u32),
+    USubWithOverflow(IntOperand, IntOperand, u32),
     /// Signed multiplication with overflow detection in n bits. n = 0 produces poison.
     /// Multi-result: primary = wrapping product (Int), secondary = overflow flag (Bool).
-    SMulWithOverflow(Operand, Operand, u32),
+    SMulWithOverflow(IntOperand, IntOperand, u32),
     /// Unsigned multiplication with overflow detection in n bits. n = 0 produces poison.
     /// Multi-result: primary = wrapping product (Int), secondary = overflow flag (Bool).
-    UMulWithOverflow(Operand, Operand, u32),
+    UMulWithOverflow(IntOperand, IntOperand, u32),
     /// Integer constant (arbitrary precision, matching Lean `Int`).
     Const(BigInt),
     /// Boolean constant: true or false.
@@ -258,50 +256,50 @@ pub enum Op {
 
     // -- Comparison --
     /// Integer comparison. Returns Bool.
-    ICmp(ICmpOp, Operand, Operand),
+    ICmp(ICmpOp, IntOperand, IntOperand),
     /// Float comparison. Returns Bool.
-    FCmp(FCmpOp, Operand, Operand),
+    FCmp(FCmpOp, FloatOperand, FloatOperand),
 
     // -- Select --
     /// Conditional select: select cond, true_val, false_val. Cond must be Bool.
-    Select(Operand, Operand, Operand),
+    Select(BoolOperand, Operand, Operand),
 
     // -- Memory --
     /// Load from pointer. Second field is byte count. Third is mem token input.
-    Load(Operand, u32, Operand),
+    Load(PtrOperand, u32, MemOperand),
     /// Store value to pointer: store val, ptr. Third field is byte count. Fourth is mem token input.
-    Store(Operand, Operand, u32, Operand),
+    Store(Operand, PtrOperand, u32, MemOperand),
     /// Allocate n bytes on stack, returns pointer.
     StackSlot(u32),
     /// Memory copy (non-overlapping): memcpy semantics.
     /// Args: (dst_ptr, src_ptr, byte_count, mem_token)
-    MemCopy(Operand, Operand, Operand, Operand),
+    MemCopy(PtrOperand, PtrOperand, IntOperand, MemOperand),
     /// Memory move (may overlap): memmove semantics.
     /// Args: (dst_ptr, src_ptr, byte_count, mem_token)
-    MemMove(Operand, Operand, Operand, Operand),
+    MemMove(PtrOperand, PtrOperand, IntOperand, MemOperand),
     /// Memory set: memset semantics.
     /// Args: (dst_ptr, value, byte_count, mem_token)
-    MemSet(Operand, Operand, Operand, Operand),
+    MemSet(PtrOperand, Operand, IntOperand, MemOperand),
 
     // -- Atomic memory operations --
     /// Atomic load from pointer with memory ordering. Third is mem token input.
-    LoadAtomic(Operand, MemoryOrdering, Operand),
+    LoadAtomic(PtrOperand, MemoryOrdering, MemOperand),
     /// Atomic store value to pointer: store.atomic val, ptr, ordering. Fourth is mem token input.
-    StoreAtomic(Operand, Operand, MemoryOrdering, Operand),
+    StoreAtomic(Operand, PtrOperand, MemoryOrdering, MemOperand),
     /// Atomic read-modify-write: rmw op, ptr, val, ordering. Fifth is mem token input.
-    AtomicRmw(AtomicRmwOp, Operand, Operand, MemoryOrdering, Operand),
+    AtomicRmw(AtomicRmwOp, PtrOperand, Operand, MemoryOrdering, MemOperand),
     /// Atomic compare-and-exchange: cmpxchg ptr, expected, desired, success_ord, failure_ord.
     /// Returns the old value; caller uses icmp to check success. Sixth is mem token input.
     AtomicCmpXchg(
-        Operand,
+        PtrOperand,
         Operand,
         Operand,
         MemoryOrdering,
         MemoryOrdering,
-        Operand,
+        MemOperand,
     ),
     /// Memory fence with ordering. Second is mem token input.
-    Fence(MemoryOrdering, Operand),
+    Fence(MemoryOrdering, MemOperand),
 
     // -- Symbol --
     /// Load the address of a symbol (function or static data).
@@ -310,59 +308,59 @@ pub enum Op {
 
     // -- Call --
     /// Call function with arguments. Third is mem token input.
-    Call(Operand, Vec<Operand>, Operand),
+    Call(PtrOperand, Vec<Operand>, MemOperand),
 
     // -- Type conversion --
     /// Bitcast (reinterpret bits).
     Bitcast(Operand),
     /// Sign-extend to n bits (for lowering).
-    Sext(Operand, u32),
+    Sext(IntOperand, u32),
     /// Zero-extend to n bits (for lowering).
-    Zext(Operand, u32),
+    Zext(IntOperand, u32),
     /// Float to signed integer (truncation toward zero).
-    FpToSi(Operand),
+    FpToSi(FloatOperand),
     /// Float to unsigned integer (truncation toward zero).
-    FpToUi(Operand),
+    FpToUi(FloatOperand),
     /// Signed integer to float.
-    SiToFp(Operand, FloatType),
+    SiToFp(IntOperand, FloatType),
     /// Unsigned integer to float.
-    UiToFp(Operand, FloatType),
+    UiToFp(IntOperand, FloatType),
     /// Float-to-float conversion (widen or narrow).
-    FpConvert(Operand),
+    FpConvert(FloatOperand),
 
     // -- Floating point arithmetic --
     /// Floating point addition: fadd %a, %b
-    FAdd(Operand, Operand, FpRewriteFlags),
+    FAdd(FloatOperand, FloatOperand, FpRewriteFlags),
     /// Floating point subtraction: fsub %a, %b
-    FSub(Operand, Operand, FpRewriteFlags),
+    FSub(FloatOperand, FloatOperand, FpRewriteFlags),
     /// Floating point multiplication: fmul %a, %b
-    FMul(Operand, Operand, FpRewriteFlags),
+    FMul(FloatOperand, FloatOperand, FpRewriteFlags),
     /// Floating point division: fdiv %a, %b
-    FDiv(Operand, Operand, FpRewriteFlags),
+    FDiv(FloatOperand, FloatOperand, FpRewriteFlags),
     /// Floating point remainder: frem %a, %b
-    FRem(Operand, Operand, FpRewriteFlags),
+    FRem(FloatOperand, FloatOperand, FpRewriteFlags),
     /// IEEE 754-2008 minNum: fminnum %a, %b
-    FMinNum(Operand, Operand),
+    FMinNum(FloatOperand, FloatOperand),
     /// IEEE 754-2008 maxNum: fmaxnum %a, %b
-    FMaxNum(Operand, Operand),
+    FMaxNum(FloatOperand, FloatOperand),
     /// Floating point negation: fneg %a
-    FNeg(Operand),
+    FNeg(FloatOperand),
     /// Floating point absolute value: fabs %a
-    FAbs(Operand),
+    FAbs(FloatOperand),
     /// Copy sign: copysign %mag, %sign
-    CopySign(Operand, Operand),
+    CopySign(FloatOperand, FloatOperand),
 
     // -- Pointer operations --
     /// Pointer addition: ptradd ptr, offset → ptr (preserves provenance).
-    PtrAdd(Operand, Operand),
+    PtrAdd(PtrOperand, IntOperand),
     /// Pointer difference: ptrdiff ptr_a, ptr_b → int (same allocation).
-    PtrDiff(Operand, Operand),
+    PtrDiff(PtrOperand, PtrOperand),
     /// Pointer to integer with provenance capture.
-    PtrToInt(Operand),
+    PtrToInt(PtrOperand),
     /// Pointer to address (discard provenance).
-    PtrToAddr(Operand),
+    PtrToAddr(PtrOperand),
     /// Integer to pointer (no valid provenance).
-    IntToPtr(Operand),
+    IntToPtr(IntOperand),
 
     // -- Aggregate operations --
     /// Extract value from struct/array at indices path.
@@ -374,11 +372,11 @@ pub enum Op {
 
     // -- Terminators (by convention, placed last in a basic block) --
     /// Return value from function. Second is mem token output.
-    Ret(Option<Operand>, Operand),
+    Ret(Option<Operand>, MemOperand),
     /// Unconditional branch with block arguments.
     Br(BlockRef, Vec<Operand>),
     /// Conditional branch: brif cond, then_block(args...), else_block(args...).
-    BrIf(Operand, BlockRef, Vec<Operand>, BlockRef, Vec<Operand>),
+    BrIf(BoolOperand, BlockRef, Vec<Operand>, BlockRef, Vec<Operand>),
     /// Loop backedge: continue with values fed back to loop header.
     Continue(Vec<Operand>),
     /// Exit region with values.
@@ -387,48 +385,4 @@ pub enum Op {
     Unreachable,
     /// Trap: unconditionally abort execution (e.g., failed assertion).
     Trap,
-}
-
-// ── Conversions from typed operands to Operand ──
-
-impl From<IntOperand> for Operand {
-    fn from(op: IntOperand) -> Self {
-        op.raw()
-    }
-}
-
-impl From<BoolOperand> for Operand {
-    fn from(op: BoolOperand) -> Self {
-        op.raw()
-    }
-}
-
-impl From<FloatOperand> for Operand {
-    fn from(op: FloatOperand) -> Self {
-        op.raw()
-    }
-}
-
-impl From<PtrOperand> for Operand {
-    fn from(op: PtrOperand) -> Self {
-        op.raw()
-    }
-}
-
-impl From<MemOperand> for Operand {
-    fn from(op: MemOperand) -> Self {
-        op.raw()
-    }
-}
-
-impl From<UnitOperand> for Operand {
-    fn from(op: UnitOperand) -> Self {
-        op.raw()
-    }
-}
-
-impl From<ByteOperand> for Operand {
-    fn from(op: ByteOperand) -> Self {
-        op.raw()
-    }
 }

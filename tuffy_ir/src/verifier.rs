@@ -407,10 +407,10 @@ impl FuncVerifier<'_> {
             | Op::Min(a, b)
             | Op::Max(a, b)
             | Op::Clmul(a, b) => {
-                self.check_operand(a, &loc);
-                self.check_operand(b, &loc);
-                self.expect_int(a, "int arith lhs", &loc);
-                self.expect_int(b, "int arith rhs", &loc);
+                self.check_operand(&a.clone().raw(), &loc);
+                self.check_operand(&b.clone().raw(), &loc);
+                self.expect_int(&a.clone().raw(), "int arith lhs", &loc);
+                self.expect_int(&b.clone().raw(), "int arith rhs", &loc);
                 if !matches!(inst.ty, Type::Int) {
                     self.result.error(
                         loc.clone(),
@@ -422,10 +422,10 @@ impl FuncVerifier<'_> {
 
             // Boolean binary ops: both Bool, result Bool.
             Op::BAnd(a, b) | Op::BOr(a, b) | Op::BXor(a, b) => {
-                self.check_operand(a, &loc);
-                self.check_operand(b, &loc);
-                self.expect_bool(a, "boolean op lhs", &loc);
-                self.expect_bool(b, "boolean op rhs", &loc);
+                self.check_operand(&a.clone().raw(), &loc);
+                self.check_operand(&b.clone().raw(), &loc);
+                self.expect_bool(&a.clone().raw(), "boolean op lhs", &loc);
+                self.expect_bool(&b.clone().raw(), "boolean op rhs", &loc);
                 if inst.ty != Type::Bool {
                     self.result.error(
                         loc.clone(),
@@ -435,8 +435,8 @@ impl FuncVerifier<'_> {
             }
 
             Op::CountOnes(a) => {
-                self.check_operand(a, &loc);
-                self.expect_int(a, "count_ones", &loc);
+                self.check_operand(&a.clone().raw(), &loc);
+                self.expect_int(&a.clone().raw(), "count_ones", &loc);
                 if !matches!(inst.ty, Type::Int) {
                     self.result.error(
                         loc,
@@ -446,8 +446,8 @@ impl FuncVerifier<'_> {
             }
 
             Op::CountLeadingZeros(a, bits) => {
-                self.check_operand(a, &loc);
-                self.expect_int(a, "count_leading_zeros", &loc);
+                self.check_operand(&a.clone().raw(), &loc);
+                self.expect_int(&a.clone().raw(), "count_leading_zeros", &loc);
                 if *bits == 0 {
                     self.result
                         .error(loc.clone(), "count_leading_zeros bit width must be > 0");
@@ -461,8 +461,8 @@ impl FuncVerifier<'_> {
             }
 
             Op::CountTrailingZeros(a) => {
-                self.check_operand(a, &loc);
-                self.expect_int(a, "count_trailing_zeros", &loc);
+                self.check_operand(&a.clone().raw(), &loc);
+                self.expect_int(&a.clone().raw(), "count_trailing_zeros", &loc);
                 if !matches!(inst.ty, Type::Int) {
                     self.result.error(
                         loc,
@@ -472,8 +472,8 @@ impl FuncVerifier<'_> {
             }
 
             Op::Bswap(a, bytes) => {
-                self.check_operand(a, &loc);
-                self.expect_int(a, "bswap", &loc);
+                self.check_operand(&a.clone().raw(), &loc);
+                self.expect_int(&a.clone().raw(), "bswap", &loc);
                 if *bytes == 0 {
                     self.result
                         .error(loc.clone(), "bswap byte count must be > 0");
@@ -485,8 +485,8 @@ impl FuncVerifier<'_> {
             }
 
             Op::BitReverse(a, bits) => {
-                self.check_operand(a, &loc);
-                self.expect_int(a, "bit_reverse", &loc);
+                self.check_operand(&a.clone().raw(), &loc);
+                self.expect_int(&a.clone().raw(), "bit_reverse", &loc);
                 if *bits == 0 {
                     self.result
                         .error(loc.clone(), "bit_reverse bit width must be > 0");
@@ -500,10 +500,10 @@ impl FuncVerifier<'_> {
             }
 
             Op::RotateLeft(a, b, bits) | Op::RotateRight(a, b, bits) => {
-                self.check_operand(a, &loc);
-                self.check_operand(b, &loc);
-                self.expect_int(a, "rotate value", &loc);
-                self.expect_int(b, "rotate amount", &loc);
+                self.check_operand(&a.clone().raw(), &loc);
+                self.check_operand(&b.clone().raw(), &loc);
+                self.expect_int(&a.clone().raw(), "rotate value", &loc);
+                self.expect_int(&b.clone().raw(), "rotate amount", &loc);
                 if *bits == 0 {
                     self.result
                         .error(loc.clone(), "rotate bit width must be > 0");
@@ -518,10 +518,10 @@ impl FuncVerifier<'_> {
             | Op::SaturatingSub(a, b, bits)
             | Op::SignedSaturatingAdd(a, b, bits)
             | Op::SignedSaturatingSub(a, b, bits) => {
-                self.check_operand(a, &loc);
-                self.check_operand(b, &loc);
-                self.expect_int(a, "saturating arith lhs", &loc);
-                self.expect_int(b, "saturating arith rhs", &loc);
+                self.check_operand(&a.clone().raw(), &loc);
+                self.check_operand(&b.clone().raw(), &loc);
+                self.expect_int(&a.clone().raw(), "saturating arith lhs", &loc);
+                self.expect_int(&b.clone().raw(), "saturating arith rhs", &loc);
                 if *bits == 0 {
                     self.result
                         .error(loc.clone(), "saturating arith bit width must be > 0");
@@ -540,10 +540,10 @@ impl FuncVerifier<'_> {
             | Op::USubWithOverflow(a, b, bits)
             | Op::SMulWithOverflow(a, b, bits)
             | Op::UMulWithOverflow(a, b, bits) => {
-                self.check_operand(a, &loc);
-                self.check_operand(b, &loc);
-                self.expect_int(a, "overflow arith lhs", &loc);
-                self.expect_int(b, "overflow arith rhs", &loc);
+                self.check_operand(&a.clone().raw(), &loc);
+                self.check_operand(&b.clone().raw(), &loc);
+                self.expect_int(&a.clone().raw(), "overflow arith lhs", &loc);
+                self.expect_int(&b.clone().raw(), "overflow arith rhs", &loc);
                 if *bits == 0 {
                     self.result
                         .error(loc.clone(), "overflow arith bit width must be > 0");
@@ -594,10 +594,10 @@ impl FuncVerifier<'_> {
             }
 
             Op::ICmp(_, a, b) => {
-                self.check_operand(a, &loc);
-                self.check_operand(b, &loc);
-                self.expect_int(a, "icmp lhs", &loc);
-                self.expect_int(b, "icmp rhs", &loc);
+                self.check_operand(&a.clone().raw(), &loc);
+                self.check_operand(&b.clone().raw(), &loc);
+                self.expect_int(&a.clone().raw(), "icmp lhs", &loc);
+                self.expect_int(&b.clone().raw(), "icmp rhs", &loc);
                 if inst.ty != Type::Bool {
                     self.result
                         .error(loc, format!("icmp result must be Bool, got {:?}", inst.ty));
@@ -605,10 +605,10 @@ impl FuncVerifier<'_> {
             }
 
             Op::FCmp(_, a, b) => {
-                self.check_operand(a, &loc);
-                self.check_operand(b, &loc);
-                self.expect_float(a, "fcmp lhs", &loc);
-                self.expect_float(b, "fcmp rhs", &loc);
+                self.check_operand(&a.clone().raw(), &loc);
+                self.check_operand(&b.clone().raw(), &loc);
+                self.expect_float(&a.clone().raw(), "fcmp lhs", &loc);
+                self.expect_float(&b.clone().raw(), "fcmp rhs", &loc);
                 if inst.ty != Type::Bool {
                     self.result
                         .error(loc, format!("fcmp result must be Bool, got {:?}", inst.ty));
@@ -616,10 +616,10 @@ impl FuncVerifier<'_> {
             }
 
             Op::Select(cond, tv, fv) => {
-                self.check_operand(cond, &loc);
+                self.check_operand(&cond.clone().raw(), &loc);
                 self.check_operand(tv, &loc);
                 self.check_operand(fv, &loc);
-                self.expect_bool(cond, "select cond", &loc);
+                self.expect_bool(&cond.clone().raw(), "select cond", &loc);
                 self.expect_same_type(tv, fv, "select arms", &loc);
             }
 
@@ -638,10 +638,10 @@ impl FuncVerifier<'_> {
         match &inst.op {
             // -- Memory --
             Op::Load(ptr, _bytes, mem) => {
-                self.check_operand(ptr, loc);
-                self.check_operand(mem, loc);
-                self.expect_ptr(ptr, "load ptr", loc);
-                self.expect_mem(mem, "load mem", loc);
+                self.check_operand(&ptr.clone().raw(), loc);
+                self.check_operand(&mem.clone().raw(), loc);
+                self.expect_ptr(&ptr.clone().raw(), "load ptr", loc);
+                self.expect_mem(&mem.clone().raw(), "load mem", loc);
                 if inst.ty == Type::Mem {
                     self.result.error(
                         loc.clone(),
@@ -658,10 +658,10 @@ impl FuncVerifier<'_> {
             }
             Op::Store(val, ptr, _bytes, mem) => {
                 self.check_operand(val, loc);
-                self.check_operand(ptr, loc);
-                self.check_operand(mem, loc);
-                self.expect_ptr(ptr, "store ptr", loc);
-                self.expect_mem(mem, "store mem", loc);
+                self.check_operand(&ptr.clone().raw(), loc);
+                self.check_operand(&mem.clone().raw(), loc);
+                self.expect_ptr(&ptr.clone().raw(), "store ptr", loc);
+                self.expect_mem(&mem.clone().raw(), "store mem", loc);
                 if let Some(val_ty) = self.value_type(val.value) {
                     let val_ty = val_ty.clone();
                     self.check_loadable_type(&val_ty, "store value type", loc);
@@ -684,10 +684,10 @@ impl FuncVerifier<'_> {
 
             // -- Atomic memory --
             Op::LoadAtomic(ptr, ord, mem) => {
-                self.check_operand(ptr, loc);
-                self.check_operand(mem, loc);
-                self.expect_ptr(ptr, "load.atomic ptr", loc);
-                self.expect_mem(mem, "load.atomic mem", loc);
+                self.check_operand(&ptr.clone().raw(), loc);
+                self.check_operand(&mem.clone().raw(), loc);
+                self.expect_ptr(&ptr.clone().raw(), "load.atomic ptr", loc);
+                self.expect_mem(&mem.clone().raw(), "load.atomic mem", loc);
                 self.check_load_ordering(ord, loc);
                 if inst.ty != Type::Mem {
                     self.result.error(
@@ -702,10 +702,10 @@ impl FuncVerifier<'_> {
             }
             Op::StoreAtomic(val, ptr, ord, mem) => {
                 self.check_operand(val, loc);
-                self.check_operand(ptr, loc);
-                self.check_operand(mem, loc);
-                self.expect_ptr(ptr, "store.atomic ptr", loc);
-                self.expect_mem(mem, "store.atomic mem", loc);
+                self.check_operand(&ptr.clone().raw(), loc);
+                self.check_operand(&mem.clone().raw(), loc);
+                self.expect_ptr(&ptr.clone().raw(), "store.atomic ptr", loc);
+                self.expect_mem(&mem.clone().raw(), "store.atomic mem", loc);
                 self.check_store_ordering(ord, loc);
                 if inst.ty != Type::Mem {
                     self.result.error(
@@ -715,11 +715,11 @@ impl FuncVerifier<'_> {
                 }
             }
             Op::AtomicRmw(_, ptr, val, _ord, mem) => {
-                self.check_operand(ptr, loc);
+                self.check_operand(&ptr.clone().raw(), loc);
                 self.check_operand(val, loc);
-                self.check_operand(mem, loc);
-                self.expect_ptr(ptr, "rmw ptr", loc);
-                self.expect_mem(mem, "rmw mem", loc);
+                self.check_operand(&mem.clone().raw(), loc);
+                self.expect_ptr(&ptr.clone().raw(), "rmw ptr", loc);
+                self.expect_mem(&mem.clone().raw(), "rmw mem", loc);
                 if inst.ty != Type::Mem {
                     self.result.error(
                         loc.clone(),
@@ -732,12 +732,12 @@ impl FuncVerifier<'_> {
                 }
             }
             Op::AtomicCmpXchg(ptr, expected, desired, _succ, fail, mem) => {
-                self.check_operand(ptr, loc);
+                self.check_operand(&ptr.clone().raw(), loc);
                 self.check_operand(expected, loc);
                 self.check_operand(desired, loc);
-                self.check_operand(mem, loc);
-                self.expect_ptr(ptr, "cmpxchg ptr", loc);
-                self.expect_mem(mem, "cmpxchg mem", loc);
+                self.check_operand(&mem.clone().raw(), loc);
+                self.expect_ptr(&ptr.clone().raw(), "cmpxchg ptr", loc);
+                self.expect_mem(&mem.clone().raw(), "cmpxchg mem", loc);
                 self.expect_same_type(expected, desired, "cmpxchg expected/desired", loc);
                 if matches!(fail, MemoryOrdering::Release | MemoryOrdering::AcqRel) {
                     self.result.error(
@@ -757,8 +757,8 @@ impl FuncVerifier<'_> {
                 }
             }
             Op::Fence(ord, mem) => {
-                self.check_operand(mem, loc);
-                self.expect_mem(mem, "fence mem", loc);
+                self.check_operand(&mem.clone().raw(), loc);
+                self.expect_mem(&mem.clone().raw(), "fence mem", loc);
                 if matches!(ord, MemoryOrdering::Relaxed) {
                     self.result
                         .error(loc.clone(), "fence cannot use Relaxed ordering");
@@ -811,10 +811,10 @@ impl FuncVerifier<'_> {
             | Op::FRem(a, b, _)
             | Op::FMinNum(a, b)
             | Op::FMaxNum(a, b) => {
-                self.check_operand(a, loc);
-                self.check_operand(b, loc);
-                self.expect_float(a, "float arith lhs", loc);
-                self.expect_float(b, "float arith rhs", loc);
+                self.check_operand(&a.clone().raw(), loc);
+                self.check_operand(&b.clone().raw(), loc);
+                self.expect_float(&a.clone().raw(), "float arith lhs", loc);
+                self.expect_float(&b.clone().raw(), "float arith rhs", loc);
                 if !matches!(inst.ty, Type::Float(_)) {
                     self.result.error(
                         loc.clone(),
@@ -823,8 +823,8 @@ impl FuncVerifier<'_> {
                 }
             }
             Op::FNeg(a) | Op::FAbs(a) => {
-                self.check_operand(a, loc);
-                self.expect_float(a, "float unary", loc);
+                self.check_operand(&a.clone().raw(), loc);
+                self.expect_float(&a.clone().raw(), "float unary", loc);
                 if !matches!(inst.ty, Type::Float(_)) {
                     self.result.error(
                         loc.clone(),
@@ -833,10 +833,10 @@ impl FuncVerifier<'_> {
                 }
             }
             Op::CopySign(mag, sign) => {
-                self.check_operand(mag, loc);
-                self.check_operand(sign, loc);
-                self.expect_float(mag, "copysign mag", loc);
-                self.expect_float(sign, "copysign sign", loc);
+                self.check_operand(&mag.clone().raw(), loc);
+                self.check_operand(&sign.clone().raw(), loc);
+                self.expect_float(&mag.clone().raw(), "copysign mag", loc);
+                self.expect_float(&sign.clone().raw(), "copysign sign", loc);
                 if !matches!(inst.ty, Type::Float(_)) {
                     self.result.error(
                         loc.clone(),
@@ -847,10 +847,10 @@ impl FuncVerifier<'_> {
 
             // -- Pointer ops --
             Op::PtrAdd(ptr, off) => {
-                self.check_operand(ptr, loc);
-                self.check_operand(off, loc);
-                self.expect_ptr(ptr, "ptradd ptr", loc);
-                self.expect_int(off, "ptradd offset", loc);
+                self.check_operand(&ptr.clone().raw(), loc);
+                self.check_operand(&off.clone().raw(), loc);
+                self.expect_ptr(&ptr.clone().raw(), "ptradd ptr", loc);
+                self.expect_int(&off.clone().raw(), "ptradd offset", loc);
                 if !matches!(inst.ty, Type::Ptr(_)) {
                     self.result.error(
                         loc.clone(),
@@ -859,10 +859,10 @@ impl FuncVerifier<'_> {
                 }
             }
             Op::PtrDiff(a, b) => {
-                self.check_operand(a, loc);
-                self.check_operand(b, loc);
-                self.expect_ptr(a, "ptrdiff lhs", loc);
-                self.expect_ptr(b, "ptrdiff rhs", loc);
+                self.check_operand(&a.clone().raw(), loc);
+                self.check_operand(&b.clone().raw(), loc);
+                self.expect_ptr(&a.clone().raw(), "ptrdiff lhs", loc);
+                self.expect_ptr(&b.clone().raw(), "ptrdiff rhs", loc);
                 if !matches!(inst.ty, Type::Int) {
                     self.result.error(
                         loc.clone(),
@@ -871,8 +871,8 @@ impl FuncVerifier<'_> {
                 }
             }
             Op::PtrToInt(a) | Op::PtrToAddr(a) => {
-                self.check_operand(a, loc);
-                self.expect_ptr(a, "ptr-to-int/addr", loc);
+                self.check_operand(&a.clone().raw(), loc);
+                self.expect_ptr(&a.clone().raw(), "ptr-to-int/addr", loc);
                 if !matches!(inst.ty, Type::Int) {
                     self.result.error(
                         loc.clone(),
@@ -881,8 +881,8 @@ impl FuncVerifier<'_> {
                 }
             }
             Op::IntToPtr(a) => {
-                self.check_operand(a, loc);
-                self.expect_int(a, "inttoptr", loc);
+                self.check_operand(&a.clone().raw(), loc);
+                self.expect_int(&a.clone().raw(), "inttoptr", loc);
                 if !matches!(inst.ty, Type::Ptr(_)) {
                     self.result.error(
                         loc.clone(),
@@ -971,10 +971,10 @@ impl FuncVerifier<'_> {
             }
             Op::SymbolAddr(_) => {}
             Op::Call(callee, args, mem) => {
-                self.check_operand(callee, loc);
+                self.check_operand(&callee.clone().raw(), loc);
                 self.check_operands(args, loc);
-                self.check_operand(mem, loc);
-                self.expect_mem(mem, "call mem", loc);
+                self.check_operand(&mem.clone().raw(), loc);
+                self.expect_mem(&mem.clone().raw(), "call mem", loc);
                 if inst.ty != Type::Mem {
                     self.result.error(
                         loc.clone(),
@@ -988,7 +988,7 @@ impl FuncVerifier<'_> {
                 self.check_operand(a, loc);
             }
             Op::Sext(a, _) | Op::Zext(a, _) => {
-                self.check_operand(a, loc);
+                self.check_operand(&a.clone().raw(), loc);
                 if !matches!(inst.ty, Type::Int) {
                     self.result.error(
                         loc.clone(),
@@ -997,7 +997,7 @@ impl FuncVerifier<'_> {
                 }
             }
             Op::FpToSi(a) | Op::FpToUi(a) => {
-                self.check_operand(a, loc);
+                self.check_operand(&a.clone().raw(), loc);
                 if !matches!(inst.ty, Type::Int) {
                     self.result.error(
                         loc.clone(),
@@ -1006,7 +1006,7 @@ impl FuncVerifier<'_> {
                 }
             }
             Op::SiToFp(a, _) | Op::UiToFp(a, _) => {
-                self.check_operand(a, loc);
+                self.check_operand(&a.clone().raw(), loc);
                 if !matches!(inst.ty, Type::Float(_)) {
                     self.result.error(
                         loc.clone(),
@@ -1015,7 +1015,7 @@ impl FuncVerifier<'_> {
                 }
             }
             Op::FpConvert(a) => {
-                self.check_operand(a, loc);
+                self.check_operand(&a.clone().raw(), loc);
                 if !matches!(inst.ty, Type::Float(_)) {
                     self.result.error(
                         loc.clone(),
@@ -1026,8 +1026,8 @@ impl FuncVerifier<'_> {
 
             // -- Terminators --
             Op::Ret(val, mem) => {
-                self.check_operand(mem, loc);
-                self.expect_mem(mem, "ret mem", loc);
+                self.check_operand(&mem.clone().raw(), loc);
+                self.expect_mem(&mem.clone().raw(), "ret mem", loc);
                 if let Some(op) = val {
                     self.check_operand(op, loc);
                     if let Some(ret_ty) = &self.func.ret_ty {
@@ -1044,8 +1044,8 @@ impl FuncVerifier<'_> {
                 self.check_branch_target(*target, args, loc);
             }
             Op::BrIf(cond, then_bb, then_args, else_bb, else_args) => {
-                self.check_operand(cond, loc);
-                self.expect_bool(cond, "brif cond", loc);
+                self.check_operand(&cond.clone().raw(), loc);
+                self.expect_bool(&cond.clone().raw(), "brif cond", loc);
                 self.check_branch_target(*then_bb, then_args, loc);
                 self.check_branch_target(*else_bb, else_args, loc);
             }

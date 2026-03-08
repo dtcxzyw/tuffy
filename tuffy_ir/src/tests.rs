@@ -4,6 +4,7 @@ use crate::builder::Builder;
 use crate::function::{Function, RegionKind};
 use crate::instruction::{AtomicRmwOp, ICmpOp, Instruction, Op, Origin};
 use crate::module::{Module, SymbolTable};
+use crate::typed::IntOperand;
 use crate::types::{
     Annotation, FloatType, FpRewriteFlags, IntAnnotation, IntSignedness, MemoryOrdering, Type,
 };
@@ -1148,7 +1149,7 @@ fn verify_detects_wrong_arith_operand_type() {
     func.instructions.insert(
         ret_idx as usize,
         Instruction {
-            op: Op::Add(cmp.into(), p1.into()),
+            op: Op::Add(IntOperand::from(cmp.raw()), p1.into()),
             ty: i64_type,
             secondary_ty: None,
             origin: Origin::synthetic(),

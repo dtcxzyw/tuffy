@@ -257,7 +257,7 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> IntValue {
         let res_ann = Some(Annotation::Int(int_ann));
-        let v = self.push_inst(Op::Add(a.raw(), b.raw()), Type::Int, None, origin, res_ann);
+        let v = self.push_inst(Op::Add(a, b), Type::Int, None, origin, res_ann);
         IntValue::new(v, self.func)
     }
 
@@ -270,7 +270,7 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> IntValue {
         let res_ann = Some(Annotation::Int(int_ann));
-        let v = self.push_inst(Op::Sub(a.raw(), b.raw()), Type::Int, None, origin, res_ann);
+        let v = self.push_inst(Op::Sub(a, b), Type::Int, None, origin, res_ann);
         IntValue::new(v, self.func)
     }
 
@@ -283,7 +283,7 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> IntValue {
         let res_ann = Some(Annotation::Int(int_ann));
-        let v = self.push_inst(Op::Mul(a.raw(), b.raw()), Type::Int, None, origin, res_ann);
+        let v = self.push_inst(Op::Mul(a, b), Type::Int, None, origin, res_ann);
         IntValue::new(v, self.func)
     }
 
@@ -296,7 +296,7 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> IntValue {
         let res_ann = Some(Annotation::Int(int_ann));
-        let v = self.push_inst(Op::Div(a.raw(), b.raw()), Type::Int, None, origin, res_ann);
+        let v = self.push_inst(Op::Div(a, b), Type::Int, None, origin, res_ann);
         IntValue::new(v, self.func)
     }
 
@@ -309,7 +309,7 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> IntValue {
         let res_ann = Some(Annotation::Int(int_ann));
-        let v = self.push_inst(Op::Rem(a.raw(), b.raw()), Type::Int, None, origin, res_ann);
+        let v = self.push_inst(Op::Rem(a, b), Type::Int, None, origin, res_ann);
         IntValue::new(v, self.func)
     }
 
@@ -322,7 +322,7 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> IntValue {
         let res_ann = Some(Annotation::Int(int_ann));
-        let v = self.push_inst(Op::And(a.raw(), b.raw()), Type::Int, None, origin, res_ann);
+        let v = self.push_inst(Op::And(a, b), Type::Int, None, origin, res_ann);
         IntValue::new(v, self.func)
     }
 
@@ -335,7 +335,7 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> IntValue {
         let res_ann = Some(Annotation::Int(int_ann));
-        let v = self.push_inst(Op::Or(a.raw(), b.raw()), Type::Int, None, origin, res_ann);
+        let v = self.push_inst(Op::Or(a, b), Type::Int, None, origin, res_ann);
         IntValue::new(v, self.func)
     }
 
@@ -348,7 +348,7 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> IntValue {
         let res_ann = Some(Annotation::Int(int_ann));
-        let v = self.push_inst(Op::Xor(a.raw(), b.raw()), Type::Int, None, origin, res_ann);
+        let v = self.push_inst(Op::Xor(a, b), Type::Int, None, origin, res_ann);
         IntValue::new(v, self.func)
     }
 
@@ -383,19 +383,19 @@ impl<'a> Builder<'a> {
 
     /// Boolean AND.
     pub fn band(&mut self, a: BoolOperand, b: BoolOperand, origin: Origin) -> BoolValue {
-        let v = self.push_inst(Op::BAnd(a.raw(), b.raw()), Type::Bool, None, origin, None);
+        let v = self.push_inst(Op::BAnd(a, b), Type::Bool, None, origin, None);
         BoolValue::new(v, self.func)
     }
 
     /// Boolean OR.
     pub fn bor(&mut self, a: BoolOperand, b: BoolOperand, origin: Origin) -> BoolValue {
-        let v = self.push_inst(Op::BOr(a.raw(), b.raw()), Type::Bool, None, origin, None);
+        let v = self.push_inst(Op::BOr(a, b), Type::Bool, None, origin, None);
         BoolValue::new(v, self.func)
     }
 
     /// Boolean XOR.
     pub fn bxor(&mut self, a: BoolOperand, b: BoolOperand, origin: Origin) -> BoolValue {
-        let v = self.push_inst(Op::BXor(a.raw(), b.raw()), Type::Bool, None, origin, None);
+        let v = self.push_inst(Op::BXor(a, b), Type::Bool, None, origin, None);
         BoolValue::new(v, self.func)
     }
 
@@ -407,7 +407,7 @@ impl<'a> Builder<'a> {
         ann: Option<Annotation>,
         origin: Origin,
     ) -> IntValue {
-        let v = self.push_inst(Op::Shl(a.raw(), b.raw()), Type::Int, None, origin, ann);
+        let v = self.push_inst(Op::Shl(a, b), Type::Int, None, origin, ann);
         IntValue::new(v, self.func)
     }
 
@@ -422,19 +422,13 @@ impl<'a> Builder<'a> {
         if let Some(annotation) = ann {
             a = IntOperand::annotated(IntValue::new(a.raw().value, self.func), annotation);
         }
-        let v = self.push_inst(Op::Shr(a.raw(), b.raw()), Type::Int, None, origin, ann);
+        let v = self.push_inst(Op::Shr(a, b), Type::Int, None, origin, ann);
         IntValue::new(v, self.func)
     }
 
     /// Integer comparison.
     pub fn icmp(&mut self, op: ICmpOp, a: IntOperand, b: IntOperand, origin: Origin) -> BoolValue {
-        let v = self.push_inst(
-            Op::ICmp(op, a.raw(), b.raw()),
-            Type::Bool,
-            None,
-            origin,
-            None,
-        );
+        let v = self.push_inst(Op::ICmp(op, a, b), Type::Bool, None, origin, None);
         BoolValue::new(v, self.func)
     }
 
@@ -446,13 +440,7 @@ impl<'a> Builder<'a> {
         b: FloatOperand,
         origin: Origin,
     ) -> BoolValue {
-        let v = self.push_inst(
-            Op::FCmp(op, a.raw(), b.raw()),
-            Type::Bool,
-            None,
-            origin,
-            None,
-        );
+        let v = self.push_inst(Op::FCmp(op, a, b), Type::Bool, None, origin, None);
         BoolValue::new(v, self.func)
     }
 
@@ -466,7 +454,7 @@ impl<'a> Builder<'a> {
         ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::Load(ptr.raw(), bytes, mem.raw()), ty, None, origin, ann)
+        self.push_inst(Op::Load(ptr, bytes, mem), ty, None, origin, ann)
     }
 
     /// Store value to pointer.
@@ -479,7 +467,7 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> MemValue {
         let v = self.push_inst(
-            Op::Store(val, ptr.raw(), bytes, mem.raw()),
+            Op::Store(val, ptr, bytes, mem),
             Type::Mem,
             None,
             origin,
@@ -506,7 +494,7 @@ impl<'a> Builder<'a> {
         if ann.is_some() {
             a.annotation = ann;
         }
-        self.push_inst(Op::Min(a, b), Type::Int, None, origin, ann)
+        self.push_inst(Op::Min(a.into(), b.into()), Type::Int, None, origin, ann)
     }
 
     /// Integer maximum.
@@ -527,7 +515,7 @@ impl<'a> Builder<'a> {
         if ann.is_some() {
             a.annotation = ann;
         }
-        self.push_inst(Op::Max(a, b), Type::Int, None, origin, ann)
+        self.push_inst(Op::Max(a.into(), b.into()), Type::Int, None, origin, ann)
     }
 
     // ── Floating point arithmetic ──
@@ -541,7 +529,7 @@ impl<'a> Builder<'a> {
         ty: Type,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::FAdd(a, b, flags), ty, None, origin, None)
+        self.push_inst(Op::FAdd(a.into(), b.into(), flags), ty, None, origin, None)
     }
 
     /// Floating point subtraction.
@@ -553,7 +541,7 @@ impl<'a> Builder<'a> {
         ty: Type,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::FSub(a, b, flags), ty, None, origin, None)
+        self.push_inst(Op::FSub(a.into(), b.into(), flags), ty, None, origin, None)
     }
 
     /// Floating point multiplication.
@@ -565,7 +553,7 @@ impl<'a> Builder<'a> {
         ty: Type,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::FMul(a, b, flags), ty, None, origin, None)
+        self.push_inst(Op::FMul(a.into(), b.into(), flags), ty, None, origin, None)
     }
 
     /// Floating point division.
@@ -577,7 +565,7 @@ impl<'a> Builder<'a> {
         ty: Type,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::FDiv(a, b, flags), ty, None, origin, None)
+        self.push_inst(Op::FDiv(a.into(), b.into(), flags), ty, None, origin, None)
     }
 
     /// Floating point remainder.
@@ -589,7 +577,7 @@ impl<'a> Builder<'a> {
         ty: Type,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::FRem(a, b, flags), ty, None, origin, None)
+        self.push_inst(Op::FRem(a.into(), b.into(), flags), ty, None, origin, None)
     }
 
     /// IEEE 754-2008 minNum.
@@ -600,7 +588,7 @@ impl<'a> Builder<'a> {
         ty: Type,
         origin: Origin,
     ) -> FloatValue {
-        let v = self.push_inst(Op::FMinNum(a.raw(), b.raw()), ty, None, origin, None);
+        let v = self.push_inst(Op::FMinNum(a, b), ty, None, origin, None);
         FloatValue::new(v, self.func)
     }
 
@@ -612,7 +600,7 @@ impl<'a> Builder<'a> {
         ty: Type,
         origin: Origin,
     ) -> FloatValue {
-        let v = self.push_inst(Op::FMaxNum(a.raw(), b.raw()), ty, None, origin, None);
+        let v = self.push_inst(Op::FMaxNum(a, b), ty, None, origin, None);
         FloatValue::new(v, self.func)
     }
 
@@ -624,19 +612,19 @@ impl<'a> Builder<'a> {
         ty: Type,
         origin: Origin,
     ) -> FloatValue {
-        let v = self.push_inst(Op::CopySign(mag.raw(), sign.raw()), ty, None, origin, None);
+        let v = self.push_inst(Op::CopySign(mag, sign), ty, None, origin, None);
         FloatValue::new(v, self.func)
     }
 
     /// Floating point negation.
     pub fn fneg(&mut self, val: FloatOperand, ty: Type, origin: Origin) -> FloatValue {
-        let v = self.push_inst(Op::FNeg(val.raw()), ty, None, origin, None);
+        let v = self.push_inst(Op::FNeg(val), ty, None, origin, None);
         FloatValue::new(v, self.func)
     }
 
     /// Floating point absolute value.
     pub fn fabs(&mut self, val: FloatOperand, ty: Type, origin: Origin) -> FloatValue {
-        let v = self.push_inst(Op::FAbs(val.raw()), ty, None, origin, None);
+        let v = self.push_inst(Op::FAbs(val), ty, None, origin, None);
         FloatValue::new(v, self.func)
     }
 
@@ -652,7 +640,13 @@ impl<'a> Builder<'a> {
         ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(Op::Select(cond, true_val, false_val), ty, None, origin, ann)
+        self.push_inst(
+            Op::Select(cond.into(), true_val, false_val),
+            ty,
+            None,
+            origin,
+            ann,
+        )
     }
 
     /// Population count: count the number of set bits.
@@ -662,7 +656,7 @@ impl<'a> Builder<'a> {
             bit_width: result_bits,
             signedness: IntSignedness::Unsigned,
         });
-        let v = self.push_inst(Op::CountOnes(val.raw()), Type::Int, None, origin, Some(ann));
+        let v = self.push_inst(Op::CountOnes(val), Type::Int, None, origin, Some(ann));
         IntValue::new(v, self.func)
     }
 
@@ -680,7 +674,7 @@ impl<'a> Builder<'a> {
             signedness: IntSignedness::Unsigned,
         });
         self.push_inst(
-            Op::CountLeadingZeros(val, bits),
+            Op::CountLeadingZeros(val.into(), bits),
             Type::Int,
             None,
             origin,
@@ -701,7 +695,7 @@ impl<'a> Builder<'a> {
             signedness: IntSignedness::Unsigned,
         });
         self.push_inst(
-            Op::CountTrailingZeros(val),
+            Op::CountTrailingZeros(val.into()),
             Type::Int,
             None,
             origin,
@@ -711,32 +705,32 @@ impl<'a> Builder<'a> {
 
     /// Byte-swap: reverse byte order of the low `bytes` bytes.
     pub fn bswap(&mut self, val: IntOperand, bytes: u32, origin: Origin) -> IntValue {
-        let op = val.raw();
+        let op = val.clone().raw();
         let _ty = self
             .value_type(op.value)
             .filter(|t| matches!(t, Type::Int))
             .expect("bswap operand must be Int type");
         let ann = self.value_annotation(op.value).cloned();
-        let v = self.push_inst(Op::Bswap(op, bytes), Type::Int, None, origin, ann);
+        let v = self.push_inst(Op::Bswap(val, bytes), Type::Int, None, origin, ann);
         IntValue::new(v, self.func)
     }
 
     /// Bit-reverse: reverse bit order of the low `bits` bits.
     pub fn bit_reverse(&mut self, val: IntOperand, bits: u32, origin: Origin) -> IntValue {
-        let op = val.raw();
+        let op = val.clone().raw();
         let _ty = self
             .value_type(op.value)
             .filter(|t| matches!(t, Type::Int))
             .expect("bit_reverse operand must be Int type");
         let ann = self.value_annotation(op.value).cloned();
-        let v = self.push_inst(Op::BitReverse(op, bits), Type::Int, None, origin, ann);
+        let v = self.push_inst(Op::BitReverse(val, bits), Type::Int, None, origin, ann);
         IntValue::new(v, self.func)
     }
 
     /// Merge: replace the low `width` bits of `a` with the low `width` bits of `b`.
     pub fn merge(&mut self, a: IntOperand, b: IntOperand, width: u32, origin: Origin) -> IntValue {
-        let op_a = a.raw();
-        let op_b = b.raw();
+        let op_a = a.clone().raw();
+        let _op_b = b.clone().raw();
         let _ty = self
             .value_type(op_a.value)
             .and_then(|t| match t {
@@ -745,14 +739,14 @@ impl<'a> Builder<'a> {
             })
             .expect("merge operand must be Int type");
         let ann = self.value_annotation(op_a.value).cloned();
-        let v = self.push_inst(Op::Merge(op_a, op_b, width), Type::Int, None, origin, ann);
+        let v = self.push_inst(Op::Merge(a, b, width), Type::Int, None, origin, ann);
         IntValue::new(v, self.func)
     }
 
     /// Carry-less multiplication (polynomial multiplication over GF(2)).
     pub fn clmul(&mut self, a: IntOperand, b: IntOperand, origin: Origin) -> IntValue {
-        let op_a = a.raw();
-        let op_b = b.raw();
+        let op_a = a.clone().raw();
+        let _op_b = b.clone().raw();
         let _ty = self
             .value_type(op_a.value)
             .and_then(|t| match t {
@@ -761,13 +755,13 @@ impl<'a> Builder<'a> {
             })
             .expect("clmul operand must be Int type");
         let ann = self.value_annotation(op_a.value).cloned();
-        let v = self.push_inst(Op::Clmul(op_a, op_b), Type::Int, None, origin, ann);
+        let v = self.push_inst(Op::Clmul(a, b), Type::Int, None, origin, ann);
         IntValue::new(v, self.func)
     }
 
     /// Split: decompose `a` at bit position `width`. Returns (hi, lo).
     pub fn split(&mut self, a: IntOperand, width: u32, origin: Origin) -> (IntValue, IntValue) {
-        let op = a.raw();
+        let op = a.clone().raw();
         let ty = self
             .value_type(op.value)
             .and_then(|t| match t {
@@ -775,7 +769,7 @@ impl<'a> Builder<'a> {
                 _ => None,
             })
             .expect("split operand must be Int type");
-        let primary = self.push_inst(Op::Split(op, width), ty.clone(), Some(ty), origin, None);
+        let primary = self.push_inst(Op::Split(a, width), ty.clone(), Some(ty), origin, None);
         let secondary = ValueRef::inst_secondary_result(primary.index());
         (
             IntValue::new(primary, self.func),
@@ -799,7 +793,13 @@ impl<'a> Builder<'a> {
             })
             .expect("rotate_left operand must be Int type");
         let ann = self.value_annotation(val.value).cloned();
-        self.push_inst(Op::RotateLeft(val, amt, bits), Type::Int, None, origin, ann)
+        self.push_inst(
+            Op::RotateLeft(val.into(), amt.into(), bits),
+            Type::Int,
+            None,
+            origin,
+            ann,
+        )
     }
 
     /// Rotate right in an `bits`-bit field.
@@ -819,7 +819,7 @@ impl<'a> Builder<'a> {
             .expect("rotate_right operand must be Int type");
         let ann = self.value_annotation(val.value).cloned();
         self.push_inst(
-            Op::RotateRight(val, amt, bits),
+            Op::RotateRight(val.into(), amt.into(), bits),
             Type::Int,
             None,
             origin,
@@ -841,7 +841,7 @@ impl<'a> Builder<'a> {
             signedness: IntSignedness::Unsigned,
         });
         self.push_inst(
-            Op::SaturatingAdd(a, b, bits),
+            Op::SaturatingAdd(a.into(), b.into(), bits),
             Type::Int,
             None,
             origin,
@@ -863,7 +863,7 @@ impl<'a> Builder<'a> {
             signedness: IntSignedness::Unsigned,
         });
         self.push_inst(
-            Op::SaturatingSub(a, b, bits),
+            Op::SaturatingSub(a.into(), b.into(), bits),
             Type::Int,
             None,
             origin,
@@ -886,7 +886,7 @@ impl<'a> Builder<'a> {
             signedness: IntSignedness::Signed,
         });
         self.push_inst(
-            Op::SignedSaturatingAdd(a, b, bits),
+            Op::SignedSaturatingAdd(a.into(), b.into(), bits),
             Type::Int,
             None,
             origin,
@@ -909,7 +909,7 @@ impl<'a> Builder<'a> {
             signedness: IntSignedness::Signed,
         });
         self.push_inst(
-            Op::SignedSaturatingSub(a, b, bits),
+            Op::SignedSaturatingSub(a.into(), b.into(), bits),
             Type::Int,
             None,
             origin,
@@ -931,7 +931,7 @@ impl<'a> Builder<'a> {
             signedness: IntSignedness::Signed,
         });
         let primary = self.push_inst_with_secondary(
-            Op::SAddWithOverflow(a, b, bits),
+            Op::SAddWithOverflow(a.into(), b.into(), bits),
             Type::Int,
             Type::Bool,
             origin,
@@ -956,7 +956,7 @@ impl<'a> Builder<'a> {
             signedness: IntSignedness::Unsigned,
         });
         let primary = self.push_inst_with_secondary(
-            Op::UAddWithOverflow(a, b, bits),
+            Op::UAddWithOverflow(a.into(), b.into(), bits),
             Type::Int,
             Type::Bool,
             origin,
@@ -981,7 +981,7 @@ impl<'a> Builder<'a> {
             signedness: IntSignedness::Signed,
         });
         let primary = self.push_inst_with_secondary(
-            Op::SSubWithOverflow(a, b, bits),
+            Op::SSubWithOverflow(a.into(), b.into(), bits),
             Type::Int,
             Type::Bool,
             origin,
@@ -1006,7 +1006,7 @@ impl<'a> Builder<'a> {
             signedness: IntSignedness::Unsigned,
         });
         let primary = self.push_inst_with_secondary(
-            Op::USubWithOverflow(a, b, bits),
+            Op::USubWithOverflow(a.into(), b.into(), bits),
             Type::Int,
             Type::Bool,
             origin,
@@ -1031,7 +1031,7 @@ impl<'a> Builder<'a> {
             signedness: IntSignedness::Signed,
         });
         let primary = self.push_inst_with_secondary(
-            Op::SMulWithOverflow(a, b, bits),
+            Op::SMulWithOverflow(a.into(), b.into(), bits),
             Type::Int,
             Type::Bool,
             origin,
@@ -1056,7 +1056,7 @@ impl<'a> Builder<'a> {
             signedness: IntSignedness::Unsigned,
         });
         let primary = self.push_inst_with_secondary(
-            Op::UMulWithOverflow(a, b, bits),
+            Op::UMulWithOverflow(a.into(), b.into(), bits),
             Type::Int,
             Type::Bool,
             origin,
@@ -1086,7 +1086,7 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> ValueRef {
         self.push_inst(
-            Op::MemCopy(dst, src, count, mem),
+            Op::MemCopy(dst.into(), src.into(), count.into(), mem.into()),
             Type::Mem,
             None,
             origin,
@@ -1104,7 +1104,7 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> ValueRef {
         self.push_inst(
-            Op::MemMove(dst, src, count, mem),
+            Op::MemMove(dst.into(), src.into(), count.into(), mem.into()),
             Type::Mem,
             None,
             origin,
@@ -1122,7 +1122,7 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> ValueRef {
         self.push_inst(
-            Op::MemSet(dst, val, count, mem),
+            Op::MemSet(dst.into(), val, count.into(), mem.into()),
             Type::Mem,
             None,
             origin,
@@ -1143,7 +1143,7 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> (ValueRef, ValueRef) {
         let primary = self.push_inst_with_secondary(
-            Op::LoadAtomic(ptr, ordering, mem),
+            Op::LoadAtomic(ptr.into(), ordering, mem.into()),
             Type::Mem,
             ty,
             origin,
@@ -1164,7 +1164,7 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> ValueRef {
         self.push_inst(
-            Op::StoreAtomic(val, ptr, ordering, mem),
+            Op::StoreAtomic(val, ptr.into(), ordering, mem.into()),
             Type::Mem,
             None,
             origin,
@@ -1186,7 +1186,7 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> (ValueRef, ValueRef) {
         let primary = self.push_inst_with_secondary(
-            Op::AtomicRmw(op, ptr, val, ordering, mem),
+            Op::AtomicRmw(op, ptr.into(), val, ordering, mem.into()),
             Type::Mem,
             ty,
             origin,
@@ -1212,7 +1212,14 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> (ValueRef, ValueRef) {
         let primary = self.push_inst_with_secondary(
-            Op::AtomicCmpXchg(ptr, expected, desired, success_ord, failure_ord, mem),
+            Op::AtomicCmpXchg(
+                ptr.into(),
+                expected,
+                desired,
+                success_ord,
+                failure_ord,
+                mem.into(),
+            ),
             Type::Mem,
             ty,
             origin,
@@ -1225,13 +1232,7 @@ impl<'a> Builder<'a> {
 
     /// Memory fence. Returns mem token.
     pub fn fence(&mut self, ordering: MemoryOrdering, mem: MemOperand, origin: Origin) -> MemValue {
-        let v = self.push_inst(
-            Op::Fence(ordering, mem.raw()),
-            Type::Mem,
-            None,
-            origin,
-            None,
-        );
+        let v = self.push_inst(Op::Fence(ordering, mem), Type::Mem, None, origin, None);
         MemValue::new(v, self.func)
     }
 
@@ -1259,12 +1260,17 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> (ValueRef, Option<ValueRef>) {
         if ret_ty == Type::Unit {
-            let primary =
-                self.push_inst(Op::Call(callee, args, mem), Type::Mem, None, origin, None);
+            let primary = self.push_inst(
+                Op::Call(callee.into(), args, mem.into()),
+                Type::Mem,
+                None,
+                origin,
+                None,
+            );
             (primary, None)
         } else {
             let primary = self.push_inst_with_secondary(
-                Op::Call(callee, args, mem),
+                Op::Call(callee.into(), args, mem.into()),
                 Type::Mem,
                 ret_ty,
                 origin,
@@ -1296,13 +1302,7 @@ impl<'a> Builder<'a> {
             bit_width: bits,
             signedness: IntSignedness::Signed,
         });
-        let v = self.push_inst(
-            Op::Sext(val.raw(), bits),
-            Type::Int,
-            None,
-            origin,
-            Some(ann),
-        );
+        let v = self.push_inst(Op::Sext(val, bits), Type::Int, None, origin, Some(ann));
         IntValue::new(v, self.func)
     }
 
@@ -1313,13 +1313,7 @@ impl<'a> Builder<'a> {
             bit_width: bits,
             signedness: IntSignedness::Unsigned,
         });
-        let v = self.push_inst(
-            Op::Zext(val.raw(), bits),
-            Type::Int,
-            None,
-            origin,
-            Some(ann),
-        );
+        let v = self.push_inst(Op::Zext(val, bits), Type::Int, None, origin, Some(ann));
         IntValue::new(v, self.func)
     }
 
@@ -1330,7 +1324,7 @@ impl<'a> Builder<'a> {
             bit_width: bits,
             signedness: IntSignedness::Signed,
         });
-        let v = self.push_inst(Op::FpToSi(val.raw()), Type::Int, None, origin, Some(ann));
+        let v = self.push_inst(Op::FpToSi(val), Type::Int, None, origin, Some(ann));
         IntValue::new(v, self.func)
     }
 
@@ -1341,43 +1335,25 @@ impl<'a> Builder<'a> {
             bit_width: bits,
             signedness: IntSignedness::Unsigned,
         });
-        let v = self.push_inst(Op::FpToUi(val.raw()), Type::Int, None, origin, Some(ann));
+        let v = self.push_inst(Op::FpToUi(val), Type::Int, None, origin, Some(ann));
         IntValue::new(v, self.func)
     }
 
     /// Signed integer to float.
     pub fn si_to_fp(&mut self, val: IntOperand, ft: FloatType, origin: Origin) -> FloatValue {
-        let v = self.push_inst(
-            Op::SiToFp(val.raw(), ft),
-            Type::Float(ft),
-            None,
-            origin,
-            None,
-        );
+        let v = self.push_inst(Op::SiToFp(val, ft), Type::Float(ft), None, origin, None);
         FloatValue::new(v, self.func)
     }
 
     /// Unsigned integer to float.
     pub fn ui_to_fp(&mut self, val: IntOperand, ft: FloatType, origin: Origin) -> FloatValue {
-        let v = self.push_inst(
-            Op::UiToFp(val.raw(), ft),
-            Type::Float(ft),
-            None,
-            origin,
-            None,
-        );
+        let v = self.push_inst(Op::UiToFp(val, ft), Type::Float(ft), None, origin, None);
         FloatValue::new(v, self.func)
     }
 
     /// Float-to-float conversion (widen or narrow).
     pub fn fp_convert(&mut self, val: FloatOperand, ft: FloatType, origin: Origin) -> FloatValue {
-        let v = self.push_inst(
-            Op::FpConvert(val.raw()),
-            Type::Float(ft),
-            None,
-            origin,
-            None,
-        );
+        let v = self.push_inst(Op::FpConvert(val), Type::Float(ft), None, origin, None);
         FloatValue::new(v, self.func)
     }
 
@@ -1392,7 +1368,7 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> ValueRef {
         self.push_inst(
-            Op::PtrAdd(ptr, offset),
+            Op::PtrAdd(ptr.into(), offset.into()),
             Type::Ptr(addr_space),
             None,
             origin,
@@ -1407,13 +1383,7 @@ impl<'a> Builder<'a> {
             bit_width: bits,
             signedness: IntSignedness::Signed,
         });
-        let v = self.push_inst(
-            Op::PtrDiff(a.raw(), b.raw()),
-            Type::Int,
-            None,
-            origin,
-            Some(ann),
-        );
+        let v = self.push_inst(Op::PtrDiff(a, b), Type::Int, None, origin, Some(ann));
         IntValue::new(v, self.func)
     }
 
@@ -1424,7 +1394,7 @@ impl<'a> Builder<'a> {
             bit_width: bits,
             signedness: IntSignedness::Unsigned,
         });
-        let v = self.push_inst(Op::PtrToInt(ptr.raw()), Type::Int, None, origin, Some(ann));
+        let v = self.push_inst(Op::PtrToInt(ptr), Type::Int, None, origin, Some(ann));
         IntValue::new(v, self.func)
     }
 
@@ -1435,19 +1405,13 @@ impl<'a> Builder<'a> {
             bit_width: bits,
             signedness: IntSignedness::Unsigned,
         });
-        let v = self.push_inst(Op::PtrToAddr(ptr.raw()), Type::Int, None, origin, Some(ann));
+        let v = self.push_inst(Op::PtrToAddr(ptr), Type::Int, None, origin, Some(ann));
         IntValue::new(v, self.func)
     }
 
     /// Integer to pointer (no valid provenance).
     pub fn inttoptr(&mut self, val: IntOperand, addr_space: u32, origin: Origin) -> PtrValue {
-        let v = self.push_inst(
-            Op::IntToPtr(val.raw()),
-            Type::Ptr(addr_space),
-            None,
-            origin,
-            None,
-        );
+        let v = self.push_inst(Op::IntToPtr(val), Type::Ptr(addr_space), None, origin, None);
         PtrValue::new(v, self.func)
     }
 
@@ -1490,7 +1454,7 @@ impl<'a> Builder<'a> {
     /// Return from function. Takes mem token output.
     pub fn ret(&mut self, val: Option<Operand>, mem: MemOperand, origin: Origin) -> ValueRef {
         let ty = self.func.ret_ty.clone().unwrap_or(Type::Unit);
-        self.push_inst(Op::Ret(val, mem.raw()), ty, None, origin, None)
+        self.push_inst(Op::Ret(val, mem), ty, None, origin, None)
     }
 
     /// Unconditional branch with block arguments.
@@ -1509,7 +1473,7 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> ValueRef {
         self.push_inst(
-            Op::BrIf(cond, then_block, then_args, else_block, else_args),
+            Op::BrIf(cond.into(), then_block, then_args, else_block, else_args),
             Type::Unit,
             None,
             origin,
