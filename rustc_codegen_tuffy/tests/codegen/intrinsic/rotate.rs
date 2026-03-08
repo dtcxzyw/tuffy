@@ -37,31 +37,30 @@
 // CHECK:     v1: int:u32 = param %x
 // CHECK:     v2: int:u32 = param %shift
 // CHECK:     v3: int:i64 = iconst 4
-// CHECK:     v4: int:i64 = iconst 4294967295
-// CHECK:     v5: int:u64 = and v3, v4
-// CHECK:     v6: int:i64 = iconst 8
-// CHECK:     v7: int:i32 = mul v5:u32, v6:u32
-// CHECK:     v8: int:u32 = zext v7, 32
-// CHECK:     v9: int:i64 = iconst 0
-// CHECK:     v10: bool = icmp.eq v8, v9:u32
-// CHECK:     v11: int:u64 = bool_to_int v10
-// CHECK:     v12: int:i64 = iconst 0
-// CHECK:     v13: bool = icmp.eq v11, v12
-// CHECK:     brif v13, bb1(v0), bb3(v0)
+// CHECK:     v4: int:u32 = zext v3, 32
+// CHECK:     v5: int:i64 = iconst 8
+// CHECK:     v6: int:i32 = mul v4, v5:u32
+// CHECK:     v7: int:u32 = zext v6, 32
+// CHECK:     v8: int:i64 = iconst 0
+// CHECK:     v9: bool = icmp.eq v7, v8:u32
+// CHECK:     v10: int:u64 = bool_to_int v9
+// CHECK:     v11: int:i64 = iconst 0
+// CHECK:     v12: bool = icmp.eq v10, v11
+// CHECK:     brif v12, bb1(v0), bb3(v0)
 // CHECK:
-// CHECK:   bb1(v15: mem):
-// CHECK:     v16: int:i64 = rem v2, v8
-// CHECK:     v17: int:i64 = iconst 32
-// CHECK:     v18: int:u64 = sub v17, v16
-// CHECK:     v19: int:u32 = shl v1, v16
-// CHECK:     v20: int:u32 = shr v1, v18
-// CHECK:     v21: int:u64 = or v19, v20
-// CHECK:     br bb2(v15)
+// CHECK:   bb1(v14: mem):
+// CHECK:     v15: int:i64 = rem v2, v7
+// CHECK:     v16: int:i64 = iconst 32
+// CHECK:     v17: int:u64 = sub v16, v15
+// CHECK:     v18: int:u32 = shl v1, v15
+// CHECK:     v19: int:u32 = shr v1, v17
+// CHECK:     v20: int:u64 = or v18, v19
+// CHECK:     br bb2(v14)
 // CHECK:
-// CHECK:   bb2(v23: mem):
-// CHECK:     ret v21, v23
+// CHECK:   bb2(v22: mem):
+// CHECK:     ret v20, v22
 // CHECK:
-// CHECK:   bb3(v25: mem):
+// CHECK:   bb3(v24: mem):
 // CHECK:     trap
 // CHECK: }
 // CHECK:
@@ -103,31 +102,30 @@
 // CHECK:     v1: int:u32 = param %x
 // CHECK:     v2: int:u32 = param %shift
 // CHECK:     v3: int:i64 = iconst 4
-// CHECK:     v4: int:i64 = iconst 4294967295
-// CHECK:     v5: int:u64 = and v3, v4
-// CHECK:     v6: int:i64 = iconst 8
-// CHECK:     v7: int:i32 = mul v5:u32, v6:u32
-// CHECK:     v8: int:u32 = zext v7, 32
-// CHECK:     v9: int:i64 = iconst 0
-// CHECK:     v10: bool = icmp.eq v8, v9:u32
-// CHECK:     v11: int:u64 = bool_to_int v10
-// CHECK:     v12: int:i64 = iconst 0
-// CHECK:     v13: bool = icmp.eq v11, v12
-// CHECK:     brif v13, bb1(v0), bb3(v0)
+// CHECK:     v4: int:u32 = zext v3, 32
+// CHECK:     v5: int:i64 = iconst 8
+// CHECK:     v6: int:i32 = mul v4, v5:u32
+// CHECK:     v7: int:u32 = zext v6, 32
+// CHECK:     v8: int:i64 = iconst 0
+// CHECK:     v9: bool = icmp.eq v7, v8:u32
+// CHECK:     v10: int:u64 = bool_to_int v9
+// CHECK:     v11: int:i64 = iconst 0
+// CHECK:     v12: bool = icmp.eq v10, v11
+// CHECK:     brif v12, bb1(v0), bb3(v0)
 // CHECK:
-// CHECK:   bb1(v15: mem):
-// CHECK:     v16: int:i64 = rem v2, v8
-// CHECK:     v17: int:i64 = iconst 32
-// CHECK:     v18: int:u64 = sub v17, v16
-// CHECK:     v19: int:u32 = shl v1, v18
-// CHECK:     v20: int:u32 = shr v1, v16
-// CHECK:     v21: int:u64 = or v19, v20
-// CHECK:     br bb2(v15)
+// CHECK:   bb1(v14: mem):
+// CHECK:     v15: int:i64 = rem v2, v7
+// CHECK:     v16: int:i64 = iconst 32
+// CHECK:     v17: int:u64 = sub v16, v15
+// CHECK:     v18: int:u32 = shl v1, v17
+// CHECK:     v19: int:u32 = shr v1, v15
+// CHECK:     v20: int:u64 = or v18, v19
+// CHECK:     br bb2(v14)
 // CHECK:
-// CHECK:   bb2(v23: mem):
-// CHECK:     ret v21, v23
+// CHECK:   bb2(v22: mem):
+// CHECK:     ret v20, v22
 // CHECK:
-// CHECK:   bb3(v25: mem):
+// CHECK:   bb3(v24: mem):
 // CHECK:     trap
 // CHECK: }
 // CHECK:

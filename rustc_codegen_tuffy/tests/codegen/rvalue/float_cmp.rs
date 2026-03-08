@@ -1,6 +1,6 @@
 // compile-flags: -Zmir-opt-level=3 -C debug-assertions=off --crate-type lib
 // CHECK: warning: incorrect NaN comparison, NaN cannot be directly compared to itself
-// CHECK:    --> /tuffy/rustc_codegen_tuffy/tests/codegen/rvalue/float_cmp.rs:117:5
+// CHECK:    --> codegen/rvalue/float_cmp.rs:117:5
 // CHECK:     |
 // CHECK: 117 |     f32::NAN != f32::NAN
 // CHECK:     |     ^^^^^^^^^^^^^^^^^^^^
