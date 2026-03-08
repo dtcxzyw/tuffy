@@ -145,6 +145,10 @@ pub(super) fn translate_annotation(ty: ty::Ty<'_>) -> Option<Annotation> {
                 },
             })
         }),
+        ty::Char => Some(Annotation::Int(IntAnnotation {
+            bit_width: 32,
+            signedness: IntSignedness::Unsigned,
+        })),
         _ => None,
     }
 }

@@ -245,6 +245,10 @@ impl<'a> Builder<'a> {
         ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
+        assert!(
+            !matches!(ty, Type::Int) || matches!(ann, Some(Annotation::Int(_))),
+            "Int type parameter must have IntAnnotation"
+        );
         self.push_inst(Op::Param(index), ty, None, origin, ann)
     }
 
