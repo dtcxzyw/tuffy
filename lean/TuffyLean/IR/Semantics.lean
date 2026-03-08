@@ -35,6 +35,15 @@ def evalOr (a b : Int) : Int := Int.lor a b
 /-- Bitwise XOR (two's complement, infinite width) -/
 def evalXor (a b : Int) : Int := Int.xor a b
 
+/-- Boolean AND (logical conjunction) -/
+def evalBAnd (a b : Bool) : Bool := a && b
+
+/-- Boolean OR (logical disjunction) -/
+def evalBOr (a b : Bool) : Bool := a || b
+
+/-- Boolean XOR (logical exclusive or) -/
+def evalBXor (a b : Bool) : Bool := xor a b
+
 /-- Population count: number of set bits in a natural number. -/
 def popcount : Nat → Nat
   | 0 => 0
