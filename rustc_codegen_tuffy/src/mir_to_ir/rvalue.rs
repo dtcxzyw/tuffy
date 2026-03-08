@@ -1058,13 +1058,40 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // Unchecked variants: the caller guarantees no overflow so the
                     // result can carry a full Signed/Unsigned annotation directly.
                     BinOp::AddUnchecked => {
-                        self.builder.add(l_op, r_op, I64, Origin::synthetic())
+                        let bits = match res_ann {
+                            Some(IntAnn::Signed(n) | IntAnn::Unsigned(n) | IntAnn::DontCare(n)) => n,
+                            None => 64,
+                        };
+                        let sum = self.builder.add(l_op, r_op, I64, Origin::synthetic());
+                        match res_ann {
+                            Some(IntAnn::Signed(_)) => self.builder.sext(sum.into(), bits, Origin::synthetic()),
+                            Some(IntAnn::Unsigned(_)) => self.builder.zext(sum.into(), bits, Origin::synthetic()),
+                            _ => sum,
+                        }
                     }
                     BinOp::SubUnchecked => {
-                        self.builder.sub(l_op, r_op, I64, Origin::synthetic())
+                        let bits = match res_ann {
+                            Some(IntAnn::Signed(n) | IntAnn::Unsigned(n) | IntAnn::DontCare(n)) => n,
+                            None => 64,
+                        };
+                        let diff = self.builder.sub(l_op, r_op, I64, Origin::synthetic());
+                        match res_ann {
+                            Some(IntAnn::Signed(_)) => self.builder.sext(diff.into(), bits, Origin::synthetic()),
+                            Some(IntAnn::Unsigned(_)) => self.builder.zext(diff.into(), bits, Origin::synthetic()),
+                            _ => diff,
+                        }
                     }
                     BinOp::MulUnchecked => {
-                        self.builder.mul(l_op, r_op, I64, Origin::synthetic())
+                        let bits = match res_ann {
+                            Some(IntAnn::Signed(n) | IntAnn::Unsigned(n) | IntAnn::DontCare(n)) => n,
+                            None => 64,
+                        };
+                        let prod = self.builder.mul(l_op, r_op, I64, Origin::synthetic());
+                        match res_ann {
+                            Some(IntAnn::Signed(_)) => self.builder.sext(prod.into(), bits, Origin::synthetic()),
+                            Some(IntAnn::Unsigned(_)) => self.builder.zext(prod.into(), bits, Origin::synthetic()),
+                            _ => prod,
+                        }
                     }
                     // Checked arithmetic: emit a multi-result IR intrinsic that
                     // produces (wrapping_result: Int, overflow: Bool).  The primary
