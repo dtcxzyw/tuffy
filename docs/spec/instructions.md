@@ -644,24 +644,30 @@ not produce one. See [types.md](types.md#mem) for details on the `mem` type.
 ### `load`
 
 ```
-vN = load.<size> vPtr, vMem
+vN = load vPtr, vMem -> <type>
 ```
 
-Load `size` bytes from the address pointed to by `vPtr`. Takes a `mem` token as input
+Load a value of the specified type from the address pointed to by `vPtr`. Takes a `mem` token as input
 (MemoryUse). Returns a data value only — does not produce a new `mem` token.
 
-**Semantics**: `evalLoad(mem, addr, size) = bytes [mem[addr], mem[addr+1], ..., mem[addr+size-1]]`
+The loaded type must be one of: `int`, `float` (any variant), `vec` (any variant), or `byte(N)`.
+Array and struct types are not supported — use `byte(N)` and convert explicitly instead.
+
+**Semantics**: `evalLoad(mem, addr, ty) = value of type ty loaded from mem[addr..]`
 
 ### `store`
 
 ```
-vN = store.<size> vVal, vPtr, vMem
+vN = store vVal, vPtr, vMem
 ```
 
 Store a value to the address pointed to by `vPtr`. Takes a `mem` token as input
 (MemoryDef) and produces a new `mem` token as its result.
 
-**Semantics**: `evalStore(mem, addr, bs) = mem[addr..addr+len(bs)] := bs`
+The stored value type must be one of: `int`, `float` (any variant), `vec` (any variant), or `byte(N)`.
+Array and struct types are not supported — convert to `byte(N)` explicitly before storing.
+
+**Semantics**: `evalStore(mem, addr, val) = mem with val written at addr`
 
 ### `stack_slot`
 

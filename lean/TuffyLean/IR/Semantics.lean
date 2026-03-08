@@ -374,13 +374,18 @@ def applyAnnotation (v : Int) (ann : Annotation) : Value :=
   | .dontCare n => .int (v % (2 ^ n))
 
 -- Memory load/store semantics
+-- Load/store operations support int, float, vec, and byte types.
+-- Array and struct types are not supported.
 
-/-- Load `size` bytes from memory starting at address `addr`.
-    Returns a `bytes` value containing the loaded abstract bytes. -/
+/-- Load a value from memory starting at address `addr`.
+    The loaded value type is determined by the instruction's type annotation.
+    For byte(N) types, returns a `bytes` value containing N abstract bytes.
+    For int/float/vec types, the bytes are interpreted according to the type. -/
 def evalLoad (mem : Memory) (addr : Int) (size : Nat) : Value :=
   .bytes (List.ofFn (fun (i : Fin size) => mem.bytes (addr + i.val)))
 
-/-- Store a list of abstract bytes to memory starting at address `addr`.
+/-- Store a value to memory starting at address `addr`.
+    The value must be of type int, float, vec, or byte(N).
     Returns the updated memory. -/
 def evalStore (mem : Memory) (addr : Int) (bs : List AbstractByte) : Memory :=
   { bytes := fun a =>

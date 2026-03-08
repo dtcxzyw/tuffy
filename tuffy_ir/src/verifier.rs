@@ -240,6 +240,19 @@ impl<'a> FuncVerifier<'a> {
         self.expect_type(op, &Type::Mem, ctx, loc);
     }
 
+    fn check_loadable_type(&mut self, ty: &Type, ctx: &str, loc: &Location) {
+        match ty {
+            Type::Int | Type::Float(_) | Type::Vec(_) | Type::Byte(_) => {}
+            Type::Struct(_) | Type::Array(_, _) => {
+                self.result.error(
+                    loc.clone(),
+                    format!("{ctx}: array and struct types not supported, got {ty:?}"),
+                );
+            }
+            _ => {}
+        }
+    }
+
     fn expect_same_type(&mut self, a: &Operand, b: &Operand, ctx: &str, loc: &Location) {
         if let (Some(ta), Some(tb)) = (self.value_type(a.value), self.value_type(b.value))
             && ta != tb
@@ -643,6 +656,7 @@ impl FuncVerifier<'_> {
                         "load result must be a data type, not Mem".to_string(),
                     );
                 }
+                self.check_loadable_type(&inst.ty, "load result type", loc);
                 if inst.secondary_ty.is_some() {
                     self.result.error(
                         loc.clone(),
@@ -656,6 +670,10 @@ impl FuncVerifier<'_> {
                 self.check_operand(mem, loc);
                 self.expect_ptr(ptr, "store ptr", loc);
                 self.expect_mem(mem, "store mem", loc);
+                if let Some(val_ty) = self.value_type(val.value) {
+                    let val_ty = val_ty.clone();
+                    self.check_loadable_type(&val_ty, "store value type", loc);
+                }
                 if inst.ty != Type::Mem {
                     self.result.error(
                         loc.clone(),
