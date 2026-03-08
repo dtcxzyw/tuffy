@@ -1697,4 +1697,122 @@ impl<'a> Builder<'a> {
         let v = self.store(val, ptr.raw(), bytes, mem.raw(), origin);
         MemValue::new(v, self.func)
     }
+
+    /// Float addition (typed).
+    pub fn fadd_typed(
+        &mut self,
+        a: FloatOperand,
+        b: FloatOperand,
+        flags: FpRewriteFlags,
+        ty: Type,
+        origin: Origin,
+    ) -> FloatValue {
+        let v = self.fadd(a.raw(), b.raw(), flags, ty, origin);
+        FloatValue::new(v, self.func)
+    }
+
+    /// Float subtraction (typed).
+    pub fn fsub_typed(
+        &mut self,
+        a: FloatOperand,
+        b: FloatOperand,
+        flags: FpRewriteFlags,
+        ty: Type,
+        origin: Origin,
+    ) -> FloatValue {
+        let v = self.fsub(a.raw(), b.raw(), flags, ty, origin);
+        FloatValue::new(v, self.func)
+    }
+
+    /// Float multiplication (typed).
+    pub fn fmul_typed(
+        &mut self,
+        a: FloatOperand,
+        b: FloatOperand,
+        flags: FpRewriteFlags,
+        ty: Type,
+        origin: Origin,
+    ) -> FloatValue {
+        let v = self.fmul(a.raw(), b.raw(), flags, ty, origin);
+        FloatValue::new(v, self.func)
+    }
+
+    /// Float division (typed).
+    pub fn fdiv_typed(
+        &mut self,
+        a: FloatOperand,
+        b: FloatOperand,
+        flags: FpRewriteFlags,
+        ty: Type,
+        origin: Origin,
+    ) -> FloatValue {
+        let v = self.fdiv(a.raw(), b.raw(), flags, ty, origin);
+        FloatValue::new(v, self.func)
+    }
+
+    /// Float remainder (typed).
+    pub fn frem_typed(
+        &mut self,
+        a: FloatOperand,
+        b: FloatOperand,
+        flags: FpRewriteFlags,
+        ty: Type,
+        origin: Origin,
+    ) -> FloatValue {
+        let v = self.frem(a.raw(), b.raw(), flags, ty, origin);
+        FloatValue::new(v, self.func)
+    }
+
+    /// Float negation (typed).
+    pub fn fneg_typed(&mut self, val: FloatOperand, ty: Type, origin: Origin) -> FloatValue {
+        let v = self.fneg(val.raw(), ty, origin);
+        FloatValue::new(v, self.func)
+    }
+
+    /// Zero-extend to n bits (typed).
+    pub fn zext_typed(&mut self, val: IntOperand, bits: u32, origin: Origin) -> IntValue {
+        let v = self.zext(val.raw(), bits, origin);
+        IntValue::new(v, self.func)
+    }
+
+    /// Sign-extend to n bits (typed).
+    pub fn sext_typed(&mut self, val: IntOperand, bits: u32, origin: Origin) -> IntValue {
+        let v = self.sext(val.raw(), bits, origin);
+        IntValue::new(v, self.func)
+    }
+
+    /// Float to signed integer (typed).
+    pub fn fp_to_si_typed(&mut self, val: FloatOperand, bits: u32, origin: Origin) -> IntValue {
+        let v = self.fp_to_si(val.raw(), bits, origin);
+        IntValue::new(v, self.func)
+    }
+
+    /// Float to unsigned integer (typed).
+    pub fn fp_to_ui_typed(&mut self, val: FloatOperand, bits: u32, origin: Origin) -> IntValue {
+        let v = self.fp_to_ui(val.raw(), bits, origin);
+        IntValue::new(v, self.func)
+    }
+
+    /// Signed integer to float (typed).
+    pub fn si_to_fp_typed(&mut self, val: IntOperand, ft: FloatType, origin: Origin) -> FloatValue {
+        let v = self.si_to_fp(val.raw(), ft, origin);
+        FloatValue::new(v, self.func)
+    }
+
+    /// Unsigned integer to float (typed).
+    pub fn ui_to_fp_typed(&mut self, val: IntOperand, ft: FloatType, origin: Origin) -> FloatValue {
+        let v = self.ui_to_fp(val.raw(), ft, origin);
+        FloatValue::new(v, self.func)
+    }
+
+    /// Split integer into high and low parts (typed).
+    pub fn split_typed(
+        &mut self,
+        a: IntOperand,
+        width: u32,
+        origin: Origin,
+    ) -> (IntValue, IntValue) {
+        let (hi, lo) = self.split(a.raw(), width, origin);
+        (IntValue::new(hi, self.func), IntValue::new(lo, self.func))
+    }
 }
