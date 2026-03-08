@@ -914,11 +914,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         }
     }
 
-    /// Extract bit width from result annotation, defaulting to 64 if not specified.
+    /// Extract bit width from result annotation.
     fn extract_result_bits(&self, res_ann: Option<IntAnn>) -> u32 {
-        match res_ann {
-            Some(IntAnn::Signed(n) | IntAnn::Unsigned(n) | IntAnn::DontCare(n)) => n,
-            None => 64,
+        match res_ann.unwrap() {
+            IntAnn::Signed(n) | IntAnn::Unsigned(n) => n,
+            IntAnn::DontCare(_) => unreachable!("DontCare annotation in extract_result_bits"),
         }
     }
 
@@ -929,10 +929,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         res_ann: Option<IntAnn>,
         bits: u32,
     ) -> ValueRef {
-        match res_ann {
-            Some(IntAnn::Signed(_)) => self.builder.sext(value.into(), bits, Origin::synthetic()),
-            Some(IntAnn::Unsigned(_)) => self.builder.zext(value.into(), bits, Origin::synthetic()),
-            _ => value,
+        match res_ann.unwrap() {
+            IntAnn::Signed(_) => self.builder.sext(value.into(), bits, Origin::synthetic()),
+            IntAnn::Unsigned(_) => self.builder.zext(value.into(), bits, Origin::synthetic()),
+            IntAnn::DontCare(_) => unreachable!("DontCare annotation in apply_int_extension"),
         }
     }
 
