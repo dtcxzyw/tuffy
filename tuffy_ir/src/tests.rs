@@ -2099,3 +2099,57 @@ fn test_boolean_ops() {
     let result = crate::verifier::verify_module(&module);
     assert!(result.is_ok(), "expected no errors: {result}");
 }
+
+#[test]
+fn test_typed_builder_api() {
+    use crate::typed::{BoolOperand, IntOperand};
+
+    let mut module = Module::new("test");
+    let name = module.intern("test_typed");
+    let ret_ann = Annotation::Int(I64);
+    let mut func = Function::new(name, vec![], vec![], vec![], Some(Type::Int), Some(ret_ann));
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+
+    let entry = builder.create_block();
+    builder.switch_to_block(entry);
+
+    let mem0 = builder.add_block_arg(entry, Type::Mem, None);
+
+    // Test typed constants
+    let a = builder.iconst_typed(10, 64, IntSignedness::Signed, Origin::synthetic());
+    let b = builder.iconst_typed(20, 64, IntSignedness::Signed, Origin::synthetic());
+
+    // Test typed arithmetic
+    let sum = builder.add_typed(
+        IntOperand::from_value(a),
+        IntOperand::from_value(b),
+        I64,
+        Origin::synthetic(),
+    );
+
+    // Test typed comparison
+    let cmp = builder.icmp_typed(
+        ICmpOp::Eq,
+        IntOperand::from_value(a),
+        IntOperand::from_value(b),
+        Origin::synthetic(),
+    );
+
+    // Test typed boolean operations
+    let t = builder.bconst_typed(true, Origin::synthetic());
+    let _and = builder.band_typed(
+        BoolOperand::from_value(cmp),
+        BoolOperand::from_value(t),
+        Origin::synthetic(),
+    );
+
+    builder.ret(Some(sum.raw().into()), mem0.into(), Origin::synthetic());
+    builder.exit_region();
+
+    module.add_function(func);
+    let result = crate::verifier::verify_module(&module);
+    assert!(result.is_ok(), "expected no errors: {result}");
+}

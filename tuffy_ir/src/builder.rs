@@ -7,6 +7,10 @@ use num_bigint::BigInt;
 use crate::function::{BasicBlock, BlockArg, CfgNode, Function, Region, RegionKind};
 use crate::instruction::{AtomicRmwOp, FCmpOp, ICmpOp, Instruction, Op, Operand, Origin};
 use crate::module::SymbolId;
+use crate::typed::{
+    BoolOperand, BoolValue, FloatOperand, FloatValue, IntOperand, IntValue, MemOperand, MemValue,
+    PtrOperand,
+};
 use crate::types::{Annotation, FloatType, FpRewriteFlags, MemoryOrdering, Type};
 use crate::value::{BlockRef, RegionRef, ValueRef};
 
@@ -1478,5 +1482,219 @@ impl<'a> Builder<'a> {
                 | Op::Unreachable
                 | Op::Trap
         )
+    }
+
+    // ── Typed builder methods (Phase 1) ──
+
+    /// Integer constant (typed).
+    pub fn iconst_typed(
+        &mut self,
+        val: impl Into<BigInt>,
+        bit_width: u32,
+        signedness: crate::types::IntSignedness,
+        origin: Origin,
+    ) -> IntValue {
+        let v = self.iconst(val, bit_width, signedness, origin);
+        IntValue::new(v, self.func)
+    }
+
+    /// Boolean constant (typed).
+    pub fn bconst_typed(&mut self, val: bool, origin: Origin) -> BoolValue {
+        let v = self.bconst(val, origin);
+        BoolValue::new(v, self.func)
+    }
+
+    /// Float constant (typed).
+    pub fn fconst_typed(&mut self, ft: FloatType, bits: u64, origin: Origin) -> FloatValue {
+        let v = self.fconst(ft, bits, origin);
+        FloatValue::new(v, self.func)
+    }
+
+    /// Integer addition (typed).
+    pub fn add_typed(
+        &mut self,
+        a: IntOperand,
+        b: IntOperand,
+        int_ann: crate::types::IntAnnotation,
+        origin: Origin,
+    ) -> IntValue {
+        let v = self.add(a.raw(), b.raw(), int_ann, origin);
+        IntValue::new(v, self.func)
+    }
+
+    /// Integer subtraction (typed).
+    pub fn sub_typed(
+        &mut self,
+        a: IntOperand,
+        b: IntOperand,
+        int_ann: crate::types::IntAnnotation,
+        origin: Origin,
+    ) -> IntValue {
+        let v = self.sub(a.raw(), b.raw(), int_ann, origin);
+        IntValue::new(v, self.func)
+    }
+
+    /// Integer multiplication (typed).
+    pub fn mul_typed(
+        &mut self,
+        a: IntOperand,
+        b: IntOperand,
+        int_ann: crate::types::IntAnnotation,
+        origin: Origin,
+    ) -> IntValue {
+        let v = self.mul(a.raw(), b.raw(), int_ann, origin);
+        IntValue::new(v, self.func)
+    }
+
+    /// Integer division (typed).
+    pub fn div_typed(
+        &mut self,
+        a: IntOperand,
+        b: IntOperand,
+        int_ann: crate::types::IntAnnotation,
+        origin: Origin,
+    ) -> IntValue {
+        let v = self.div(a.raw(), b.raw(), int_ann, origin);
+        IntValue::new(v, self.func)
+    }
+
+    /// Integer remainder (typed).
+    pub fn rem_typed(
+        &mut self,
+        a: IntOperand,
+        b: IntOperand,
+        int_ann: crate::types::IntAnnotation,
+        origin: Origin,
+    ) -> IntValue {
+        let v = self.rem(a.raw(), b.raw(), int_ann, origin);
+        IntValue::new(v, self.func)
+    }
+
+    /// Bitwise AND (typed).
+    pub fn and_typed(
+        &mut self,
+        a: IntOperand,
+        b: IntOperand,
+        int_ann: crate::types::IntAnnotation,
+        origin: Origin,
+    ) -> IntValue {
+        let v = self.and(a.raw(), b.raw(), int_ann, origin);
+        IntValue::new(v, self.func)
+    }
+
+    /// Bitwise OR (typed).
+    pub fn or_typed(
+        &mut self,
+        a: IntOperand,
+        b: IntOperand,
+        int_ann: crate::types::IntAnnotation,
+        origin: Origin,
+    ) -> IntValue {
+        let v = self.or(a.raw(), b.raw(), int_ann, origin);
+        IntValue::new(v, self.func)
+    }
+
+    /// Bitwise XOR (typed).
+    pub fn xor_typed(
+        &mut self,
+        a: IntOperand,
+        b: IntOperand,
+        int_ann: crate::types::IntAnnotation,
+        origin: Origin,
+    ) -> IntValue {
+        let v = self.xor(a.raw(), b.raw(), int_ann, origin);
+        IntValue::new(v, self.func)
+    }
+
+    /// Left shift (typed).
+    pub fn shl_typed(
+        &mut self,
+        a: IntOperand,
+        b: IntOperand,
+        ann: Option<Annotation>,
+        origin: Origin,
+    ) -> IntValue {
+        let v = self.shl(a.raw(), b.raw(), ann, origin);
+        IntValue::new(v, self.func)
+    }
+
+    /// Right shift (typed).
+    pub fn shr_typed(
+        &mut self,
+        a: IntOperand,
+        b: IntOperand,
+        ann: Option<Annotation>,
+        origin: Origin,
+    ) -> IntValue {
+        let v = self.shr(a.raw(), b.raw(), ann, origin);
+        IntValue::new(v, self.func)
+    }
+
+    /// Boolean AND (typed).
+    pub fn band_typed(&mut self, a: BoolOperand, b: BoolOperand, origin: Origin) -> BoolValue {
+        let v = self.band(a.raw(), b.raw(), origin);
+        BoolValue::new(v, self.func)
+    }
+
+    /// Boolean OR (typed).
+    pub fn bor_typed(&mut self, a: BoolOperand, b: BoolOperand, origin: Origin) -> BoolValue {
+        let v = self.bor(a.raw(), b.raw(), origin);
+        BoolValue::new(v, self.func)
+    }
+
+    /// Boolean XOR (typed).
+    pub fn bxor_typed(&mut self, a: BoolOperand, b: BoolOperand, origin: Origin) -> BoolValue {
+        let v = self.bxor(a.raw(), b.raw(), origin);
+        BoolValue::new(v, self.func)
+    }
+
+    /// Integer comparison (typed).
+    pub fn icmp_typed(
+        &mut self,
+        op: ICmpOp,
+        a: IntOperand,
+        b: IntOperand,
+        origin: Origin,
+    ) -> BoolValue {
+        let v = self.icmp(op, a.raw(), b.raw(), origin);
+        BoolValue::new(v, self.func)
+    }
+
+    /// Float comparison (typed).
+    pub fn fcmp_typed(
+        &mut self,
+        op: FCmpOp,
+        a: FloatOperand,
+        b: FloatOperand,
+        origin: Origin,
+    ) -> BoolValue {
+        let v = self.fcmp(op, a.raw(), b.raw(), origin);
+        BoolValue::new(v, self.func)
+    }
+
+    /// Load from pointer (typed). Returns loaded value (type determined by caller).
+    pub fn load_typed(
+        &mut self,
+        ptr: PtrOperand,
+        bytes: u32,
+        ty: Type,
+        mem: MemOperand,
+        ann: Option<Annotation>,
+        origin: Origin,
+    ) -> ValueRef {
+        self.load(ptr.raw(), bytes, ty, mem.raw(), ann, origin)
+    }
+
+    /// Store to pointer (typed). Returns new mem token.
+    pub fn store_typed(
+        &mut self,
+        val: Operand,
+        ptr: PtrOperand,
+        bytes: u32,
+        mem: MemOperand,
+        origin: Origin,
+    ) -> MemValue {
+        let v = self.store(val, ptr.raw(), bytes, mem.raw(), origin);
+        MemValue::new(v, self.func)
     }
 }
