@@ -1843,8 +1843,18 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             )
                         };
                         let int_bits_val = if val_is_float {
-                            self.builder
-                                .bitcast(val.into(), Type::Int, None, Origin::synthetic())
+                            let bits = match ft {
+                                FloatType::F16 | FloatType::BF16 => 16,
+                                FloatType::F32 => 32,
+                                FloatType::F64 => 64,
+                                FloatType::F128 => 128,
+                            };
+                            self.builder.bitcast(
+                                val.into(),
+                                Type::Int,
+                                int_annotation_for_bytes(bits / 8),
+                                Origin::synthetic(),
+                            )
                         } else {
                             val
                         };

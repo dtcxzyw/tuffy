@@ -479,10 +479,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             }
             "unchecked_shl" => {
                 if ir_args.len() >= 2 {
+                    let ann = substs
+                        .first()
+                        .and_then(|a| a.as_type())
+                        .and_then(|t| type_size(tcx, t))
+                        .and_then(|sz| int_annotation_for_bytes(sz as u32));
                     let result = self.builder.shl(
                         ir_args[0].into(),
                         ir_args[1].into(),
-                        None,
+                        ann,
                         Origin::synthetic(),
                     );
                     self.locals.set(destination_local, result.raw());
@@ -491,10 +496,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             }
             "unchecked_shr" => {
                 if ir_args.len() >= 2 {
+                    let ann = substs
+                        .first()
+                        .and_then(|a| a.as_type())
+                        .and_then(|t| type_size(tcx, t))
+                        .and_then(|sz| int_annotation_for_bytes(sz as u32));
                     let result = self.builder.shr(
                         ir_args[0].into(),
                         ir_args[1].into(),
-                        None,
+                        ann,
                         Origin::synthetic(),
                     );
                     self.locals.set(destination_local, result.raw());
