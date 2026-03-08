@@ -256,10 +256,6 @@ pub enum Op {
     // -- Select --
     /// Conditional select: select cond, true_val, false_val. Cond must be Bool.
     Select(Operand, Operand, Operand),
-    /// Convert Bool to Int: true → 1, false → 0.
-    BoolToInt(Operand),
-    /// Convert Int to Bool: 0 → false, non-zero → true.
-    IntToBool(Operand),
 
     // -- Memory --
     /// Load from pointer. Second field is byte count. Third is mem token input.

@@ -14,9 +14,7 @@
 // CHECK:     v1: f32 = param %a
 // CHECK:     v2: f32 = param %b
 // CHECK:     v3: bool = fcmp.oeq v1, v2
-// CHECK:     v4: int:u64 = bool_to_int v3
-// CHECK:     v5: bool = int_to_bool v4
-// CHECK:     ret v5, v0
+// CHECK:     ret v3, v0
 // CHECK: }
 // CHECK:
 // CHECK: fn f32_ne(_1: f32, _2: f32) -> bool {
@@ -34,9 +32,7 @@
 // CHECK:     v1: f32 = param %a
 // CHECK:     v2: f32 = param %b
 // CHECK:     v3: bool = fcmp.une v1, v2
-// CHECK:     v4: int:u64 = bool_to_int v3
-// CHECK:     v5: bool = int_to_bool v4
-// CHECK:     ret v5, v0
+// CHECK:     ret v3, v0
 // CHECK: }
 // CHECK:
 // CHECK: fn f32_ne_nan() -> bool {
@@ -70,9 +66,7 @@
 // CHECK:     v1: f64 = param %a
 // CHECK:     v2: f64 = param %b
 // CHECK:     v3: bool = fcmp.une v1, v2
-// CHECK:     v4: int:u64 = bool_to_int v3
-// CHECK:     v5: bool = int_to_bool v4
-// CHECK:     ret v5, v0
+// CHECK:     ret v3, v0
 // CHECK: }
 // CHECK:
 

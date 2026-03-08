@@ -530,16 +530,6 @@ The condition must be of type `bool`. The result type matches the type of `vTrue
 
 **Semantics**: `evalSelect(cond, tv, fv) = if cond then tv else fv`
 
-### `bool_to_int`
-
-```
-vN = bool_to_int vA
-```
-
-Convert a `bool` to an `int`: `true` → 1, `false` → 0.
-
-**Semantics**: `evalBoolToInt(b) = if b then 1 else 0`
-
 ## Value Annotations
 
 Range constraints and bit-level facts are encoded as annotations on value definitions

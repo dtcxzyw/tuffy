@@ -31,32 +31,38 @@
 // CHECK:     v2: int:s32 = param %b
 // CHECK:     v3: int:i64 = iconst 0
 // CHECK:     v4: bool = icmp.eq v2, v3:s32
-// CHECK:     v5: int:u64 = bool_to_int v4
-// CHECK:     v6: int:i64 = iconst 0
-// CHECK:     v7: bool = icmp.eq v5, v6
-// CHECK:     brif v7, bb1(v0), bb3(v0)
+// CHECK:     v5: int:u64 = iconst 1
+// CHECK:     v6: int:u64 = iconst 0
+// CHECK:     v7: int:u64 = select v4, v5, v6
+// CHECK:     v8: int:i64 = iconst 0
+// CHECK:     v9: bool = icmp.eq v7, v8
+// CHECK:     brif v9, bb1(v0), bb3(v0)
 // CHECK:
-// CHECK:   bb1(v9: mem):
-// CHECK:     v10: int:i64 = iconst -1
-// CHECK:     v11: bool = icmp.eq v2, v10:s32
-// CHECK:     v12: int:u64 = bool_to_int v11
-// CHECK:     v13: int:i64 = iconst -2147483648
-// CHECK:     v14: bool = icmp.eq v1, v13:s32
-// CHECK:     v15: int:u64 = bool_to_int v14
-// CHECK:     v16: int:i64 = and v12, v15
-// CHECK:     v17: int:u64 = zext v16, 64
-// CHECK:     v18: int:i64 = iconst 0
-// CHECK:     v19: bool = icmp.eq v17, v18
-// CHECK:     brif v19, bb2(v9), bb4(v9)
+// CHECK:   bb1(v11: mem):
+// CHECK:     v12: int:i64 = iconst -1
+// CHECK:     v13: bool = icmp.eq v2, v12:s32
+// CHECK:     v14: int:i64 = iconst -2147483648
+// CHECK:     v15: bool = icmp.eq v1, v14:s32
+// CHECK:     v16: int:u64 = iconst 1
+// CHECK:     v17: int:u64 = iconst 0
+// CHECK:     v18: int:u64 = select v13, v16, v17
+// CHECK:     v19: int:u64 = iconst 1
+// CHECK:     v20: int:u64 = iconst 0
+// CHECK:     v21: int:u64 = select v15, v19, v20
+// CHECK:     v22: int:i64 = and v18, v21
+// CHECK:     v23: int:u64 = zext v22, 64
+// CHECK:     v24: int:i64 = iconst 0
+// CHECK:     v25: bool = icmp.eq v23, v24
+// CHECK:     brif v25, bb2(v11), bb4(v11)
 // CHECK:
-// CHECK:   bb2(v21: mem):
-// CHECK:     v22: int:i64 = div v1, v2
-// CHECK:     ret v22, v21
+// CHECK:   bb2(v27: mem):
+// CHECK:     v28: int:i64 = div v1, v2
+// CHECK:     ret v28, v27
 // CHECK:
-// CHECK:   bb3(v24: mem):
+// CHECK:   bb3(v30: mem):
 // CHECK:     trap
 // CHECK:
-// CHECK:   bb4(v26: mem):
+// CHECK:   bb4(v32: mem):
 // CHECK:     trap
 // CHECK: }
 // CHECK:
@@ -82,16 +88,18 @@
 // CHECK:     v2: int:u32 = param %b
 // CHECK:     v3: int:i64 = iconst 0
 // CHECK:     v4: bool = icmp.eq v2, v3:u32
-// CHECK:     v5: int:u64 = bool_to_int v4
-// CHECK:     v6: int:i64 = iconst 0
-// CHECK:     v7: bool = icmp.eq v5, v6
-// CHECK:     brif v7, bb1(v0), bb2(v0)
+// CHECK:     v5: int:u64 = iconst 1
+// CHECK:     v6: int:u64 = iconst 0
+// CHECK:     v7: int:u64 = select v4, v5, v6
+// CHECK:     v8: int:i64 = iconst 0
+// CHECK:     v9: bool = icmp.eq v7, v8
+// CHECK:     brif v9, bb1(v0), bb2(v0)
 // CHECK:
-// CHECK:   bb1(v9: mem):
-// CHECK:     v10: int:i64 = div v1, v2
-// CHECK:     ret v10, v9
+// CHECK:   bb1(v11: mem):
+// CHECK:     v12: int:i64 = div v1, v2
+// CHECK:     ret v12, v11
 // CHECK:
-// CHECK:   bb2(v12: mem):
+// CHECK:   bb2(v14: mem):
 // CHECK:     trap
 // CHECK: }
 // CHECK:
@@ -127,32 +135,38 @@
 // CHECK:     v2: int:s32 = param %b
 // CHECK:     v3: int:i64 = iconst 0
 // CHECK:     v4: bool = icmp.eq v2, v3:s32
-// CHECK:     v5: int:u64 = bool_to_int v4
-// CHECK:     v6: int:i64 = iconst 0
-// CHECK:     v7: bool = icmp.eq v5, v6
-// CHECK:     brif v7, bb1(v0), bb3(v0)
+// CHECK:     v5: int:u64 = iconst 1
+// CHECK:     v6: int:u64 = iconst 0
+// CHECK:     v7: int:u64 = select v4, v5, v6
+// CHECK:     v8: int:i64 = iconst 0
+// CHECK:     v9: bool = icmp.eq v7, v8
+// CHECK:     brif v9, bb1(v0), bb3(v0)
 // CHECK:
-// CHECK:   bb1(v9: mem):
-// CHECK:     v10: int:i64 = iconst -1
-// CHECK:     v11: bool = icmp.eq v2, v10:s32
-// CHECK:     v12: int:u64 = bool_to_int v11
-// CHECK:     v13: int:i64 = iconst -2147483648
-// CHECK:     v14: bool = icmp.eq v1, v13:s32
-// CHECK:     v15: int:u64 = bool_to_int v14
-// CHECK:     v16: int:i64 = and v12, v15
-// CHECK:     v17: int:u64 = zext v16, 64
-// CHECK:     v18: int:i64 = iconst 0
-// CHECK:     v19: bool = icmp.eq v17, v18
-// CHECK:     brif v19, bb2(v9), bb4(v9)
+// CHECK:   bb1(v11: mem):
+// CHECK:     v12: int:i64 = iconst -1
+// CHECK:     v13: bool = icmp.eq v2, v12:s32
+// CHECK:     v14: int:i64 = iconst -2147483648
+// CHECK:     v15: bool = icmp.eq v1, v14:s32
+// CHECK:     v16: int:u64 = iconst 1
+// CHECK:     v17: int:u64 = iconst 0
+// CHECK:     v18: int:u64 = select v13, v16, v17
+// CHECK:     v19: int:u64 = iconst 1
+// CHECK:     v20: int:u64 = iconst 0
+// CHECK:     v21: int:u64 = select v15, v19, v20
+// CHECK:     v22: int:i64 = and v18, v21
+// CHECK:     v23: int:u64 = zext v22, 64
+// CHECK:     v24: int:i64 = iconst 0
+// CHECK:     v25: bool = icmp.eq v23, v24
+// CHECK:     brif v25, bb2(v11), bb4(v11)
 // CHECK:
-// CHECK:   bb2(v21: mem):
-// CHECK:     v22: int:i64 = rem v1, v2
-// CHECK:     ret v22, v21
+// CHECK:   bb2(v27: mem):
+// CHECK:     v28: int:i64 = rem v1, v2
+// CHECK:     ret v28, v27
 // CHECK:
-// CHECK:   bb3(v24: mem):
+// CHECK:   bb3(v30: mem):
 // CHECK:     trap
 // CHECK:
-// CHECK:   bb4(v26: mem):
+// CHECK:   bb4(v32: mem):
 // CHECK:     trap
 // CHECK: }
 // CHECK:
@@ -178,16 +192,18 @@
 // CHECK:     v2: int:u32 = param %b
 // CHECK:     v3: int:i64 = iconst 0
 // CHECK:     v4: bool = icmp.eq v2, v3:u32
-// CHECK:     v5: int:u64 = bool_to_int v4
-// CHECK:     v6: int:i64 = iconst 0
-// CHECK:     v7: bool = icmp.eq v5, v6
-// CHECK:     brif v7, bb1(v0), bb2(v0)
+// CHECK:     v5: int:u64 = iconst 1
+// CHECK:     v6: int:u64 = iconst 0
+// CHECK:     v7: int:u64 = select v4, v5, v6
+// CHECK:     v8: int:i64 = iconst 0
+// CHECK:     v9: bool = icmp.eq v7, v8
+// CHECK:     brif v9, bb1(v0), bb2(v0)
 // CHECK:
-// CHECK:   bb1(v9: mem):
-// CHECK:     v10: int:i64 = rem v1, v2
-// CHECK:     ret v10, v9
+// CHECK:   bb1(v11: mem):
+// CHECK:     v12: int:i64 = rem v1, v2
+// CHECK:     ret v12, v11
 // CHECK:
-// CHECK:   bb2(v12: mem):
+// CHECK:   bb2(v14: mem):
 // CHECK:     trap
 // CHECK: }
 // CHECK:

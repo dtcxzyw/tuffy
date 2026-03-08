@@ -19,8 +19,8 @@ Boolean type with two values: `true` and `false`. Distinct from integers — boo
 logic is not conflated with integer arithmetic. Comparison instructions (`icmp`) return
 `bool`, and control flow instructions (`brif`, `select`) require `bool` conditions.
 
-To convert between `bool` and `int`, use `bool_to_int` (true → 1, false → 0). The
-reverse conversion uses `icmp.ne val, 0`.
+To convert `bool` to `int`, use `select cond, 1, 0`. To convert `int` to `bool`, use
+`icmp.ne val, 0`.
 
 ## `byte(N)`
 

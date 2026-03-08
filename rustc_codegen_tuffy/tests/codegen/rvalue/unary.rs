@@ -47,11 +47,14 @@
 // CHECK: func @not_bool(%a: bool) -> bool {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: bool = param %a
-// CHECK:     v2: int:u64 = bool_to_int v1
-// CHECK:     v3: int:i64 = iconst 1
-// CHECK:     v4: int:i64 = xor v2, v3
-// CHECK:     v5: bool = int_to_bool v4
-// CHECK:     ret v5, v0
+// CHECK:     v2: int:u64 = iconst 1
+// CHECK:     v3: int:u64 = iconst 0
+// CHECK:     v4: int:u64 = select v1, v2, v3
+// CHECK:     v5: int:i64 = iconst 1
+// CHECK:     v6: int:i64 = xor v4, v5
+// CHECK:     v7: int:i64 = iconst 0
+// CHECK:     v8: bool = icmp.ne v6, v7
+// CHECK:     ret v8, v0
 // CHECK: }
 // CHECK:
 // CHECK: fn not_i128(_1: i128) -> i128 {

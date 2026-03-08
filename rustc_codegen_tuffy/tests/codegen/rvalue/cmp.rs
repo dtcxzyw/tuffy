@@ -14,9 +14,7 @@
 // CHECK:     v1: int:s32 = param %a
 // CHECK:     v2: int:s32 = param %b
 // CHECK:     v3: bool = icmp.eq v1, v2
-// CHECK:     v4: int:u64 = bool_to_int v3
-// CHECK:     v5: bool = int_to_bool v4
-// CHECK:     ret v5, v0
+// CHECK:     ret v3, v0
 // CHECK: }
 // CHECK:
 // CHECK: fn ge_i32(_1: i32, _2: i32) -> bool {
@@ -34,9 +32,7 @@
 // CHECK:     v1: int:s32 = param %a
 // CHECK:     v2: int:s32 = param %b
 // CHECK:     v3: bool = icmp.ge v1, v2
-// CHECK:     v4: int:u64 = bool_to_int v3
-// CHECK:     v5: bool = int_to_bool v4
-// CHECK:     ret v5, v0
+// CHECK:     ret v3, v0
 // CHECK: }
 // CHECK:
 // CHECK: fn gt_i32(_1: i32, _2: i32) -> bool {
@@ -54,9 +50,7 @@
 // CHECK:     v1: int:s32 = param %a
 // CHECK:     v2: int:s32 = param %b
 // CHECK:     v3: bool = icmp.gt v1, v2
-// CHECK:     v4: int:u64 = bool_to_int v3
-// CHECK:     v5: bool = int_to_bool v4
-// CHECK:     ret v5, v0
+// CHECK:     ret v3, v0
 // CHECK: }
 // CHECK:
 // CHECK: fn le_i32(_1: i32, _2: i32) -> bool {
@@ -74,9 +68,7 @@
 // CHECK:     v1: int:s32 = param %a
 // CHECK:     v2: int:s32 = param %b
 // CHECK:     v3: bool = icmp.le v1, v2
-// CHECK:     v4: int:u64 = bool_to_int v3
-// CHECK:     v5: bool = int_to_bool v4
-// CHECK:     ret v5, v0
+// CHECK:     ret v3, v0
 // CHECK: }
 // CHECK:
 // CHECK: fn lt_i32(_1: i32, _2: i32) -> bool {
@@ -94,9 +86,7 @@
 // CHECK:     v1: int:s32 = param %a
 // CHECK:     v2: int:s32 = param %b
 // CHECK:     v3: bool = icmp.lt v1, v2
-// CHECK:     v4: int:u64 = bool_to_int v3
-// CHECK:     v5: bool = int_to_bool v4
-// CHECK:     ret v5, v0
+// CHECK:     ret v3, v0
 // CHECK: }
 // CHECK:
 // CHECK: fn ne_i32(_1: i32, _2: i32) -> bool {
@@ -114,9 +104,7 @@
 // CHECK:     v1: int:s32 = param %a
 // CHECK:     v2: int:s32 = param %b
 // CHECK:     v3: bool = icmp.ne v1, v2
-// CHECK:     v4: int:u64 = bool_to_int v3
-// CHECK:     v5: bool = int_to_bool v4
-// CHECK:     ret v5, v0
+// CHECK:     ret v3, v0
 // CHECK: }
 // CHECK:
 

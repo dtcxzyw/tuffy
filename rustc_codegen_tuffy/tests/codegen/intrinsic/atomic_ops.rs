@@ -1088,110 +1088,112 @@
 // CHECK:     v251: int:i64 = iconst 4
 // CHECK:     v252: ptr = ptradd v6, v251
 // CHECK:     v253: bool = load.1 v252, v249
-// CHECK:     v254: int:u64 = bool_to_int v253
-// CHECK:     v255: int:i64 = iconst 255
-// CHECK:     v256: int:u64 = and v254, v255
-// CHECK:     v257: int:i64 = iconst 0
-// CHECK:     v258: bool = icmp.eq v256, v257
-// CHECK:     brif v258, bb27(v249), bb26(v249)
+// CHECK:     v254: int:u64 = iconst 1
+// CHECK:     v255: int:u64 = iconst 0
+// CHECK:     v256: int:u64 = select v253, v254, v255
+// CHECK:     v257: int:i64 = iconst 255
+// CHECK:     v258: int:u64 = and v256, v257
+// CHECK:     v259: int:i64 = iconst 0
+// CHECK:     v260: bool = icmp.eq v258, v259
+// CHECK:     brif v260, bb27(v249), bb26(v249)
 // CHECK:
-// CHECK:   bb26(v260: mem):
-// CHECK:     v261: int:i64 = iconst 0
-// CHECK:     v262: mem = store.8 v261, v7, v260
-// CHECK:     v263: int:i64 = iconst 4
-// CHECK:     v264: ptr = ptradd v7, v263
-// CHECK:     v265: mem = store.4 v250, v264, v262
-// CHECK:     v266: int:i64 = iconst 0
-// CHECK:     v267: mem = store.4 v266, v7, v265
-// CHECK:     br bb28(v267)
+// CHECK:   bb26(v262: mem):
+// CHECK:     v263: int:i64 = iconst 0
+// CHECK:     v264: mem = store.8 v263, v7, v262
+// CHECK:     v265: int:i64 = iconst 4
+// CHECK:     v266: ptr = ptradd v7, v265
+// CHECK:     v267: mem = store.4 v250, v266, v264
+// CHECK:     v268: int:i64 = iconst 0
+// CHECK:     v269: mem = store.4 v268, v7, v267
+// CHECK:     br bb28(v269)
 // CHECK:
-// CHECK:   bb27(v269: mem):
-// CHECK:     v270: int:i64 = iconst 0
-// CHECK:     v271: mem = store.8 v270, v7, v269
-// CHECK:     v272: int:i64 = iconst 4
-// CHECK:     v273: ptr = ptradd v7, v272
-// CHECK:     v274: mem = store.4 v250, v273, v271
-// CHECK:     v275: int:i64 = iconst 1
-// CHECK:     v276: mem = store.4 v275, v7, v274
-// CHECK:     br bb28(v276)
+// CHECK:   bb27(v271: mem):
+// CHECK:     v272: int:i64 = iconst 0
+// CHECK:     v273: mem = store.8 v272, v7, v271
+// CHECK:     v274: int:i64 = iconst 4
+// CHECK:     v275: ptr = ptradd v7, v274
+// CHECK:     v276: mem = store.4 v250, v275, v273
+// CHECK:     v277: int:i64 = iconst 1
+// CHECK:     v278: mem = store.4 v277, v7, v276
+// CHECK:     br bb28(v278)
 // CHECK:
-// CHECK:   bb28(v278: mem):
-// CHECK:     ret v278
+// CHECK:   bb28(v280: mem):
+// CHECK:     ret v280
 // CHECK:
-// CHECK:   bb29(v280: mem):
-// CHECK:     v281: int:i64 = iconst 1
-// CHECK:     v282: bool = icmp.eq v14, v281
-// CHECK:     brif v282, bb4(v280), bb30(v280)
+// CHECK:   bb29(v282: mem):
+// CHECK:     v283: int:i64 = iconst 1
+// CHECK:     v284: bool = icmp.eq v14, v283
+// CHECK:     brif v284, bb4(v282), bb30(v282)
 // CHECK:
-// CHECK:   bb30(v284: mem):
-// CHECK:     v285: int:i64 = iconst 2
-// CHECK:     v286: bool = icmp.eq v14, v285
-// CHECK:     brif v286, bb3(v284), bb31(v284)
+// CHECK:   bb30(v286: mem):
+// CHECK:     v287: int:i64 = iconst 2
+// CHECK:     v288: bool = icmp.eq v14, v287
+// CHECK:     brif v288, bb3(v286), bb31(v286)
 // CHECK:
-// CHECK:   bb31(v288: mem):
-// CHECK:     v289: int:i64 = iconst 3
-// CHECK:     v290: bool = icmp.eq v14, v289
-// CHECK:     brif v290, bb5(v288), bb32(v288)
+// CHECK:   bb31(v290: mem):
+// CHECK:     v291: int:i64 = iconst 3
+// CHECK:     v292: bool = icmp.eq v14, v291
+// CHECK:     brif v292, bb5(v290), bb32(v290)
 // CHECK:
-// CHECK:   bb32(v292: mem):
-// CHECK:     v293: int:i64 = iconst 4
-// CHECK:     v294: bool = icmp.eq v14, v293
-// CHECK:     brif v294, bb6(v292), bb7(v292)
+// CHECK:   bb32(v294: mem):
+// CHECK:     v295: int:i64 = iconst 4
+// CHECK:     v296: bool = icmp.eq v14, v295
+// CHECK:     brif v296, bb6(v294), bb7(v294)
 // CHECK:
-// CHECK:   bb33(v296: mem):
-// CHECK:     v297: int:i64 = iconst 3
-// CHECK:     v298: bool = icmp.eq v21, v297
-// CHECK:     brif v298, bb9(v296), bb7(v296)
+// CHECK:   bb33(v298: mem):
+// CHECK:     v299: int:i64 = iconst 3
+// CHECK:     v300: bool = icmp.eq v21, v299
+// CHECK:     brif v300, bb9(v298), bb7(v298)
 // CHECK:
-// CHECK:   bb34(v300: mem):
-// CHECK:     v301: int:i64 = iconst 2
-// CHECK:     v302: bool = icmp.eq v28, v301
-// CHECK:     brif v302, bb23(v300), bb35(v300)
+// CHECK:   bb34(v302: mem):
+// CHECK:     v303: int:i64 = iconst 2
+// CHECK:     v304: bool = icmp.eq v28, v303
+// CHECK:     brif v304, bb23(v302), bb35(v302)
 // CHECK:
-// CHECK:   bb35(v304: mem):
-// CHECK:     v305: int:i64 = iconst 4
-// CHECK:     v306: bool = icmp.eq v28, v305
-// CHECK:     brif v306, bb22(v304), bb1(v304)
+// CHECK:   bb35(v306: mem):
+// CHECK:     v307: int:i64 = iconst 4
+// CHECK:     v308: bool = icmp.eq v28, v307
+// CHECK:     brif v308, bb22(v306), bb1(v306)
 // CHECK:
-// CHECK:   bb36(v308: mem):
-// CHECK:     v309: int:i64 = iconst 2
-// CHECK:     v310: bool = icmp.eq v35, v309
-// CHECK:     brif v310, bb20(v308), bb37(v308)
+// CHECK:   bb36(v310: mem):
+// CHECK:     v311: int:i64 = iconst 2
+// CHECK:     v312: bool = icmp.eq v35, v311
+// CHECK:     brif v312, bb20(v310), bb37(v310)
 // CHECK:
-// CHECK:   bb37(v312: mem):
-// CHECK:     v313: int:i64 = iconst 4
-// CHECK:     v314: bool = icmp.eq v35, v313
-// CHECK:     brif v314, bb19(v312), bb1(v312)
+// CHECK:   bb37(v314: mem):
+// CHECK:     v315: int:i64 = iconst 4
+// CHECK:     v316: bool = icmp.eq v35, v315
+// CHECK:     brif v316, bb19(v314), bb1(v314)
 // CHECK:
-// CHECK:   bb38(v316: mem):
-// CHECK:     v317: int:i64 = iconst 2
-// CHECK:     v318: bool = icmp.eq v42, v317
-// CHECK:     brif v318, bb17(v316), bb39(v316)
+// CHECK:   bb38(v318: mem):
+// CHECK:     v319: int:i64 = iconst 2
+// CHECK:     v320: bool = icmp.eq v42, v319
+// CHECK:     brif v320, bb17(v318), bb39(v318)
 // CHECK:
-// CHECK:   bb39(v320: mem):
-// CHECK:     v321: int:i64 = iconst 4
-// CHECK:     v322: bool = icmp.eq v42, v321
-// CHECK:     brif v322, bb16(v320), bb1(v320)
+// CHECK:   bb39(v322: mem):
+// CHECK:     v323: int:i64 = iconst 4
+// CHECK:     v324: bool = icmp.eq v42, v323
+// CHECK:     brif v324, bb16(v322), bb1(v322)
 // CHECK:
-// CHECK:   bb40(v324: mem):
-// CHECK:     v325: int:i64 = iconst 2
-// CHECK:     v326: bool = icmp.eq v49, v325
-// CHECK:     brif v326, bb14(v324), bb41(v324)
+// CHECK:   bb40(v326: mem):
+// CHECK:     v327: int:i64 = iconst 2
+// CHECK:     v328: bool = icmp.eq v49, v327
+// CHECK:     brif v328, bb14(v326), bb41(v326)
 // CHECK:
-// CHECK:   bb41(v328: mem):
-// CHECK:     v329: int:i64 = iconst 4
-// CHECK:     v330: bool = icmp.eq v49, v329
-// CHECK:     brif v330, bb13(v328), bb1(v328)
+// CHECK:   bb41(v330: mem):
+// CHECK:     v331: int:i64 = iconst 4
+// CHECK:     v332: bool = icmp.eq v49, v331
+// CHECK:     brif v332, bb13(v330), bb1(v330)
 // CHECK:
-// CHECK:   bb42(v332: mem):
-// CHECK:     v333: int:i64 = iconst 2
-// CHECK:     v334: bool = icmp.eq v56, v333
-// CHECK:     brif v334, bb11(v332), bb43(v332)
+// CHECK:   bb42(v334: mem):
+// CHECK:     v335: int:i64 = iconst 2
+// CHECK:     v336: bool = icmp.eq v56, v335
+// CHECK:     brif v336, bb11(v334), bb43(v334)
 // CHECK:
-// CHECK:   bb43(v336: mem):
-// CHECK:     v337: int:i64 = iconst 4
-// CHECK:     v338: bool = icmp.eq v56, v337
-// CHECK:     brif v338, bb10(v336), bb1(v336)
+// CHECK:   bb43(v338: mem):
+// CHECK:     v339: int:i64 = iconst 4
+// CHECK:     v340: bool = icmp.eq v56, v339
+// CHECK:     brif v340, bb10(v338), bb1(v338)
 // CHECK: }
 // CHECK:
 // CHECK: === ISel failure dump for _RINvNtNtCsiYoX4ApF2vj_4core4sync6atomic23atomic_compare_exchangemECseYAj3kFwz5z_10atomic_ops ===
@@ -1429,37 +1431,39 @@
 // CHECK:     vref=251 (index=251) op=PtrAdd(Operand { value: ValueRef(5), annotation: None }, Operand { value: ValueRef(250), annotation: None })
 // CHECK:     vref=252 (index=252) op=Store(Operand { value: ValueRef(248), annotation: None }, Operand { value: ValueRef(251), annotation: None }, 1, Operand { value: ValueRef(249), annotation: None })
 // CHECK:     vref=253 (index=253) op=Br(BlockRef(25), [Operand { value: ValueRef(252), annotation: None }])
-// CHECK:   block 25 (inst_start=254, inst_count=10):
+// CHECK:   block 25 (inst_start=254, inst_count=12):
 // CHECK:     vref=254 (index=254) op=Load(Operand { value: ValueRef(5), annotation: None }, 4, Operand { value: ValueRef(2147483673), annotation: None })
 // CHECK:     vref=255 (index=255) op=Const(4)
 // CHECK:     vref=256 (index=256) op=PtrAdd(Operand { value: ValueRef(5), annotation: None }, Operand { value: ValueRef(255), annotation: None })
 // CHECK:     vref=257 (index=257) op=Load(Operand { value: ValueRef(256), annotation: None }, 1, Operand { value: ValueRef(2147483673), annotation: None })
-// CHECK:     vref=258 (index=258) op=BoolToInt(Operand { value: ValueRef(257), annotation: None })
-// CHECK:     vref=259 (index=259) op=Const(255)
-// CHECK:     vref=260 (index=260) op=And(Operand { value: ValueRef(258), annotation: None }, Operand { value: ValueRef(259), annotation: None })
-// CHECK:     vref=261 (index=261) op=Const(0)
-// CHECK:     vref=262 (index=262) op=ICmp(Eq, Operand { value: ValueRef(260), annotation: None }, Operand { value: ValueRef(261), annotation: None })
-// CHECK:     vref=263 (index=263) op=BrIf(Operand { value: ValueRef(262), annotation: None }, BlockRef(27), [Operand { value: ValueRef(2147483673), annotation: None }], BlockRef(26), [Operand { value: ValueRef(2147483673), annotation: None }])
-// CHECK:   block 26 (inst_start=264, inst_count=8):
-// CHECK:     vref=264 (index=264) op=Const(0)
-// CHECK:     vref=265 (index=265) op=Store(Operand { value: ValueRef(264), annotation: None }, Operand { value: ValueRef(6), annotation: None }, 8, Operand { value: ValueRef(2147483674), annotation: None })
-// CHECK:     vref=266 (index=266) op=Const(4)
-// CHECK:     vref=267 (index=267) op=PtrAdd(Operand { value: ValueRef(6), annotation: None }, Operand { value: ValueRef(266), annotation: None })
-// CHECK:     vref=268 (index=268) op=Store(Operand { value: ValueRef(254), annotation: None }, Operand { value: ValueRef(267), annotation: None }, 4, Operand { value: ValueRef(265), annotation: None })
-// CHECK:     vref=269 (index=269) op=Const(0)
-// CHECK:     vref=270 (index=270) op=Store(Operand { value: ValueRef(269), annotation: None }, Operand { value: ValueRef(6), annotation: None }, 4, Operand { value: ValueRef(268), annotation: None })
-// CHECK:     vref=271 (index=271) op=Br(BlockRef(28), [Operand { value: ValueRef(270), annotation: None }])
-// CHECK:   block 27 (inst_start=272, inst_count=8):
-// CHECK:     vref=272 (index=272) op=Const(0)
-// CHECK:     vref=273 (index=273) op=Store(Operand { value: ValueRef(272), annotation: None }, Operand { value: ValueRef(6), annotation: None }, 8, Operand { value: ValueRef(2147483675), annotation: None })
-// CHECK:     vref=274 (index=274) op=Const(4)
-// CHECK:     vref=275 (index=275) op=PtrAdd(Operand { value: ValueRef(6), annotation: None }, Operand { value: ValueRef(274), annotation: None })
-// CHECK:     vref=276 (index=276) op=Store(Operand { value: ValueRef(254), annotation: None }, Operand { value: ValueRef(275), annotation: None }, 4, Operand { value: ValueRef(273), annotation: None })
-// CHECK:     vref=277 (index=277) op=Const(1)
-// CHECK:     vref=278 (index=278) op=Store(Operand { value: ValueRef(277), annotation: None }, Operand { value: ValueRef(6), annotation: None }, 4, Operand { value: ValueRef(276), annotation: None })
-// CHECK:     vref=279 (index=279) op=Br(BlockRef(28), [Operand { value: ValueRef(278), annotation: None }])
-// CHECK:   block 28 (inst_start=280, inst_count=1):
-// CHECK:     vref=280 (index=280) op=Ret(None, Operand { value: ValueRef(2147483676), annotation: None })
+// CHECK:     vref=258 (index=258) op=Const(1)
+// CHECK:     vref=259 (index=259) op=Const(0)
+// CHECK:     vref=260 (index=260) op=Select(Operand { value: ValueRef(257), annotation: None }, Operand { value: ValueRef(258), annotation: None }, Operand { value: ValueRef(259), annotation: None })
+// CHECK:     vref=261 (index=261) op=Const(255)
+// CHECK:     vref=262 (index=262) op=And(Operand { value: ValueRef(260), annotation: None }, Operand { value: ValueRef(261), annotation: None })
+// CHECK:     vref=263 (index=263) op=Const(0)
+// CHECK:     vref=264 (index=264) op=ICmp(Eq, Operand { value: ValueRef(262), annotation: None }, Operand { value: ValueRef(263), annotation: None })
+// CHECK:     vref=265 (index=265) op=BrIf(Operand { value: ValueRef(264), annotation: None }, BlockRef(27), [Operand { value: ValueRef(2147483673), annotation: None }], BlockRef(26), [Operand { value: ValueRef(2147483673), annotation: None }])
+// CHECK:   block 26 (inst_start=266, inst_count=8):
+// CHECK:     vref=266 (index=266) op=Const(0)
+// CHECK:     vref=267 (index=267) op=Store(Operand { value: ValueRef(266), annotation: None }, Operand { value: ValueRef(6), annotation: None }, 8, Operand { value: ValueRef(2147483674), annotation: None })
+// CHECK:     vref=268 (index=268) op=Const(4)
+// CHECK:     vref=269 (index=269) op=PtrAdd(Operand { value: ValueRef(6), annotation: None }, Operand { value: ValueRef(268), annotation: None })
+// CHECK:     vref=270 (index=270) op=Store(Operand { value: ValueRef(254), annotation: None }, Operand { value: ValueRef(269), annotation: None }, 4, Operand { value: ValueRef(267), annotation: None })
+// CHECK:     vref=271 (index=271) op=Const(0)
+// CHECK:     vref=272 (index=272) op=Store(Operand { value: ValueRef(271), annotation: None }, Operand { value: ValueRef(6), annotation: None }, 4, Operand { value: ValueRef(270), annotation: None })
+// CHECK:     vref=273 (index=273) op=Br(BlockRef(28), [Operand { value: ValueRef(272), annotation: None }])
+// CHECK:   block 27 (inst_start=274, inst_count=8):
+// CHECK:     vref=274 (index=274) op=Const(0)
+// CHECK:     vref=275 (index=275) op=Store(Operand { value: ValueRef(274), annotation: None }, Operand { value: ValueRef(6), annotation: None }, 8, Operand { value: ValueRef(2147483675), annotation: None })
+// CHECK:     vref=276 (index=276) op=Const(4)
+// CHECK:     vref=277 (index=277) op=PtrAdd(Operand { value: ValueRef(6), annotation: None }, Operand { value: ValueRef(276), annotation: None })
+// CHECK:     vref=278 (index=278) op=Store(Operand { value: ValueRef(254), annotation: None }, Operand { value: ValueRef(277), annotation: None }, 4, Operand { value: ValueRef(275), annotation: None })
+// CHECK:     vref=279 (index=279) op=Const(1)
+// CHECK:     vref=280 (index=280) op=Store(Operand { value: ValueRef(279), annotation: None }, Operand { value: ValueRef(6), annotation: None }, 4, Operand { value: ValueRef(278), annotation: None })
+// CHECK:     vref=281 (index=281) op=Br(BlockRef(28), [Operand { value: ValueRef(280), annotation: None }])
+// CHECK:   block 28 (inst_start=282, inst_count=1):
+// CHECK:     vref=282 (index=282) op=Ret(None, Operand { value: ValueRef(2147483676), annotation: None })
 // CHECK:   block 29 (inst_start=17, inst_count=3):
 // CHECK:     vref=17 (index=17) op=Const(1)
 // CHECK:     vref=18 (index=18) op=ICmp(Eq, Operand { value: ValueRef(13), annotation: None }, Operand { value: ValueRef(17), annotation: None })

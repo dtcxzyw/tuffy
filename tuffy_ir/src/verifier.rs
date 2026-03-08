@@ -609,28 +609,6 @@ impl FuncVerifier<'_> {
                 self.expect_same_type(tv, fv, "select arms", &loc);
             }
 
-            Op::BoolToInt(a) => {
-                self.check_operand(a, &loc);
-                self.expect_bool(a, "bool_to_int", &loc);
-                if !matches!(inst.ty, Type::Int) {
-                    self.result.error(
-                        loc,
-                        format!("bool_to_int result must be Int, got {:?}", inst.ty),
-                    );
-                }
-            }
-
-            Op::IntToBool(a) => {
-                self.check_operand(a, &loc);
-                self.expect_int(a, "int_to_bool", &loc);
-                if inst.ty != Type::Bool {
-                    self.result.error(
-                        loc,
-                        format!("int_to_bool result must be Bool, got {:?}", inst.ty),
-                    );
-                }
-            }
-
             // Dispatch remaining ops to a separate method.
             _ => self.verify_instruction_rest(inst, &loc),
         }

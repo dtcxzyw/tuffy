@@ -38,28 +38,32 @@
 // CHECK:     v6: ptr = ptradd v2, v5
 // CHECK:     v7: int:i64 = load.8 v6, v3
 // CHECK:     v8: int:u64, v9: bool = uadd_overflow.64 v4:u64, v7:u64
-// CHECK:     v10: int:u64 = bool_to_int v9
-// CHECK:     v11: int:i64 = iconst 0
-// CHECK:     v12: bool = icmp.eq v10, v11
-// CHECK:     brif v12, bb1(v3), bb3(v3)
+// CHECK:     v10: int:u64 = iconst 1
+// CHECK:     v11: int:u64 = iconst 0
+// CHECK:     v12: int:u64 = select v9, v10, v11
+// CHECK:     v13: int:i64 = iconst 0
+// CHECK:     v14: bool = icmp.eq v12, v13
+// CHECK:     brif v14, bb1(v3), bb3(v3)
 // CHECK:
-// CHECK:   bb1(v14: mem):
-// CHECK:     v15: int:i64 = iconst 16
-// CHECK:     v16: ptr = ptradd v2, v15
-// CHECK:     v17: int:i64 = load.8 v16, v14
-// CHECK:     v18: int:u64, v19: bool = uadd_overflow.64 v8, v17:u64
-// CHECK:     v20: int:u64 = bool_to_int v19
-// CHECK:     v21: int:i64 = iconst 0
-// CHECK:     v22: bool = icmp.eq v20, v21
-// CHECK:     brif v22, bb2(v14), bb4(v14)
+// CHECK:   bb1(v16: mem):
+// CHECK:     v17: int:i64 = iconst 16
+// CHECK:     v18: ptr = ptradd v2, v17
+// CHECK:     v19: int:i64 = load.8 v18, v16
+// CHECK:     v20: int:u64, v21: bool = uadd_overflow.64 v8, v19:u64
+// CHECK:     v22: int:u64 = iconst 1
+// CHECK:     v23: int:u64 = iconst 0
+// CHECK:     v24: int:u64 = select v21, v22, v23
+// CHECK:     v25: int:i64 = iconst 0
+// CHECK:     v26: bool = icmp.eq v24, v25
+// CHECK:     brif v26, bb2(v16), bb4(v16)
 // CHECK:
-// CHECK:   bb2(v24: mem):
-// CHECK:     ret v18, v24
+// CHECK:   bb2(v28: mem):
+// CHECK:     ret v20, v28
 // CHECK:
-// CHECK:   bb3(v26: mem):
+// CHECK:   bb3(v30: mem):
 // CHECK:     trap
 // CHECK:
-// CHECK:   bb4(v28: mem):
+// CHECK:   bb4(v32: mem):
 // CHECK:     trap
 // CHECK: }
 // CHECK:

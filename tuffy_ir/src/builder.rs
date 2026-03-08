@@ -594,21 +594,6 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::Select(cond, true_val, false_val), ty, None, origin, ann)
     }
 
-    /// Convert Bool to Int: true → 1, false → 0.
-    pub fn bool_to_int(&mut self, val: Operand, bit_width: u32, origin: Origin) -> ValueRef {
-        use crate::types::{IntAnnotation, IntSignedness};
-        let ann = Annotation::Int(IntAnnotation {
-            bit_width,
-            signedness: IntSignedness::Unsigned,
-        });
-        self.push_inst(Op::BoolToInt(val), Type::Int, None, origin, Some(ann))
-    }
-
-    /// Convert Int to Bool: 0 → false, non-zero → true.
-    pub fn int_to_bool(&mut self, val: Operand, origin: Origin) -> ValueRef {
-        self.push_inst(Op::IntToBool(val), Type::Bool, None, origin, None)
-    }
-
     /// Population count: count the number of set bits.
     pub fn count_ones(&mut self, val: Operand, result_bits: u32, origin: Origin) -> ValueRef {
         use crate::types::{IntAnnotation, IntSignedness};

@@ -436,10 +436,6 @@ def evalFCmp (op : FCmpOp) (a b : Float) : Value :=
 def evalSelect (cond : Bool) (tv fv : Value) : Value :=
   if cond then tv else fv
 
-/-- Convert a boolean to an integer: true → 1, false → 0. -/
-def evalBoolToInt (b : Bool) : Value :=
-  .int (if b then 1 else 0)
-
 -- Memory bulk operation semantics
 
 /-- MemCopy: copy `count` bytes from `src` to `dst` (non-overlapping, memcpy semantics).

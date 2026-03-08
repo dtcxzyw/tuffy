@@ -734,9 +734,6 @@ fn legalize_inst<M: AbiMetadata + Clone>(
         Op::Select(cond, tv, fv) if wide_result => {
             leg_select_128(old, s, b, old_vref, cond, tv, fv);
         }
-        Op::BoolToInt(val) if wide_result => {
-            leg_bool_to_int_128(s, b, old_vref, val);
-        }
         Op::Ret(val, mem) if old.ret_ty.as_ref().is_some_and(is_128_bit_int) => {
             leg_ret(s, b, old_vref, val, mem);
         }
@@ -979,8 +976,6 @@ fn copy_inst<M: AbiMetadata + Clone>(
             inst.result_annotation,
             o(),
         ),
-        Op::BoolToInt(a) => b.bool_to_int(remap_op(s, a), 64, o()),
-        Op::IntToBool(a) => b.int_to_bool(remap_op(s, a), o()),
         Op::Load(ptr, bytes, mem) => {
             let data = b.load(
                 remap_op(s, ptr),
@@ -1257,7 +1252,19 @@ fn leg_add<M>(
 
     let lo = b.add(Operand::new(a_lo), Operand::new(b_lo), I64, o());
     let carry = b.icmp(ICmpOp::Lt, Operand::new(lo), Operand::new(a_lo), o());
-    let carry_int = b.bool_to_int(Operand::new(carry), 64, o());
+    let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
+    let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
+    let carry_int = b.select(
+        Operand::new(carry),
+        one.into(),
+        zero.into(),
+        Type::Int,
+        Some(Annotation::Int(IntAnnotation {
+            bit_width: 64,
+            signedness: IntSignedness::Unsigned,
+        })),
+        o(),
+    );
     let hi_sum = b.add(Operand::new(a_hi), Operand::new(b_hi), I64, o());
     let hi = b.add(Operand::new(hi_sum), Operand::new(carry_int), I64, o());
     s.vmap.set(old_vref, Mapped::Pair(lo, hi));
@@ -1280,7 +1287,19 @@ fn leg_sub<M>(
 
     let lo = b.sub(Operand::new(a_lo), Operand::new(b_lo), I64, o());
     let borrow = b.icmp(ICmpOp::Gt, Operand::new(lo), Operand::new(a_lo), o());
-    let borrow_int = b.bool_to_int(Operand::new(borrow), 64, o());
+    let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
+    let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
+    let borrow_int = b.select(
+        Operand::new(borrow),
+        one.into(),
+        zero.into(),
+        Type::Int,
+        Some(Annotation::Int(IntAnnotation {
+            bit_width: 64,
+            signedness: IntSignedness::Unsigned,
+        })),
+        o(),
+    );
     let hi_diff = b.sub(Operand::new(a_hi), Operand::new(b_hi), I64, o());
     let hi = b.sub(Operand::new(hi_diff), Operand::new(borrow_int), I64, o());
     s.vmap.set(old_vref, Mapped::Pair(lo, hi));
@@ -1318,10 +1337,34 @@ fn leg_mul<M>(
     let p0_hi = b.shr(Operand::new(p0), Operand::new(c32), None, o());
     let mid1 = b.add(Operand::new(p0_hi), Operand::new(p1), I64, o());
     let carry1 = b.icmp(ICmpOp::Lt, Operand::new(mid1), Operand::new(p1), o());
-    let carry1_int = b.bool_to_int(Operand::new(carry1), 64, o());
+    let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
+    let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
+    let carry1_int = b.select(
+        Operand::new(carry1),
+        one.into(),
+        zero.into(),
+        Type::Int,
+        Some(Annotation::Int(IntAnnotation {
+            bit_width: 64,
+            signedness: IntSignedness::Unsigned,
+        })),
+        o(),
+    );
     let mid = b.add(Operand::new(mid1), Operand::new(p2), I64, o());
     let carry2 = b.icmp(ICmpOp::Lt, Operand::new(mid), Operand::new(p2), o());
-    let carry2_int = b.bool_to_int(Operand::new(carry2), 64, o());
+    let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
+    let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
+    let carry2_int = b.select(
+        Operand::new(carry2),
+        one.into(),
+        zero.into(),
+        Type::Int,
+        Some(Annotation::Int(IntAnnotation {
+            bit_width: 64,
+            signedness: IntSignedness::Unsigned,
+        })),
+        o(),
+    );
     let total_carry = b.add(Operand::new(carry1_int), Operand::new(carry2_int), I64, o());
 
     let mid_shifted = b.shl(Operand::new(mid), Operand::new(c32), None, o());
@@ -1357,7 +1400,19 @@ fn leg_add128_core<M>(
     let (b_lo, b_hi) = wide_pair(s, old, b, op_b);
     let lo = b.add(Operand::new(a_lo), Operand::new(b_lo), I64, o());
     let carry = b.icmp(ICmpOp::Lt, Operand::new(lo), Operand::new(a_lo), o());
-    let carry_int = b.bool_to_int(Operand::new(carry), 64, o());
+    let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
+    let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
+    let carry_int = b.select(
+        Operand::new(carry),
+        one.into(),
+        zero.into(),
+        Type::Int,
+        Some(Annotation::Int(IntAnnotation {
+            bit_width: 64,
+            signedness: IntSignedness::Unsigned,
+        })),
+        o(),
+    );
     let hi_sum = b.add(Operand::new(a_hi), Operand::new(b_hi), I64, o());
     let hi = b.add(Operand::new(hi_sum), Operand::new(carry_int), I64, o());
     (lo, hi, a_hi, b_hi)
@@ -1376,22 +1431,59 @@ fn leg_uadd_with_overflow_128<M>(
 
     let lo = b.add(Operand::new(a_lo), Operand::new(b_lo), I64, o());
     let lo_carry = b.icmp(ICmpOp::Lt, Operand::new(lo), Operand::new(a_lo), o());
-    let lo_carry_int = b.bool_to_int(Operand::new(lo_carry), 64, o());
+    let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
+    let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
+    let lo_carry_int = b.select(
+        Operand::new(lo_carry),
+        one.into(),
+        zero.into(),
+        Type::Int,
+        Some(Annotation::Int(IntAnnotation {
+            bit_width: 64,
+            signedness: IntSignedness::Unsigned,
+        })),
+        o(),
+    );
 
     let hi_sum = b.add(Operand::new(a_hi), Operand::new(b_hi), I64, o());
     let hi_carry = b.icmp(ICmpOp::Lt, Operand::new(hi_sum), Operand::new(a_hi), o());
     let hi = b.add(Operand::new(hi_sum), Operand::new(lo_carry_int), I64, o());
     let hi_carry2 = b.icmp(ICmpOp::Lt, Operand::new(hi), Operand::new(hi_sum), o());
     // overflow = hi_carry OR hi_carry2
-    let hi_carry_int = b.bool_to_int(Operand::new(hi_carry), 64, o());
-    let hi_carry2_int = b.bool_to_int(Operand::new(hi_carry2), 64, o());
+    let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
+    let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
+    let hi_carry_int = b.select(
+        Operand::new(hi_carry),
+        one.into(),
+        zero.into(),
+        Type::Int,
+        Some(Annotation::Int(IntAnnotation {
+            bit_width: 64,
+            signedness: IntSignedness::Unsigned,
+        })),
+        o(),
+    );
+    let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
+    let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
+    let hi_carry2_int = b.select(
+        Operand::new(hi_carry2),
+        one.into(),
+        zero.into(),
+        Type::Int,
+        Some(Annotation::Int(IntAnnotation {
+            bit_width: 64,
+            signedness: IntSignedness::Unsigned,
+        })),
+        o(),
+    );
     let overflow_int = b.or(
         Operand::new(hi_carry_int),
         Operand::new(hi_carry2_int),
         I64,
         o(),
     );
-    let overflow = b.int_to_bool(Operand::new(overflow_int), o());
+    let zero_cmp = b.iconst(0, 64, IntSignedness::DontCare, o());
+    let overflow = b.icmp(ICmpOp::Ne, Operand::new(overflow_int), zero_cmp.into(), o());
 
     s.vmap.set(old_vref, Mapped::Pair(lo, hi));
     let old_sec = ValueRef::inst_secondary_result(old_vref.index());
@@ -1433,21 +1525,58 @@ fn leg_usub_with_overflow_128<M>(
 
     let lo = b.sub(Operand::new(a_lo), Operand::new(b_lo), I64, o());
     let lo_borrow = b.icmp(ICmpOp::Gt, Operand::new(lo), Operand::new(a_lo), o());
-    let lo_borrow_int = b.bool_to_int(Operand::new(lo_borrow), 64, o());
+    let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
+    let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
+    let lo_borrow_int = b.select(
+        Operand::new(lo_borrow),
+        one.into(),
+        zero.into(),
+        Type::Int,
+        Some(Annotation::Int(IntAnnotation {
+            bit_width: 64,
+            signedness: IntSignedness::Unsigned,
+        })),
+        o(),
+    );
 
     let hi_diff = b.sub(Operand::new(a_hi), Operand::new(b_hi), I64, o());
     let hi_borrow = b.icmp(ICmpOp::Gt, Operand::new(hi_diff), Operand::new(a_hi), o());
     let hi = b.sub(Operand::new(hi_diff), Operand::new(lo_borrow_int), I64, o());
     let hi_borrow2 = b.icmp(ICmpOp::Gt, Operand::new(hi), Operand::new(hi_diff), o());
-    let hi_borrow_int = b.bool_to_int(Operand::new(hi_borrow), 64, o());
-    let hi_borrow2_int = b.bool_to_int(Operand::new(hi_borrow2), 64, o());
+    let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
+    let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
+    let hi_borrow_int = b.select(
+        Operand::new(hi_borrow),
+        one.into(),
+        zero.into(),
+        Type::Int,
+        Some(Annotation::Int(IntAnnotation {
+            bit_width: 64,
+            signedness: IntSignedness::Unsigned,
+        })),
+        o(),
+    );
+    let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
+    let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
+    let hi_borrow2_int = b.select(
+        Operand::new(hi_borrow2),
+        one.into(),
+        zero.into(),
+        Type::Int,
+        Some(Annotation::Int(IntAnnotation {
+            bit_width: 64,
+            signedness: IntSignedness::Unsigned,
+        })),
+        o(),
+    );
     let overflow_int = b.or(
         Operand::new(hi_borrow_int),
         Operand::new(hi_borrow2_int),
         I64,
         o(),
     );
-    let overflow = b.int_to_bool(Operand::new(overflow_int), o());
+    let zero_cmp = b.iconst(0, 64, IntSignedness::DontCare, o());
+    let overflow = b.icmp(ICmpOp::Ne, Operand::new(overflow_int), zero_cmp.into(), o());
 
     s.vmap.set(old_vref, Mapped::Pair(lo, hi));
     let old_sec = ValueRef::inst_secondary_result(old_vref.index());
@@ -1468,7 +1597,19 @@ fn leg_ssub_with_overflow_128<M>(
     // Compute (lo, hi) of a - b
     let lo = b.sub(Operand::new(a_lo), Operand::new(b_lo), I64, o());
     let lo_borrow = b.icmp(ICmpOp::Gt, Operand::new(lo), Operand::new(a_lo), o());
-    let lo_borrow_int = b.bool_to_int(Operand::new(lo_borrow), 64, o());
+    let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
+    let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
+    let lo_borrow_int = b.select(
+        Operand::new(lo_borrow),
+        one.into(),
+        zero.into(),
+        Type::Int,
+        Some(Annotation::Int(IntAnnotation {
+            bit_width: 64,
+            signedness: IntSignedness::Unsigned,
+        })),
+        o(),
+    );
     let hi_diff = b.sub(Operand::new(a_hi), Operand::new(b_hi), I64, o());
     let hi = b.sub(Operand::new(hi_diff), Operand::new(lo_borrow_int), I64, o());
 
@@ -1700,18 +1841,68 @@ fn leg_icmp<M>(
         ICmpOp::Eq => {
             let hi_eq = b.icmp(ICmpOp::Eq, Operand::new(a_hi), Operand::new(b_hi), o());
             let lo_eq = b.icmp(ICmpOp::Eq, Operand::new(a_lo), Operand::new(b_lo), o());
-            let hi_int = b.bool_to_int(Operand::new(hi_eq), 64, o());
-            let lo_int = b.bool_to_int(Operand::new(lo_eq), 64, o());
+            let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
+            let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
+            let hi_int = b.select(
+                Operand::new(hi_eq),
+                one.into(),
+                zero.into(),
+                Type::Int,
+                Some(Annotation::Int(IntAnnotation {
+                    bit_width: 64,
+                    signedness: IntSignedness::Unsigned,
+                })),
+                o(),
+            );
+            let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
+            let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
+            let lo_int = b.select(
+                Operand::new(lo_eq),
+                one.into(),
+                zero.into(),
+                Type::Int,
+                Some(Annotation::Int(IntAnnotation {
+                    bit_width: 64,
+                    signedness: IntSignedness::Unsigned,
+                })),
+                o(),
+            );
             let both = b.and(Operand::new(hi_int), Operand::new(lo_int), I64, o());
-            b.int_to_bool(Operand::new(both), o())
+            let zero = b.iconst(0, 64, IntSignedness::DontCare, o());
+            b.icmp(ICmpOp::Ne, Operand::new(both), zero.into(), o())
         }
         ICmpOp::Ne => {
             let hi_ne = b.icmp(ICmpOp::Ne, Operand::new(a_hi), Operand::new(b_hi), o());
             let lo_ne = b.icmp(ICmpOp::Ne, Operand::new(a_lo), Operand::new(b_lo), o());
-            let hi_int = b.bool_to_int(Operand::new(hi_ne), 64, o());
-            let lo_int = b.bool_to_int(Operand::new(lo_ne), 64, o());
+            let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
+            let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
+            let hi_int = b.select(
+                Operand::new(hi_ne),
+                one.into(),
+                zero.into(),
+                Type::Int,
+                Some(Annotation::Int(IntAnnotation {
+                    bit_width: 64,
+                    signedness: IntSignedness::Unsigned,
+                })),
+                o(),
+            );
+            let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
+            let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
+            let lo_int = b.select(
+                Operand::new(lo_ne),
+                one.into(),
+                zero.into(),
+                Type::Int,
+                Some(Annotation::Int(IntAnnotation {
+                    bit_width: 64,
+                    signedness: IntSignedness::Unsigned,
+                })),
+                o(),
+            );
             let either = b.or(Operand::new(hi_int), Operand::new(lo_int), I64, o());
-            b.int_to_bool(Operand::new(either), o())
+            let zero = b.iconst(0, 64, IntSignedness::DontCare, o());
+            b.icmp(ICmpOp::Ne, Operand::new(either), zero.into(), o())
         }
         ICmpOp::Lt | ICmpOp::Le | ICmpOp::Gt | ICmpOp::Ge => {
             let hi_cmp = b.icmp(cmp_op, Operand::new(a_hi), Operand::new(b_hi), o());
@@ -1969,17 +2160,6 @@ fn leg_select_128<M>(
         Some(Annotation::Int(I64)),
         o(),
     );
-    s.vmap.set(old_vref, Mapped::Pair(lo, hi));
-}
-
-// ---------------------------------------------------------------------------
-// 128-bit bool_to_int: lo = bool_to_int(val), hi = 0
-// ---------------------------------------------------------------------------
-
-fn leg_bool_to_int_128<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, val: &Operand) {
-    let v = s.vmap.one(val.value);
-    let lo = b.bool_to_int(Operand::new(v), 64, o());
-    let hi = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
     s.vmap.set(old_vref, Mapped::Pair(lo, hi));
 }
 

@@ -173,7 +173,18 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             (Some(Type::Int), _) => self.coerce_to_int(v),
                             (Some(Type::Ptr(_)), _) => self.coerce_to_ptr(v),
                             (Some(Type::Bool), Some(Type::Int)) => {
-                                self.builder.int_to_bool(v.into(), Origin::synthetic())
+                                let zero = self.builder.iconst(
+                                    0,
+                                    64,
+                                    IntSignedness::DontCare,
+                                    Origin::synthetic(),
+                                );
+                                self.builder.icmp(
+                                    ICmpOp::Ne,
+                                    v.into(),
+                                    zero.into(),
+                                    Origin::synthetic(),
+                                )
                             }
                             (Some(Type::Float(ft)), Some(Type::Int)) => {
                                 // Float value was carried as Int bits — reinterpret.
@@ -540,9 +551,23 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     .ptrtoaddr(discr_val.into(), 64, Origin::synthetic());
             }
         } else if matches!(self.builder.value_type(discr_val), Some(Type::Bool)) {
-            discr_val = self
+            let one = self
                 .builder
-                .bool_to_int(discr_val.into(), 64, Origin::synthetic());
+                .iconst(1, 64, IntSignedness::Unsigned, Origin::synthetic());
+            let zero = self
+                .builder
+                .iconst(0, 64, IntSignedness::Unsigned, Origin::synthetic());
+            discr_val = self.builder.select(
+                discr_val.into(),
+                one.into(),
+                zero.into(),
+                Type::Int,
+                Some(Annotation::Int(IntAnnotation {
+                    bit_width: 64,
+                    signedness: IntSignedness::Unsigned,
+                })),
+                Origin::synthetic(),
+            );
         }
 
         // Mask the discriminant to its type's bit width so that a sign-extended

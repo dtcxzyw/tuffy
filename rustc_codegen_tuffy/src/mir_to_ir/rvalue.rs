@@ -1288,38 +1288,28 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     }
                     BinOp::Eq => {
                         if is_float_cmp {
-                            let cmp = self.builder.fcmp(
+                            self.builder.fcmp(
                                 FCmpOp::OEq,
                                 l_raw.into(),
                                 r_raw.into(),
                                 Origin::synthetic(),
-                            );
-                            self.builder
-                                .bool_to_int(cmp.into(), 64, Origin::synthetic())
+                            )
                         } else {
-                            let cmp =
-                                self.builder
-                                    .icmp(ICmpOp::Eq, l_op, r_op, Origin::synthetic());
                             self.builder
-                                .bool_to_int(cmp.into(), 64, Origin::synthetic())
+                                .icmp(ICmpOp::Eq, l_op, r_op, Origin::synthetic())
                         }
                     }
                     BinOp::Ne => {
                         if is_float_cmp {
-                            let cmp = self.builder.fcmp(
+                            self.builder.fcmp(
                                 FCmpOp::UNe,
                                 l_raw.into(),
                                 r_raw.into(),
                                 Origin::synthetic(),
-                            );
-                            self.builder
-                                .bool_to_int(cmp.into(), 64, Origin::synthetic())
+                            )
                         } else {
-                            let cmp =
-                                self.builder
-                                    .icmp(ICmpOp::Ne, l_op, r_op, Origin::synthetic());
                             self.builder
-                                .bool_to_int(cmp.into(), 64, Origin::synthetic())
+                                .icmp(ICmpOp::Ne, l_op, r_op, Origin::synthetic())
                         }
                     }
                     BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
@@ -1330,14 +1320,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 BinOp::Gt => FCmpOp::OGt,
                                 _ => FCmpOp::OGe,
                             };
-                            let cmp = self.builder.fcmp(
+                            self.builder.fcmp(
                                 fcmp_op,
                                 l_raw.into(),
                                 r_raw.into(),
                                 Origin::synthetic(),
-                            );
-                            self.builder
-                                .bool_to_int(cmp.into(), 64, Origin::synthetic())
+                            )
                         } else {
                             let icmp_op = match op {
                                 BinOp::Lt => ICmpOp::Lt,
@@ -1345,9 +1333,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 BinOp::Gt => ICmpOp::Gt,
                                 _ => ICmpOp::Ge,
                             };
-                            let cmp = self.builder.icmp(icmp_op, l_op, r_op, Origin::synthetic());
-                            self.builder
-                                .bool_to_int(cmp.into(), 64, Origin::synthetic())
+                            self.builder.icmp(icmp_op, l_op, r_op, Origin::synthetic())
                         }
                     }
                     BinOp::Cmp => {
@@ -1370,22 +1356,52 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 r_f.into(),
                                 Origin::synthetic(),
                             );
-                            let lt_int =
-                                self.builder.bool_to_int(lt.into(), 64, Origin::synthetic());
+                            let one = self.builder.iconst(
+                                1,
+                                8,
+                                IntSignedness::Signed,
+                                Origin::synthetic(),
+                            );
+                            let zero = self.builder.iconst(
+                                0,
+                                8,
+                                IntSignedness::Signed,
+                                Origin::synthetic(),
+                            );
+                            let lt_int = self.builder.select(
+                                lt.into(),
+                                one.into(),
+                                zero.into(),
+                                Type::Int,
+                                Some(Annotation::Int(IntAnnotation {
+                                    bit_width: 8,
+                                    signedness: IntSignedness::Signed,
+                                })),
+                                Origin::synthetic(),
+                            );
                             let gt = self.builder.fcmp(
                                 FCmpOp::OGt,
                                 l_f.into(),
                                 r_f.into(),
                                 Origin::synthetic(),
                             );
-                            let gt_int =
-                                self.builder.bool_to_int(gt.into(), 64, Origin::synthetic());
+                            let gt_int = self.builder.select(
+                                gt.into(),
+                                one.into(),
+                                zero.into(),
+                                Type::Int,
+                                Some(Annotation::Int(IntAnnotation {
+                                    bit_width: 8,
+                                    signedness: IntSignedness::Signed,
+                                })),
+                                Origin::synthetic(),
+                            );
                             self.builder.sub(
                                 gt_int.into(),
                                 lt_int.into(),
                                 IntAnnotation {
-                                    bit_width: 64,
-                                    signedness: IntSignedness::DontCare,
+                                    bit_width: 8,
+                                    signedness: IntSignedness::Signed,
                                 },
                                 Origin::synthetic(),
                             )
@@ -1396,19 +1412,49 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 r_op.clone(),
                                 Origin::synthetic(),
                             );
-                            let lt_int =
-                                self.builder.bool_to_int(lt.into(), 64, Origin::synthetic());
+                            let one = self.builder.iconst(
+                                1,
+                                8,
+                                IntSignedness::Signed,
+                                Origin::synthetic(),
+                            );
+                            let zero = self.builder.iconst(
+                                0,
+                                8,
+                                IntSignedness::Signed,
+                                Origin::synthetic(),
+                            );
+                            let lt_int = self.builder.select(
+                                lt.into(),
+                                one.into(),
+                                zero.into(),
+                                Type::Int,
+                                Some(Annotation::Int(IntAnnotation {
+                                    bit_width: 8,
+                                    signedness: IntSignedness::Signed,
+                                })),
+                                Origin::synthetic(),
+                            );
                             let gt = self
                                 .builder
                                 .icmp(ICmpOp::Gt, l_op, r_op, Origin::synthetic());
-                            let gt_int =
-                                self.builder.bool_to_int(gt.into(), 64, Origin::synthetic());
+                            let gt_int = self.builder.select(
+                                gt.into(),
+                                one.into(),
+                                zero.into(),
+                                Type::Int,
+                                Some(Annotation::Int(IntAnnotation {
+                                    bit_width: 8,
+                                    signedness: IntSignedness::Signed,
+                                })),
+                                Origin::synthetic(),
+                            );
                             self.builder.sub(
                                 gt_int.into(),
                                 lt_int.into(),
                                 IntAnnotation {
-                                    bit_width: 64,
-                                    signedness: IntSignedness::DontCare,
+                                    bit_width: 8,
+                                    signedness: IntSignedness::Signed,
                                 },
                                 Origin::synthetic(),
                             )
@@ -2002,9 +2048,18 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     },
                                     Origin::synthetic(),
                                 );
-                                let is_neg = self
-                                    .builder
-                                    .int_to_bool(sign_masked.into(), Origin::synthetic());
+                                let zero_cmp = self.builder.iconst(
+                                    0,
+                                    64,
+                                    IntSignedness::DontCare,
+                                    Origin::synthetic(),
+                                );
+                                let is_neg = self.builder.icmp(
+                                    ICmpOp::Ne,
+                                    sign_masked.into(),
+                                    zero_cmp.into(),
+                                    Origin::synthetic(),
+                                );
                                 let tentative = self.builder.select(
                                     is_neg.into(),
                                     zero.into(),
@@ -2849,20 +2904,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 };
                 let result = match self.builder.value_type(v) {
                     Some(Type::Bool) => {
-                        let int_v = self.builder.bool_to_int(v.into(), 64, Origin::synthetic());
-                        let one = self.builder.iconst(
-                            1,
-                            64,
-                            IntSignedness::DontCare,
-                            Origin::synthetic(),
-                        );
-                        self.builder.xor(
-                            int_v.into(),
-                            one.into(),
-                            IntAnnotation {
-                                bit_width: 64,
-                                signedness: IntSignedness::DontCare,
-                            },
+                        let false_val = self.builder.bconst(false, Origin::synthetic());
+                        self.builder.icmp(
+                            ICmpOp::Eq,
+                            v.into(),
+                            false_val.into(),
                             Origin::synthetic(),
                         )
                     }

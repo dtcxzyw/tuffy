@@ -43,24 +43,26 @@
 // CHECK:     v7: int:u32 = zext v6, 32
 // CHECK:     v8: int:i64 = iconst 0
 // CHECK:     v9: bool = icmp.eq v7, v8:u32
-// CHECK:     v10: int:u64 = bool_to_int v9
-// CHECK:     v11: int:i64 = iconst 0
-// CHECK:     v12: bool = icmp.eq v10, v11
-// CHECK:     brif v12, bb1(v0), bb3(v0)
+// CHECK:     v10: int:u64 = iconst 1
+// CHECK:     v11: int:u64 = iconst 0
+// CHECK:     v12: int:u64 = select v9, v10, v11
+// CHECK:     v13: int:i64 = iconst 0
+// CHECK:     v14: bool = icmp.eq v12, v13
+// CHECK:     brif v14, bb1(v0), bb3(v0)
 // CHECK:
-// CHECK:   bb1(v14: mem):
-// CHECK:     v15: int:i64 = rem v2, v7
-// CHECK:     v16: int:i64 = iconst 32
-// CHECK:     v17: int:u64 = sub v16, v15
-// CHECK:     v18: int:u32 = shl v1, v15
-// CHECK:     v19: int:u32 = shr v1, v17
-// CHECK:     v20: int:u64 = or v18, v19
-// CHECK:     br bb2(v14)
+// CHECK:   bb1(v16: mem):
+// CHECK:     v17: int:i64 = rem v2, v7
+// CHECK:     v18: int:i64 = iconst 32
+// CHECK:     v19: int:u64 = sub v18, v17
+// CHECK:     v20: int:u32 = shl v1, v17
+// CHECK:     v21: int:u32 = shr v1, v19
+// CHECK:     v22: int:u64 = or v20, v21
+// CHECK:     br bb2(v16)
 // CHECK:
-// CHECK:   bb2(v22: mem):
-// CHECK:     ret v20, v22
+// CHECK:   bb2(v24: mem):
+// CHECK:     ret v22, v24
 // CHECK:
-// CHECK:   bb3(v24: mem):
+// CHECK:   bb3(v26: mem):
 // CHECK:     trap
 // CHECK: }
 // CHECK:
@@ -108,24 +110,26 @@
 // CHECK:     v7: int:u32 = zext v6, 32
 // CHECK:     v8: int:i64 = iconst 0
 // CHECK:     v9: bool = icmp.eq v7, v8:u32
-// CHECK:     v10: int:u64 = bool_to_int v9
-// CHECK:     v11: int:i64 = iconst 0
-// CHECK:     v12: bool = icmp.eq v10, v11
-// CHECK:     brif v12, bb1(v0), bb3(v0)
+// CHECK:     v10: int:u64 = iconst 1
+// CHECK:     v11: int:u64 = iconst 0
+// CHECK:     v12: int:u64 = select v9, v10, v11
+// CHECK:     v13: int:i64 = iconst 0
+// CHECK:     v14: bool = icmp.eq v12, v13
+// CHECK:     brif v14, bb1(v0), bb3(v0)
 // CHECK:
-// CHECK:   bb1(v14: mem):
-// CHECK:     v15: int:i64 = rem v2, v7
-// CHECK:     v16: int:i64 = iconst 32
-// CHECK:     v17: int:u64 = sub v16, v15
-// CHECK:     v18: int:u32 = shl v1, v17
-// CHECK:     v19: int:u32 = shr v1, v15
-// CHECK:     v20: int:u64 = or v18, v19
-// CHECK:     br bb2(v14)
+// CHECK:   bb1(v16: mem):
+// CHECK:     v17: int:i64 = rem v2, v7
+// CHECK:     v18: int:i64 = iconst 32
+// CHECK:     v19: int:u64 = sub v18, v17
+// CHECK:     v20: int:u32 = shl v1, v19
+// CHECK:     v21: int:u32 = shr v1, v17
+// CHECK:     v22: int:u64 = or v20, v21
+// CHECK:     br bb2(v16)
 // CHECK:
-// CHECK:   bb2(v22: mem):
-// CHECK:     ret v20, v22
+// CHECK:   bb2(v24: mem):
+// CHECK:     ret v22, v24
 // CHECK:
-// CHECK:   bb3(v24: mem):
+// CHECK:   bb3(v26: mem):
 // CHECK:     trap
 // CHECK: }
 // CHECK:
@@ -235,10 +239,9 @@
 // CHECK:     v4: int:u32 = zext v3, 32
 // CHECK:     v5: int:i64 = iconst 0
 // CHECK:     v6: bool = icmp.eq v4, v5:u32
-// CHECK:     v7: int:u64 = bool_to_int v6
-// CHECK:     v8: int:i32 = or v1, v2
-// CHECK:     v9: int:u32 = zext v8, 32
-// CHECK:     ret v9, v0
+// CHECK:     v7: int:i32 = or v1, v2
+// CHECK:     v8: int:u32 = zext v7, 32
+// CHECK:     ret v8, v0
 // CHECK: }
 // CHECK:
 // CHECK: fn <u32 as core::intrinsics::fallback::FunnelShift>::unchecked_funnel_shl(_1: u32, _2: u32, _3: u32) -> u32 {
@@ -293,35 +296,34 @@
 // CHECK:     v4: ptr = stack_slot 4
 // CHECK:     v5: int:i64 = iconst 32
 // CHECK:     v6: bool = icmp.lt v3, v5:u32
-// CHECK:     v7: int:u64 = bool_to_int v6
-// CHECK:     v8: int:i64 = iconst 4294967295
-// CHECK:     v9: int:u64 = and v3, v8
-// CHECK:     v10: int:i64 = iconst 0
-// CHECK:     v11: bool = icmp.eq v9, v10
-// CHECK:     brif v11, bb1(v0), bb2(v0)
+// CHECK:     v7: int:i64 = iconst 4294967295
+// CHECK:     v8: int:u64 = and v3, v7
+// CHECK:     v9: int:i64 = iconst 0
+// CHECK:     v10: bool = icmp.eq v8, v9
+// CHECK:     brif v10, bb1(v0), bb2(v0)
 // CHECK:
-// CHECK:   bb1(v13: mem):
-// CHECK:     v14: mem = store.4 v1, v4, v13
-// CHECK:     br bb4(v14)
+// CHECK:   bb1(v12: mem):
+// CHECK:     v13: mem = store.4 v1, v4, v12
+// CHECK:     br bb4(v13)
 // CHECK:
-// CHECK:   bb2(v16: mem):
-// CHECK:     v17: int:i64 = iconst 31
-// CHECK:     v18: int:i64 = and v3, v17
-// CHECK:     v19: int:u32 = shl v1, v18
-// CHECK:     v20: int:i64 = iconst 32
-// CHECK:     v21: int:i32 = sub v20:u32, v3
-// CHECK:     v22: int:u32 = zext v21, 32
-// CHECK:     v23: int:i64 = iconst 31
-// CHECK:     v24: int:i64 = and v22, v23
-// CHECK:     v25: int:u32 = shr v2, v24
-// CHECK:     br bb3(v16)
+// CHECK:   bb2(v15: mem):
+// CHECK:     v16: int:i64 = iconst 31
+// CHECK:     v17: int:i64 = and v3, v16
+// CHECK:     v18: int:u32 = shl v1, v17
+// CHECK:     v19: int:i64 = iconst 32
+// CHECK:     v20: int:i32 = sub v19:u32, v3
+// CHECK:     v21: int:u32 = zext v20, 32
+// CHECK:     v22: int:i64 = iconst 31
+// CHECK:     v23: int:i64 = and v21, v22
+// CHECK:     v24: int:u32 = shr v2, v23
+// CHECK:     br bb3(v15)
 // CHECK:
-// CHECK:   bb3(v27: mem):
-// CHECK:     br bb4(v27)
+// CHECK:   bb3(v26: mem):
+// CHECK:     br bb4(v26)
 // CHECK:
-// CHECK:   bb4(v29: mem):
-// CHECK:     v30: int:u32 = load.4 v4, v29
-// CHECK:     ret v30, v29
+// CHECK:   bb4(v28: mem):
+// CHECK:     v29: int:u32 = load.4 v4, v28
+// CHECK:     ret v29, v28
 // CHECK: }
 // CHECK:
 // CHECK: fn <u32 as core::intrinsics::fallback::FunnelShift>::unchecked_funnel_shr(_1: u32, _2: u32, _3: u32) -> u32 {
@@ -376,35 +378,34 @@
 // CHECK:     v4: ptr = stack_slot 4
 // CHECK:     v5: int:i64 = iconst 32
 // CHECK:     v6: bool = icmp.lt v3, v5:u32
-// CHECK:     v7: int:u64 = bool_to_int v6
-// CHECK:     v8: int:i64 = iconst 4294967295
-// CHECK:     v9: int:u64 = and v3, v8
-// CHECK:     v10: int:i64 = iconst 0
-// CHECK:     v11: bool = icmp.eq v9, v10
-// CHECK:     brif v11, bb1(v0), bb2(v0)
+// CHECK:     v7: int:i64 = iconst 4294967295
+// CHECK:     v8: int:u64 = and v3, v7
+// CHECK:     v9: int:i64 = iconst 0
+// CHECK:     v10: bool = icmp.eq v8, v9
+// CHECK:     brif v10, bb1(v0), bb2(v0)
 // CHECK:
-// CHECK:   bb1(v13: mem):
-// CHECK:     v14: mem = store.4 v2, v4, v13
-// CHECK:     br bb4(v14)
+// CHECK:   bb1(v12: mem):
+// CHECK:     v13: mem = store.4 v2, v4, v12
+// CHECK:     br bb4(v13)
 // CHECK:
-// CHECK:   bb2(v16: mem):
-// CHECK:     v17: int:i64 = iconst 32
-// CHECK:     v18: int:i32 = sub v17:u32, v3
-// CHECK:     v19: int:u32 = zext v18, 32
-// CHECK:     v20: int:i64 = iconst 31
-// CHECK:     v21: int:i64 = and v19, v20
-// CHECK:     v22: int:u32 = shl v1, v21
-// CHECK:     v23: int:i64 = iconst 31
-// CHECK:     v24: int:i64 = and v3, v23
-// CHECK:     v25: int:u32 = shr v2, v24
-// CHECK:     br bb3(v16)
+// CHECK:   bb2(v15: mem):
+// CHECK:     v16: int:i64 = iconst 32
+// CHECK:     v17: int:i32 = sub v16:u32, v3
+// CHECK:     v18: int:u32 = zext v17, 32
+// CHECK:     v19: int:i64 = iconst 31
+// CHECK:     v20: int:i64 = and v18, v19
+// CHECK:     v21: int:u32 = shl v1, v20
+// CHECK:     v22: int:i64 = iconst 31
+// CHECK:     v23: int:i64 = and v3, v22
+// CHECK:     v24: int:u32 = shr v2, v23
+// CHECK:     br bb3(v15)
 // CHECK:
-// CHECK:   bb3(v27: mem):
-// CHECK:     br bb4(v27)
+// CHECK:   bb3(v26: mem):
+// CHECK:     br bb4(v26)
 // CHECK:
-// CHECK:   bb4(v29: mem):
-// CHECK:     v30: int:u32 = load.4 v4, v29
-// CHECK:     ret v30, v29
+// CHECK:   bb4(v28: mem):
+// CHECK:     v29: int:u32 = load.4 v4, v28
+// CHECK:     ret v29, v28
 // CHECK: }
 // CHECK:
 // CHECK: fn rotate_left_u32(_1: u32, _2: u32) -> u32 {

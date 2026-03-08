@@ -449,12 +449,6 @@ fn fmt_inst(
                 ctx.fmt_operand(fv)
             )
         }
-        Op::BoolToInt(val) => {
-            format!("{v} = bool_to_int {}", ctx.fmt_operand(val))
-        }
-        Op::IntToBool(val) => {
-            format!("{v} = int_to_bool {}", ctx.fmt_operand(val))
-        }
         Op::Load(ptr, bytes, mem) => {
             format!(
                 "{v} = load.{bytes} {}, {}",

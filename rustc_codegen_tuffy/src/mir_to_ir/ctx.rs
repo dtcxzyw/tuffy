@@ -6,7 +6,7 @@ use tuffy_codegen::AbiMetadataBox;
 use tuffy_ir::builder::Builder;
 use tuffy_ir::instruction::{Operand, Origin};
 use tuffy_ir::module::{SymbolId, SymbolTable};
-use tuffy_ir::types::{Annotation, IntSignedness, Type};
+use tuffy_ir::types::{Annotation, IntAnnotation, IntSignedness, Type};
 use tuffy_ir::value::{BlockRef, ValueRef};
 
 use super::StaticDataVec;
@@ -230,9 +230,25 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     pub(super) fn coerce_to_int(&mut self, val: ValueRef) -> ValueRef {
         match self.builder.value_type(val) {
             Some(Type::Ptr(_)) => self.builder.ptrtoaddr(val.into(), 64, Origin::synthetic()),
-            Some(Type::Bool) => self
-                .builder
-                .bool_to_int(val.into(), 64, Origin::synthetic()),
+            Some(Type::Bool) => {
+                let one = self
+                    .builder
+                    .iconst(1, 64, IntSignedness::Unsigned, Origin::synthetic());
+                let zero = self
+                    .builder
+                    .iconst(0, 64, IntSignedness::Unsigned, Origin::synthetic());
+                self.builder.select(
+                    val.into(),
+                    one.into(),
+                    zero.into(),
+                    Type::Int,
+                    Some(Annotation::Int(IntAnnotation {
+                        bit_width: 64,
+                        signedness: IntSignedness::Unsigned,
+                    })),
+                    Origin::synthetic(),
+                )
+            }
             _ => val,
         }
     }

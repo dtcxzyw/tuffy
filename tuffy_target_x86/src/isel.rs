@@ -1339,45 +1339,6 @@ fn select_inst(
             select_select(ctx, vref, cond, tv, fv)?;
         }
 
-        Op::BoolToInt(val) => {
-            // If the ICmp result was already materialized into a register (e.g. by
-            // gen_icmp's immediate-SetCC+MovzxB), use it directly — no need to
-            // re-emit SetCC from stale flags.  This also avoids the spill-corruption
-            // bug that occurs when `SetCC { dst }` + `MovzxB { dst, src: dst }` share
-            // the same VReg and the allocator spills `dst` between the two.
-            if let Some(src) = ctx.regs.get(val.value) {
-                ctx.regs.assign(vref, src);
-            } else if let Some(cc) = ctx.cmps.get(val.value) {
-                // Fresh materialization with separate VRegs (same spill-safety fix).
-                let tmp_cc = ctx.alloc.alloc();
-                let dst = ctx.alloc.alloc();
-                ctx.out.push(MInst::SetCC { cc, dst: tmp_cc });
-                ctx.out.push(MInst::MovzxB { dst, src: tmp_cc });
-                ctx.regs.assign(vref, dst);
-            }
-        }
-
-        Op::IntToBool(val) => {
-            // Int to Bool: test the integer and store the condition code.
-            // If the value is already in a register, TEST it against itself;
-            // downstream BrIf/Select will consume the condition code directly.
-            let src = ctx.ensure_in_reg(val.value)?;
-            ctx.out.push(MInst::TestRR {
-                size: OpSize::S64,
-                src1: src,
-                src2: src,
-            });
-            ctx.cmps.set(vref, CondCode::Ne);
-            // Also materialize into a register for non-flag consumers.
-            let dst = ctx.alloc.alloc();
-            ctx.out.push(MInst::SetCC {
-                cc: CondCode::Ne,
-                dst,
-            });
-            ctx.out.push(MInst::MovzxB { dst, src: dst });
-            ctx.regs.assign(vref, dst);
-        }
-
         Op::Bitcast(val) | Op::PtrToInt(val) | Op::PtrToAddr(val) | Op::IntToPtr(val) => {
             let src = ctx.ensure_in_reg(val.value)?;
             ctx.regs.assign(vref, src);
