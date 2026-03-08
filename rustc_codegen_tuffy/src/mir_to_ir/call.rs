@@ -270,13 +270,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // need it (e.g. size_of_val on unsized types).
                     if let Operand::Copy(place) | Operand::Move(place) = &arg.node
                         && place.projection.is_empty()
-                            && let Some(fat_v) = self.fat_locals.get(place.local) {
-                                let local_ty =
-                                    self.monomorphize(self.mir.local_decls[place.local].ty);
-                                if is_fat_ptr(self.tcx, local_ty) {
-                                    intrinsic_args.push(fat_v);
-                                }
-                            }
+                        && let Some(fat_v) = self.fat_locals.get(place.local)
+                    {
+                        let local_ty = self.monomorphize(self.mir.local_decls[place.local].ty);
+                        if is_fat_ptr(self.tcx, local_ty) {
+                            intrinsic_args.push(fat_v);
+                        }
+                    }
                 }
             }
 
@@ -358,16 +358,17 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let intrinsic_changed_local = intrinsic_result != saved_local_for_proj;
                     if intrinsic_changed_local
                         && let Some(result) = intrinsic_result
-                            && let Some(addr) = proj_addr
-                                && proj_size > 0 {
-                                    self.current_mem = self.builder.store(
-                                        result.into(),
-                                        addr.into(),
-                                        proj_size,
-                                        self.current_mem.into(),
-                                        Origin::synthetic(),
-                                    );
-                                }
+                        && let Some(addr) = proj_addr
+                        && proj_size > 0
+                    {
+                        self.current_mem = self.builder.store(
+                            result.into(),
+                            addr.into(),
+                            proj_size,
+                            self.current_mem.into(),
+                            Origin::synthetic(),
+                        );
+                    }
                 } else {
                     // If the destination is a stack local, the intrinsic set the
                     // local to the raw result value.  Store it into the stack slot
@@ -393,8 +394,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 let src_addr = if offset == 0 {
                                     result_val
                                 } else {
-                                    let off =
-                                        self.builder.iconst(offset as i64, 64, IntSignedness::DontCare, Origin::synthetic());
+                                    let off = self.builder.iconst(
+                                        offset as i64,
+                                        64,
+                                        IntSignedness::DontCare,
+                                        Origin::synthetic(),
+                                    );
                                     self.builder.ptradd(
                                         result_val.into(),
                                         off.into(),
@@ -413,8 +418,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 let dst_addr = if offset == 0 {
                                     slot
                                 } else {
-                                    let off =
-                                        self.builder.iconst(offset as i64, 64, IntSignedness::DontCare, Origin::synthetic());
+                                    let off = self.builder.iconst(
+                                        offset as i64,
+                                        64,
+                                        IntSignedness::DontCare,
+                                        Origin::synthetic(),
+                                    );
                                     self.builder.ptradd(
                                         slot.into(),
                                         off.into(),
@@ -567,7 +576,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         // The fat pointer lives in a stack slot.  The vtable
                         // pointer is the second word (offset 8).
                         if let Some(base) = self.locals.get(place.local) {
-                            let off8 = self.builder.iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
+                            let off8 = self.builder.iconst(
+                                8,
+                                64,
+                                IntSignedness::DontCare,
+                                Origin::synthetic(),
+                            );
                             let vtable_addr = self.builder.ptradd(
                                 base.into(),
                                 off8.into(),
@@ -592,7 +606,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         // vtable from offset 8.
                         if let Some((addr, _)) = self.translate_place_to_addr(place) {
                             let addr = self.coerce_to_ptr(addr);
-                            let off8 = self.builder.iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
+                            let off8 = self.builder.iconst(
+                                8,
+                                64,
+                                IntSignedness::DontCare,
+                                Origin::synthetic(),
+                            );
                             let vtable_addr = self.builder.ptradd(
                                 addr.into(),
                                 off8.into(),
@@ -622,7 +641,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // rustc's InstanceKind::Virtual idx already includes the 3
                 // metadata entries, so the byte offset is simply idx * 8.
                 let offset = idx * 8;
-                let off_val = self.builder.iconst(offset as i64, 64, IntSignedness::DontCare, Origin::synthetic());
+                let off_val = self.builder.iconst(
+                    offset as i64,
+                    64,
+                    IntSignedness::DontCare,
+                    Origin::synthetic(),
+                );
                 let fn_addr =
                     self.builder
                         .ptradd(vtable.into(), off_val.into(), 0, Origin::synthetic());
@@ -789,7 +813,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let addr = if offset == 0 {
                             base
                         } else {
-                            let off = self.builder.iconst(offset as i64, 64, IntSignedness::DontCare, Origin::synthetic());
+                            let off = self.builder.iconst(
+                                offset as i64,
+                                64,
+                                IntSignedness::DontCare,
+                                Origin::synthetic(),
+                            );
                             self.builder
                                 .ptradd(base.into(), off.into(), 0, Origin::synthetic())
                         };
@@ -815,7 +844,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 Origin::synthetic(),
                             );
                             ir_args.push(w0.into());
-                            let off8 = self.builder.iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
+                            let off8 = self.builder.iconst(
+                                8,
+                                64,
+                                IntSignedness::DontCare,
+                                Origin::synthetic(),
+                            );
                             let a1 = self.builder.ptradd(
                                 addr.into(),
                                 off8.into(),
@@ -850,16 +884,17 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     && matches!(arg_ty.kind(), ty::Tuple(_) | ty::Adt(..) | ty::Array(..))
                     && arg_size > 0
                     && arg_size <= 8
-                    && matches!(self.builder.value_type(v), Some(Type::Ptr(_))) {
-                        v = self.builder.load(
-                            v.into(),
-                            arg_size as u32,
-                            default_int_type(),
-                            self.current_mem.into(),
-                            None,
-                            Origin::synthetic(),
-                        );
-                    }
+                    && matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
+                {
+                    v = self.builder.load(
+                        v.into(),
+                        arg_size as u32,
+                        default_int_type(),
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
+                    );
+                }
 
                 // Decompose 9-16 byte struct arguments into two register-
                 // sized words for the SysV ABI.  Stack-allocated structs
@@ -893,7 +928,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         Origin::synthetic(),
                     );
                     ir_args.push(w0.into());
-                    let off8 = self.builder.iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
+                    let off8 =
+                        self.builder
+                            .iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
                     let hi_addr =
                         self.builder
                             .ptradd(v.into(), off8.into(), 0, Origin::synthetic());
@@ -933,7 +970,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 Origin::synthetic(),
                             );
                             ir_args.push(w0.into());
-                            let off8 = self.builder.iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
+                            let off8 = self.builder.iconst(
+                                8,
+                                64,
+                                IntSignedness::DontCare,
+                                Origin::synthetic(),
+                            );
                             let hi_addr =
                                 self.builder
                                     .ptradd(v.into(), off8.into(), 0, Origin::synthetic());
@@ -947,12 +989,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             );
                             ir_args.push(w1.into());
                         } else {
-                            let ann = translate_annotation(arg_ty).unwrap_or(
-                                Annotation::Int(IntAnnotation {
+                            let ann = translate_annotation(arg_ty).unwrap_or(Annotation::Int(
+                                IntAnnotation {
                                     bit_width: 128,
                                     signedness: IntSignedness::Unsigned,
-                                })
-                            );
+                                },
+                            ));
                             ir_args.push(IrOperand::annotated(v, ann));
                         }
                     } else if arg_size == 16
@@ -971,7 +1013,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             Origin::synthetic(),
                         );
                         ir_args.push(w0.into());
-                        let off8 = self.builder.iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
+                        let off8 = self.builder.iconst(
+                            8,
+                            64,
+                            IntSignedness::DontCare,
+                            Origin::synthetic(),
+                        );
                         let hi_addr =
                             self.builder
                                 .ptradd(v.into(), off8.into(), 0, Origin::synthetic());
@@ -994,7 +1041,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             let tmp = self
                                 .builder
                                 .stack_slot(arg_size as u32, Origin::synthetic());
-                            let count = self.builder.iconst(arg_size as i64, 64, IntSignedness::DontCare, Origin::synthetic());
+                            let count = self.builder.iconst(
+                                arg_size as i64,
+                                64,
+                                IntSignedness::DontCare,
+                                Origin::synthetic(),
+                            );
                             let tmp_annotated = IrOperand::annotated(tmp, Annotation::Align(align));
                             let v_annotated = IrOperand::annotated(v, Annotation::Align(align));
                             let new_mem = self.builder.mem_copy(
@@ -1049,7 +1101,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             }
                         };
                         if let Some(mir::ConstValue::Slice { meta, .. }) = resolved {
-                            let len_val = self.builder.iconst(meta as i64, 64, IntSignedness::DontCare, Origin::synthetic());
+                            let len_val = self.builder.iconst(
+                                meta as i64,
+                                64,
+                                IntSignedness::DontCare,
+                                Origin::synthetic(),
+                            );
                             ir_args.push(len_val.into());
                         } else if let Some(mir::ConstValue::Indirect { alloc_id, offset }) =
                             resolved
@@ -1067,7 +1124,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     );
                                 let len =
                                     u64::from_le_bytes(len_bytes.try_into().unwrap_or([0u8; 8]));
-                                let len_val = self.builder.iconst(len as i64, 64, IntSignedness::DontCare, Origin::synthetic());
+                                let len_val = self.builder.iconst(
+                                    len as i64,
+                                    64,
+                                    IntSignedness::DontCare,
+                                    Origin::synthetic(),
+                                );
                                 ir_args.push(len_val.into());
                             }
                         }
@@ -1119,7 +1181,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // Indirect call through a function pointer in a local.
             fn_ptr
         } else {
-            self.builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
+            self.builder
+                .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
         };
         let call_ret_ty = translate_ty(self.tcx, dest_ty).unwrap_or(Type::Unit);
         let call_ret_ann = if matches!(call_ret_ty, Type::Int) {
@@ -1138,7 +1201,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         self.current_mem = call_mem;
         // For non-void calls, call_data is Some(data_vref).
         // For void calls, call_data is None — use a dummy zero.
-        let call_vref = call_data.unwrap_or_else(|| self.builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic()));
+        let call_vref = call_data.unwrap_or_else(|| {
+            self.builder
+                .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
+        });
 
         if has_call_dest_proj {
             // Destination has projections (e.g. `_5.fld0 = fn1()`).
@@ -1146,38 +1212,41 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // For non-Deref projections, also update the base local to point at
             // the newly spilled slot so subsequent reads see the mutation.
             if let Some(addr) = call_proj_addr
-                && call_proj_size > 0 {
-                    if let Some(sret) = sret_slot {
-                        // SRET function: the callee wrote the value to `sret`.
-                        // Copy it to the projected destination address.
-                        let count = self
-                            .builder
-                            .iconst(call_proj_size as i64, 64, IntSignedness::DontCare, Origin::synthetic());
-                        let addr_annotated = IrOperand::annotated(addr, Annotation::Align(1));
-                        let sret_annotated = IrOperand::annotated(sret, Annotation::Align(1));
-                        self.current_mem = self.builder.mem_copy(
-                            addr_annotated,
-                            sret_annotated,
-                            count.into(),
-                            self.current_mem.into(),
-                            Origin::synthetic(),
-                        );
-                    } else {
-                        self.current_mem = self.builder.store(
-                            call_vref.into(),
-                            addr.into(),
-                            call_proj_size,
-                            self.current_mem.into(),
-                            Origin::synthetic(),
-                        );
-                    }
+                && call_proj_size > 0
+            {
+                if let Some(sret) = sret_slot {
+                    // SRET function: the callee wrote the value to `sret`.
+                    // Copy it to the projected destination address.
+                    let count = self.builder.iconst(
+                        call_proj_size as i64,
+                        64,
+                        IntSignedness::DontCare,
+                        Origin::synthetic(),
+                    );
+                    let addr_annotated = IrOperand::annotated(addr, Annotation::Align(1));
+                    let sret_annotated = IrOperand::annotated(sret, Annotation::Align(1));
+                    self.current_mem = self.builder.mem_copy(
+                        addr_annotated,
+                        sret_annotated,
+                        count.into(),
+                        self.current_mem.into(),
+                        Origin::synthetic(),
+                    );
+                } else {
+                    self.current_mem = self.builder.store(
+                        call_vref.into(),
+                        addr.into(),
+                        call_proj_size,
+                        self.current_mem.into(),
+                        Origin::synthetic(),
+                    );
                 }
+            }
             // For non-Deref projections restore local to spilled slot.
-            if !call_dest_is_deref
-                && let Some(slot) = call_spilled_local {
-                    self.locals.set(destination.local, slot);
-                    self.stack_locals.mark(destination.local);
-                }
+            if !call_dest_is_deref && let Some(slot) = call_spilled_local {
+                self.locals.set(destination.local, slot);
+                self.stack_locals.mark(destination.local);
+            }
         } else if let Some(slot) = sret_slot {
             // SRET return (>16 bytes): the callee wrote the struct to the
             // stack slot we passed as the first argument. Just record the
@@ -1215,11 +1284,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // capture it via a placeholder instruction.
             let call_idx = call_mem.index();
             self.abi_metadata.mark_call_secondary_return(call_idx);
-            let rdx_capture = self.builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
+            let rdx_capture =
+                self.builder
+                    .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
             self.abi_metadata
                 .mark_secondary_return_capture(rdx_capture.index(), call_idx);
             // Store RDX (secondary return) at offset 8.
-            let off8 = self.builder.iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
+            let off8 = self
+                .builder
+                .iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
             let hi_addr = self
                 .builder
                 .ptradd(slot.into(), off8.into(), 0, Origin::synthetic());

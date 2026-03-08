@@ -34,3 +34,20 @@ repos:
       entry: cargo deny check
       language: system
       pass_filenames: false
+    - id: cargo-fmt-codegen
+      name: cargo fmt (rustc_codegen_tuffy)
+      entry: cargo fmt --manifest-path rustc_codegen_tuffy/Cargo.toml -- --check
+      language: system
+      types: [rust]
+      pass_filenames: false
+    - id: cargo-clippy-codegen
+      name: cargo clippy (rustc_codegen_tuffy)
+      entry: cargo clippy --manifest-path rustc_codegen_tuffy/Cargo.toml --all-targets --all-features -- -D warnings
+      language: system
+      types: [rust]
+      pass_filenames: false
+    - id: cargo-deny-codegen
+      name: cargo deny (rustc_codegen_tuffy)
+      entry: cargo deny --manifest-path rustc_codegen_tuffy/Cargo.toml check
+      language: system
+      pass_filenames: false

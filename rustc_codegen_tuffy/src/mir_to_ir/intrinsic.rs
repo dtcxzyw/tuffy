@@ -9,7 +9,9 @@ use tuffy_ir::value::ValueRef;
 
 use super::ctx::TranslationCtx;
 use super::types::int_annotation_for_bytes;
-use super::types::{default_int_annotation, default_int_type, translate_annotation, type_align, type_size};
+use super::types::{
+    default_int_annotation, default_int_type, translate_annotation, type_align, type_size,
+};
 
 const I64: IntAnnotation = IntAnnotation {
     bit_width: 64,
@@ -91,9 +93,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // cttz / cttz_nonzero: count trailing zeros.
             "cttz" | "cttz_nonzero" => {
                 if let Some(&v) = ir_args.first() {
-                    let result = self
-                        .builder
-                        .count_trailing_zeros(v.into(), 64, Origin::synthetic());
+                    let result =
+                        self.builder
+                            .count_trailing_zeros(v.into(), 64, Origin::synthetic());
                     self.locals.set(destination_local, result);
                 }
                 true
@@ -174,7 +176,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             "size_of" => {
                 if let Some(t) = substs.first().and_then(|a| a.as_type()) {
                     let sz = type_size(tcx, t).unwrap_or(0);
-                    let result = self.builder.iconst(sz as i64, 64, IntSignedness::DontCare, Origin::synthetic());
+                    let result = self.builder.iconst(
+                        sz as i64,
+                        64,
+                        IntSignedness::DontCare,
+                        Origin::synthetic(),
+                    );
                     self.locals.set(destination_local, result);
                 }
                 true
@@ -184,7 +191,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             "min_align_of" | "pref_align_of" => {
                 if let Some(t) = substs.first().and_then(|a| a.as_type()) {
                     let align = type_align(tcx, t).unwrap_or(1);
-                    let result = self.builder.iconst(align as i64, 64, IntSignedness::DontCare, Origin::synthetic());
+                    let result = self.builder.iconst(
+                        align as i64,
+                        64,
+                        IntSignedness::DontCare,
+                        Origin::synthetic(),
+                    );
                     self.locals.set(destination_local, result);
                 }
                 true
@@ -209,8 +221,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 if elem_sz == 1 {
                                     self.locals.set(destination_local, len);
                                 } else {
-                                    let esz =
-                                        self.builder.iconst(elem_sz as i64, 64, IntSignedness::DontCare, Origin::synthetic());
+                                    let esz = self.builder.iconst(
+                                        elem_sz as i64,
+                                        64,
+                                        IntSignedness::DontCare,
+                                        Origin::synthetic(),
+                                    );
                                     let result = self.builder.mul(
                                         len.into(),
                                         esz.into(),
@@ -220,7 +236,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     self.locals.set(destination_local, result);
                                 }
                             } else {
-                                let result = self.builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
+                                let result = self.builder.iconst(
+                                    0,
+                                    64,
+                                    IntSignedness::DontCare,
+                                    Origin::synthetic(),
+                                );
                                 self.locals.set(destination_local, result);
                             }
                         } else {
@@ -229,21 +250,41 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 if ir_args.len() >= 2 {
                                     self.locals.set(destination_local, ir_args[1]);
                                 } else {
-                                    let result = self.builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
+                                    let result = self.builder.iconst(
+                                        0,
+                                        64,
+                                        IntSignedness::DontCare,
+                                        Origin::synthetic(),
+                                    );
                                     self.locals.set(destination_local, result);
                                 }
                             } else {
                                 // dyn Trait: read size from vtable (fallback to 0 for now).
-                                let result = self.builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
+                                let result = self.builder.iconst(
+                                    0,
+                                    64,
+                                    IntSignedness::DontCare,
+                                    Origin::synthetic(),
+                                );
                                 self.locals.set(destination_local, result);
                             }
                         }
                     } else if let Some(sz) = type_size(tcx, t) {
                         // Sized type: compile-time constant.
-                        let result = self.builder.iconst(sz as i64, 64, IntSignedness::DontCare, Origin::synthetic());
+                        let result = self.builder.iconst(
+                            sz as i64,
+                            64,
+                            IntSignedness::DontCare,
+                            Origin::synthetic(),
+                        );
                         self.locals.set(destination_local, result);
                     } else {
-                        let result = self.builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
+                        let result = self.builder.iconst(
+                            0,
+                            64,
+                            IntSignedness::DontCare,
+                            Origin::synthetic(),
+                        );
                         self.locals.set(destination_local, result);
                     }
                 }
@@ -254,7 +295,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             "min_align_of_val" | "align_of_val" => {
                 if let Some(t) = substs.first().and_then(|a| a.as_type()) {
                     let align = type_align(tcx, t).unwrap_or(1);
-                    let result = self.builder.iconst(align as i64, 64, IntSignedness::DontCare, Origin::synthetic());
+                    let result = self.builder.iconst(
+                        align as i64,
+                        64,
+                        IntSignedness::DontCare,
+                        Origin::synthetic(),
+                    );
                     self.locals.set(destination_local, result);
                 }
                 true
@@ -273,7 +319,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let byte_offset = if elem_size == 1 {
                         offset
                     } else {
-                        let sz = self.builder.iconst(elem_size as i64, 64, IntSignedness::DontCare, Origin::synthetic());
+                        let sz = self.builder.iconst(
+                            elem_size as i64,
+                            64,
+                            IntSignedness::DontCare,
+                            Origin::synthetic(),
+                        );
                         self.builder
                             .mul(offset.into(), sz.into(), I64, Origin::synthetic())
                     };
@@ -290,9 +341,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 if ir_args.len() >= 2 {
                     let ptr1 = self.coerce_to_ptr(ir_args[0]);
                     let ptr2 = self.coerce_to_ptr(ir_args[1]);
-                    let diff = self
-                        .builder
-                        .ptrdiff(ptr1.into(), ptr2.into(), 64, Origin::synthetic());
+                    let diff =
+                        self.builder
+                            .ptrdiff(ptr1.into(), ptr2.into(), 64, Origin::synthetic());
                     let elem_size = substs
                         .first()
                         .and_then(|a| a.as_type())
@@ -301,7 +352,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let result = if elem_size <= 1 {
                         diff
                     } else {
-                        let sz = self.builder.iconst(elem_size as i64, 64, IntSignedness::DontCare, Origin::synthetic());
+                        let sz = self.builder.iconst(
+                            elem_size as i64,
+                            64,
+                            IntSignedness::DontCare,
+                            Origin::synthetic(),
+                        );
                         self.builder
                             .div(diff.into(), sz.into(), I64, Origin::synthetic())
                     };
@@ -460,7 +516,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         .map(|sz| (sz * 8) as i64)
                         .unwrap_or(64);
                     let ann = ty.and_then(translate_annotation);
-                    let bits_val = self.builder.iconst(bits, 64, IntSignedness::DontCare, Origin::synthetic());
+                    let bits_val =
+                        self.builder
+                            .iconst(bits, 64, IntSignedness::DontCare, Origin::synthetic());
                     let complement =
                         self.builder
                             .sub(bits_val.into(), c.into(), I64, Origin::synthetic());
@@ -468,21 +526,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         (
                             self.builder
                                 .shl(a.into(), c.into(), ann, Origin::synthetic()),
-                            self.builder.shr(
-                                b.into(),
-                                complement.into(),
-                                ann,
-                                Origin::synthetic(),
-                            ),
+                            self.builder
+                                .shr(b.into(), complement.into(), ann, Origin::synthetic()),
                         )
                     } else {
                         (
-                            self.builder.shl(
-                                a.into(),
-                                complement.into(),
-                                ann,
-                                Origin::synthetic(),
-                            ),
+                            self.builder
+                                .shl(a.into(), complement.into(), ann, Origin::synthetic()),
                             self.builder
                                 .shr(b.into(), c.into(), ann, Origin::synthetic()),
                         )
@@ -563,7 +613,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let byte_count = if elem_size == 1 {
                     count
                 } else {
-                    let sz = self.builder.iconst(elem_size as i64, 64, IntSignedness::DontCare, Origin::synthetic());
+                    let sz = self.builder.iconst(
+                        elem_size as i64,
+                        64,
+                        IntSignedness::DontCare,
+                        Origin::synthetic(),
+                    );
                     self.builder
                         .mul(count.into(), sz.into(), I64, Origin::synthetic())
                 };
@@ -589,7 +644,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let byte_count = if elem_size == 1 {
                     count
                 } else {
-                    let sz = self.builder.iconst(elem_size as i64, 64, IntSignedness::DontCare, Origin::synthetic());
+                    let sz = self.builder.iconst(
+                        elem_size as i64,
+                        64,
+                        IntSignedness::DontCare,
+                        Origin::synthetic(),
+                    );
                     self.builder
                         .mul(count.into(), sz.into(), I64, Origin::synthetic())
                 };
@@ -616,7 +676,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let byte_count = if elem_size == 1 {
                     count
                 } else {
-                    let sz = self.builder.iconst(elem_size as i64, 64, IntSignedness::DontCare, Origin::synthetic());
+                    let sz = self.builder.iconst(
+                        elem_size as i64,
+                        64,
+                        IntSignedness::DontCare,
+                        Origin::synthetic(),
+                    );
                     self.builder
                         .mul(count.into(), sz.into(), I64, Origin::synthetic())
                 };
@@ -639,7 +704,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 }
                 let a = ir_args[0];
                 let b = ir_args[1];
-                let sz = self.builder.iconst(elem_size as i64, 64, IntSignedness::DontCare, Origin::synthetic());
+                let sz = self.builder.iconst(
+                    elem_size as i64,
+                    64,
+                    IntSignedness::DontCare,
+                    Origin::synthetic(),
+                );
                 let sym_id = self.symbols.intern("memcmp");
                 let callee = self.builder.symbol_addr(sym_id, Origin::synthetic());
                 let (mem_out, data) = self.builder.call(
@@ -651,9 +721,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     Origin::synthetic(),
                 );
                 // raw_eq returns bool (0 or 1): true when memcmp returns 0.
-                let cmp_result =
-                    data.unwrap_or_else(|| self.builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic()));
-                let zero = self.builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
+                let cmp_result = data.unwrap_or_else(|| {
+                    self.builder
+                        .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
+                });
+                let zero = self
+                    .builder
+                    .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
                 let eq = self.builder.icmp(
                     tuffy_ir::instruction::ICmpOp::Eq,
                     cmp_result.into(),
@@ -679,7 +753,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let (xa, ya) = if off == 0 {
                         (x, y)
                     } else {
-                        let o = self.builder.iconst(off as i64, 64, IntSignedness::DontCare, Origin::synthetic());
+                        let o = self.builder.iconst(
+                            off as i64,
+                            64,
+                            IntSignedness::DontCare,
+                            Origin::synthetic(),
+                        );
                         (
                             self.builder
                                 .ptradd(x.into(), o.into(), 0, Origin::synthetic()),
@@ -802,7 +881,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         new_mem.into(),
                         Origin::synthetic(),
                     );
-                    let bool_off = self.builder.iconst(elem_size as i64, 64, IntSignedness::DontCare, Origin::synthetic());
+                    let bool_off = self.builder.iconst(
+                        elem_size as i64,
+                        64,
+                        IntSignedness::DontCare,
+                        Origin::synthetic(),
+                    );
                     let bool_ptr =
                         self.builder
                             .ptradd(slot.into(), bool_off.into(), 0, Origin::synthetic());
@@ -955,7 +1039,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let a =
                             self.builder
                                 .and(old.into(), operand.into(), I64, Origin::synthetic());
-                        let all_ones = self.builder.iconst(-1, 64, IntSignedness::DontCare, Origin::synthetic());
+                        let all_ones = self.builder.iconst(
+                            -1,
+                            64,
+                            IntSignedness::DontCare,
+                            Origin::synthetic(),
+                        );
                         self.builder
                             .xor(a.into(), all_ones.into(), I64, Origin::synthetic())
                     } else if name.starts_with("atomic_umax") {

@@ -140,18 +140,16 @@ pub(super) fn translate_ty<'tcx>(_tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> Option
 
 pub(super) fn translate_annotation(ty: ty::Ty<'_>) -> Option<Annotation> {
     match ty.kind() {
-        ty::Int(_) | ty::Uint(_) => {
-            int_bitwidth(ty).map(|bw| {
-                Annotation::Int(IntAnnotation {
-                    bit_width: bw,
-                    signedness: if is_signed_int(ty) {
-                        IntSignedness::Signed
-                    } else {
-                        IntSignedness::Unsigned
-                    },
-                })
+        ty::Int(_) | ty::Uint(_) => int_bitwidth(ty).map(|bw| {
+            Annotation::Int(IntAnnotation {
+                bit_width: bw,
+                signedness: if is_signed_int(ty) {
+                    IntSignedness::Signed
+                } else {
+                    IntSignedness::Unsigned
+                },
             })
-        }
+        }),
         _ => None,
     }
 }

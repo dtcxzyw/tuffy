@@ -98,15 +98,15 @@ pub fn translate_function<'tcx>(
     } else {
         let ty = translate_ty(tcx, ret_mir_ty).filter(|t| !matches!(t, Type::Unit));
         let ann = if matches!(ty, Some(Type::Int)) {
-            int_bitwidth(ret_mir_ty).and_then(|bw| {
-                Some(Annotation::Int(IntAnnotation {
+            int_bitwidth(ret_mir_ty).map(|bw| {
+                Annotation::Int(IntAnnotation {
                     bit_width: bw,
                     signedness: if is_signed_int(ret_mir_ty) {
                         IntSignedness::Signed
                     } else {
                         IntSignedness::Unsigned
                     },
-                }))
+                })
             })
         } else {
             translate_annotation(ret_mir_ty)
@@ -141,15 +141,15 @@ pub fn translate_function<'tcx>(
                 let param_ann = if sz > 16 {
                     None
                 } else if is_int {
-                    int_bitwidth(ty).and_then(|bw| {
-                        Some(Annotation::Int(IntAnnotation {
+                    int_bitwidth(ty).map(|bw| {
+                        Annotation::Int(IntAnnotation {
                             bit_width: bw,
                             signedness: if is_signed_int(ty) {
                                 IntSignedness::Signed
                             } else {
                                 IntSignedness::Unsigned
                             },
-                        }))
+                        })
                     })
                 } else {
                     translate_annotation(ty)
@@ -471,7 +471,12 @@ pub fn translate_function<'tcx>(
                                 Origin::synthetic(),
                             );
                             if let Some(meta) = ctx.fat_locals.get(local) {
-                                let off8 = ctx.builder.iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
+                                let off8 = ctx.builder.iconst(
+                                    8,
+                                    64,
+                                    IntSignedness::DontCare,
+                                    Origin::synthetic(),
+                                );
                                 let meta_addr = ctx.builder.ptradd(
                                     slot.into(),
                                     off8.into(),
