@@ -268,17 +268,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     intrinsic_args.push(v);
                     // Also push fat pointer metadata for intrinsics that
                     // need it (e.g. size_of_val on unsized types).
-                    if let Operand::Copy(place) | Operand::Move(place) = &arg.node {
-                        if place.projection.is_empty() {
-                            if let Some(fat_v) = self.fat_locals.get(place.local) {
+                    if let Operand::Copy(place) | Operand::Move(place) = &arg.node
+                        && place.projection.is_empty()
+                            && let Some(fat_v) = self.fat_locals.get(place.local) {
                                 let local_ty =
                                     self.monomorphize(self.mir.local_decls[place.local].ty);
                                 if is_fat_ptr(self.tcx, local_ty) {
                                     intrinsic_args.push(fat_v);
                                 }
                             }
-                        }
-                    }
                 }
             }
 
@@ -358,10 +356,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // location — skip the redundant store which would
                     // overwrite the result with the raw pointer value.
                     let intrinsic_changed_local = intrinsic_result != saved_local_for_proj;
-                    if intrinsic_changed_local {
-                        if let Some(result) = intrinsic_result {
-                            if let Some(addr) = proj_addr {
-                                if proj_size > 0 {
+                    if intrinsic_changed_local
+                        && let Some(result) = intrinsic_result
+                            && let Some(addr) = proj_addr
+                                && proj_size > 0 {
                                     self.current_mem = self.builder.store(
                                         result.into(),
                                         addr.into(),
@@ -370,9 +368,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         Origin::synthetic(),
                                     );
                                 }
-                            }
-                        }
-                    }
                 } else {
                     // If the destination is a stack local, the intrinsic set the
                     // local to the raw result value.  Store it into the stack slot
@@ -660,7 +655,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         // Check if this is a large struct return (>16 bytes) that requires SRET.
         // On x86-64 SysV ABI, structs larger than 16 bytes are returned via
         // a hidden pointer passed as the first argument.
-        let needs_sret = dest_size.map_or(false, |sz| sz > 16);
+        let needs_sret = dest_size.is_some_and(|sz| sz > 16);
         let sret_slot = if needs_sret {
             // If the destination is _0 and the function itself has an SRET
             // pointer, reuse it so the callee writes directly into the
@@ -855,8 +850,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     && matches!(arg_ty.kind(), ty::Tuple(_) | ty::Adt(..) | ty::Array(..))
                     && arg_size > 0
                     && arg_size <= 8
-                {
-                    if matches!(self.builder.value_type(v), Some(Type::Ptr(_))) {
+                    && matches!(self.builder.value_type(v), Some(Type::Ptr(_))) {
                         v = self.builder.load(
                             v.into(),
                             arg_size as u32,
@@ -866,7 +860,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             Origin::synthetic(),
                         );
                     }
-                }
 
                 // Decompose 9-16 byte struct arguments into two register-
                 // sized words for the SysV ABI.  Stack-allocated structs
@@ -1148,8 +1141,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // Store the call result through the pre-computed projected address.
             // For non-Deref projections, also update the base local to point at
             // the newly spilled slot so subsequent reads see the mutation.
-            if let Some(addr) = call_proj_addr {
-                if call_proj_size > 0 {
+            if let Some(addr) = call_proj_addr
+                && call_proj_size > 0 {
                     if let Some(sret) = sret_slot {
                         // SRET function: the callee wrote the value to `sret`.
                         // Copy it to the projected destination address.
@@ -1175,14 +1168,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         );
                     }
                 }
-            }
             // For non-Deref projections restore local to spilled slot.
-            if !call_dest_is_deref {
-                if let Some(slot) = call_spilled_local {
+            if !call_dest_is_deref
+                && let Some(slot) = call_spilled_local {
                     self.locals.set(destination.local, slot);
                     self.stack_locals.mark(destination.local);
                 }
-            }
         } else if let Some(slot) = sret_slot {
             // SRET return (>16 bytes): the callee wrote the struct to the
             // stack slot we passed as the first argument. Just record the

@@ -459,8 +459,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                     self.current_mem.into(),
                                                     Origin::synthetic(),
                                                 );
-                                                if let Some(arith_bytes) = checked_rvalue {
-                                                    if arith_bytes >= 8 {
+                                                if let Some(arith_bytes) = checked_rvalue
+                                                    && arith_bytes >= 8 {
                                                         let off = self.builder.iconst(
                                                             arith_bytes as i64,
                                                             64,
@@ -484,7 +484,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                             Origin::synthetic(),
                                                         );
                                                     }
-                                                }
                                             }
                                         } // close ref_fat_src else
                                     } else {
@@ -555,13 +554,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                 let target_ty = self.monomorphize(*cast_ty);
                                                 let target_size =
                                                     type_size(self.tcx, target_ty).unwrap_or(0);
-                                                if matches!(kind, CastKind::PtrToPtr)
-                                                    && target_size <= 8
-                                                {
-                                                    false
-                                                } else {
-                                                    true
-                                                }
+                                                !(matches!(kind, CastKind::PtrToPtr) && target_size <= 8)
                                             } else {
                                                 false
                                             }
@@ -934,8 +927,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // the stack slot at offset 8 so that code loading the full
                     // fat pointer from the slot (e.g. the Return terminator's
                     // stack-allocated path) sees both words.
-                    if self.stack_locals.is_stack(place.local) {
-                        if let Some(slot) = self.locals.get(place.local) {
+                    if self.stack_locals.is_stack(place.local)
+                        && let Some(slot) = self.locals.get(place.local) {
                             let off = self.builder.iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
                             let addr = self.builder.ptradd(
                                 slot.into(),
@@ -951,7 +944,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 Origin::synthetic(),
                             );
                         }
-                    }
                 }
                 // Cast from a projected non-fat type to a fat pointer
                 // (e.g. `NonNull<[T]> as *const [T]` in into_vec):

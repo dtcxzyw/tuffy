@@ -614,9 +614,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     {
                         // This is an unsizing coercion to a trait object.
                         // Get the concrete source type.
-                        let Some(src_ty) = self.operand_ty_mono(op) else {
-                            return None;
-                        };
+                        let src_ty = self.operand_ty_mono(op)?;
                         let src_inner = match src_ty.kind() {
                             ty::Ref(_, inner, _) => *inner,
                             ty::RawPtr(inner, _) => *inner,
@@ -667,9 +665,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     if let Some(inner) = target_inner
                         && let ty::Slice(_) = inner.kind()
                     {
-                        let Some(src_ty) = self.operand_ty_mono(op) else {
-                            return None;
-                        };
+                        let src_ty = self.operand_ty_mono(op)?;
                         let src_inner = match src_ty.kind() {
                             ty::Ref(_, inner, _) => *inner,
                             ty::RawPtr(inner, _) => *inner,
@@ -691,9 +687,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // boundary (matching codegen_ssa::base::unsized_info).
                     if let Some(inner) = target_inner {
                         let typing_env = ty::TypingEnv::fully_monomorphized();
-                        let Some(src_ty) = self.operand_ty_mono(op) else {
-                            return None;
-                        };
+                        let src_ty = self.operand_ty_mono(op)?;
                         let src_inner = match src_ty.kind() {
                             ty::Ref(_, inner, _) => *inner,
                             ty::RawPtr(inner, _) => *inner,
@@ -713,8 +707,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     );
                                 }
                             }
-                            ty::Dynamic(predicates, _) => {
-                                if !src_tail.has_escaping_bound_vars() && !src_tail.is_trait() {
+                            ty::Dynamic(predicates, _)
+                                if !src_tail.has_escaping_bound_vars() && !src_tail.is_trait() => {
                                     let principal = predicates
                                         .principal()
                                         .map(|p| self.tcx.instantiate_bound_regions_with_erased(p));
@@ -750,7 +744,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         );
                                     }
                                 }
-                            }
                             _ => {}
                         }
                     }
@@ -839,8 +832,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // Float arithmetic: dispatch directly to fadd/fsub/fmul/fdiv.
                 // Operands are always Float-typed at this point.
                 // Floats have no "unchecked" variants — only the plain ops.
-                if let Some(ref fty) = float_ty {
-                    if matches!(
+                if let Some(ref fty) = float_ty
+                    && matches!(
                         op,
                         BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem
                     ) {
@@ -886,7 +879,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         };
                         return Some(res);
                     }
-                }
 
                 // Unsupported operand types produce Unit or
                 // typeless values — emit a dummy zero so the IR stays well-typed.
@@ -1085,15 +1077,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let (primary, overflow) = if matches!(res_ann, Some(IntAnn::Signed(_)))
                         {
                             self.builder.sadd_with_overflow(
-                                l_op.into(),
-                                r_op.into(),
+                                l_op,
+                                r_op,
                                 bits,
                                 Origin::synthetic(),
                             )
                         } else {
                             self.builder.uadd_with_overflow(
-                                l_op.into(),
-                                r_op.into(),
+                                l_op,
+                                r_op,
                                 bits,
                                 Origin::synthetic(),
                             )
@@ -1113,15 +1105,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let (primary, overflow) = if matches!(res_ann, Some(IntAnn::Signed(_)))
                         {
                             self.builder.ssub_with_overflow(
-                                l_op.into(),
-                                r_op.into(),
+                                l_op,
+                                r_op,
                                 bits,
                                 Origin::synthetic(),
                             )
                         } else {
                             self.builder.usub_with_overflow(
-                                l_op.into(),
-                                r_op.into(),
+                                l_op,
+                                r_op,
                                 bits,
                                 Origin::synthetic(),
                             )
@@ -1141,15 +1133,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let (primary, overflow) = if matches!(res_ann, Some(IntAnn::Signed(_)))
                         {
                             self.builder.smul_with_overflow(
-                                l_op.into(),
-                                r_op.into(),
+                                l_op,
+                                r_op,
                                 bits,
                                 Origin::synthetic(),
                             )
                         } else {
                             self.builder.umul_with_overflow(
-                                l_op.into(),
-                                r_op.into(),
+                                l_op,
+                                r_op,
                                 bits,
                                 Origin::synthetic(),
                             )
@@ -1832,9 +1824,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         // later independent writes to both locals to corrupt each other.
                         if matches!(kind, CastKind::Transmute)
                             && matches!(self.builder.value_type(val), Some(Type::Ptr(_)))
-                        {
-                            if let Operand::Copy(src) | Operand::Move(src) = operand {
-                                if src.projection.is_empty()
+                            && let Operand::Copy(src) | Operand::Move(src) = operand
+                                && src.projection.is_empty()
                                     && self.stack_locals.is_stack(src.local)
                                 {
                                     let target_size =
@@ -1855,14 +1846,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         return Some(loaded);
                                     }
                                 }
-                            }
-                        }
                         // Transmute from an Int register value to a Float type: reinterpret
                         // the bit pattern via a temporary stack slot (no bitcast in IR).
                         if matches!(kind, CastKind::Transmute)
                             && matches!(self.builder.value_type(val), Some(Type::Int | Type::Bool))
-                        {
-                            if let Some(Type::Float(ft)) = translate_ty(self.tcx, target_ty_mono) {
+                            && let Some(Type::Float(ft)) = translate_ty(self.tcx, target_ty_mono) {
                                 let size = type_size(self.tcx, target_ty_mono).unwrap_or(0) as u32;
                                 if size > 0 && size <= 8 {
                                     let slot = self.builder.stack_slot(size, Origin::synthetic());
@@ -1884,7 +1872,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     return Some(loaded);
                                 }
                             }
-                        }
                         // Transmute / PtrToPtr from a pointer-typed source
                         // to a non-pointer target
                         if matches!(self.builder.value_type(val), Some(Type::Ptr(_)))
@@ -1895,14 +1882,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         {
                             let src_ty = operand_ty_projected(operand, self.mir, self.tcx)
                                 .map(|ty| self.monomorphize(ty));
-                            if let Some(st) = src_ty {
-                                if matches!(st.kind(), ty::RawPtr(..) | ty::Ref(..) | ty::FnPtr(..))
+                            if let Some(st) = src_ty
+                                && matches!(st.kind(), ty::RawPtr(..) | ty::Ref(..) | ty::FnPtr(..))
                                 {
                                     return Some(
                                         self.builder.ptrtoaddr(val.into(), 64, Origin::synthetic()),
                                     );
                                 }
-                            }
                         }
                         Some(val)
                     }
@@ -2064,14 +2050,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let is_i128_const = bytes == 16
                         && matches!(op, Operand::Constant(_))
                         && matches!(self.builder.value_type(val), Some(Type::Int))
-                        && field_ty.map_or(false, |t| {
+                        && field_ty.is_some_and(|t| {
                             matches!(
                                 t.kind(),
                                 ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
                             )
                         });
-                    if is_i128_const {
-                        if let Operand::Constant(c) = op {
+                    if is_i128_const
+                        && let Operand::Constant(c) = op {
                             let mono_const = self.tcx.instantiate_and_normalize_erasing_regions(
                                 self.instance.args,
                                 ty::TypingEnv::fully_monomorphized(),
@@ -2089,7 +2075,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             {
                                 let bits = int.to_bits(int.size());
                                 // Only emit as static data if value doesn't fit in 64 bits
-                                let is_signed = field_ty.map_or(false, |t| {
+                                let is_signed = field_ty.is_some_and(|t| {
                                     matches!(t.kind(), ty::Int(ty::IntTy::I128))
                                 });
                                 let needs_static = if is_signed {
@@ -2114,7 +2100,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 }
                             }
                         }
-                    }
 
                     let offset = if let Some(variant_idx) = enum_variant_idx {
                         variant_field_offset(self.tcx, agg_ty, variant_idx, i)
@@ -2365,8 +2350,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let op_ty = operand_ty_projected(operand, self.mir, self.tcx)
                     .map(|ty| self.monomorphize(ty));
                 // Float negation: use FNeg IR op, which keeps the result Float-typed.
-                if let Some(ty) = op_ty {
-                    if ty.is_floating_point() {
+                if let Some(ty) = op_ty
+                    && ty.is_floating_point() {
                         let ft = match ty.kind() {
                             ty::Float(ty::FloatTy::F32) => FloatType::F32,
                             ty::Float(ty::FloatTy::F64) => FloatType::F64,
@@ -2378,7 +2363,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             Origin::synthetic(),
                         ));
                     }
-                }
                 let _neg_ann = op_ty.and_then(translate_annotation);
                 // For large integral types (>8 bytes, e.g. i128) stored in memory,
                 // translate_place_to_value returns a Ptr to the stack slot.

@@ -25,8 +25,6 @@ fn parse_atomic_ordering(name: &str) -> MemoryOrdering {
         MemoryOrdering::Release
     } else if name.ends_with("_acqrel") {
         MemoryOrdering::AcqRel
-    } else if name.ends_with("_seqcst") {
-        MemoryOrdering::SeqCst
     } else {
         MemoryOrdering::SeqCst
     }
@@ -320,7 +318,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         .map(|sz| (sz * 8) as u32)
                         .unwrap_or(64);
                     let is_signed =
-                        ty.map_or(false, |t| matches!(t.kind(), rustc_middle::ty::Int(_)));
+                        ty.is_some_and(|t| matches!(t.kind(), rustc_middle::ty::Int(_)));
                     let result = if is_signed {
                         self.builder.signed_saturating_add(
                             ir_args[0].into(),
@@ -350,7 +348,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         .map(|sz| (sz * 8) as u32)
                         .unwrap_or(64);
                     let is_signed =
-                        ty.map_or(false, |t| matches!(t.kind(), rustc_middle::ty::Int(_)));
+                        ty.is_some_and(|t| matches!(t.kind(), rustc_middle::ty::Int(_)));
                     let result = if is_signed {
                         self.builder.signed_saturating_sub(
                             ir_args[0].into(),
@@ -673,10 +671,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let x = self.coerce_to_ptr(ir_args[0]);
                 let y = self.coerce_to_ptr(ir_args[1]);
                 let mut mem = current_mem;
-                let num_words = (elem_size as u64).div_ceil(8);
+                let num_words = elem_size.div_ceil(8);
                 for i in 0..num_words {
                     let off = i * 8;
-                    let chunk = std::cmp::min(8, elem_size as u64 - off) as u32;
+                    let chunk = std::cmp::min(8, elem_size - off) as u32;
                     let (xa, ya) = if off == 0 {
                         (x, y)
                     } else {

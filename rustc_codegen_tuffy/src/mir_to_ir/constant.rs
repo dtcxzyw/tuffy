@@ -79,6 +79,7 @@ pub(super) fn translate_int_to_int_cast(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn translate_const<'tcx>(
     tcx: TyCtxt<'tcx>,
     instance: Instance<'tcx>,
@@ -283,6 +284,7 @@ pub(super) fn translate_const<'tcx>(
 /// Walks the provenance entries in the given byte range and resolves each
 /// pointer target to a symbol name. For `Memory` targets, the target
 /// allocation is recursively emitted as static data.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn extract_alloc_relocs<'tcx>(
     tcx: TyCtxt<'tcx>,
     alloc: &rustc_middle::mir::interpret::Allocation,

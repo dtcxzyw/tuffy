@@ -28,18 +28,18 @@ impl IntAnn {
     }
 
     /// Convert IntAnn to Annotation.
-    pub(super) fn to_annotation(&self) -> Annotation {
+    pub(super) fn to_annotation(self) -> Annotation {
         match self {
             IntAnn::Signed(n) => Annotation::Int(IntAnnotation {
-                bit_width: *n,
+                bit_width: n,
                 signedness: IntSignedness::Signed,
             }),
             IntAnn::Unsigned(n) => Annotation::Int(IntAnnotation {
-                bit_width: *n,
+                bit_width: n,
                 signedness: IntSignedness::Unsigned,
             }),
             IntAnn::DontCare(n) => Annotation::Int(IntAnnotation {
-                bit_width: *n,
+                bit_width: n,
                 signedness: IntSignedness::DontCare,
             }),
         }

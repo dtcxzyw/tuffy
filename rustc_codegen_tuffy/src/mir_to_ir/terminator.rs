@@ -147,15 +147,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 // of converting the address to an integer.
                                 let ret_size =
                                     type_size(self.tcx, ret_mir_ty).unwrap_or(8).min(8) as u32;
-                                let loaded = self.builder.load(
+
+                                self.builder.load(
                                     v.into(),
                                     ret_size,
                                     default_int_type(),
                                     self.current_mem.into(),
                                     None,
                                     Origin::synthetic(),
-                                );
-                                loaded
+                                )
                             }
                             (Some(Type::Int), _) => self.coerce_to_int(v),
                             (Some(Type::Ptr(_)), _) => self.coerce_to_ptr(v),
