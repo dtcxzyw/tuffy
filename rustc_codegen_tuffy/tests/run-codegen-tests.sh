@@ -55,6 +55,7 @@ run_codegen_test() {
     # Compile and capture IR
     local ir_output="$OUT_DIR/$name.ir"
     if ! rustc +nightly -Z codegen-backend="$BACKEND" \
+        -D warnings \
         -C llvm-args=dump-ir $compile_flags \
         --crate-name "$name" \
         -o "$OUT_DIR/$name" \

@@ -1,17 +1,4 @@
 // compile-flags: -Zmir-opt-level=3 -C debug-assertions=off --crate-type lib
-// CHECK: warning: incorrect NaN comparison, NaN cannot be directly compared to itself
-// CHECK:    --> codegen/rvalue/float_cmp.rs:117:5
-// CHECK:     |
-// CHECK: 117 |     f32::NAN != f32::NAN
-// CHECK:     |     ^^^^^^^^^^^^^^^^^^^^
-// CHECK:     |
-// CHECK:     = note: `#[warn(invalid_nan_comparisons)]` on by default
-// CHECK: help: use `f32::is_nan()` or `f64::is_nan()` instead
-// CHECK:     |
-// CHECK: 117 -     f32::NAN != f32::NAN
-// CHECK: 117 +     !f32::NAN.is_nan()
-// CHECK:     |
-// CHECK:
 // CHECK: fn f32_eq(_1: f32, _2: f32) -> bool {
 // CHECK:     debug a => _1;
 // CHECK:     debug b => _2;
@@ -54,6 +41,8 @@
 // CHECK:
 // CHECK: fn f32_ne_nan() -> bool {
 // CHECK:     let mut _0: bool;
+// CHECK:     scope 1 (inlined core::f32::<impl f32>::is_nan) {
+// CHECK:     }
 // CHECK:
 // CHECK:     bb0: {
 // CHECK:         _0 = const true;
@@ -86,8 +75,6 @@
 // CHECK:     ret v5, v0
 // CHECK: }
 // CHECK:
-// CHECK: warning: 1 warning emitted
-// CHECK:
 
 #[no_mangle]
 pub fn f32_ne(a: f32, b: f32) -> bool {
@@ -114,5 +101,5 @@ pub fn f32_ne_nan() -> bool {
     // With OEq: NaN == NaN is false, so !(false) = true ✓
     // With UNe: NaN UNe NaN is true ✓
     // Both give correct result, but semantics differ
-    f32::NAN != f32::NAN
+    f32::NAN.is_nan()
 }

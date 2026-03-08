@@ -44,6 +44,7 @@ out_file=$(mktemp)
 trap "rm -f $ir_output $out_file" EXIT
 
 rustc +nightly -Z codegen-backend="$BACKEND" \
+    -D warnings \
     -C llvm-args=dump-ir $compile_flags \
     --crate-name "$name" \
     -o "$out_file" \
