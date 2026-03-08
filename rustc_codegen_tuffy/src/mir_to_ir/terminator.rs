@@ -179,12 +179,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     IntSignedness::DontCare,
                                     Origin::synthetic(),
                                 );
-                                self.builder.icmp(
-                                    ICmpOp::Ne,
-                                    v.into(),
-                                    zero.into(),
-                                    Origin::synthetic(),
-                                )
+                                self.builder
+                                    .icmp(ICmpOp::Ne, v.into(), zero.into(), Origin::synthetic())
+                                    .raw()
                             }
                             (Some(Type::Float(ft)), Some(Type::Int)) => {
                                 // Float value was carried as Int bits — reinterpret.
@@ -230,10 +227,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 Origin::synthetic(),
                             )
                         } else if matches!(ret_ir_ty, Some(Type::Bool)) {
-                            self.builder.bconst(false, Origin::synthetic())
+                            self.builder.bconst(false, Origin::synthetic()).raw()
                         } else {
                             self.builder
                                 .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
+                                .raw()
                         };
                         self.builder.ret(
                             Some(dummy.into()),
@@ -361,13 +359,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         // 16-byte stack slot so drop_in_place
                                         // receives a valid &mut FatPtr.
                                         let slot = self.builder.stack_slot(16, Origin::synthetic());
-                                        self.current_mem = self.builder.store(
-                                            v.into(),
-                                            slot.into(),
-                                            8,
-                                            self.current_mem.into(),
-                                            Origin::synthetic(),
-                                        ).raw();
+                                        self.current_mem = self
+                                            .builder
+                                            .store(
+                                                v.into(),
+                                                slot.into(),
+                                                8,
+                                                self.current_mem.into(),
+                                                Origin::synthetic(),
+                                            )
+                                            .raw();
                                         let off8 = self.builder.iconst(
                                             8,
                                             64,
@@ -380,13 +381,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                             0,
                                             Origin::synthetic(),
                                         );
-                                        self.current_mem = self.builder.store(
-                                            fat_val.into(),
-                                            hi.into(),
-                                            8,
-                                            self.current_mem.into(),
-                                            Origin::synthetic(),
-                                        ).raw();
+                                        self.current_mem = self
+                                            .builder
+                                            .store(
+                                                fat_val.into(),
+                                                hi.into(),
+                                                8,
+                                                self.current_mem.into(),
+                                                Origin::synthetic(),
+                                            )
+                                            .raw();
                                         Some(slot)
                                     } else if ty_size > 8
                                         || matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
@@ -396,13 +400,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         let slot = self
                                             .builder
                                             .stack_slot(ty_size as u32, Origin::synthetic());
-                                        self.current_mem = self.builder.store(
-                                            v.into(),
-                                            slot.into(),
-                                            ty_size as u32,
-                                            self.current_mem.into(),
-                                            Origin::synthetic(),
-                                        ).raw();
+                                        self.current_mem = self
+                                            .builder
+                                            .store(
+                                                v.into(),
+                                                slot.into(),
+                                                ty_size as u32,
+                                                self.current_mem.into(),
+                                                Origin::synthetic(),
+                                            )
+                                            .raw();
                                         Some(slot)
                                     }
                                 } else {
@@ -417,12 +424,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         )
                                         .map(|l| l.align.abi.bytes())
                                         .unwrap_or(1);
-                                    Some(self.builder.iconst(
-                                        align as i64,
-                                        64,
-                                        IntSignedness::DontCare,
-                                        Origin::synthetic(),
-                                    ))
+                                    Some(
+                                        self.builder
+                                            .iconst(
+                                                align as i64,
+                                                64,
+                                                IntSignedness::DontCare,
+                                                Origin::synthetic(),
+                                            )
+                                            .raw(),
+                                    )
                                 }
                             } else {
                                 self.translate_place_to_addr(place)
@@ -525,6 +536,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // TODO: process blocks in reverse post-order to avoid this.
                 self.builder
                     .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
+                    .raw()
             }
         };
 
@@ -579,9 +591,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 IntSignedness::DontCare,
                 Origin::synthetic(),
             );
-            discr_val =
-                self.builder
-                    .and(discr_val.into(), mask_val.into(), I64, Origin::synthetic());
+            discr_val = self
+                .builder
+                .and(discr_val.into(), mask_val.into(), I64, Origin::synthetic())
+                .raw();
         }
 
         let all_targets: Vec<_> = targets.iter().collect();

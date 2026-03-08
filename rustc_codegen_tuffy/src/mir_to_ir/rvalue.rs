@@ -43,13 +43,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // that would dereference the data pointer.
             if let Some(fat_val) = self.fat_locals.get(place.local) {
                 // Store data pointer into slot[0..8].
-                self.current_mem = self.builder.store(
-                    addr.into(),
-                    slot.into(),
-                    8,
-                    self.current_mem.into(),
-                    Origin::synthetic(),
-                ).raw();
+                self.current_mem = self
+                    .builder
+                    .store(
+                        addr.into(),
+                        slot.into(),
+                        8,
+                        self.current_mem.into(),
+                        Origin::synthetic(),
+                    )
+                    .raw();
                 // Store fat component (length/vtable) into slot[8..16].
                 let off8 = self
                     .builder
@@ -57,13 +60,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let hi_addr = self
                     .builder
                     .ptradd(slot.into(), off8.into(), 0, Origin::synthetic());
-                self.current_mem = self.builder.store(
-                    fat_val.into(),
-                    hi_addr.into(),
-                    8,
-                    self.current_mem.into(),
-                    Origin::synthetic(),
-                ).raw();
+                self.current_mem = self
+                    .builder
+                    .store(
+                        fat_val.into(),
+                        hi_addr.into(),
+                        8,
+                        self.current_mem.into(),
+                        Origin::synthetic(),
+                    )
+                    .raw();
             } else if matches!(self.builder.value_type(addr), Some(Type::Ptr(_)))
                 && self.builder.is_memory_address(addr)
             {
@@ -109,22 +115,28 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         self.builder
                             .ptradd(slot.into(), off.into(), 0, Origin::synthetic())
                     };
-                    self.current_mem = self.builder.store(
-                        word.into(),
-                        dst.into(),
-                        chunk,
-                        self.current_mem.into(),
-                        Origin::synthetic(),
-                    ).raw();
+                    self.current_mem = self
+                        .builder
+                        .store(
+                            word.into(),
+                            dst.into(),
+                            chunk,
+                            self.current_mem.into(),
+                            Origin::synthetic(),
+                        )
+                        .raw();
                 }
             } else {
-                self.current_mem = self.builder.store(
-                    addr.into(),
-                    slot.into(),
-                    size,
-                    self.current_mem.into(),
-                    Origin::synthetic(),
-                ).raw();
+                self.current_mem = self
+                    .builder
+                    .store(
+                        addr.into(),
+                        slot.into(),
+                        size,
+                        self.current_mem.into(),
+                        Origin::synthetic(),
+                    )
+                    .raw();
             }
             addr = slot;
             if persist_spill {
@@ -339,12 +351,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         return Some(overflow);
                     }
                     // Fallback: always false (no overflow).
-                    return Some(self.builder.iconst(
-                        0,
-                        64,
-                        IntSignedness::DontCare,
-                        Origin::synthetic(),
-                    ).raw());
+                    return Some(
+                        self.builder
+                            .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
+                            .raw(),
+                    );
                 }
             }
         }
@@ -355,7 +366,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         if bytes == 0 {
             return Some(
                 self.builder
-                    .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic()).raw(),
+                    .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
+                    .raw(),
             );
         }
         // For fat pointer types (e.g. &mut dyn Write, &[T]), load the
@@ -410,12 +422,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             .ok()?;
 
         match layout.variants {
-            rustc_abi::Variants::Empty => {
-                Some(
-                    self.builder
-                        .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic()).raw(),
-                )
-            }
+            rustc_abi::Variants::Empty => Some(
+                self.builder
+                    .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
+                    .raw(),
+            ),
             rustc_abi::Variants::Single { index } => {
                 let discr_val = match place_ty.kind() {
                     ty::Adt(adt_def, _) if adt_def.is_enum() => {
@@ -423,12 +434,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     }
                     _ => index.as_u32() as i64,
                 };
-                Some(self.builder.iconst(
-                    discr_val,
-                    64,
-                    IntSignedness::DontCare,
-                    Origin::synthetic(),
-                ).raw())
+                Some(
+                    self.builder
+                        .iconst(discr_val, 64, IntSignedness::DontCare, Origin::synthetic())
+                        .raw(),
+                )
             }
             rustc_abi::Variants::Multiple {
                 ref tag,
@@ -445,13 +455,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let val = self.locals.get(place.local)?;
                         let size = layout.size.bytes() as u32;
                         let slot = self.builder.stack_slot(size, Origin::synthetic());
-                        self.current_mem = self.builder.store(
-                            val.into(),
-                            slot.into(),
-                            size,
-                            self.current_mem.into(),
-                            Origin::synthetic(),
-                        ).raw();
+                        self.current_mem = self
+                            .builder
+                            .store(
+                                val.into(),
+                                slot.into(),
+                                size,
+                                self.current_mem.into(),
+                                Origin::synthetic(),
+                            )
+                            .raw();
                         slot
                     }
                 } else {
@@ -619,12 +632,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     }
                 };
                 if let Some(mir::ConstValue::Slice { meta, .. }) = resolved {
-                    return Some(self.builder.iconst(
-                        meta as i64,
-                        64,
-                        IntSignedness::DontCare,
-                        Origin::synthetic(),
-                    ));
+                    return Some(
+                        self.builder
+                            .iconst(
+                                meta as i64,
+                                64,
+                                IntSignedness::DontCare,
+                                Origin::synthetic(),
+                            )
+                            .raw(),
+                    );
                 }
                 // Indirect constant for fat pointer types (e.g. &[T]):
                 // the allocation contains [data_ptr (8 bytes) | len (8 bytes)].
@@ -640,12 +657,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             byte_offset..byte_offset + 8,
                         );
                         let len = u64::from_le_bytes(len_bytes.try_into().unwrap_or([0u8; 8]));
-                        return Some(self.builder.iconst(
-                            len as i64,
-                            64,
-                            IntSignedness::DontCare,
-                            Origin::synthetic(),
-                        ));
+                        return Some(
+                            self.builder
+                                .iconst(
+                                    len as i64,
+                                    64,
+                                    IntSignedness::DontCare,
+                                    Origin::synthetic(),
+                                )
+                                .raw(),
+                        );
                     }
                 }
                 None
@@ -779,12 +800,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         if let ty::Array(_, len) = src_inner.kind()
                             && let Some(n) = len.try_to_target_usize(self.tcx)
                         {
-                            return Some(self.builder.iconst(
-                                n as i64,
-                                64,
-                                IntSignedness::DontCare,
-                                Origin::synthetic(),
-                            ));
+                            return Some(
+                                self.builder
+                                    .iconst(
+                                        n as i64,
+                                        64,
+                                        IntSignedness::DontCare,
+                                        Origin::synthetic(),
+                                    )
+                                    .raw(),
+                            );
                         }
                     }
 
@@ -811,12 +836,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 if let ty::Array(_, len) = src_tail.kind()
                                     && let Some(n) = len.try_to_target_usize(self.tcx)
                                 {
-                                    return Some(self.builder.iconst(
-                                        n as i64,
-                                        64,
-                                        IntSignedness::DontCare,
-                                        Origin::synthetic(),
-                                    ));
+                                    return Some(
+                                        self.builder
+                                            .iconst(
+                                                n as i64,
+                                                64,
+                                                IntSignedness::DontCare,
+                                                Origin::synthetic(),
+                                            )
+                                            .raw(),
+                                    );
                                 }
                             }
                             ty::Dynamic(predicates, _)
@@ -930,8 +959,22 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         bits: u32,
     ) -> ValueRef {
         match res_ann.unwrap() {
-            IntAnn::Signed(_) => self.builder.sext(value.into(), bits, Origin::synthetic()),
-            IntAnn::Unsigned(_) => self.builder.zext(value.into(), bits, Origin::synthetic()),
+            IntAnn::Signed(_) => self.builder.sext(
+                IrOperand {
+                    value,
+                    annotation: None,
+                },
+                bits,
+                Origin::synthetic(),
+            ),
+            IntAnn::Unsigned(_) => self.builder.zext(
+                IrOperand {
+                    value,
+                    annotation: None,
+                },
+                bits,
+                Origin::synthetic(),
+            ),
             IntAnn::DontCare(_) => unreachable!("DontCare annotation in apply_int_extension"),
         }
     }
@@ -1024,12 +1067,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     self.builder.value_type(r_raw),
                     Some(Type::Int | Type::Ptr(_) | Type::Bool | Type::Float(_))
                 ) {
-                    return Some(self.builder.iconst(
-                        0,
-                        64,
-                        IntSignedness::DontCare,
-                        Origin::synthetic(),
-                    ));
+                    return Some(
+                        self.builder
+                            .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
+                            .raw(),
+                    );
                 }
 
                 // Detect 128-bit integer operands early so we can load from
@@ -1126,41 +1168,50 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // then extend to proper signedness.
                     BinOp::Add => {
                         let bits = self.extract_result_bits(res_ann);
-                        let sum = self.builder.add(
-                            l_op,
-                            r_op,
-                            IntAnnotation {
-                                bit_width: bits,
-                                signedness: IntSignedness::DontCare,
-                            },
-                            Origin::synthetic(),
-                        );
+                        let sum = self
+                            .builder
+                            .add(
+                                l_op.into(),
+                                r_op.into(),
+                                IntAnnotation {
+                                    bit_width: bits,
+                                    signedness: IntSignedness::DontCare,
+                                },
+                                Origin::synthetic(),
+                            )
+                            .raw();
                         self.apply_int_extension(sum, res_ann, bits)
                     }
                     BinOp::Sub => {
                         let bits = self.extract_result_bits(res_ann);
-                        let diff = self.builder.sub(
-                            l_op,
-                            r_op,
-                            IntAnnotation {
-                                bit_width: bits,
-                                signedness: IntSignedness::DontCare,
-                            },
-                            Origin::synthetic(),
-                        );
+                        let diff = self
+                            .builder
+                            .sub(
+                                l_op.into(),
+                                r_op.into(),
+                                IntAnnotation {
+                                    bit_width: bits,
+                                    signedness: IntSignedness::DontCare,
+                                },
+                                Origin::synthetic(),
+                            )
+                            .raw();
                         self.apply_int_extension(diff, res_ann, bits)
                     }
                     BinOp::Mul => {
                         let bits = self.extract_result_bits(res_ann);
-                        let prod = self.builder.mul(
-                            l_op,
-                            r_op,
-                            IntAnnotation {
-                                bit_width: bits,
-                                signedness: IntSignedness::DontCare,
-                            },
-                            Origin::synthetic(),
-                        );
+                        let prod = self
+                            .builder
+                            .mul(
+                                l_op.into(),
+                                r_op.into(),
+                                IntAnnotation {
+                                    bit_width: bits,
+                                    signedness: IntSignedness::DontCare,
+                                },
+                                Origin::synthetic(),
+                            )
+                            .raw();
                         self.apply_int_extension(prod, res_ann, bits)
                     }
                     // Unchecked variants: the caller guarantees no overflow so the
@@ -1185,7 +1236,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 bit_width: 64,
                                 signedness: IntSignedness::DontCare,
                             });
-                        self.builder.add(l_op, r_op, ann, Origin::synthetic())
+                        self.builder
+                            .add(l_op.into(), r_op.into(), ann, Origin::synthetic())
+                            .raw()
                     }
                     BinOp::SubUnchecked => {
                         let ann = res_ann
@@ -1207,7 +1260,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 bit_width: 64,
                                 signedness: IntSignedness::DontCare,
                             });
-                        self.builder.sub(l_op, r_op, ann, Origin::synthetic())
+                        self.builder
+                            .sub(l_op.into(), r_op.into(), ann, Origin::synthetic())
+                            .raw()
                     }
                     BinOp::MulUnchecked => {
                         let ann = res_ann
@@ -1229,7 +1284,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 bit_width: 64,
                                 signedness: IntSignedness::DontCare,
                             });
-                        self.builder.mul(l_op, r_op, ann, Origin::synthetic())
+                        self.builder
+                            .mul(l_op.into(), r_op.into(), ann, Origin::synthetic())
+                            .raw()
                     }
                     // Checked arithmetic: emit a multi-result IR intrinsic that
                     // produces (wrapping_result: Int, overflow: Bool).  The primary
@@ -1288,28 +1345,24 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     }
                     BinOp::Eq => {
                         if is_float_cmp {
-                            self.builder.fcmp(
-                                FCmpOp::OEq,
-                                l_raw.into(),
-                                r_raw.into(),
-                                Origin::synthetic(),
-                            )
+                            self.builder
+                                .fcmp(FCmpOp::OEq, l_raw.into(), r_raw.into(), Origin::synthetic())
+                                .raw()
                         } else {
                             self.builder
-                                .icmp(ICmpOp::Eq, l_op, r_op, Origin::synthetic())
+                                .icmp(ICmpOp::Eq, l_op.into(), r_op.into(), Origin::synthetic())
+                                .raw()
                         }
                     }
                     BinOp::Ne => {
                         if is_float_cmp {
-                            self.builder.fcmp(
-                                FCmpOp::UNe,
-                                l_raw.into(),
-                                r_raw.into(),
-                                Origin::synthetic(),
-                            )
+                            self.builder
+                                .fcmp(FCmpOp::UNe, l_raw.into(), r_raw.into(), Origin::synthetic())
+                                .raw()
                         } else {
                             self.builder
-                                .icmp(ICmpOp::Ne, l_op, r_op, Origin::synthetic())
+                                .icmp(ICmpOp::Ne, l_op.into(), r_op.into(), Origin::synthetic())
+                                .raw()
                         }
                     }
                     BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
@@ -1320,12 +1373,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 BinOp::Gt => FCmpOp::OGt,
                                 _ => FCmpOp::OGe,
                             };
-                            self.builder.fcmp(
-                                fcmp_op,
-                                l_raw.into(),
-                                r_raw.into(),
-                                Origin::synthetic(),
-                            )
+                            self.builder
+                                .fcmp(fcmp_op, l_raw.into(), r_raw.into(), Origin::synthetic())
+                                .raw()
                         } else {
                             let icmp_op = match op {
                                 BinOp::Lt => ICmpOp::Lt,
@@ -1333,7 +1383,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 BinOp::Gt => ICmpOp::Gt,
                                 _ => ICmpOp::Ge,
                             };
-                            self.builder.icmp(icmp_op, l_op, r_op, Origin::synthetic())
+                            self.builder
+                                .icmp(icmp_op, l_op.into(), r_op.into(), Origin::synthetic())
+                                .raw()
                         }
                     }
                     BinOp::Cmp => {
@@ -1396,20 +1448,22 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 })),
                                 Origin::synthetic(),
                             );
-                            self.builder.sub(
-                                gt_int.into(),
-                                lt_int.into(),
-                                IntAnnotation {
-                                    bit_width: 8,
-                                    signedness: IntSignedness::Signed,
-                                },
-                                Origin::synthetic(),
-                            )
+                            self.builder
+                                .sub(
+                                    gt_int.into(),
+                                    lt_int.into(),
+                                    IntAnnotation {
+                                        bit_width: 8,
+                                        signedness: IntSignedness::Signed,
+                                    },
+                                    Origin::synthetic(),
+                                )
+                                .raw()
                         } else {
                             let lt = self.builder.icmp(
                                 ICmpOp::Lt,
-                                l_op.clone(),
-                                r_op.clone(),
+                                l_op.clone().into(),
+                                r_op.clone().into(),
                                 Origin::synthetic(),
                             );
                             let one = self.builder.iconst(
@@ -1435,9 +1489,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 })),
                                 Origin::synthetic(),
                             );
-                            let gt = self
-                                .builder
-                                .icmp(ICmpOp::Gt, l_op, r_op, Origin::synthetic());
+                            let gt = self.builder.icmp(
+                                ICmpOp::Gt,
+                                l_op.into(),
+                                r_op.into(),
+                                Origin::synthetic(),
+                            );
                             let gt_int = self.builder.select(
                                 gt.into(),
                                 one.into(),
@@ -1449,15 +1506,17 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 })),
                                 Origin::synthetic(),
                             );
-                            self.builder.sub(
-                                gt_int.into(),
-                                lt_int.into(),
-                                IntAnnotation {
-                                    bit_width: 8,
-                                    signedness: IntSignedness::Signed,
-                                },
-                                Origin::synthetic(),
-                            )
+                            self.builder
+                                .sub(
+                                    gt_int.into(),
+                                    lt_int.into(),
+                                    IntAnnotation {
+                                        bit_width: 8,
+                                        signedness: IntSignedness::Signed,
+                                    },
+                                    Origin::synthetic(),
+                                )
+                                .raw()
                         }
                     }
                     BinOp::Shl | BinOp::ShlUnchecked => {
@@ -1479,7 +1538,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             Origin::synthetic(),
                         );
                         let masked_op = IrOperand {
-                            value: masked,
+                            value: masked.raw(),
                             annotation: None,
                         };
                         let ann = res_ann.map(|ia| match ia {
@@ -1496,45 +1555,56 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 signedness: IntSignedness::DontCare,
                             }),
                         });
-                        self.builder.shl(l_op, masked_op, ann, Origin::synthetic())
+                        self.builder
+                            .shl(l_op.into(), masked_op.into(), ann, Origin::synthetic())
+                            .raw()
                     }
                     BinOp::BitOr => {
                         let bits = self.extract_result_bits(res_ann);
-                        let result = self.builder.or(
-                            l_op,
-                            r_op,
-                            IntAnnotation {
-                                bit_width: bits,
-                                signedness: IntSignedness::DontCare,
-                            },
-                            Origin::synthetic(),
-                        );
+                        let result = self
+                            .builder
+                            .or(
+                                l_op.into(),
+                                r_op.into(),
+                                IntAnnotation {
+                                    bit_width: bits,
+                                    signedness: IntSignedness::DontCare,
+                                },
+                                Origin::synthetic(),
+                            )
+                            .raw();
                         self.apply_int_extension(result, res_ann, bits)
                     }
                     BinOp::BitAnd => {
                         let bits = self.extract_result_bits(res_ann);
-                        let result = self.builder.and(
-                            l_op,
-                            r_op,
-                            IntAnnotation {
-                                bit_width: bits,
-                                signedness: IntSignedness::DontCare,
-                            },
-                            Origin::synthetic(),
-                        );
+                        let result = self
+                            .builder
+                            .and(
+                                l_op.into(),
+                                r_op.into(),
+                                IntAnnotation {
+                                    bit_width: bits,
+                                    signedness: IntSignedness::DontCare,
+                                },
+                                Origin::synthetic(),
+                            )
+                            .raw();
                         self.apply_int_extension(result, res_ann, bits)
                     }
                     BinOp::BitXor => {
                         let bits = self.extract_result_bits(res_ann);
-                        let result = self.builder.xor(
-                            l_op,
-                            r_op,
-                            IntAnnotation {
-                                bit_width: bits,
-                                signedness: IntSignedness::DontCare,
-                            },
-                            Origin::synthetic(),
-                        );
+                        let result = self
+                            .builder
+                            .xor(
+                                l_op.into(),
+                                r_op.into(),
+                                IntAnnotation {
+                                    bit_width: bits,
+                                    signedness: IntSignedness::DontCare,
+                                },
+                                Origin::synthetic(),
+                            )
+                            .raw();
                         self.apply_int_extension(result, res_ann, bits)
                     }
                     BinOp::Shr | BinOp::ShrUnchecked => {
@@ -1556,7 +1626,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             Origin::synthetic(),
                         );
                         let masked_op = IrOperand {
-                            value: masked,
+                            value: masked.raw(),
                             annotation: None,
                         };
                         let ann = res_ann.map(|ia| match ia {
@@ -1573,26 +1643,34 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 signedness: IntSignedness::DontCare,
                             }),
                         });
-                        self.builder.shr(l_op, masked_op, ann, Origin::synthetic())
+                        self.builder
+                            .shr(l_op.into(), masked_op.into(), ann, Origin::synthetic())
+                            .raw()
                     }
-                    BinOp::Div => self.builder.div(
-                        l_op,
-                        r_op,
-                        IntAnnotation {
-                            bit_width: 64,
-                            signedness: IntSignedness::DontCare,
-                        },
-                        Origin::synthetic(),
-                    ),
-                    BinOp::Rem => self.builder.rem(
-                        l_op,
-                        r_op,
-                        IntAnnotation {
-                            bit_width: 64,
-                            signedness: IntSignedness::DontCare,
-                        },
-                        Origin::synthetic(),
-                    ),
+                    BinOp::Div => self
+                        .builder
+                        .div(
+                            l_op.into(),
+                            r_op.into(),
+                            IntAnnotation {
+                                bit_width: 64,
+                                signedness: IntSignedness::DontCare,
+                            },
+                            Origin::synthetic(),
+                        )
+                        .raw(),
+                    BinOp::Rem => self
+                        .builder
+                        .rem(
+                            l_op.into(),
+                            r_op.into(),
+                            IntAnnotation {
+                                bit_width: 64,
+                                signedness: IntSignedness::DontCare,
+                            },
+                            Origin::synthetic(),
+                        )
+                        .raw(),
                     BinOp::Offset => {
                         // ptr.wrapping_offset(count) = ptr + count * sizeof(T).
                         let l_raw = self.translate_operand(lhs)?;
@@ -1614,15 +1692,17 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 IntSignedness::DontCare,
                                 Origin::synthetic(),
                             );
-                            self.builder.mul(
-                                r.into(),
-                                size_val.into(),
-                                IntAnnotation {
-                                    bit_width: 64,
-                                    signedness: IntSignedness::DontCare,
-                                },
-                                Origin::synthetic(),
-                            )
+                            self.builder
+                                .mul(
+                                    r.into(),
+                                    size_val.into(),
+                                    IntAnnotation {
+                                        bit_width: 64,
+                                        signedness: IntSignedness::DontCare,
+                                    },
+                                    Origin::synthetic(),
+                                )
+                                .raw()
                         };
                         let ptr = self.coerce_to_ptr(l_raw);
                         self.builder
@@ -2247,13 +2327,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             let size = type_size(self.tcx, target_ty_mono).unwrap_or(0) as u32;
                             if size > 0 && size <= 8 {
                                 let slot = self.builder.stack_slot(size, Origin::synthetic());
-                                self.current_mem = self.builder.store(
-                                    val.into(),
-                                    slot.into(),
-                                    size,
-                                    self.current_mem.into(),
-                                    Origin::synthetic(),
-                                ).raw();
+                                self.current_mem = self
+                                    .builder
+                                    .store(
+                                        val.into(),
+                                        slot.into(),
+                                        size,
+                                        self.current_mem.into(),
+                                        Origin::synthetic(),
+                                    )
+                                    .raw();
                                 let loaded = self.builder.load(
                                     slot.into(),
                                     size,
@@ -2299,13 +2382,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let local_ty = self.monomorphize(self.mir.local_decls[place.local].ty);
                         let size = type_size(self.tcx, local_ty).unwrap_or(8) as u32;
                         let slot = self.builder.stack_slot(size.max(8), Origin::synthetic());
-                        self.current_mem = self.builder.store(
-                            val.into(),
-                            slot.into(),
-                            8,
-                            self.current_mem.into(),
-                            Origin::synthetic(),
-                        ).raw();
+                        self.current_mem = self
+                            .builder
+                            .store(
+                                val.into(),
+                                slot.into(),
+                                8,
+                                self.current_mem.into(),
+                                Origin::synthetic(),
+                            )
+                            .raw();
                         if let Some(meta) = self.fat_locals.get(place.local) {
                             let off8 = self.builder.iconst(
                                 8,
@@ -2319,13 +2405,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 0,
                                 Origin::synthetic(),
                             );
-                            self.current_mem = self.builder.store(
-                                meta.into(),
-                                meta_addr.into(),
-                                8,
-                                self.current_mem.into(),
-                                Origin::synthetic(),
-                            ).raw();
+                            self.current_mem = self
+                                .builder
+                                .store(
+                                    meta.into(),
+                                    meta_addr.into(),
+                                    8,
+                                    self.current_mem.into(),
+                                    Origin::synthetic(),
+                                )
+                                .raw();
                         }
                         self.locals.set(place.local, slot);
                         self.stack_locals.mark(place.local);
@@ -2354,12 +2443,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
                 // For non-enum aggregates with no operands, return zero.
                 if operands.is_empty() && enum_variant_idx.is_none() {
-                    return Some(self.builder.iconst(
-                        0,
-                        64,
-                        IntSignedness::DontCare,
-                        Origin::synthetic(),
-                    ));
+                    return Some(
+                        self.builder
+                            .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
+                            .raw(),
+                    );
                 }
 
                 // Determine the aggregate type for layout queries.
@@ -2391,12 +2479,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     8 * operands.len() as u64
                 });
                 if total_size == 0 {
-                    return Some(self.builder.iconst(
-                        0,
-                        64,
-                        IntSignedness::DontCare,
-                        Origin::synthetic(),
-                    ));
+                    return Some(
+                        self.builder
+                            .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
+                            .raw(),
+                    );
                 }
                 // Reuse the destination local's existing stack slot when
                 // available (e.g. sret-allocated _0) to avoid an intermediate
@@ -2440,13 +2527,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             self.builder
                                 .ptradd(slot.into(), off.into(), 0, Origin::synthetic())
                         };
-                        self.current_mem = self.builder.store(
-                            zero.into(),
-                            dst.into(),
-                            chunk,
-                            self.current_mem.into(),
-                            Origin::synthetic(),
-                        ).raw();
+                        self.current_mem = self
+                            .builder
+                            .store(
+                                zero.into(),
+                                dst.into(),
+                                chunk,
+                                self.current_mem.into(),
+                                Origin::synthetic(),
+                            )
+                            .raw();
                     }
                 }
 
@@ -2460,6 +2550,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let mut val = self.translate_operand(op).unwrap_or_else(|| {
                         self.builder
                             .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
+                            .raw()
                     });
 
                     // For large i128/u128 constants (>64 bits) in aggregates, iconst creates
@@ -2566,12 +2657,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 }
                             };
                             if let Some(mir::ConstValue::Slice { meta, .. }) = resolved {
-                                Some(self.builder.iconst(
-                                    meta as i64,
-                                    64,
-                                    IntSignedness::DontCare,
-                                    Origin::synthetic(),
-                                ))
+                                Some(
+                                    self.builder
+                                        .iconst(
+                                            meta as i64,
+                                            64,
+                                            IntSignedness::DontCare,
+                                            Origin::synthetic(),
+                                        )
+                                        .raw(),
+                                )
                             } else if let Some(mir::ConstValue::Indirect { alloc_id, offset }) =
                                 resolved
                             {
@@ -2591,12 +2686,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         let len = u64::from_le_bytes(
                                             len_bytes.try_into().unwrap_or([0u8; 8]),
                                         );
-                                        Some(self.builder.iconst(
-                                            len as i64,
-                                            64,
-                                            IntSignedness::DontCare,
-                                            Origin::synthetic(),
-                                        ))
+                                        Some(
+                                            self.builder
+                                                .iconst(
+                                                    len as i64,
+                                                    64,
+                                                    IntSignedness::DontCare,
+                                                    Origin::synthetic(),
+                                                )
+                                                .raw(),
+                                        )
                                     } else {
                                         None
                                     }
@@ -2611,13 +2710,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     };
                     if let Some(fat_val) = fat_op {
                         // Store data pointer into dst[0..8].
-                        self.current_mem = self.builder.store(
-                            val.into(),
-                            dst_addr.into(),
-                            8,
-                            self.current_mem.into(),
-                            Origin::synthetic(),
-                        ).raw();
+                        self.current_mem = self
+                            .builder
+                            .store(
+                                val.into(),
+                                dst_addr.into(),
+                                8,
+                                self.current_mem.into(),
+                                Origin::synthetic(),
+                            )
+                            .raw();
                         // Store fat component (length/vtable) into dst[8..16].
                         let off8 = self.builder.iconst(
                             8,
@@ -2631,13 +2733,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             0,
                             Origin::synthetic(),
                         );
-                        self.current_mem = self.builder.store(
-                            fat_val.into(),
-                            hi.into(),
-                            8,
-                            self.current_mem.into(),
-                            Origin::synthetic(),
-                        ).raw();
+                        self.current_mem = self
+                            .builder
+                            .store(
+                                fat_val.into(),
+                                hi.into(),
+                                8,
+                                self.current_mem.into(),
+                                Origin::synthetic(),
+                            )
+                            .raw();
                     } else if is_ptr_val && bytes > 8 {
                         // val is a pointer to multi-word data — copy word-by-word.
                         let num_words = (bytes as u64).div_ceil(8);
@@ -2680,13 +2785,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     Origin::synthetic(),
                                 )
                             };
-                            self.current_mem = self.builder.store(
-                                word.into(),
-                                dst.into(),
-                                word_size,
-                                self.current_mem.into(),
-                                Origin::synthetic(),
-                            ).raw();
+                            self.current_mem = self
+                                .builder
+                                .store(
+                                    word.into(),
+                                    dst.into(),
+                                    word_size,
+                                    self.current_mem.into(),
+                                    Origin::synthetic(),
+                                )
+                                .raw();
                         }
                     } else if is_stack_op
                         && is_ptr_val
@@ -2701,21 +2809,27 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             int_annotation_for_bytes(bytes),
                             Origin::synthetic(),
                         );
-                        self.current_mem = self.builder.store(
-                            loaded.into(),
-                            dst_addr.into(),
-                            bytes,
-                            self.current_mem.into(),
-                            Origin::synthetic(),
-                        ).raw();
+                        self.current_mem = self
+                            .builder
+                            .store(
+                                loaded.into(),
+                                dst_addr.into(),
+                                bytes,
+                                self.current_mem.into(),
+                                Origin::synthetic(),
+                            )
+                            .raw();
                     } else {
-                        self.current_mem = self.builder.store(
-                            val.into(),
-                            dst_addr.into(),
-                            bytes,
-                            self.current_mem.into(),
-                            Origin::synthetic(),
-                        ).raw();
+                        self.current_mem = self
+                            .builder
+                            .store(
+                                val.into(),
+                                dst_addr.into(),
+                                bytes,
+                                self.current_mem.into(),
+                                Origin::synthetic(),
+                            )
+                            .raw();
                     }
                 }
 
@@ -2839,12 +2953,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     self.coerce_to_int(v)
                 };
                 if !matches!(self.builder.value_type(v), Some(Type::Int)) {
-                    return Some(self.builder.iconst(
-                        0,
-                        64,
-                        IntSignedness::DontCare,
-                        Origin::synthetic(),
-                    ));
+                    return Some(
+                        self.builder
+                            .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
+                            .raw(),
+                    );
                 }
                 let bits = match neg_ann {
                     Some(IntAnn::Signed(n) | IntAnn::Unsigned(n) | IntAnn::DontCare(n)) => n,
@@ -2867,7 +2980,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     Some(IntAnn::Unsigned(_)) => {
                         self.builder.zext(result.into(), bits, Origin::synthetic())
                     }
-                    _ => result,
+                    _ => result.raw(),
                 })
             }
             Rvalue::UnaryOp(mir::UnOp::Not, operand) => {
@@ -2884,15 +2997,19 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let one =
                         self.builder
                             .iconst(1, 64, IntSignedness::DontCare, Origin::synthetic());
-                    return Some(self.builder.xor(
-                        int_v.into(),
-                        one.into(),
-                        IntAnnotation {
-                            bit_width: 64,
-                            signedness: IntSignedness::DontCare,
-                        },
-                        Origin::synthetic(),
-                    ));
+                    return Some(
+                        self.builder
+                            .xor(
+                                int_v.into(),
+                                one.into(),
+                                IntAnnotation {
+                                    bit_width: 64,
+                                    signedness: IntSignedness::DontCare,
+                                },
+                                Origin::synthetic(),
+                            )
+                            .raw(),
+                    );
                 }
                 let bits = match not_ann {
                     Some(IntAnn::Signed(n) | IntAnn::Unsigned(n) | IntAnn::DontCare(n)) => n,
@@ -2904,13 +3021,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 };
                 let result = match self.builder.value_type(v) {
                     Some(Type::Bool) => {
-                        let false_val = self.builder.bconst(false, Origin::synthetic());
-                        self.builder.icmp(
-                            ICmpOp::Eq,
-                            v.into(),
-                            false_val.into(),
-                            Origin::synthetic(),
-                        )
+                        let true_val = self.builder.bconst(true, Origin::synthetic());
+                        self.builder
+                            .bxor(v.into(), true_val.into(), Origin::synthetic())
+                            .raw()
                     }
                     Some(Type::Ptr(_))
                         if mir_ty.is_some_and(|t| t.is_integral())
@@ -2938,6 +3052,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         );
                         self.builder
                             .xor(loaded.into(), ones.into(), xor_ann, Origin::synthetic())
+                            .raw()
                     }
                     _ => {
                         // Bitwise NOT: XOR with -1.
@@ -2949,6 +3064,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         );
                         self.builder
                             .xor(v.into(), ones.into(), xor_ann, Origin::synthetic())
+                            .raw()
                     }
                 };
                 Some(match not_ann {
@@ -2978,12 +3094,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     _ => return None,
                 };
                 if n == 0 || elem_size == 0 {
-                    return Some(self.builder.iconst(
-                        0,
-                        64,
-                        IntSignedness::DontCare,
-                        Origin::synthetic(),
-                    ));
+                    return Some(
+                        self.builder
+                            .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
+                            .raw(),
+                    );
                 }
                 let total = (elem_size * n) as u32;
                 let slot = if dest_place.projection.is_empty() {
@@ -3014,13 +3129,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         self.builder
                             .ptradd(slot.into(), off.into(), 0, Origin::synthetic())
                     };
-                    self.current_mem = self.builder.store(
-                        elem_val.into(),
-                        dst.into(),
-                        store_size,
-                        self.current_mem.into(),
-                        Origin::synthetic(),
-                    ).raw();
+                    self.current_mem = self
+                        .builder
+                        .store(
+                            elem_val.into(),
+                            dst.into(),
+                            store_size,
+                            self.current_mem.into(),
+                            Origin::synthetic(),
+                        )
+                        .raw();
                 }
                 // Only mark the local as stack when writing directly to it
                 // (no projection). For projected assignments like `(*ptr) = [v; n]`
@@ -3135,7 +3253,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // to skip runtime checks, matching release-mode behaviour.
                 Some(
                     self.builder
-                        .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic()),
+                        .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
+                        .raw(),
                 )
             }
         }

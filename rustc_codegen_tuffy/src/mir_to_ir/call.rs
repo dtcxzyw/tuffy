@@ -361,13 +361,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         && let Some(addr) = proj_addr
                         && proj_size > 0
                     {
-                        self.current_mem = self.builder.store(
-                            result.into(),
-                            addr.into(),
-                            proj_size,
-                            self.current_mem.into(),
-                            Origin::synthetic(),
-                        ).raw();
+                        self.current_mem = self
+                            .builder
+                            .store(
+                                result.into(),
+                                addr.into(),
+                                proj_size,
+                                self.current_mem.into(),
+                                Origin::synthetic(),
+                            )
+                            .raw();
                     }
                 } else {
                     // If the destination is a stack local, the intrinsic set the
@@ -431,23 +434,29 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         Origin::synthetic(),
                                     )
                                 };
-                                self.current_mem = self.builder.store(
-                                    word.into(),
-                                    dst_addr.into(),
-                                    chunk,
-                                    self.current_mem.into(),
-                                    Origin::synthetic(),
-                                ).raw();
+                                self.current_mem = self
+                                    .builder
+                                    .store(
+                                        word.into(),
+                                        dst_addr.into(),
+                                        chunk,
+                                        self.current_mem.into(),
+                                        Origin::synthetic(),
+                                    )
+                                    .raw();
                                 offset += chunk;
                             }
                         } else {
-                            self.current_mem = self.builder.store(
-                                result_val.into(),
-                                slot.into(),
-                                size.max(1),
-                                self.current_mem.into(),
-                                Origin::synthetic(),
-                            ).raw();
+                            self.current_mem = self
+                                .builder
+                                .store(
+                                    result_val.into(),
+                                    slot.into(),
+                                    size.max(1),
+                                    self.current_mem.into(),
+                                    Origin::synthetic(),
+                                )
+                                .raw();
                         }
                         self.locals.set(destination.local, slot);
                     }
@@ -1182,7 +1191,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             fn_ptr
         } else {
             self.builder
-                .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic()).raw()
+                .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
+                .raw()
         };
         let call_ret_ty = translate_ty(self.tcx, dest_ty).unwrap_or(Type::Unit);
         let call_ret_ann = if matches!(call_ret_ty, Type::Int) {
@@ -1203,7 +1213,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         // For void calls, call_data is None — use a dummy zero.
         let call_vref = call_data.unwrap_or_else(|| {
             self.builder
-                .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic()).raw()
+                .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
+                .raw()
         });
 
         if has_call_dest_proj {
@@ -1233,13 +1244,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         Origin::synthetic(),
                     );
                 } else {
-                    self.current_mem = self.builder.store(
-                        call_vref.into(),
-                        addr.into(),
-                        call_proj_size,
-                        self.current_mem.into(),
-                        Origin::synthetic(),
-                    ).raw();
+                    self.current_mem = self
+                        .builder
+                        .store(
+                            call_vref.into(),
+                            addr.into(),
+                            call_proj_size,
+                            self.current_mem.into(),
+                            Origin::synthetic(),
+                        )
+                        .raw();
                 }
             }
             // For non-Deref projections restore local to spilled slot.
@@ -1273,13 +1287,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 self.builder.stack_slot(size as u32, Origin::synthetic())
             };
             // Store RAX (primary return) at offset 0.
-            self.current_mem = self.builder.store(
-                call_vref.into(),
-                slot.into(),
-                8,
-                self.current_mem.into(),
-                Origin::synthetic(),
-            ).raw();
+            self.current_mem = self
+                .builder
+                .store(
+                    call_vref.into(),
+                    slot.into(),
+                    8,
+                    self.current_mem.into(),
+                    Origin::synthetic(),
+                )
+                .raw();
             // Mark the call as having a secondary return in RDX and
             // capture it via a placeholder instruction.
             let call_idx = call_mem.index();
@@ -1296,13 +1313,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             let hi_addr = self
                 .builder
                 .ptradd(slot.into(), off8.into(), 0, Origin::synthetic());
-            self.current_mem = self.builder.store(
-                rdx_capture.into(),
-                hi_addr.into(),
-                8,
-                self.current_mem.into(),
-                Origin::synthetic(),
-            ).raw();
+            self.current_mem = self
+                .builder
+                .store(
+                    rdx_capture.into(),
+                    hi_addr.into(),
+                    8,
+                    self.current_mem.into(),
+                    Origin::synthetic(),
+                )
+                .raw();
 
             self.locals.set(destination.local, slot);
             self.stack_locals.mark(destination.local);
@@ -1345,13 +1365,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 };
                 let size = type_size(self.tcx, inner_ty).unwrap_or(8) as u32;
                 let slot = self.builder.stack_slot(size.max(1), Origin::synthetic());
-                self.current_mem = self.builder.store(
-                    call_vref.into(),
-                    slot.into(),
-                    size,
-                    self.current_mem.into(),
-                    Origin::synthetic(),
-                ).raw();
+                self.current_mem = self
+                    .builder
+                    .store(
+                        call_vref.into(),
+                        slot.into(),
+                        size,
+                        self.current_mem.into(),
+                        Origin::synthetic(),
+                    )
+                    .raw();
                 self.locals.set(destination.local, slot);
             } else if self.stack_locals.is_stack(destination.local) {
                 // Destination was pre-promoted to a stack local (e.g. because
@@ -1360,13 +1383,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // the slot pointer with the raw value.
                 if let Some(slot) = self.locals.get(destination.local) {
                     let size = dest_size.unwrap_or(8) as u32;
-                    self.current_mem = self.builder.store(
-                        call_vref.into(),
-                        slot.into(),
-                        size.max(1),
-                        self.current_mem.into(),
-                        Origin::synthetic(),
-                    ).raw();
+                    self.current_mem = self
+                        .builder
+                        .store(
+                            call_vref.into(),
+                            slot.into(),
+                            size.max(1),
+                            self.current_mem.into(),
+                            Origin::synthetic(),
+                        )
+                        .raw();
                 }
             } else {
                 self.locals.set(destination.local, call_vref);

@@ -219,13 +219,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let slot_size = (size as u32).max(1);
         let slot = self.builder.stack_slot(slot_size, Origin::synthetic());
         if let Some(old_val) = self.locals.get(local) {
-            self.current_mem = self.builder.store(
-                old_val.into(),
-                slot.into(),
-                slot_size,
-                self.current_mem.into(),
-                Origin::synthetic(),
-            ).raw();
+            self.current_mem = self
+                .builder
+                .store(
+                    old_val.into(),
+                    slot.into(),
+                    slot_size,
+                    self.current_mem.into(),
+                    Origin::synthetic(),
+                )
+                .raw();
         }
         self.locals.set(local, slot);
         self.stack_locals.mark(local);

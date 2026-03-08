@@ -463,13 +463,16 @@ pub fn translate_function<'tcx>(
                             } else {
                                 size as u32
                             };
-                            ctx.current_mem = ctx.builder.store(
-                                prev.into(),
-                                slot.into(),
-                                store_bytes,
-                                ctx.current_mem.into(),
-                                Origin::synthetic(),
-                            );
+                            ctx.current_mem = ctx
+                                .builder
+                                .store(
+                                    prev.into(),
+                                    slot.into(),
+                                    store_bytes,
+                                    ctx.current_mem.into(),
+                                    Origin::synthetic(),
+                                )
+                                .raw();
                             if let Some(meta) = ctx.fat_locals.get(local) {
                                 let off8 = ctx.builder.iconst(
                                     8,
@@ -483,13 +486,16 @@ pub fn translate_function<'tcx>(
                                     0,
                                     Origin::synthetic(),
                                 );
-                                ctx.current_mem = ctx.builder.store(
-                                    meta.into(),
-                                    meta_addr.into(),
-                                    8,
-                                    ctx.current_mem.into(),
-                                    Origin::synthetic(),
-                                );
+                                ctx.current_mem = ctx
+                                    .builder
+                                    .store(
+                                        meta.into(),
+                                        meta_addr.into(),
+                                        8,
+                                        ctx.current_mem.into(),
+                                        Origin::synthetic(),
+                                    )
+                                    .raw();
                             }
                         }
                         ctx.locals.set(local, slot);

@@ -326,7 +326,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             Origin::synthetic(),
                         );
                         self.builder
-                            .mul(offset.into(), sz.into(), I64, Origin::synthetic()).raw()
+                            .mul(offset.into(), sz.into(), I64, Origin::synthetic())
+                            .raw()
                     };
                     let result =
                         self.builder
@@ -359,7 +360,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             Origin::synthetic(),
                         );
                         self.builder
-                            .div(diff.into(), sz.into(), I64, Origin::synthetic()).raw()
+                            .div(diff.into(), sz.into(), I64, Origin::synthetic())
+                            .raw()
                     };
                     self.locals.set(destination_local, result);
                 }
@@ -620,7 +622,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         Origin::synthetic(),
                     );
                     self.builder
-                        .mul(count.into(), sz.into(), I64, Origin::synthetic()).raw()
+                        .mul(count.into(), sz.into(), I64, Origin::synthetic())
+                        .raw()
                 };
                 let dst_annotated = IrOperand::annotated(dst, Annotation::Align(elem_align as u32));
                 let mem_out = self.builder.mem_set(
@@ -651,7 +654,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         Origin::synthetic(),
                     );
                     self.builder
-                        .mul(count.into(), sz.into(), I64, Origin::synthetic()).raw()
+                        .mul(count.into(), sz.into(), I64, Origin::synthetic())
+                        .raw()
                 };
                 let dst_annotated = IrOperand::annotated(dst, Annotation::Align(elem_align as u32));
                 let src_annotated = IrOperand::annotated(src, Annotation::Align(elem_align as u32));
@@ -683,7 +687,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         Origin::synthetic(),
                     );
                     self.builder
-                        .mul(count.into(), sz.into(), I64, Origin::synthetic()).raw()
+                        .mul(count.into(), sz.into(), I64, Origin::synthetic())
+                        .raw()
                 };
                 let dst_annotated = IrOperand::annotated(dst, Annotation::Align(elem_align as u32));
                 let src_annotated = IrOperand::annotated(src, Annotation::Align(elem_align as u32));
@@ -724,10 +729,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let cmp_result = data.unwrap_or_else(|| {
                     self.builder
                         .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
+                        .raw()
                 });
                 let zero = self
                     .builder
-                    .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
+                    .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
+                    .raw();
                 let eq = self.builder.icmp(
                     tuffy_ir::instruction::ICmpOp::Eq,
                     cmp_result.into(),
@@ -782,20 +789,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         int_annotation_for_bytes(chunk),
                         Origin::synthetic(),
                     );
-                    mem = self.builder.store(
-                        vy.into(),
-                        xa.into(),
-                        chunk,
-                        mem.into(),
-                        Origin::synthetic(),
-                    );
-                    mem = self.builder.store(
-                        vx.into(),
-                        ya.into(),
-                        chunk,
-                        mem.into(),
-                        Origin::synthetic(),
-                    );
+                    mem = self
+                        .builder
+                        .store(vy.into(), xa.into(), chunk, mem.into(), Origin::synthetic())
+                        .raw();
+                    mem = self
+                        .builder
+                        .store(vx.into(), ya.into(), chunk, mem.into(), Origin::synthetic())
+                        .raw();
                 }
                 Some(mem)
             }
@@ -897,7 +898,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         mem2.into(),
                         Origin::synthetic(),
                     );
-                    Some(mem3)
+                    Some(mem3.raw())
                 } else {
                     self.locals.set(destination_local, actual_old);
                     Some(new_mem)
@@ -1047,6 +1048,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         );
                         self.builder
                             .xor(a.into(), all_ones.into(), I64, Origin::synthetic())
+                            .raw()
                     } else if name.starts_with("atomic_umax") {
                         let _bits = (elem_size * 8) as u32;
                         let gt = self.builder.icmp(

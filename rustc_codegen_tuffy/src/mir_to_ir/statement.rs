@@ -100,12 +100,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                         ..
                                                     }) = resolved
                                                     {
-                                                        Some(self.builder.iconst(
-                                                            meta as i64,
-                                                            64,
-                                                            IntSignedness::DontCare,
-                                                            Origin::synthetic(),
-                                                        ))
+                                                        Some(
+                                                            self.builder
+                                                                .iconst(
+                                                                    meta as i64,
+                                                                    64,
+                                                                    IntSignedness::DontCare,
+                                                                    Origin::synthetic(),
+                                                                )
+                                                                .raw(),
+                                                        )
                                                     } else if let Some(
                                                         mir::ConstValue::Indirect {
                                                             alloc_id,
@@ -126,7 +130,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                             let len = u64::from_le_bytes(
                                                                 len_bytes.try_into().unwrap_or([0u8; 8]),
                                                             );
-                                                            Some(self.builder.iconst(len as i64, 64, IntSignedness::DontCare, Origin::synthetic()))
+                                                            Some(self.builder.iconst(len as i64, 64, IntSignedness::DontCare, Origin::synthetic()).raw())
                                                         } else {
                                                             None
                                                         }
@@ -187,13 +191,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                             };
                                             if let Some(fat_val) = fat_src {
                                                 // Store data pointer into slot[0..8].
-                                                self.current_mem = self.builder.store(
-                                                    val.into(),
-                                                    slot.into(),
-                                                    8,
-                                                    self.current_mem.into(),
-                                                    Origin::synthetic(),
-                                                ).raw();
+                                                self.current_mem = self
+                                                    .builder
+                                                    .store(
+                                                        val.into(),
+                                                        slot.into(),
+                                                        8,
+                                                        self.current_mem.into(),
+                                                        Origin::synthetic(),
+                                                    )
+                                                    .raw();
                                                 // Store fat component (length/vtable) into slot[8..16].
                                                 let off8 = self.builder.iconst(
                                                     8,
@@ -207,13 +214,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                     0,
                                                     Origin::synthetic(),
                                                 );
-                                                self.current_mem = self.builder.store(
-                                                    fat_val.into(),
-                                                    hi_addr.into(),
-                                                    8,
-                                                    self.current_mem.into(),
-                                                    Origin::synthetic(),
-                                                ).raw();
+                                                self.current_mem = self
+                                                    .builder
+                                                    .store(
+                                                        fat_val.into(),
+                                                        hi_addr.into(),
+                                                        8,
+                                                        self.current_mem.into(),
+                                                        Origin::synthetic(),
+                                                    )
+                                                    .raw();
                                             } else {
                                                 // For word-by-word copy we need a SOURCE ADDRESS
                                                 // to load from. When the rvalue is Use(Copy/Move)
@@ -278,13 +288,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                             Origin::synthetic(),
                                                         )
                                                     };
-                                                    self.current_mem = self.builder.store(
-                                                        word.into(),
-                                                        dst_addr.into(),
-                                                        chunk,
-                                                        self.current_mem.into(),
-                                                        Origin::synthetic(),
-                                                    ).raw();
+                                                    self.current_mem = self
+                                                        .builder
+                                                        .store(
+                                                            word.into(),
+                                                            dst_addr.into(),
+                                                            chunk,
+                                                            self.current_mem.into(),
+                                                            Origin::synthetic(),
+                                                        )
+                                                        .raw();
                                                 }
                                             }
                                         }
@@ -320,13 +333,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         };
                                         if let Some(fat_val) = ref_fat_src {
                                             // Store data pointer into slot[0..8].
-                                            self.current_mem = self.builder.store(
-                                                val.into(),
-                                                slot.into(),
-                                                8,
-                                                self.current_mem.into(),
-                                                Origin::synthetic(),
-                                            ).raw();
+                                            self.current_mem = self
+                                                .builder
+                                                .store(
+                                                    val.into(),
+                                                    slot.into(),
+                                                    8,
+                                                    self.current_mem.into(),
+                                                    Origin::synthetic(),
+                                                )
+                                                .raw();
                                             // Store metadata (length/vtable) into slot[8..16].
                                             let off8 = self.builder.iconst(
                                                 8,
@@ -340,13 +356,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                 0,
                                                 Origin::synthetic(),
                                             );
-                                            self.current_mem = self.builder.store(
-                                                fat_val.into(),
-                                                hi_addr.into(),
-                                                8,
-                                                self.current_mem.into(),
-                                                Origin::synthetic(),
-                                            ).raw();
+                                            self.current_mem = self
+                                                .builder
+                                                .store(
+                                                    fat_val.into(),
+                                                    hi_addr.into(),
+                                                    8,
+                                                    self.current_mem.into(),
+                                                    Origin::synthetic(),
+                                                )
+                                                .raw();
                                         } else {
                                             let src_slot = match rvalue {
                                                 Rvalue::Use(
@@ -426,13 +445,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                             Origin::synthetic(),
                                                         )
                                                     };
-                                                    self.current_mem = self.builder.store(
-                                                        word.into(),
-                                                        dst_addr.into(),
-                                                        chunk,
-                                                        self.current_mem.into(),
-                                                        Origin::synthetic(),
-                                                    ).raw();
+                                                    self.current_mem = self
+                                                        .builder
+                                                        .store(
+                                                            word.into(),
+                                                            dst_addr.into(),
+                                                            chunk,
+                                                            self.current_mem.into(),
+                                                            Origin::synthetic(),
+                                                        )
+                                                        .raw();
                                                 }
                                             } else {
                                                 // CheckedBinaryOp stores (result, bool)
@@ -461,13 +483,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                     _ => None,
                                                 };
                                                 let store_bytes = checked_rvalue.unwrap_or(bytes);
-                                                self.current_mem = self.builder.store(
-                                                    val.into(),
-                                                    slot.into(),
-                                                    store_bytes,
-                                                    self.current_mem.into(),
-                                                    Origin::synthetic(),
-                                                ).raw();
+                                                self.current_mem = self
+                                                    .builder
+                                                    .store(
+                                                        val.into(),
+                                                        slot.into(),
+                                                        store_bytes,
+                                                        self.current_mem.into(),
+                                                        Origin::synthetic(),
+                                                    )
+                                                    .raw();
                                                 if let Some(arith_bytes) = checked_rvalue
                                                     && arith_bytes >= 8
                                                 {
@@ -489,24 +514,30 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                         IntSignedness::DontCare,
                                                         Origin::synthetic(),
                                                     );
-                                                    self.current_mem = self.builder.store(
-                                                        zero.into(),
-                                                        flag_addr.into(),
-                                                        1,
-                                                        self.current_mem.into(),
-                                                        Origin::synthetic(),
-                                                    ).raw();
+                                                    self.current_mem = self
+                                                        .builder
+                                                        .store(
+                                                            zero.into(),
+                                                            flag_addr.into(),
+                                                            1,
+                                                            self.current_mem.into(),
+                                                            Origin::synthetic(),
+                                                        )
+                                                        .raw();
                                                 }
                                             }
                                         } // close ref_fat_src else
                                     } else {
-                                        self.current_mem = self.builder.store(
-                                            val.into(),
-                                            slot.into(),
-                                            bytes,
-                                            self.current_mem.into(),
-                                            Origin::synthetic(),
-                                        ).raw();
+                                        self.current_mem = self
+                                            .builder
+                                            .store(
+                                                val.into(),
+                                                slot.into(),
+                                                bytes,
+                                                self.current_mem.into(),
+                                                Origin::synthetic(),
+                                            )
+                                            .raw();
                                     }
                                 } else {
                                     self.locals.set(place.local, val);
@@ -653,13 +684,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                 Origin::synthetic(),
                                             )
                                         };
-                                        self.current_mem = self.builder.store(
-                                            word.into(),
-                                            dst_addr.into(),
-                                            chunk,
-                                            self.current_mem.into(),
-                                            Origin::synthetic(),
-                                        ).raw();
+                                        self.current_mem = self
+                                            .builder
+                                            .store(
+                                                word.into(),
+                                                dst_addr.into(),
+                                                chunk,
+                                                self.current_mem.into(),
+                                                Origin::synthetic(),
+                                            )
+                                            .raw();
                                     }
                                     self.locals.set(place.local, new_slot);
                                 }
@@ -690,13 +724,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 };
                                 if let Some(fat_val) = fat_src.filter(|_| bytes >= 16) {
                                     // Store data pointer into dst[0..8].
-                                    self.current_mem = self.builder.store(
-                                        val.into(),
-                                        addr.into(),
-                                        8,
-                                        self.current_mem.into(),
-                                        Origin::synthetic(),
-                                    ).raw();
+                                    self.current_mem = self
+                                        .builder
+                                        .store(
+                                            val.into(),
+                                            addr.into(),
+                                            8,
+                                            self.current_mem.into(),
+                                            Origin::synthetic(),
+                                        )
+                                        .raw();
                                     // Store fat component into dst[8..16].
                                     let off8 = self.builder.iconst(
                                         8,
@@ -710,13 +747,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         0,
                                         Origin::synthetic(),
                                     );
-                                    self.current_mem = self.builder.store(
-                                        fat_val.into(),
-                                        hi_addr.into(),
-                                        8,
-                                        self.current_mem.into(),
-                                        Origin::synthetic(),
-                                    ).raw();
+                                    self.current_mem = self
+                                        .builder
+                                        .store(
+                                            fat_val.into(),
+                                            hi_addr.into(),
+                                            8,
+                                            self.current_mem.into(),
+                                            Origin::synthetic(),
+                                        )
+                                        .raw();
                                 } else if bytes > 8
                                     || matches!(rvalue, Rvalue::Aggregate(..))
                                     || !matches!(
@@ -785,25 +825,31 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                 Origin::synthetic(),
                                             )
                                         };
-                                        self.current_mem = self.builder.store(
-                                            word.into(),
-                                            dst_addr.into(),
-                                            chunk,
-                                            self.current_mem.into(),
-                                            Origin::synthetic(),
-                                        ).raw();
+                                        self.current_mem = self
+                                            .builder
+                                            .store(
+                                                word.into(),
+                                                dst_addr.into(),
+                                                chunk,
+                                                self.current_mem.into(),
+                                                Origin::synthetic(),
+                                            )
+                                            .raw();
                                     }
                                 } else {
                                     // Scalar pointer value (≤8 bytes, e.g. &u32,
                                     // *const T): store the value directly instead
                                     // of treating it as an address to load from.
-                                    self.current_mem = self.builder.store(
-                                        val.into(),
-                                        addr.into(),
-                                        bytes,
-                                        self.current_mem.into(),
-                                        Origin::synthetic(),
-                                    ).raw();
+                                    self.current_mem = self
+                                        .builder
+                                        .store(
+                                            val.into(),
+                                            addr.into(),
+                                            bytes,
+                                            self.current_mem.into(),
+                                            Origin::synthetic(),
+                                        )
+                                        .raw();
                                 }
                             } else if bytes > 8 {
                                 // Check if the rvalue's source type is also >8 bytes
@@ -882,24 +928,30 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     _ => src_bytes > 8,
                                 };
                                 if val_is_wide {
-                                    self.current_mem = self.builder.store(
-                                        val.into(),
-                                        addr.into(),
-                                        bytes,
-                                        self.current_mem.into(),
-                                        Origin::synthetic(),
-                                    ).raw();
+                                    self.current_mem = self
+                                        .builder
+                                        .store(
+                                            val.into(),
+                                            addr.into(),
+                                            bytes,
+                                            self.current_mem.into(),
+                                            Origin::synthetic(),
+                                        )
+                                        .raw();
                                 } else {
                                     // Scalar Int value being stored to a >8-byte
                                     // projected field (e.g. u16 as u128 → _2.0).
                                     // Store low word, then compute and store high word.
-                                    self.current_mem = self.builder.store(
-                                        val.into(),
-                                        addr.into(),
-                                        8,
-                                        self.current_mem.into(),
-                                        Origin::synthetic(),
-                                    ).raw();
+                                    self.current_mem = self
+                                        .builder
+                                        .store(
+                                            val.into(),
+                                            addr.into(),
+                                            8,
+                                            self.current_mem.into(),
+                                            Origin::synthetic(),
+                                        )
+                                        .raw();
                                     let src_is_signed = match rvalue {
                                         Rvalue::Cast(CastKind::IntToInt, op, _) => {
                                             let src_ty =
@@ -946,22 +998,28 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         0,
                                         Origin::synthetic(),
                                     );
-                                    self.current_mem = self.builder.store(
-                                        hi_word.into(),
-                                        hi_addr.into(),
-                                        8,
-                                        self.current_mem.into(),
-                                        Origin::synthetic(),
-                                    ).raw();
+                                    self.current_mem = self
+                                        .builder
+                                        .store(
+                                            hi_word.into(),
+                                            hi_addr.into(),
+                                            8,
+                                            self.current_mem.into(),
+                                            Origin::synthetic(),
+                                        )
+                                        .raw();
                                 }
                             } else if bytes > 0 {
-                                self.current_mem = self.builder.store(
-                                    val.into(),
-                                    addr.into(),
-                                    bytes,
-                                    self.current_mem.into(),
-                                    Origin::synthetic(),
-                                ).raw();
+                                self.current_mem = self
+                                    .builder
+                                    .store(
+                                        val.into(),
+                                        addr.into(),
+                                        bytes,
+                                        self.current_mem.into(),
+                                        Origin::synthetic(),
+                                    )
+                                    .raw();
                             }
                         }
                     }
@@ -985,13 +1043,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let addr =
                             self.builder
                                 .ptradd(slot.into(), off.into(), 0, Origin::synthetic());
-                        self.current_mem = self.builder.store(
-                            fat_val.into(),
-                            addr.into(),
-                            8,
-                            self.current_mem.into(),
-                            Origin::synthetic(),
-                        ).raw();
+                        self.current_mem = self
+                            .builder
+                            .store(
+                                fat_val.into(),
+                                addr.into(),
+                                8,
+                                self.current_mem.into(),
+                                Origin::synthetic(),
+                            )
+                            .raw();
                     }
                 }
                 // Cast from a projected non-fat type to a fat pointer
@@ -1071,12 +1132,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     IntSignedness::DontCare,
                                     Origin::synthetic(),
                                 );
-                                self.builder.mul(
-                                    count_v.into(),
-                                    sz.into(),
-                                    I64,
-                                    Origin::synthetic(),
-                                )
+                                self.builder
+                                    .mul(count_v.into(), sz.into(), I64, Origin::synthetic())
+                                    .raw()
                             };
                             let sym_id = self.symbols.intern("memcpy");
                             let callee = self.builder.symbol_addr(sym_id, Origin::synthetic());
@@ -1196,13 +1254,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let tag_const =
             self.builder
                 .iconst(tag_val, 64, IntSignedness::DontCare, Origin::synthetic());
-        self.current_mem = self.builder.store(
-            tag_const.into(),
-            tag_addr.into(),
-            tag_size,
-            self.current_mem.into(),
-            Origin::synthetic(),
-        ).raw();
+        self.current_mem = self
+            .builder
+            .store(
+                tag_const.into(),
+                tag_addr.into(),
+                tag_size,
+                self.current_mem.into(),
+                Origin::synthetic(),
+            )
+            .raw();
     }
 
     /// Write the discriminant tag for an enum variant into a slot pointer.
@@ -1277,12 +1338,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let tag_const =
             self.builder
                 .iconst(tag_val, 64, IntSignedness::DontCare, Origin::synthetic());
-        self.current_mem = self.builder.store(
-            tag_const.into(),
-            tag_addr.into(),
-            tag_size,
-            self.current_mem.into(),
-            Origin::synthetic(),
-        ).raw();
+        self.current_mem = self
+            .builder
+            .store(
+                tag_const.into(),
+                tag_addr.into(),
+                tag_size,
+                self.current_mem.into(),
+                Origin::synthetic(),
+            )
+            .raw();
     }
 }
