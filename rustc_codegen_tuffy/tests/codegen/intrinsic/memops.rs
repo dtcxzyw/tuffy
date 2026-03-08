@@ -157,7 +157,7 @@
 // CHECK:
 // CHECK:   bb3(v12: mem):
 // CHECK:     v13: ptr = symbol_addr @memcpy
-// CHECK:     v14: mem, v15: int = call v13(v2, v1, v3), v12 -> int
+// CHECK:     v14: mem, v15: int:u64 = call v13(v2, v1, v3), v12 -> int
 // CHECK:     ret v14
 // CHECK: }
 // CHECK:
@@ -393,48 +393,49 @@
 // CHECK:   bb1(v7: mem):
 // CHECK:     v8: int:u64 = ptrtoaddr v1
 // CHECK:     v9: int:i64 = iconst 1
-// CHECK:     v10: int:u64 = sub v2, v9:u64
+// CHECK:     v10: int:i64 = sub v2, v9:u64
 // CHECK:     v11: int:u64 = zext v10, 64
-// CHECK:     v12: int:u64 = and v8, v11
-// CHECK:     v13: int:i64 = iconst 0
-// CHECK:     v14: bool = icmp.eq v12, v13:u64
-// CHECK:     v15: int:u64 = bool_to_int v14
-// CHECK:     v16: bool = int_to_bool v15
-// CHECK:     ret v16, v7
+// CHECK:     v12: int:i64 = and v8, v11
+// CHECK:     v13: int:u64 = zext v12, 64
+// CHECK:     v14: int:i64 = iconst 0
+// CHECK:     v15: bool = icmp.eq v13, v14:u64
+// CHECK:     v16: int:u64 = bool_to_int v15
+// CHECK:     v17: bool = int_to_bool v16
+// CHECK:     ret v17, v7
 // CHECK:
-// CHECK:   bb2(v18: mem):
-// CHECK:     v19: ptr = symbol_addr @.Lstr.0
-// CHECK:     v20: int:i64 = iconst 42
+// CHECK:   bb2(v19: mem):
+// CHECK:     v20: ptr = symbol_addr @.Lstr.0
 // CHECK:     v21: int:i64 = iconst 42
-// CHECK:     v22: mem = store.8 v19, v4, v18
-// CHECK:     v23: int:i64 = iconst 8
-// CHECK:     v24: ptr = ptradd v4, v23
-// CHECK:     v25: mem = store.8 v21, v24, v22
-// CHECK:     v26: int:i64 = iconst 42
-// CHECK:     v27: int:i64 = iconst 8
-// CHECK:     v28: ptr = ptradd v4, v27
-// CHECK:     v29: mem = store.8 v26, v28, v25
-// CHECK:     v30: ptr = load.8 v4, v29
-// CHECK:     v31: int:u64 = ptrtoaddr v30
-// CHECK:     v32: ptr = symbol_addr @.Lstr.1
-// CHECK:     v33: int:i64 = iconst 42
-// CHECK:     v34: mem = store.8 v31, v3, v29
-// CHECK:     v35: int:i64 = iconst 0
-// CHECK:     v36: int:i64 = iconst 8
-// CHECK:     v37: ptr = ptradd v3, v36
-// CHECK:     v38: mem = store.8 v35, v37, v34
-// CHECK:     v39: ptr = symbol_addr @.Lloc.3
-// CHECK:     v40: ptr = symbol_addr @_RNvNtCsiYoX4ApF2vj_4core9panicking9panic_fmt
-// CHECK:     v41: mem = call v40(v39), v38
-// CHECK:     v42: int:i64 = iconst 0
+// CHECK:     v22: int:i64 = iconst 42
+// CHECK:     v23: mem = store.8 v20, v4, v19
+// CHECK:     v24: int:i64 = iconst 8
+// CHECK:     v25: ptr = ptradd v4, v24
+// CHECK:     v26: mem = store.8 v22, v25, v23
+// CHECK:     v27: int:i64 = iconst 42
+// CHECK:     v28: int:i64 = iconst 8
+// CHECK:     v29: ptr = ptradd v4, v28
+// CHECK:     v30: mem = store.8 v27, v29, v26
+// CHECK:     v31: ptr = load.8 v4, v30
+// CHECK:     v32: int:u64 = ptrtoaddr v31
+// CHECK:     v33: ptr = symbol_addr @.Lstr.1
+// CHECK:     v34: int:i64 = iconst 42
+// CHECK:     v35: mem = store.8 v32, v3, v30
+// CHECK:     v36: int:i64 = iconst 0
+// CHECK:     v37: int:i64 = iconst 8
+// CHECK:     v38: ptr = ptradd v3, v37
+// CHECK:     v39: mem = store.8 v36, v38, v35
+// CHECK:     v40: ptr = symbol_addr @.Lloc.3
+// CHECK:     v41: ptr = symbol_addr @_RNvNtCsiYoX4ApF2vj_4core9panicking9panic_fmt
+// CHECK:     v42: mem = call v41(v40), v39
+// CHECK:     v43: int:i64 = iconst 0
 // CHECK:     unreachable
 // CHECK:
-// CHECK:   bb3(v44: mem):
-// CHECK:     v45: int:i64 = iconst 4294967295
-// CHECK:     v46: int:u64 = and v5, v45
-// CHECK:     v47: int:i64 = iconst 1
-// CHECK:     v48: bool = icmp.eq v46, v47
-// CHECK:     brif v48, bb1(v44), bb2(v44)
+// CHECK:   bb3(v45: mem):
+// CHECK:     v46: int:i64 = iconst 4294967295
+// CHECK:     v47: int:u64 = and v5, v46
+// CHECK:     v48: int:i64 = iconst 1
+// CHECK:     v49: bool = icmp.eq v47, v48
+// CHECK:     brif v49, bb1(v45), bb2(v45)
 // CHECK: }
 // CHECK:
 // CHECK: fn std::intrinsics::cold_path() -> () {
@@ -665,7 +666,7 @@
 // CHECK:     v53: bool = icmp.eq v51, v52:u64
 // CHECK:     v54: int:u64 = bool_to_int v53
 // CHECK:     v55: int:i64 = iconst 1
-// CHECK:     v56: int:u64 = xor v54, v55
+// CHECK:     v56: int:i64 = xor v54, v55
 // CHECK:     v57: int:i64 = iconst 255
 // CHECK:     v58: int:u64 = and v56, v57
 // CHECK:     v59: int:i64 = iconst 0
@@ -1063,7 +1064,7 @@
 // CHECK:     v87: bool = icmp.eq v85, v86:u64
 // CHECK:     v88: int:u64 = bool_to_int v87
 // CHECK:     v89: int:i64 = iconst 1
-// CHECK:     v90: int:u64 = xor v88, v89
+// CHECK:     v90: int:i64 = xor v88, v89
 // CHECK:     v91: int:i64 = iconst 255
 // CHECK:     v92: int:u64 = and v90, v91
 // CHECK:     v93: int:i64 = iconst 0
@@ -1099,7 +1100,7 @@
 // CHECK:     v118: bool = icmp.eq v116, v117:u64
 // CHECK:     v119: int:u64 = bool_to_int v118
 // CHECK:     v120: int:i64 = iconst 1
-// CHECK:     v121: int:u64 = xor v119, v120
+// CHECK:     v121: int:i64 = xor v119, v120
 // CHECK:     v122: int:i64 = iconst 255
 // CHECK:     v123: int:u64 = and v121, v122
 // CHECK:     v124: int:i64 = iconst 0
@@ -1444,7 +1445,7 @@
 // CHECK:     v68: bool = icmp.eq v66, v67:u64
 // CHECK:     v69: int:u64 = bool_to_int v68
 // CHECK:     v70: int:i64 = iconst 1
-// CHECK:     v71: int:u64 = xor v69, v70
+// CHECK:     v71: int:i64 = xor v69, v70
 // CHECK:     v72: int:i64 = iconst 255
 // CHECK:     v73: int:u64 = and v71, v72
 // CHECK:     v74: int:i64 = iconst 0
@@ -1471,7 +1472,7 @@
 // CHECK:     v91: bool = icmp.eq v89, v90:u64
 // CHECK:     v92: int:u64 = bool_to_int v91
 // CHECK:     v93: int:i64 = iconst 1
-// CHECK:     v94: int:u64 = xor v92, v93
+// CHECK:     v94: int:i64 = xor v92, v93
 // CHECK:     v95: int:i64 = iconst 255
 // CHECK:     v96: int:u64 = and v94, v95
 // CHECK:     v97: int:i64 = iconst 0
@@ -1717,13 +1718,13 @@
 // CHECK:     brif v46, bb5(v37), bb4(v37)
 // CHECK:
 // CHECK:   bb4(v48: mem):
-// CHECK:     v49: int:u64 = sub v8, v7
+// CHECK:     v49: int:i64 = sub v8, v7
 // CHECK:     v50: int:u64 = zext v49, 64
 // CHECK:     v51: mem = store.8 v50, v5, v48
 // CHECK:     br bb6(v51)
 // CHECK:
 // CHECK:   bb5(v53: mem):
-// CHECK:     v54: int:u64 = sub v7, v8
+// CHECK:     v54: int:i64 = sub v7, v8
 // CHECK:     v55: int:u64 = zext v54, 64
 // CHECK:     v56: mem = store.8 v55, v5, v53
 // CHECK:     br bb6(v56)

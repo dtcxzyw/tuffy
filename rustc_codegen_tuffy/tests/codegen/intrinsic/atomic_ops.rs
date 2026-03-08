@@ -237,15 +237,15 @@
 // CHECK:     unreachable
 // CHECK:
 // CHECK:   bb4(v68: mem):
-// CHECK:     v69: mem, v70: int = load.atomic.seqcst v1, v68
+// CHECK:     v69: mem, v70: int:i64 = load.atomic.seqcst v1, v68
 // CHECK:     br bb7(v69)
 // CHECK:
 // CHECK:   bb5(v72: mem):
-// CHECK:     v73: mem, v74: int = load.atomic.seqcst v1, v72
+// CHECK:     v73: mem, v74: int:i64 = load.atomic.seqcst v1, v72
 // CHECK:     br bb7(v73)
 // CHECK:
 // CHECK:   bb6(v76: mem):
-// CHECK:     v77: mem, v78: int = load.atomic.seqcst v1, v76
+// CHECK:     v77: mem, v78: int:i64 = load.atomic.seqcst v1, v76
 // CHECK:     br bb7(v77)
 // CHECK:
 // CHECK:   bb7(v80: mem):
@@ -949,7 +949,7 @@
 // CHECK:     unreachable
 // CHECK:
 // CHECK:   bb10(v114: mem):
-// CHECK:     v115: mem, v116: int = cmpxchg.seqcst.seqcst v1, v2, v3, v114
+// CHECK:     v115: mem, v116: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v114
 // CHECK:     v117: bool = icmp.eq v116, v2
 // CHECK:     v118: mem = store.4 v116, v6, v115
 // CHECK:     v119: int:i64 = iconst 4
@@ -958,7 +958,7 @@
 // CHECK:     br bb25(v121)
 // CHECK:
 // CHECK:   bb11(v123: mem):
-// CHECK:     v124: mem, v125: int = cmpxchg.seqcst.seqcst v1, v2, v3, v123
+// CHECK:     v124: mem, v125: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v123
 // CHECK:     v126: bool = icmp.eq v125, v2
 // CHECK:     v127: mem = store.4 v125, v6, v124
 // CHECK:     v128: int:i64 = iconst 4
@@ -967,7 +967,7 @@
 // CHECK:     br bb25(v130)
 // CHECK:
 // CHECK:   bb12(v132: mem):
-// CHECK:     v133: mem, v134: int = cmpxchg.seqcst.seqcst v1, v2, v3, v132
+// CHECK:     v133: mem, v134: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v132
 // CHECK:     v135: bool = icmp.eq v134, v2
 // CHECK:     v136: mem = store.4 v134, v6, v133
 // CHECK:     v137: int:i64 = iconst 4
@@ -976,7 +976,7 @@
 // CHECK:     br bb25(v139)
 // CHECK:
 // CHECK:   bb13(v141: mem):
-// CHECK:     v142: mem, v143: int = cmpxchg.seqcst.seqcst v1, v2, v3, v141
+// CHECK:     v142: mem, v143: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v141
 // CHECK:     v144: bool = icmp.eq v143, v2
 // CHECK:     v145: mem = store.4 v143, v6, v142
 // CHECK:     v146: int:i64 = iconst 4
@@ -985,7 +985,7 @@
 // CHECK:     br bb25(v148)
 // CHECK:
 // CHECK:   bb14(v150: mem):
-// CHECK:     v151: mem, v152: int = cmpxchg.seqcst.seqcst v1, v2, v3, v150
+// CHECK:     v151: mem, v152: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v150
 // CHECK:     v153: bool = icmp.eq v152, v2
 // CHECK:     v154: mem = store.4 v152, v6, v151
 // CHECK:     v155: int:i64 = iconst 4
@@ -994,7 +994,7 @@
 // CHECK:     br bb25(v157)
 // CHECK:
 // CHECK:   bb15(v159: mem):
-// CHECK:     v160: mem, v161: int = cmpxchg.seqcst.seqcst v1, v2, v3, v159
+// CHECK:     v160: mem, v161: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v159
 // CHECK:     v162: bool = icmp.eq v161, v2
 // CHECK:     v163: mem = store.4 v161, v6, v160
 // CHECK:     v164: int:i64 = iconst 4
@@ -1003,7 +1003,7 @@
 // CHECK:     br bb25(v166)
 // CHECK:
 // CHECK:   bb16(v168: mem):
-// CHECK:     v169: mem, v170: int = cmpxchg.seqcst.seqcst v1, v2, v3, v168
+// CHECK:     v169: mem, v170: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v168
 // CHECK:     v171: bool = icmp.eq v170, v2
 // CHECK:     v172: mem = store.4 v170, v6, v169
 // CHECK:     v173: int:i64 = iconst 4
@@ -1012,7 +1012,7 @@
 // CHECK:     br bb25(v175)
 // CHECK:
 // CHECK:   bb17(v177: mem):
-// CHECK:     v178: mem, v179: int = cmpxchg.seqcst.seqcst v1, v2, v3, v177
+// CHECK:     v178: mem, v179: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v177
 // CHECK:     v180: bool = icmp.eq v179, v2
 // CHECK:     v181: mem = store.4 v179, v6, v178
 // CHECK:     v182: int:i64 = iconst 4
@@ -1021,7 +1021,7 @@
 // CHECK:     br bb25(v184)
 // CHECK:
 // CHECK:   bb18(v186: mem):
-// CHECK:     v187: mem, v188: int = cmpxchg.seqcst.seqcst v1, v2, v3, v186
+// CHECK:     v187: mem, v188: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v186
 // CHECK:     v189: bool = icmp.eq v188, v2
 // CHECK:     v190: mem = store.4 v188, v6, v187
 // CHECK:     v191: int:i64 = iconst 4
@@ -1030,7 +1030,7 @@
 // CHECK:     br bb25(v193)
 // CHECK:
 // CHECK:   bb19(v195: mem):
-// CHECK:     v196: mem, v197: int = cmpxchg.seqcst.seqcst v1, v2, v3, v195
+// CHECK:     v196: mem, v197: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v195
 // CHECK:     v198: bool = icmp.eq v197, v2
 // CHECK:     v199: mem = store.4 v197, v6, v196
 // CHECK:     v200: int:i64 = iconst 4
@@ -1039,7 +1039,7 @@
 // CHECK:     br bb25(v202)
 // CHECK:
 // CHECK:   bb20(v204: mem):
-// CHECK:     v205: mem, v206: int = cmpxchg.seqcst.seqcst v1, v2, v3, v204
+// CHECK:     v205: mem, v206: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v204
 // CHECK:     v207: bool = icmp.eq v206, v2
 // CHECK:     v208: mem = store.4 v206, v6, v205
 // CHECK:     v209: int:i64 = iconst 4
@@ -1048,7 +1048,7 @@
 // CHECK:     br bb25(v211)
 // CHECK:
 // CHECK:   bb21(v213: mem):
-// CHECK:     v214: mem, v215: int = cmpxchg.seqcst.seqcst v1, v2, v3, v213
+// CHECK:     v214: mem, v215: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v213
 // CHECK:     v216: bool = icmp.eq v215, v2
 // CHECK:     v217: mem = store.4 v215, v6, v214
 // CHECK:     v218: int:i64 = iconst 4
@@ -1057,7 +1057,7 @@
 // CHECK:     br bb25(v220)
 // CHECK:
 // CHECK:   bb22(v222: mem):
-// CHECK:     v223: mem, v224: int = cmpxchg.seqcst.seqcst v1, v2, v3, v222
+// CHECK:     v223: mem, v224: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v222
 // CHECK:     v225: bool = icmp.eq v224, v2
 // CHECK:     v226: mem = store.4 v224, v6, v223
 // CHECK:     v227: int:i64 = iconst 4
@@ -1066,7 +1066,7 @@
 // CHECK:     br bb25(v229)
 // CHECK:
 // CHECK:   bb23(v231: mem):
-// CHECK:     v232: mem, v233: int = cmpxchg.seqcst.seqcst v1, v2, v3, v231
+// CHECK:     v232: mem, v233: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v231
 // CHECK:     v234: bool = icmp.eq v233, v2
 // CHECK:     v235: mem = store.4 v233, v6, v232
 // CHECK:     v236: int:i64 = iconst 4
@@ -1075,7 +1075,7 @@
 // CHECK:     br bb25(v238)
 // CHECK:
 // CHECK:   bb24(v240: mem):
-// CHECK:     v241: mem, v242: int = cmpxchg.seqcst.seqcst v1, v2, v3, v240
+// CHECK:     v241: mem, v242: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v240
 // CHECK:     v243: bool = icmp.eq v242, v2
 // CHECK:     v244: mem = store.4 v242, v6, v241
 // CHECK:     v245: int:i64 = iconst 4
@@ -1660,7 +1660,7 @@
 // CHECK:     v3: ptr = stack_slot 8
 // CHECK:     v4: mem = store.8 v1, v3, v0
 // CHECK:     v5: ptr = load.8 v3, v4
-// CHECK:     v6: mem, v7: int = rmw.add.seqcst v5, v2, v4
+// CHECK:     v6: mem, v7: int:i64 = rmw.add.seqcst v5, v2, v4
 // CHECK:     br bb1(v6)
 // CHECK:
 // CHECK:   bb1(v9: mem):
@@ -1720,7 +1720,7 @@
 // CHECK:     v3: mem = store.8 v1, v2, v0
 // CHECK:     v4: ptr = load.8 v2, v3
 // CHECK:     v5: ptr = symbol_addr @_RINvNtNtCsiYoX4ApF2vj_4core4sync6atomic11atomic_loadmECseYAj3kFwz5z_10atomic_ops
-// CHECK:     v6: mem, v7: int = call v5(v4), v3 -> int
+// CHECK:     v6: mem, v7: int:u32 = call v5(v4), v3 -> int
 // CHECK:     br bb1(v6)
 // CHECK:
 // CHECK:   bb1(v9: mem):
@@ -1803,7 +1803,7 @@
 // CHECK:     v3: ptr = stack_slot 8
 // CHECK:     v4: mem = store.8 v1, v3, v0
 // CHECK:     v5: ptr = load.8 v3, v4
-// CHECK:     v6: mem, v7: int = rmw.xchg.seqcst v5, v2, v4
+// CHECK:     v6: mem, v7: int:i64 = rmw.xchg.seqcst v5, v2, v4
 // CHECK:     br bb1(v6)
 // CHECK:
 // CHECK:   bb1(v9: mem):

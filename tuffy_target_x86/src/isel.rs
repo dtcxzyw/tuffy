@@ -3423,8 +3423,8 @@ fn select_zext(ctx: &mut IselCtx, vref: ValueRef, val: &Operand, func: &Function
             // Non-standard bit width: check signedness
             let is_unsigned = src_ann
                 .is_none_or(|a| matches!(a.signedness, tuffy_ir::types::IntSignedness::Unsigned));
-            if is_unsigned {
-                // Already unsigned, no masking needed
+            if is_unsigned || n >= 64 {
+                // Already unsigned or full width, no masking needed
                 ctx.out.push(MInst::MovRR {
                     size: OpSize::S64,
                     dst,

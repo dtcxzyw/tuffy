@@ -1097,7 +1097,17 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     value: r,
                     annotation: r_ann,
                 };
-                let res_ann = l_ann.and_then(|a| IntAnn::from_annotation(&a));
+                let res_ann = Some(
+                    l_ann
+                        .and_then(|a| IntAnn::from_annotation(&a))
+                        .or_else(|| r_ann.and_then(|a| IntAnn::from_annotation(&a)))
+                        .or_else(|| {
+                            // Fallback: use destination type
+                            let dest_ty = dest_place.ty(&self.mir.local_decls, self.tcx).ty;
+                            translate_annotation(dest_ty).and_then(|a| IntAnn::from_annotation(&a))
+                        })
+                        .unwrap_or(IntAnn::Unsigned(64)),
+                );
 
                 // Detect float operands for comparison fixup.
                 let is_float_cmp = matches!(

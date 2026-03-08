@@ -43,19 +43,20 @@
 // CHECK:     v13: int:i64 = iconst -2147483648
 // CHECK:     v14: bool = icmp.eq v1, v13:s32
 // CHECK:     v15: int:u64 = bool_to_int v14
-// CHECK:     v16: int:u64 = and v12, v15
-// CHECK:     v17: int:i64 = iconst 0
-// CHECK:     v18: bool = icmp.eq v16, v17
-// CHECK:     brif v18, bb2(v9), bb4(v9)
+// CHECK:     v16: int:i64 = and v12, v15
+// CHECK:     v17: int:u64 = zext v16, 64
+// CHECK:     v18: int:i64 = iconst 0
+// CHECK:     v19: bool = icmp.eq v17, v18
+// CHECK:     brif v19, bb2(v9), bb4(v9)
 // CHECK:
-// CHECK:   bb2(v20: mem):
-// CHECK:     v21: int:u64 = div v1, v2
-// CHECK:     ret v21, v20
+// CHECK:   bb2(v21: mem):
+// CHECK:     v22: int:i64 = div v1, v2
+// CHECK:     ret v22, v21
 // CHECK:
-// CHECK:   bb3(v23: mem):
+// CHECK:   bb3(v24: mem):
 // CHECK:     trap
 // CHECK:
-// CHECK:   bb4(v25: mem):
+// CHECK:   bb4(v26: mem):
 // CHECK:     trap
 // CHECK: }
 // CHECK:
@@ -87,7 +88,7 @@
 // CHECK:     brif v7, bb1(v0), bb2(v0)
 // CHECK:
 // CHECK:   bb1(v9: mem):
-// CHECK:     v10: int:u64 = div v1, v2
+// CHECK:     v10: int:i64 = div v1, v2
 // CHECK:     ret v10, v9
 // CHECK:
 // CHECK:   bb2(v12: mem):
@@ -138,19 +139,20 @@
 // CHECK:     v13: int:i64 = iconst -2147483648
 // CHECK:     v14: bool = icmp.eq v1, v13:s32
 // CHECK:     v15: int:u64 = bool_to_int v14
-// CHECK:     v16: int:u64 = and v12, v15
-// CHECK:     v17: int:i64 = iconst 0
-// CHECK:     v18: bool = icmp.eq v16, v17
-// CHECK:     brif v18, bb2(v9), bb4(v9)
+// CHECK:     v16: int:i64 = and v12, v15
+// CHECK:     v17: int:u64 = zext v16, 64
+// CHECK:     v18: int:i64 = iconst 0
+// CHECK:     v19: bool = icmp.eq v17, v18
+// CHECK:     brif v19, bb2(v9), bb4(v9)
 // CHECK:
-// CHECK:   bb2(v20: mem):
-// CHECK:     v21: int:u64 = rem v1, v2
-// CHECK:     ret v21, v20
+// CHECK:   bb2(v21: mem):
+// CHECK:     v22: int:i64 = rem v1, v2
+// CHECK:     ret v22, v21
 // CHECK:
-// CHECK:   bb3(v23: mem):
+// CHECK:   bb3(v24: mem):
 // CHECK:     trap
 // CHECK:
-// CHECK:   bb4(v25: mem):
+// CHECK:   bb4(v26: mem):
 // CHECK:     trap
 // CHECK: }
 // CHECK:
@@ -182,7 +184,7 @@
 // CHECK:     brif v7, bb1(v0), bb2(v0)
 // CHECK:
 // CHECK:   bb1(v9: mem):
-// CHECK:     v10: int:u64 = rem v1, v2
+// CHECK:     v10: int:i64 = rem v1, v2
 // CHECK:     ret v10, v9
 // CHECK:
 // CHECK:   bb2(v12: mem):

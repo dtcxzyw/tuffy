@@ -14,7 +14,7 @@
 // CHECK:     v1: int:s32 = param %a
 // CHECK:     v2: int:u32 = param %b
 // CHECK:     v3: int:i64 = iconst 31
-// CHECK:     v4: int:u64 = and v2, v3
+// CHECK:     v4: int:i64 = and v2, v3
 // CHECK:     v5: int:s32 = shl v1, v4
 // CHECK:     ret v5, v0
 // CHECK: }
@@ -34,7 +34,7 @@
 // CHECK:     v1: int:s32 = param %a
 // CHECK:     v2: int:u32 = param %b
 // CHECK:     v3: int:i64 = iconst 31
-// CHECK:     v4: int:u64 = and v2, v3
+// CHECK:     v4: int:i64 = and v2, v3
 // CHECK:     v5: int:s32 = shr v1, v4
 // CHECK:     ret v5, v0
 // CHECK: }
@@ -54,7 +54,7 @@
 // CHECK:     v1: int:u32 = param %a
 // CHECK:     v2: int:u32 = param %b
 // CHECK:     v3: int:i64 = iconst 31
-// CHECK:     v4: int:u64 = and v2, v3
+// CHECK:     v4: int:i64 = and v2, v3
 // CHECK:     v5: int:u32 = shr v1, v4
 // CHECK:     ret v5, v0
 // CHECK: }
