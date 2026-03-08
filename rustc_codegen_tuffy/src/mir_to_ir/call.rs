@@ -1059,8 +1059,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             let tmp_annotated = IrOperand::annotated(tmp, Annotation::Align(align));
                             let v_annotated = IrOperand::annotated(v, Annotation::Align(align));
                             let new_mem = self.builder.mem_copy(
-                                tmp_annotated,
-                                v_annotated,
+                                tmp_annotated.into(),
+                                v_annotated.into(),
                                 count.into(),
                                 self.current_mem.into(),
                                 Origin::synthetic(),
@@ -1239,8 +1239,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     self.current_mem = self
                         .builder
                         .mem_copy(
-                            addr_annotated,
-                            sret_annotated,
+                            addr_annotated.into(),
+                            sret_annotated.into(),
                             count.into(),
                             self.current_mem.into(),
                             Origin::synthetic(),

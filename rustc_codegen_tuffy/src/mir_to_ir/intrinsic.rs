@@ -626,7 +626,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 };
                 let dst_annotated = IrOperand::annotated(dst, Annotation::Align(elem_align as u32));
                 let mem_out = self.builder.mem_set(
-                    dst_annotated,
+                    dst_annotated.into(),
                     val.into(),
                     byte_count.into(),
                     current_mem.into(),
@@ -659,8 +659,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let dst_annotated = IrOperand::annotated(dst, Annotation::Align(elem_align as u32));
                 let src_annotated = IrOperand::annotated(src, Annotation::Align(elem_align as u32));
                 let mem_out = self.builder.mem_copy(
-                    dst_annotated,
-                    src_annotated,
+                    dst_annotated.into(),
+                    src_annotated.into(),
                     byte_count.into(),
                     current_mem.into(),
                     Origin::synthetic(),
@@ -692,8 +692,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let dst_annotated = IrOperand::annotated(dst, Annotation::Align(elem_align as u32));
                 let src_annotated = IrOperand::annotated(src, Annotation::Align(elem_align as u32));
                 let mem_out = self.builder.mem_move(
-                    dst_annotated,
-                    src_annotated,
+                    dst_annotated.into(),
+                    src_annotated.into(),
                     byte_count.into(),
                     current_mem.into(),
                     Origin::synthetic(),

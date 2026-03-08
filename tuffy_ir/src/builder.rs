@@ -1086,14 +1086,14 @@ impl<'a> Builder<'a> {
     /// Memory copy (non-overlapping): memcpy semantics.
     pub fn mem_copy(
         &mut self,
-        dst: Operand,
-        src: Operand,
-        count: Operand,
+        dst: PtrOperand,
+        src: PtrOperand,
+        count: IntOperand,
         mem: MemOperand,
         origin: Origin,
     ) -> MemValue {
         let v = self.push_inst(
-            Op::MemCopy(dst.into(), src.into(), count.into(), mem),
+            Op::MemCopy(dst.raw().into(), src.raw().into(), count.raw().into(), mem),
             Type::Mem,
             None,
             origin,
@@ -1105,14 +1105,14 @@ impl<'a> Builder<'a> {
     /// Memory move (may overlap): memmove semantics.
     pub fn mem_move(
         &mut self,
-        dst: Operand,
-        src: Operand,
-        count: Operand,
+        dst: PtrOperand,
+        src: PtrOperand,
+        count: IntOperand,
         mem: MemOperand,
         origin: Origin,
     ) -> MemValue {
         let v = self.push_inst(
-            Op::MemMove(dst.into(), src.into(), count.into(), mem),
+            Op::MemMove(dst.raw().into(), src.raw().into(), count.raw().into(), mem),
             Type::Mem,
             None,
             origin,
@@ -1124,14 +1124,14 @@ impl<'a> Builder<'a> {
     /// Memory set: memset semantics.
     pub fn mem_set(
         &mut self,
-        dst: Operand,
+        dst: PtrOperand,
         val: Operand,
-        count: Operand,
+        count: IntOperand,
         mem: MemOperand,
         origin: Origin,
     ) -> MemValue {
         let v = self.push_inst(
-            Op::MemSet(dst.into(), val, count.into(), mem),
+            Op::MemSet(dst.raw().into(), val, count.raw().into(), mem),
             Type::Mem,
             None,
             origin,
@@ -1145,7 +1145,7 @@ impl<'a> Builder<'a> {
     /// Atomic load from pointer. Returns (mem_out, data_value).
     pub fn load_atomic(
         &mut self,
-        ptr: Operand,
+        ptr: PtrOperand,
         ty: Type,
         ordering: MemoryOrdering,
         mem: MemOperand,
@@ -1153,7 +1153,7 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> (ValueRef, ValueRef) {
         let primary = self.push_inst_with_secondary(
-            Op::LoadAtomic(ptr.into(), ordering, mem),
+            Op::LoadAtomic(ptr.raw().into(), ordering, mem),
             Type::Mem,
             ty,
             origin,
@@ -1168,13 +1168,13 @@ impl<'a> Builder<'a> {
     pub fn store_atomic(
         &mut self,
         val: Operand,
-        ptr: Operand,
+        ptr: PtrOperand,
         ordering: MemoryOrdering,
         mem: MemOperand,
         origin: Origin,
     ) -> MemValue {
         let v = self.push_inst(
-            Op::StoreAtomic(val, ptr.into(), ordering, mem),
+            Op::StoreAtomic(val, ptr.raw().into(), ordering, mem),
             Type::Mem,
             None,
             origin,
@@ -1188,7 +1188,7 @@ impl<'a> Builder<'a> {
     pub fn atomic_rmw(
         &mut self,
         op: AtomicRmwOp,
-        ptr: Operand,
+        ptr: PtrOperand,
         val: Operand,
         ty: Type,
         ordering: MemoryOrdering,
@@ -1197,7 +1197,7 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> (ValueRef, ValueRef) {
         let primary = self.push_inst_with_secondary(
-            Op::AtomicRmw(op, ptr.into(), val, ordering, mem),
+            Op::AtomicRmw(op, ptr.raw().into(), val, ordering, mem),
             Type::Mem,
             ty,
             origin,
@@ -1212,7 +1212,7 @@ impl<'a> Builder<'a> {
     #[allow(clippy::too_many_arguments)]
     pub fn atomic_cmpxchg(
         &mut self,
-        ptr: Operand,
+        ptr: PtrOperand,
         expected: Operand,
         desired: Operand,
         ty: Type,
@@ -1223,7 +1223,14 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> (ValueRef, ValueRef) {
         let primary = self.push_inst_with_secondary(
-            Op::AtomicCmpXchg(ptr.into(), expected, desired, success_ord, failure_ord, mem),
+            Op::AtomicCmpXchg(
+                ptr.raw().into(),
+                expected,
+                desired,
+                success_ord,
+                failure_ord,
+                mem,
+            ),
             Type::Mem,
             ty,
             origin,
@@ -1256,7 +1263,7 @@ impl<'a> Builder<'a> {
     #[allow(clippy::too_many_arguments)]
     pub fn call(
         &mut self,
-        callee: Operand,
+        callee: PtrOperand,
         args: Vec<Operand>,
         ret_ty: Type,
         mem: MemOperand,
@@ -1265,7 +1272,7 @@ impl<'a> Builder<'a> {
     ) -> (ValueRef, Option<ValueRef>) {
         if ret_ty == Type::Unit {
             let primary = self.push_inst(
-                Op::Call(callee.into(), args, mem),
+                Op::Call(callee.raw().into(), args, mem),
                 Type::Mem,
                 None,
                 origin,
@@ -1274,7 +1281,7 @@ impl<'a> Builder<'a> {
             (primary, None)
         } else {
             let primary = self.push_inst_with_secondary(
-                Op::Call(callee.into(), args, mem),
+                Op::Call(callee.raw().into(), args, mem),
                 Type::Mem,
                 ret_ty,
                 origin,

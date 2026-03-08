@@ -881,8 +881,13 @@ fn legalize_inst<M: AbiMetadata + Clone>(
                     let count = b.iconst(*bytes as i64, 64, IntSignedness::Unsigned, o());
                     let dst_annotated = Operand::annotated(dst.value, Annotation::Align(1));
                     let src_annotated = Operand::annotated(src_ptr.value, Annotation::Align(1));
-                    let new_mem =
-                        b.mem_copy(dst_annotated, src_annotated, count.into(), m.into(), o());
+                    let new_mem = b.mem_copy(
+                        dst_annotated.into(),
+                        src_annotated.into(),
+                        count.into(),
+                        m.into(),
+                        o(),
+                    );
                     s.vmap.set(old_vref, Mapped::One(new_mem.raw()));
                     return;
                 }
@@ -1269,27 +1274,27 @@ fn copy_inst<M: AbiMetadata + Clone>(
         Op::StackSlot(bytes) => b.stack_slot(*bytes, o()),
         Op::MemCopy(dst, src, count, mem) => b
             .mem_copy(
-                remap_op(s, &dst.clone().raw()),
-                remap_op(s, &src.clone().raw()),
-                remap_op(s, &count.clone().raw()),
+                remap_op(s, &dst.clone().raw()).into(),
+                remap_op(s, &src.clone().raw()).into(),
+                remap_op(s, &count.clone().raw()).into(),
                 remap_op(s, &mem.clone().raw()).into(),
                 o(),
             )
             .raw(),
         Op::MemMove(dst, src, count, mem) => b
             .mem_move(
-                remap_op(s, &dst.clone().raw()),
-                remap_op(s, &src.clone().raw()),
-                remap_op(s, &count.clone().raw()),
+                remap_op(s, &dst.clone().raw()).into(),
+                remap_op(s, &src.clone().raw()).into(),
+                remap_op(s, &count.clone().raw()).into(),
                 remap_op(s, &mem.clone().raw()).into(),
                 o(),
             )
             .raw(),
         Op::MemSet(dst, val, count, mem) => b
             .mem_set(
-                remap_op(s, &dst.clone().raw()),
+                remap_op(s, &dst.clone().raw()).into(),
                 remap_op(s, val),
-                remap_op(s, &count.clone().raw()),
+                remap_op(s, &count.clone().raw()).into(),
                 remap_op(s, &mem.clone().raw()).into(),
                 o(),
             )
@@ -1476,7 +1481,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
             .raw(),
         Op::LoadAtomic(ptr, ord, mem) => {
             let (primary, secondary) = b.load_atomic(
-                remap_op(s, &ptr.clone().raw()),
+                remap_op(s, &ptr.clone().raw()).into(),
                 inst.secondary_ty.clone().unwrap_or(I64_TYPE),
                 *ord,
                 remap_op(s, &mem.clone().raw()).into(),
@@ -1491,7 +1496,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
         Op::StoreAtomic(val, ptr, ord, mem) => b
             .store_atomic(
                 remap_op(s, val),
-                remap_op(s, &ptr.clone().raw()),
+                remap_op(s, &ptr.clone().raw()).into(),
                 *ord,
                 remap_op(s, &mem.clone().raw()).into(),
                 o(),
@@ -1500,7 +1505,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
         Op::AtomicRmw(rmw_op, ptr, val, ord, mem) => {
             let (primary, secondary) = b.atomic_rmw(
                 *rmw_op,
-                remap_op(s, &ptr.clone().raw()),
+                remap_op(s, &ptr.clone().raw()).into(),
                 remap_op(s, val),
                 inst.secondary_ty.clone().unwrap_or(I64_TYPE),
                 *ord,
@@ -1515,7 +1520,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
         }
         Op::AtomicCmpXchg(ptr, exp, des, s_ord, f_ord, mem) => {
             let (primary, secondary) = b.atomic_cmpxchg(
-                remap_op(s, &ptr.clone().raw()),
+                remap_op(s, &ptr.clone().raw()).into(),
                 remap_op(s, exp),
                 remap_op(s, des),
                 inst.secondary_ty.clone().unwrap_or(I64_TYPE),
@@ -2453,7 +2458,7 @@ fn leg_fp_to_int128<M: AbiMetadata + Clone>(
     let new_mem = s.vmap.one(old_mem);
 
     let (call_mem, data) = b.call(
-        Operand::new(callee),
+        Operand::new(callee).into(),
         vec![Operand::new(float_val)],
         I64_TYPE,
         Operand::new(new_mem).into(),
@@ -2566,7 +2571,7 @@ fn leg_div_rem_128<M: AbiMetadata + Clone>(
         .expect("128-bit div/rem requires a mem token in scope");
     let new_mem = s.vmap.one(old_mem);
     let (call_mem, data) = b.call(
-        Operand::new(callee),
+        Operand::new(callee).into(),
         args,
         I64_TYPE,
         Operand::new(new_mem).into(),
@@ -2639,7 +2644,7 @@ fn leg_int128_to_fp<M: AbiMetadata + Clone>(
         .expect("128-bit to float requires a mem token in scope");
     let new_mem = s.vmap.one(old_mem);
     let (call_mem, data) = b.call(
-        Operand::new(callee),
+        Operand::new(callee).into(),
         args,
         Type::Float(ft),
         Operand::new(new_mem).into(),
@@ -2759,7 +2764,7 @@ fn leg_call<M: AbiMetadata + Clone>(
         inst.result_annotation
     };
 
-    let (mem_out, data_out) = b.call(c, new_args, ret_ty, m.into(), ann, o());
+    let (mem_out, data_out) = b.call(c.into(), new_args, ret_ty, m.into(), ann, o());
     s.vmap.set(old_vref, Mapped::One(mem_out));
 
     if wide_ret {

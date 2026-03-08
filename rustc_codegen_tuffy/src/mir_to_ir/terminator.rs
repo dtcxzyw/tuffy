@@ -40,8 +40,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let local_annotated =
                         IrOperand::annotated(local_slot, Annotation::Align(align));
                     let new_mem = self.builder.mem_copy(
-                        sret_annotated,
-                        local_annotated,
+                        sret_annotated.into(),
+                        local_annotated.into(),
                         size_val.into(),
                         self.current_mem.into(),
                         Origin::synthetic(),

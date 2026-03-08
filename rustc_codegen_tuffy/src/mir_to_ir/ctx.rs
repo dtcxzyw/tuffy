@@ -391,8 +391,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let local_annotated = Operand::annotated(local_slot, Annotation::Align(align));
                     let ptr_annotated = Operand::annotated(ptr, Annotation::Align(align));
                     let new_mem = self.builder.mem_copy(
-                        local_annotated,
-                        ptr_annotated,
+                        local_annotated.into(),
+                        ptr_annotated.into(),
                         size_val.into(),
                         self.current_mem.into(),
                         Origin::synthetic(),
