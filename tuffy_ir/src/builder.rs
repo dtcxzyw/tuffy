@@ -670,44 +670,46 @@ impl<'a> Builder<'a> {
     /// Count leading zeros after truncating to `bits` width.
     pub fn count_leading_zeros(
         &mut self,
-        val: Operand,
+        val: IntOperand,
         bits: u32,
         result_bits: u32,
         origin: Origin,
-    ) -> ValueRef {
+    ) -> IntValue {
         use crate::types::{IntAnnotation, IntSignedness};
         let ann = Annotation::Int(IntAnnotation {
             bit_width: result_bits,
             signedness: IntSignedness::Unsigned,
         });
-        self.push_inst(
-            Op::CountLeadingZeros(val.into(), bits),
+        let v = self.push_inst(
+            Op::CountLeadingZeros(val, bits),
             Type::Int,
             None,
             origin,
             Some(ann),
-        )
+        );
+        IntValue::new(v, self.func)
     }
 
     /// Count trailing zeros.
     pub fn count_trailing_zeros(
         &mut self,
-        val: Operand,
+        val: IntOperand,
         result_bits: u32,
         origin: Origin,
-    ) -> ValueRef {
+    ) -> IntValue {
         use crate::types::{IntAnnotation, IntSignedness};
         let ann = Annotation::Int(IntAnnotation {
             bit_width: result_bits,
             signedness: IntSignedness::Unsigned,
         });
-        self.push_inst(
-            Op::CountTrailingZeros(val.into()),
+        let v = self.push_inst(
+            Op::CountTrailingZeros(val),
             Type::Int,
             None,
             origin,
             Some(ann),
-        )
+        );
+        IntValue::new(v, self.func)
     }
 
     /// Byte-swap: reverse byte order of the low `bytes` bytes.
@@ -787,141 +789,127 @@ impl<'a> Builder<'a> {
     /// Rotate left in an `bits`-bit field.
     pub fn rotate_left(
         &mut self,
-        val: Operand,
-        amt: Operand,
+        val: IntOperand,
+        amt: IntOperand,
         bits: u32,
         origin: Origin,
-    ) -> ValueRef {
-        let _ty = self
-            .value_type(val.value)
-            .and_then(|t| match t {
-                Type::Int => Some(Type::Int),
-                _ => None,
-            })
-            .expect("rotate_left operand must be Int type");
-        let ann = self.value_annotation(val.value).cloned();
-        self.push_inst(
-            Op::RotateLeft(val.into(), amt.into(), bits),
-            Type::Int,
-            None,
-            origin,
-            ann,
-        )
+    ) -> IntValue {
+        let ann = self.value_annotation(val.clone().raw().value).cloned();
+        let v = self.push_inst(Op::RotateLeft(val, amt, bits), Type::Int, None, origin, ann);
+        IntValue::new(v, self.func)
     }
 
     /// Rotate right in an `bits`-bit field.
     pub fn rotate_right(
         &mut self,
-        val: Operand,
-        amt: Operand,
+        val: IntOperand,
+        amt: IntOperand,
         bits: u32,
         origin: Origin,
-    ) -> ValueRef {
-        let _ty = self
-            .value_type(val.value)
-            .and_then(|t| match t {
-                Type::Int => Some(Type::Int),
-                _ => None,
-            })
-            .expect("rotate_right operand must be Int type");
-        let ann = self.value_annotation(val.value).cloned();
-        self.push_inst(
-            Op::RotateRight(val.into(), amt.into(), bits),
+    ) -> IntValue {
+        let ann = self.value_annotation(val.clone().raw().value).cloned();
+        let v = self.push_inst(
+            Op::RotateRight(val, amt, bits),
             Type::Int,
             None,
             origin,
             ann,
-        )
+        );
+        IntValue::new(v, self.func)
     }
 
     /// Unsigned saturating addition in `bits` bits.
     pub fn saturating_add(
         &mut self,
-        a: Operand,
-        b: Operand,
+        a: IntOperand,
+        b: IntOperand,
         bits: u32,
         origin: Origin,
-    ) -> ValueRef {
+    ) -> IntValue {
         use crate::types::{IntAnnotation, IntSignedness};
         let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Unsigned,
         });
-        self.push_inst(
-            Op::SaturatingAdd(a.into(), b.into(), bits),
+        let v = self.push_inst(
+            Op::SaturatingAdd(a, b, bits),
             Type::Int,
             None,
             origin,
             Some(ann),
-        )
+        );
+        IntValue::new(v, self.func)
     }
 
     /// Unsigned saturating subtraction in `bits` bits.
     pub fn saturating_sub(
         &mut self,
-        a: Operand,
-        b: Operand,
+        a: IntOperand,
+        b: IntOperand,
         bits: u32,
         origin: Origin,
-    ) -> ValueRef {
+    ) -> IntValue {
         use crate::types::{IntAnnotation, IntSignedness};
         let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Unsigned,
         });
-        self.push_inst(
-            Op::SaturatingSub(a.into(), b.into(), bits),
+        let v = self.push_inst(
+            Op::SaturatingSub(a, b, bits),
             Type::Int,
             None,
             origin,
             Some(ann),
-        )
+        );
+        IntValue::new(v, self.func)
     }
 
     /// Signed saturating addition in `bits` bits.
     /// Result is clamped to [-(2^(bits-1)), 2^(bits-1)-1].
     pub fn signed_saturating_add(
         &mut self,
-        a: Operand,
-        b: Operand,
+        a: IntOperand,
+        b: IntOperand,
         bits: u32,
         origin: Origin,
-    ) -> ValueRef {
+    ) -> IntValue {
         use crate::types::{IntAnnotation, IntSignedness};
         let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Signed,
         });
-        self.push_inst(
-            Op::SignedSaturatingAdd(a.into(), b.into(), bits),
+        let v = self.push_inst(
+            Op::SignedSaturatingAdd(a, b, bits),
             Type::Int,
             None,
             origin,
             Some(ann),
-        )
+        );
+        IntValue::new(v, self.func)
     }
 
     /// Signed saturating subtraction in `bits` bits.
     /// Result is clamped to [-(2^(bits-1)), 2^(bits-1)-1].
     pub fn signed_saturating_sub(
         &mut self,
-        a: Operand,
-        b: Operand,
+        a: IntOperand,
+        b: IntOperand,
         bits: u32,
         origin: Origin,
-    ) -> ValueRef {
+    ) -> IntValue {
         use crate::types::{IntAnnotation, IntSignedness};
         let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Signed,
         });
-        self.push_inst(
-            Op::SignedSaturatingSub(a.into(), b.into(), bits),
+        let v = self.push_inst(
+            Op::SignedSaturatingSub(a, b, bits),
             Type::Int,
             None,
             origin,
             Some(ann),
-        )
+        );
+        IntValue::new(v, self.func)
     }
 
     /// Signed addition with overflow detection. Returns (wrapping_sum: Int, overflow: Bool).

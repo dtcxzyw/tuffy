@@ -1064,52 +1064,66 @@ fn copy_inst<M: AbiMetadata + Clone>(
         Op::CountOnes(a) => b
             .count_ones(remap_op(s, &a.clone().raw()).into(), 64, o())
             .raw(),
-        Op::CountLeadingZeros(a, bits) => {
-            b.count_leading_zeros(remap_op(s, &a.clone().raw()), *bits, 64, o())
-        }
-        Op::CountTrailingZeros(a) => b.count_trailing_zeros(remap_op(s, &a.clone().raw()), 64, o()),
+        Op::CountLeadingZeros(a, bits) => b
+            .count_leading_zeros(remap_op(s, &a.clone().raw()).into(), *bits, 64, o())
+            .raw(),
+        Op::CountTrailingZeros(a) => b
+            .count_trailing_zeros(remap_op(s, &a.clone().raw()).into(), 64, o())
+            .raw(),
         Op::Bswap(a, bytes) => b
             .bswap(remap_op(s, &a.clone().raw()).into(), *bytes, o())
             .raw(),
         Op::BitReverse(a, bits) => b
             .bit_reverse(remap_op(s, &a.clone().raw()).into(), *bits, o())
             .raw(),
-        Op::RotateLeft(a, amt, bits) => b.rotate_left(
-            remap_op(s, &a.clone().raw()),
-            remap_op(s, &amt.clone().raw()),
-            *bits,
-            o(),
-        ),
-        Op::RotateRight(a, amt, bits) => b.rotate_right(
-            remap_op(s, &a.clone().raw()),
-            remap_op(s, &amt.clone().raw()),
-            *bits,
-            o(),
-        ),
-        Op::SaturatingAdd(a, op_b, bits) => b.saturating_add(
-            remap_op(s, &a.clone().raw()),
-            remap_op(s, &op_b.clone().raw()),
-            *bits,
-            o(),
-        ),
-        Op::SaturatingSub(a, op_b, bits) => b.saturating_sub(
-            remap_op(s, &a.clone().raw()),
-            remap_op(s, &op_b.clone().raw()),
-            *bits,
-            o(),
-        ),
-        Op::SignedSaturatingAdd(a, op_b, bits) => b.signed_saturating_add(
-            remap_op(s, &a.clone().raw()),
-            remap_op(s, &op_b.clone().raw()),
-            *bits,
-            o(),
-        ),
-        Op::SignedSaturatingSub(a, op_b, bits) => b.signed_saturating_sub(
-            remap_op(s, &a.clone().raw()),
-            remap_op(s, &op_b.clone().raw()),
-            *bits,
-            o(),
-        ),
+        Op::RotateLeft(a, amt, bits) => b
+            .rotate_left(
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &amt.clone().raw()).into(),
+                *bits,
+                o(),
+            )
+            .raw(),
+        Op::RotateRight(a, amt, bits) => b
+            .rotate_right(
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &amt.clone().raw()).into(),
+                *bits,
+                o(),
+            )
+            .raw(),
+        Op::SaturatingAdd(a, op_b, bits) => b
+            .saturating_add(
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
+                *bits,
+                o(),
+            )
+            .raw(),
+        Op::SaturatingSub(a, op_b, bits) => b
+            .saturating_sub(
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
+                *bits,
+                o(),
+            )
+            .raw(),
+        Op::SignedSaturatingAdd(a, op_b, bits) => b
+            .signed_saturating_add(
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
+                *bits,
+                o(),
+            )
+            .raw(),
+        Op::SignedSaturatingSub(a, op_b, bits) => b
+            .signed_saturating_sub(
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
+                *bits,
+                o(),
+            )
+            .raw(),
         Op::SAddWithOverflow(a, op_b, bits) if *bits > 64 => {
             leg_sadd_with_overflow_128(old, s, b, old_vref, &a.clone().raw(), &op_b.clone().raw());
             return;

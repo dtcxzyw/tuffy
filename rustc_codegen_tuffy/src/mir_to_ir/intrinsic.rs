@@ -85,7 +85,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let result =
                         self.builder
                             .count_leading_zeros(v.into(), bits, bits, Origin::synthetic());
-                    self.locals.set(destination_local, result);
+                    self.locals.set(destination_local, result.raw());
                 }
                 true
             }
@@ -96,7 +96,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let result =
                         self.builder
                             .count_trailing_zeros(v.into(), 64, Origin::synthetic());
-                    self.locals.set(destination_local, result);
+                    self.locals.set(destination_local, result.raw());
                 }
                 true
             }
@@ -160,7 +160,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         self.builder
                             .rotate_right(x.into(), n.into(), bits, Origin::synthetic())
                     };
-                    self.locals.set(destination_local, result);
+                    self.locals.set(destination_local, result.raw());
                 }
                 true
             }
@@ -392,7 +392,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             Origin::synthetic(),
                         )
                     };
-                    self.locals.set(destination_local, result);
+                    self.locals.set(destination_local, result.raw());
                 }
                 true
             }
@@ -422,7 +422,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             Origin::synthetic(),
                         )
                     };
-                    self.locals.set(destination_local, result);
+                    self.locals.set(destination_local, result.raw());
                 }
                 true
             }
