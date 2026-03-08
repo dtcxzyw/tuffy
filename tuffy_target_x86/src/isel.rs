@@ -1131,6 +1131,57 @@ fn select_inst(
             ctx.regs.assign(vref, dst);
         }
 
+        Op::BAnd(a, b) => {
+            let lhs = ctx.ensure_in_reg(a.value)?;
+            let rhs = ctx.ensure_in_reg(b.value)?;
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                dst,
+                src: lhs,
+                size: OpSize::S8,
+            });
+            ctx.out.push(MInst::AndRR {
+                dst,
+                src: rhs,
+                size: OpSize::S8,
+            });
+            ctx.regs.assign(vref, dst);
+        }
+
+        Op::BOr(a, b) => {
+            let lhs = ctx.ensure_in_reg(a.value)?;
+            let rhs = ctx.ensure_in_reg(b.value)?;
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                dst,
+                src: lhs,
+                size: OpSize::S8,
+            });
+            ctx.out.push(MInst::OrRR {
+                dst,
+                src: rhs,
+                size: OpSize::S8,
+            });
+            ctx.regs.assign(vref, dst);
+        }
+
+        Op::BXor(a, b) => {
+            let lhs = ctx.ensure_in_reg(a.value)?;
+            let rhs = ctx.ensure_in_reg(b.value)?;
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                dst,
+                src: lhs,
+                size: OpSize::S8,
+            });
+            ctx.out.push(MInst::XorRR {
+                dst,
+                src: rhs,
+                size: OpSize::S8,
+            });
+            ctx.regs.assign(vref, dst);
+        }
+
         Op::FConst(_, bits) => {
             let dst = ctx.alloc.alloc();
             ctx.out.push(MInst::MovRI64 {
