@@ -1292,14 +1292,22 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             None => 64,
                         };
                         let (primary, overflow) = if matches!(res_ann, Some(IntAnn::Signed(_))) {
-                            self.builder
-                                .sadd_with_overflow(l_op, r_op, bits, Origin::synthetic())
+                            self.builder.sadd_with_overflow(
+                                l_op.into(),
+                                r_op.into(),
+                                bits,
+                                Origin::synthetic(),
+                            )
                         } else {
-                            self.builder
-                                .uadd_with_overflow(l_op, r_op, bits, Origin::synthetic())
+                            self.builder.uadd_with_overflow(
+                                l_op.into(),
+                                r_op.into(),
+                                bits,
+                                Origin::synthetic(),
+                            )
                         };
-                        self.overflow_locals.set(dest_place.local, overflow);
-                        primary
+                        self.overflow_locals.set(dest_place.local, overflow.raw());
+                        primary.raw()
                     }
                     BinOp::SubWithOverflow => {
                         let bits = match res_ann {
@@ -1309,14 +1317,22 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             None => 64,
                         };
                         let (primary, overflow) = if matches!(res_ann, Some(IntAnn::Signed(_))) {
-                            self.builder
-                                .ssub_with_overflow(l_op, r_op, bits, Origin::synthetic())
+                            self.builder.ssub_with_overflow(
+                                l_op.into(),
+                                r_op.into(),
+                                bits,
+                                Origin::synthetic(),
+                            )
                         } else {
-                            self.builder
-                                .usub_with_overflow(l_op, r_op, bits, Origin::synthetic())
+                            self.builder.usub_with_overflow(
+                                l_op.into(),
+                                r_op.into(),
+                                bits,
+                                Origin::synthetic(),
+                            )
                         };
-                        self.overflow_locals.set(dest_place.local, overflow);
-                        primary
+                        self.overflow_locals.set(dest_place.local, overflow.raw());
+                        primary.raw()
                     }
                     BinOp::MulWithOverflow => {
                         let bits = match res_ann {
@@ -1326,14 +1342,22 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             None => 64,
                         };
                         let (primary, overflow) = if matches!(res_ann, Some(IntAnn::Signed(_))) {
-                            self.builder
-                                .smul_with_overflow(l_op, r_op, bits, Origin::synthetic())
+                            self.builder.smul_with_overflow(
+                                l_op.into(),
+                                r_op.into(),
+                                bits,
+                                Origin::synthetic(),
+                            )
                         } else {
-                            self.builder
-                                .umul_with_overflow(l_op, r_op, bits, Origin::synthetic())
+                            self.builder.umul_with_overflow(
+                                l_op.into(),
+                                r_op.into(),
+                                bits,
+                                Origin::synthetic(),
+                            )
                         };
-                        self.overflow_locals.set(dest_place.local, overflow);
-                        primary
+                        self.overflow_locals.set(dest_place.local, overflow.raw());
+                        primary.raw()
                     }
                     BinOp::Eq => {
                         if is_float_cmp {

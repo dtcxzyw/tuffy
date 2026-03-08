@@ -1151,74 +1151,74 @@ fn copy_inst<M: AbiMetadata + Clone>(
         }
         Op::SAddWithOverflow(a, op_b, bits) => {
             let (primary, secondary) = b.sadd_with_overflow(
-                remap_op(s, &a.clone().raw()),
-                remap_op(s, &op_b.clone().raw()),
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
                 *bits,
                 o(),
             );
-            s.vmap.set(old_vref, Mapped::One(primary));
+            s.vmap.set(old_vref, Mapped::One(primary.raw()));
             let old_sec = ValueRef::inst_secondary_result(old_vref.index());
-            s.vmap.set(old_sec, Mapped::One(secondary));
+            s.vmap.set(old_sec, Mapped::One(secondary.raw()));
             return;
         }
         Op::UAddWithOverflow(a, op_b, bits) => {
             let (primary, secondary) = b.uadd_with_overflow(
-                remap_op(s, &a.clone().raw()),
-                remap_op(s, &op_b.clone().raw()),
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
                 *bits,
                 o(),
             );
-            s.vmap.set(old_vref, Mapped::One(primary));
+            s.vmap.set(old_vref, Mapped::One(primary.raw()));
             let old_sec = ValueRef::inst_secondary_result(old_vref.index());
-            s.vmap.set(old_sec, Mapped::One(secondary));
+            s.vmap.set(old_sec, Mapped::One(secondary.raw()));
             return;
         }
         Op::SSubWithOverflow(a, op_b, bits) => {
             let (primary, secondary) = b.ssub_with_overflow(
-                remap_op(s, &a.clone().raw()),
-                remap_op(s, &op_b.clone().raw()),
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
                 *bits,
                 o(),
             );
-            s.vmap.set(old_vref, Mapped::One(primary));
+            s.vmap.set(old_vref, Mapped::One(primary.raw()));
             let old_sec = ValueRef::inst_secondary_result(old_vref.index());
-            s.vmap.set(old_sec, Mapped::One(secondary));
+            s.vmap.set(old_sec, Mapped::One(secondary.raw()));
             return;
         }
         Op::USubWithOverflow(a, op_b, bits) => {
             let (primary, secondary) = b.usub_with_overflow(
-                remap_op(s, &a.clone().raw()),
-                remap_op(s, &op_b.clone().raw()),
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
                 *bits,
                 o(),
             );
-            s.vmap.set(old_vref, Mapped::One(primary));
+            s.vmap.set(old_vref, Mapped::One(primary.raw()));
             let old_sec = ValueRef::inst_secondary_result(old_vref.index());
-            s.vmap.set(old_sec, Mapped::One(secondary));
+            s.vmap.set(old_sec, Mapped::One(secondary.raw()));
             return;
         }
         Op::SMulWithOverflow(a, op_b, bits) => {
             let (primary, secondary) = b.smul_with_overflow(
-                remap_op(s, &a.clone().raw()),
-                remap_op(s, &op_b.clone().raw()),
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
                 *bits,
                 o(),
             );
-            s.vmap.set(old_vref, Mapped::One(primary));
+            s.vmap.set(old_vref, Mapped::One(primary.raw()));
             let old_sec = ValueRef::inst_secondary_result(old_vref.index());
-            s.vmap.set(old_sec, Mapped::One(secondary));
+            s.vmap.set(old_sec, Mapped::One(secondary.raw()));
             return;
         }
         Op::UMulWithOverflow(a, op_b, bits) => {
             let (primary, secondary) = b.umul_with_overflow(
-                remap_op(s, &a.clone().raw()),
-                remap_op(s, &op_b.clone().raw()),
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
                 *bits,
                 o(),
             );
-            s.vmap.set(old_vref, Mapped::One(primary));
+            s.vmap.set(old_vref, Mapped::One(primary.raw()));
             let old_sec = ValueRef::inst_secondary_result(old_vref.index());
-            s.vmap.set(old_sec, Mapped::One(secondary));
+            s.vmap.set(old_sec, Mapped::One(secondary.raw()));
             return;
         }
         Op::ICmp(cmp_op, a, op_b) => b

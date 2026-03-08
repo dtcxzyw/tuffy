@@ -909,18 +909,18 @@ impl<'a> Builder<'a> {
     /// Signed addition with overflow detection. Returns (wrapping_sum: Int, overflow: Bool).
     pub fn sadd_with_overflow(
         &mut self,
-        a: Operand,
-        b: Operand,
+        a: IntOperand,
+        b: IntOperand,
         bits: u32,
         origin: Origin,
-    ) -> (ValueRef, ValueRef) {
+    ) -> (IntValue, BoolValue) {
         use crate::types::{IntAnnotation, IntSignedness};
         let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Signed,
         });
         let primary = self.push_inst_with_secondary(
-            Op::SAddWithOverflow(a.into(), b.into(), bits),
+            Op::SAddWithOverflow(a, b, bits),
             Type::Int,
             Type::Bool,
             origin,
@@ -928,24 +928,27 @@ impl<'a> Builder<'a> {
             None,
         );
         let secondary = ValueRef::inst_secondary_result(primary.index());
-        (primary, secondary)
+        (
+            IntValue::new(primary, self.func),
+            BoolValue::new(secondary, self.func),
+        )
     }
 
     /// Unsigned addition with overflow detection. Returns (wrapping_sum: Int, overflow: Bool).
     pub fn uadd_with_overflow(
         &mut self,
-        a: Operand,
-        b: Operand,
+        a: IntOperand,
+        b: IntOperand,
         bits: u32,
         origin: Origin,
-    ) -> (ValueRef, ValueRef) {
+    ) -> (IntValue, BoolValue) {
         use crate::types::{IntAnnotation, IntSignedness};
         let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Unsigned,
         });
         let primary = self.push_inst_with_secondary(
-            Op::UAddWithOverflow(a.into(), b.into(), bits),
+            Op::UAddWithOverflow(a, b, bits),
             Type::Int,
             Type::Bool,
             origin,
@@ -953,24 +956,27 @@ impl<'a> Builder<'a> {
             None,
         );
         let secondary = ValueRef::inst_secondary_result(primary.index());
-        (primary, secondary)
+        (
+            IntValue::new(primary, self.func),
+            BoolValue::new(secondary, self.func),
+        )
     }
 
     /// Signed subtraction with overflow detection. Returns (wrapping_diff: Int, overflow: Bool).
     pub fn ssub_with_overflow(
         &mut self,
-        a: Operand,
-        b: Operand,
+        a: IntOperand,
+        b: IntOperand,
         bits: u32,
         origin: Origin,
-    ) -> (ValueRef, ValueRef) {
+    ) -> (IntValue, BoolValue) {
         use crate::types::{IntAnnotation, IntSignedness};
         let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Signed,
         });
         let primary = self.push_inst_with_secondary(
-            Op::SSubWithOverflow(a.into(), b.into(), bits),
+            Op::SSubWithOverflow(a, b, bits),
             Type::Int,
             Type::Bool,
             origin,
@@ -978,24 +984,27 @@ impl<'a> Builder<'a> {
             None,
         );
         let secondary = ValueRef::inst_secondary_result(primary.index());
-        (primary, secondary)
+        (
+            IntValue::new(primary, self.func),
+            BoolValue::new(secondary, self.func),
+        )
     }
 
     /// Unsigned subtraction with overflow detection. Returns (wrapping_diff: Int, overflow: Bool).
     pub fn usub_with_overflow(
         &mut self,
-        a: Operand,
-        b: Operand,
+        a: IntOperand,
+        b: IntOperand,
         bits: u32,
         origin: Origin,
-    ) -> (ValueRef, ValueRef) {
+    ) -> (IntValue, BoolValue) {
         use crate::types::{IntAnnotation, IntSignedness};
         let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Unsigned,
         });
         let primary = self.push_inst_with_secondary(
-            Op::USubWithOverflow(a.into(), b.into(), bits),
+            Op::USubWithOverflow(a, b, bits),
             Type::Int,
             Type::Bool,
             origin,
@@ -1003,24 +1012,27 @@ impl<'a> Builder<'a> {
             None,
         );
         let secondary = ValueRef::inst_secondary_result(primary.index());
-        (primary, secondary)
+        (
+            IntValue::new(primary, self.func),
+            BoolValue::new(secondary, self.func),
+        )
     }
 
     /// Signed multiplication with overflow detection. Returns (wrapping_product: Int, overflow: Bool).
     pub fn smul_with_overflow(
         &mut self,
-        a: Operand,
-        b: Operand,
+        a: IntOperand,
+        b: IntOperand,
         bits: u32,
         origin: Origin,
-    ) -> (ValueRef, ValueRef) {
+    ) -> (IntValue, BoolValue) {
         use crate::types::{IntAnnotation, IntSignedness};
         let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Signed,
         });
         let primary = self.push_inst_with_secondary(
-            Op::SMulWithOverflow(a.into(), b.into(), bits),
+            Op::SMulWithOverflow(a, b, bits),
             Type::Int,
             Type::Bool,
             origin,
@@ -1028,24 +1040,27 @@ impl<'a> Builder<'a> {
             None,
         );
         let secondary = ValueRef::inst_secondary_result(primary.index());
-        (primary, secondary)
+        (
+            IntValue::new(primary, self.func),
+            BoolValue::new(secondary, self.func),
+        )
     }
 
     /// Unsigned multiplication with overflow detection. Returns (wrapping_product: Int, overflow: Bool).
     pub fn umul_with_overflow(
         &mut self,
-        a: Operand,
-        b: Operand,
+        a: IntOperand,
+        b: IntOperand,
         bits: u32,
         origin: Origin,
-    ) -> (ValueRef, ValueRef) {
+    ) -> (IntValue, BoolValue) {
         use crate::types::{IntAnnotation, IntSignedness};
         let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Unsigned,
         });
         let primary = self.push_inst_with_secondary(
-            Op::UMulWithOverflow(a.into(), b.into(), bits),
+            Op::UMulWithOverflow(a, b, bits),
             Type::Int,
             Type::Bool,
             origin,
@@ -1053,7 +1068,10 @@ impl<'a> Builder<'a> {
             None,
         );
         let secondary = ValueRef::inst_secondary_result(primary.index());
-        (primary, secondary)
+        (
+            IntValue::new(primary, self.func),
+            BoolValue::new(secondary, self.func),
+        )
     }
 
     // ── Memory ──
