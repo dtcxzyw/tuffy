@@ -190,6 +190,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         id
     }
 
+    /// Get the target pointer width in bits.
+    fn ptr_width(&self) -> u32 {
+        self.tcx.data_layout.pointer_size().bits() as u32
+    }
+
     /// Monomorphize a MIR type using the current instance's substitutions.
     pub(super) fn monomorphize(&self, ty: ty::Ty<'tcx>) -> ty::Ty<'tcx> {
         self.tcx.instantiate_and_normalize_erasing_regions(
@@ -228,22 +233,26 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
     /// If `val` is a Ptr or Bool, coerce it to Int.
     pub(super) fn coerce_to_int(&mut self, val: ValueRef) -> ValueRef {
+        let ptr_width = self.ptr_width();
         match self.builder.value_type(val) {
-            Some(Type::Ptr(_)) => self.builder.ptrtoaddr(val.into(), 64, Origin::synthetic()),
+            Some(Type::Ptr(_)) => {
+                self.builder
+                    .ptrtoaddr(val.into(), ptr_width, Origin::synthetic())
+            }
             Some(Type::Bool) => {
-                let one = self
-                    .builder
-                    .iconst(1, 64, IntSignedness::Unsigned, Origin::synthetic());
-                let zero = self
-                    .builder
-                    .iconst(0, 64, IntSignedness::Unsigned, Origin::synthetic());
+                let one =
+                    self.builder
+                        .iconst(1, ptr_width, IntSignedness::Unsigned, Origin::synthetic());
+                let zero =
+                    self.builder
+                        .iconst(0, ptr_width, IntSignedness::Unsigned, Origin::synthetic());
                 self.builder.select(
                     val.into(),
                     one.into(),
                     zero.into(),
                     Type::Int,
                     Some(Annotation::Int(IntAnnotation {
-                        bit_width: 64,
+                        bit_width: ptr_width,
                         signedness: IntSignedness::Unsigned,
                     })),
                     Origin::synthetic(),
