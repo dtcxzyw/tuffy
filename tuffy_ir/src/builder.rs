@@ -479,43 +479,45 @@ impl<'a> Builder<'a> {
     /// Integer minimum.
     pub fn min(
         &mut self,
-        mut a: Operand,
-        b: Operand,
+        a: IntOperand,
+        b: IntOperand,
         ann: Option<Annotation>,
         origin: Origin,
-    ) -> ValueRef {
-        let _ty = self
-            .value_type(a.value)
-            .and_then(|t| match t {
-                Type::Int => Some(Type::Int),
-                _ => None,
-            })
-            .expect("min operand must be Int type");
+    ) -> IntValue {
+        let mut a_op = a.raw();
         if ann.is_some() {
-            a.annotation = ann;
+            a_op.annotation = ann;
         }
-        self.push_inst(Op::Min(a.into(), b.into()), Type::Int, None, origin, ann)
+        let v = self.push_inst(
+            Op::Min(a_op.into(), b.raw().into()),
+            Type::Int,
+            None,
+            origin,
+            ann,
+        );
+        IntValue::new(v, self.func)
     }
 
     /// Integer maximum.
     pub fn max(
         &mut self,
-        mut a: Operand,
-        b: Operand,
+        a: IntOperand,
+        b: IntOperand,
         ann: Option<Annotation>,
         origin: Origin,
-    ) -> ValueRef {
-        let _ty = self
-            .value_type(a.value)
-            .and_then(|t| match t {
-                Type::Int => Some(Type::Int),
-                _ => None,
-            })
-            .expect("max operand must be Int type");
+    ) -> IntValue {
+        let mut a_op = a.raw();
         if ann.is_some() {
-            a.annotation = ann;
+            a_op.annotation = ann;
         }
-        self.push_inst(Op::Max(a.into(), b.into()), Type::Int, None, origin, ann)
+        let v = self.push_inst(
+            Op::Max(a_op.into(), b.raw().into()),
+            Type::Int,
+            None,
+            origin,
+            ann,
+        );
+        IntValue::new(v, self.func)
     }
 
     // ── Floating point arithmetic ──
@@ -523,61 +525,66 @@ impl<'a> Builder<'a> {
     /// Floating point addition.
     pub fn fadd(
         &mut self,
-        a: Operand,
-        b: Operand,
+        a: FloatOperand,
+        b: FloatOperand,
         flags: FpRewriteFlags,
         ty: Type,
         origin: Origin,
-    ) -> ValueRef {
-        self.push_inst(Op::FAdd(a.into(), b.into(), flags), ty, None, origin, None)
+    ) -> FloatValue {
+        let v = self.push_inst(Op::FAdd(a, b, flags), ty, None, origin, None);
+        FloatValue::new(v, self.func)
     }
 
     /// Floating point subtraction.
     pub fn fsub(
         &mut self,
-        a: Operand,
-        b: Operand,
+        a: FloatOperand,
+        b: FloatOperand,
         flags: FpRewriteFlags,
         ty: Type,
         origin: Origin,
-    ) -> ValueRef {
-        self.push_inst(Op::FSub(a.into(), b.into(), flags), ty, None, origin, None)
+    ) -> FloatValue {
+        let v = self.push_inst(Op::FSub(a, b, flags), ty, None, origin, None);
+        FloatValue::new(v, self.func)
     }
 
     /// Floating point multiplication.
     pub fn fmul(
         &mut self,
-        a: Operand,
-        b: Operand,
+        a: FloatOperand,
+        b: FloatOperand,
         flags: FpRewriteFlags,
         ty: Type,
         origin: Origin,
-    ) -> ValueRef {
-        self.push_inst(Op::FMul(a.into(), b.into(), flags), ty, None, origin, None)
+    ) -> FloatValue {
+        let v = self.push_inst(Op::FMul(a, b, flags), ty, None, origin, None);
+        FloatValue::new(v, self.func)
     }
 
     /// Floating point division.
     pub fn fdiv(
         &mut self,
-        a: Operand,
-        b: Operand,
+        a: FloatOperand,
+        b: FloatOperand,
         flags: FpRewriteFlags,
         ty: Type,
         origin: Origin,
-    ) -> ValueRef {
-        self.push_inst(Op::FDiv(a.into(), b.into(), flags), ty, None, origin, None)
+    ) -> FloatValue {
+        let v = self.push_inst(Op::FDiv(a, b, flags), ty, None, origin, None);
+        FloatValue::new(v, self.func)
     }
 
     /// Floating point remainder.
     pub fn frem(
         &mut self,
-        a: Operand,
-        b: Operand,
+        a: FloatOperand,
+        b: FloatOperand,
         flags: FpRewriteFlags,
         ty: Type,
         origin: Origin,
-    ) -> ValueRef {
-        self.push_inst(Op::FRem(a.into(), b.into(), flags), ty, None, origin, None)
+    ) -> FloatValue {
+        let v = self.push_inst(Op::FRem(a, b, flags), ty, None, origin, None);
+        FloatValue::new(v, self.func)
     }
 
     /// IEEE 754-2008 minNum.

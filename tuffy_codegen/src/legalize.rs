@@ -1045,18 +1045,22 @@ fn copy_inst<M: AbiMetadata + Clone>(
                 o(),
             )
             .raw(),
-        Op::Min(a, op_b) => b.min(
-            remap_op(s, &a.clone().raw()),
-            remap_op(s, &op_b.clone().raw()),
-            ann,
-            o(),
-        ),
-        Op::Max(a, op_b) => b.max(
-            remap_op(s, &a.clone().raw()),
-            remap_op(s, &op_b.clone().raw()),
-            ann,
-            o(),
-        ),
+        Op::Min(a, op_b) => b
+            .min(
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
+                ann,
+                o(),
+            )
+            .raw(),
+        Op::Max(a, op_b) => b
+            .max(
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
+                ann,
+                o(),
+            )
+            .raw(),
         Op::CountOnes(a) => b
             .count_ones(remap_op(s, &a.clone().raw()).into(), 64, o())
             .raw(),
@@ -1372,41 +1376,51 @@ fn copy_inst<M: AbiMetadata + Clone>(
         Op::Br(..) | Op::BrIf(..) | Op::Call(..) | Op::Continue(..) | Op::RegionYield(..) => {
             unreachable!("branch/call should be handled by dedicated leg_* function")
         }
-        Op::FAdd(a, op_b, flags) => b.fadd(
-            remap_op(s, &a.clone().raw()),
-            remap_op(s, &op_b.clone().raw()),
-            *flags,
-            inst.ty.clone(),
-            o(),
-        ),
-        Op::FSub(a, op_b, flags) => b.fsub(
-            remap_op(s, &a.clone().raw()),
-            remap_op(s, &op_b.clone().raw()),
-            *flags,
-            inst.ty.clone(),
-            o(),
-        ),
-        Op::FMul(a, op_b, flags) => b.fmul(
-            remap_op(s, &a.clone().raw()),
-            remap_op(s, &op_b.clone().raw()),
-            *flags,
-            inst.ty.clone(),
-            o(),
-        ),
-        Op::FDiv(a, op_b, flags) => b.fdiv(
-            remap_op(s, &a.clone().raw()),
-            remap_op(s, &op_b.clone().raw()),
-            *flags,
-            inst.ty.clone(),
-            o(),
-        ),
-        Op::FRem(a, op_b, flags) => b.frem(
-            remap_op(s, &a.clone().raw()),
-            remap_op(s, &op_b.clone().raw()),
-            *flags,
-            inst.ty.clone(),
-            o(),
-        ),
+        Op::FAdd(a, op_b, flags) => b
+            .fadd(
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
+                *flags,
+                inst.ty.clone(),
+                o(),
+            )
+            .raw(),
+        Op::FSub(a, op_b, flags) => b
+            .fsub(
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
+                *flags,
+                inst.ty.clone(),
+                o(),
+            )
+            .raw(),
+        Op::FMul(a, op_b, flags) => b
+            .fmul(
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
+                *flags,
+                inst.ty.clone(),
+                o(),
+            )
+            .raw(),
+        Op::FDiv(a, op_b, flags) => b
+            .fdiv(
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
+                *flags,
+                inst.ty.clone(),
+                o(),
+            )
+            .raw(),
+        Op::FRem(a, op_b, flags) => b
+            .frem(
+                remap_op(s, &a.clone().raw()).into(),
+                remap_op(s, &op_b.clone().raw()).into(),
+                *flags,
+                inst.ty.clone(),
+                o(),
+            )
+            .raw(),
         Op::FMinNum(a, op_b) => b
             .fminnum(
                 remap_op(s, &a.clone().raw()).into(),

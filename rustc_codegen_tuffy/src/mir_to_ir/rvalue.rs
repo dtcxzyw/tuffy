@@ -1047,7 +1047,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             Origin::synthetic(),
                         ),
                     };
-                    return Some(res);
+                    return Some(res.raw());
                 }
 
                 // Unsupported operand types produce Unit or
@@ -1944,12 +1944,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     None,
                                     Origin::synthetic(),
                                 );
-                                self.builder.max(
-                                    clamped_hi.into(),
-                                    lo_c.into(),
-                                    None,
-                                    Origin::synthetic(),
-                                )
+                                self.builder
+                                    .max(clamped_hi.into(), lo_c.into(), None, Origin::synthetic())
+                                    .raw()
                             } else {
                                 corrected
                             }
