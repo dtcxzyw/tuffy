@@ -17,6 +17,26 @@ matching the Lean spec's `Int` type.
 
 **Semantics**: `Value.int(immediate)`
 
+### `bconst`
+
+```
+vN = bconst <true|false>
+```
+
+Produces a boolean constant (true or false).
+
+**Semantics**: `Value.bool(immediate)`
+
+### `fconst`
+
+```
+vN = fconst <float_type> <bits>
+```
+
+Produces a floating-point constant. The bits represent the IEEE 754 bit pattern.
+
+**Semantics**: `Value.float(bits)`
+
 ### `param`
 
 ```
