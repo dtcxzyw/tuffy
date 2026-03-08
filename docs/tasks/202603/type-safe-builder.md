@@ -1,8 +1,8 @@
 # Type-Safe Builder API
 
-- Status: Draft
+- Status: Completed
 - Created: 2026-03-08
-- Completed: N/A
+- Completed: 2026-03-08
 - Parent: N/A
 
 ## Description
