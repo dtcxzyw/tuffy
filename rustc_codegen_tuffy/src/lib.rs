@@ -128,35 +128,8 @@ impl CodegenBackend for TuffyCodegenBackend {
 
                         let vr = tuffy_ir::verifier::verify_function(&result.func, &result.symbols);
                         if !vr.is_ok() {
-                            // Verification failed — emit a stub instead of
-                            // panicking so compilation can continue.
                             let func_name = result.symbols.resolve(result.func.name);
-                            eprintln!(
-                                "warning: IR verification failed for {func_name}, emitting stub\n  {vr}"
-                            );
-                            let sym_name = tcx.symbol_name(*instance).name.to_string();
-                            let is_noop = sym_name.contains("drop_in_place")
-                                || sym_name.contains("precondition_check");
-                            let code: Vec<u8> = if is_noop {
-                                vec![0xC3]
-                            } else {
-                                vec![0x0F, 0x0B]
-                            };
-                            use rustc_hir::attrs::Linkage;
-                            compiled_funcs.push(CompiledFunction {
-                                name: sym_name,
-                                code,
-                                relocations: vec![],
-                                weak: matches!(
-                                    item_data.linkage,
-                                    Linkage::Internal
-                                        | Linkage::LinkOnceODR
-                                        | Linkage::WeakODR
-                                        | Linkage::LinkOnceAny
-                                        | Linkage::WeakAny
-                                ),
-                                local: false,
-                            });
+                            panic!("IR verification failed for {func_name}: {vr}");
                         } else {
                             for (sym_id, data, relocs) in &result.static_data {
                                 all_static_data.push(StaticData {
@@ -366,21 +339,8 @@ impl CodegenBackend for TuffyCodegenBackend {
                 pending_instances.extend(result.referenced_instances.iter().copied());
                 let vr = tuffy_ir::verifier::verify_function(&result.func, &result.symbols);
                 if !vr.is_ok() {
-                    let sym_name = tcx.symbol_name(inst).name.to_string();
-                    let is_noop = sym_name.contains("drop_in_place")
-                        || sym_name.contains("precondition_check");
-                    inline_funcs.push(CompiledFunction {
-                        name: sym_name,
-                        code: if is_noop {
-                            vec![0xC3]
-                        } else {
-                            vec![0x0F, 0x0B]
-                        },
-                        relocations: vec![],
-                        weak: true,
-                        local: false,
-                    });
-                    continue;
+                    let func_name = result.symbols.resolve(result.func.name);
+                    panic!("IR verification failed for {func_name}: {vr}");
                 }
                 for (sym_id, data, relocs) in &result.static_data {
                     inline_static_data.push(StaticData {
