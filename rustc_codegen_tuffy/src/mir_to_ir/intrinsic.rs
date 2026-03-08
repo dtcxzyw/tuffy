@@ -332,7 +332,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let result =
                         self.builder
                             .ptradd(ptr.into(), byte_offset.into(), 0, Origin::synthetic());
-                    self.locals.set(destination_local, result);
+                    self.locals.set(destination_local, result.raw());
                 }
                 true
             }
@@ -632,7 +632,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     current_mem.into(),
                     Origin::synthetic(),
                 );
-                Some(mem_out)
+                Some(mem_out.raw())
             }
 
             // copy_nonoverlapping<T>(src, dst, count) → MemCopy(dst, src, count * sizeof(T), align)
@@ -665,7 +665,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     current_mem.into(),
                     Origin::synthetic(),
                 );
-                Some(mem_out)
+                Some(mem_out.raw())
             }
 
             // copy<T>(src, dst, count) → MemMove(dst, src, count * sizeof(T), align)
@@ -698,7 +698,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     current_mem.into(),
                     Origin::synthetic(),
                 );
-                Some(mem_out)
+                Some(mem_out.raw())
             }
 
             // raw_eq<T>(a, b) → memcmp(a, b, sizeof(T)) == 0
@@ -767,9 +767,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         );
                         (
                             self.builder
-                                .ptradd(x.into(), o.into(), 0, Origin::synthetic()),
+                                .ptradd(x.into(), o.into(), 0, Origin::synthetic())
+                                .raw(),
                             self.builder
-                                .ptradd(y.into(), o.into(), 0, Origin::synthetic()),
+                                .ptradd(y.into(), o.into(), 0, Origin::synthetic())
+                                .raw(),
                         )
                     };
                     let vx = self.builder.load(
@@ -838,7 +840,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     current_mem.into(),
                     Origin::synthetic(),
                 );
-                Some(new_mem)
+                Some(new_mem.raw())
             }
 
             // atomic_cxchg_*, atomic_cxchgweak_* → (old_val, success: bool)
@@ -1123,7 +1125,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         Origin::synthetic(),
                     );
                     self.locals.set(destination_local, old);
-                    Some(new_mem)
+                    Some(new_mem.raw())
                 }
             }
 

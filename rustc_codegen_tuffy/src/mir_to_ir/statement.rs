@@ -257,12 +257,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                             IntSignedness::DontCare,
                                                             Origin::synthetic(),
                                                         );
-                                                        self.builder.ptradd(
-                                                            src_base.into(),
-                                                            off.into(),
-                                                            0,
-                                                            Origin::synthetic(),
-                                                        )
+                                                        self.builder
+                                                            .ptradd(
+                                                                src_base.into(),
+                                                                off.into(),
+                                                                0,
+                                                                Origin::synthetic(),
+                                                            )
+                                                            .raw()
                                                     };
                                                     let word = self.builder.load(
                                                         src_addr.into(),
@@ -281,12 +283,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                             IntSignedness::DontCare,
                                                             Origin::synthetic(),
                                                         );
-                                                        self.builder.ptradd(
-                                                            slot.into(),
-                                                            off.into(),
-                                                            0,
-                                                            Origin::synthetic(),
-                                                        )
+                                                        self.builder
+                                                            .ptradd(
+                                                                slot.into(),
+                                                                off.into(),
+                                                                0,
+                                                                Origin::synthetic(),
+                                                            )
+                                                            .raw()
                                                     };
                                                     self.current_mem = self
                                                         .builder
@@ -414,12 +418,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                             IntSignedness::DontCare,
                                                             Origin::synthetic(),
                                                         );
-                                                        self.builder.ptradd(
-                                                            src_base.into(),
-                                                            off.into(),
-                                                            0,
-                                                            Origin::synthetic(),
-                                                        )
+                                                        self.builder
+                                                            .ptradd(
+                                                                src_base.into(),
+                                                                off.into(),
+                                                                0,
+                                                                Origin::synthetic(),
+                                                            )
+                                                            .raw()
                                                     };
                                                     let word = self.builder.load(
                                                         src_addr.into(),
@@ -438,12 +444,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                             IntSignedness::DontCare,
                                                             Origin::synthetic(),
                                                         );
-                                                        self.builder.ptradd(
-                                                            slot.into(),
-                                                            off.into(),
-                                                            0,
-                                                            Origin::synthetic(),
-                                                        )
+                                                        self.builder
+                                                            .ptradd(
+                                                                slot.into(),
+                                                                off.into(),
+                                                                0,
+                                                                Origin::synthetic(),
+                                                            )
+                                                            .raw()
                                                     };
                                                     self.current_mem = self
                                                         .builder
@@ -653,12 +661,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                 IntSignedness::DontCare,
                                                 Origin::synthetic(),
                                             );
-                                            self.builder.ptradd(
-                                                val.into(),
-                                                o.into(),
-                                                0,
-                                                Origin::synthetic(),
-                                            )
+                                            self.builder
+                                                .ptradd(
+                                                    val.into(),
+                                                    o.into(),
+                                                    0,
+                                                    Origin::synthetic(),
+                                                )
+                                                .raw()
                                         };
                                         let word = self.builder.load(
                                             src_addr.into(),
@@ -677,12 +687,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                 IntSignedness::DontCare,
                                                 Origin::synthetic(),
                                             );
-                                            self.builder.ptradd(
-                                                new_slot.into(),
-                                                o.into(),
-                                                0,
-                                                Origin::synthetic(),
-                                            )
+                                            self.builder
+                                                .ptradd(
+                                                    new_slot.into(),
+                                                    o.into(),
+                                                    0,
+                                                    Origin::synthetic(),
+                                                )
+                                                .raw()
                                         };
                                         self.current_mem = self
                                             .builder
@@ -794,12 +806,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                 IntSignedness::DontCare,
                                                 Origin::synthetic(),
                                             );
-                                            self.builder.ptradd(
-                                                src_base.into(),
-                                                off.into(),
-                                                0,
-                                                Origin::synthetic(),
-                                            )
+                                            self.builder
+                                                .ptradd(
+                                                    src_base.into(),
+                                                    off.into(),
+                                                    0,
+                                                    Origin::synthetic(),
+                                                )
+                                                .raw()
                                         };
                                         let word = self.builder.load(
                                             src_addr.into(),
@@ -818,12 +832,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                 IntSignedness::DontCare,
                                                 Origin::synthetic(),
                                             );
-                                            self.builder.ptradd(
-                                                addr.into(),
-                                                off.into(),
-                                                0,
-                                                Origin::synthetic(),
-                                            )
+                                            self.builder
+                                                .ptradd(
+                                                    addr.into(),
+                                                    off.into(),
+                                                    0,
+                                                    Origin::synthetic(),
+                                                )
+                                                .raw()
                                         };
                                         self.current_mem = self
                                             .builder
@@ -1247,6 +1263,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             );
             self.builder
                 .ptradd(base_addr.into(), off.into(), 0, Origin::synthetic())
+                .raw()
         } else {
             base_addr
         };
@@ -1331,6 +1348,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             );
             self.builder
                 .ptradd(slot.into(), off.into(), 0, Origin::synthetic())
+                .raw()
         } else {
             slot
         };

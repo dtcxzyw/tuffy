@@ -640,20 +640,14 @@ impl<'a> Builder<'a> {
     /// Conditional select: if cond then true_val else false_val.
     pub fn select(
         &mut self,
-        cond: Operand,
+        cond: BoolOperand,
         true_val: Operand,
         false_val: Operand,
         ty: Type,
         ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
-        self.push_inst(
-            Op::Select(cond.into(), true_val, false_val),
-            ty,
-            None,
-            origin,
-            ann,
-        )
+        self.push_inst(Op::Select(cond, true_val, false_val), ty, None, origin, ann)
     }
 
     /// Population count: count the number of set bits.
@@ -1077,16 +1071,17 @@ impl<'a> Builder<'a> {
         dst: Operand,
         src: Operand,
         count: Operand,
-        mem: Operand,
+        mem: MemOperand,
         origin: Origin,
-    ) -> ValueRef {
-        self.push_inst(
-            Op::MemCopy(dst.into(), src.into(), count.into(), mem.into()),
+    ) -> MemValue {
+        let v = self.push_inst(
+            Op::MemCopy(dst.into(), src.into(), count.into(), mem),
             Type::Mem,
             None,
             origin,
             None,
-        )
+        );
+        MemValue::new(v, self.func)
     }
 
     /// Memory move (may overlap): memmove semantics.
@@ -1095,16 +1090,17 @@ impl<'a> Builder<'a> {
         dst: Operand,
         src: Operand,
         count: Operand,
-        mem: Operand,
+        mem: MemOperand,
         origin: Origin,
-    ) -> ValueRef {
-        self.push_inst(
-            Op::MemMove(dst.into(), src.into(), count.into(), mem.into()),
+    ) -> MemValue {
+        let v = self.push_inst(
+            Op::MemMove(dst.into(), src.into(), count.into(), mem),
             Type::Mem,
             None,
             origin,
             None,
-        )
+        );
+        MemValue::new(v, self.func)
     }
 
     /// Memory set: memset semantics.
@@ -1113,16 +1109,17 @@ impl<'a> Builder<'a> {
         dst: Operand,
         val: Operand,
         count: Operand,
-        mem: Operand,
+        mem: MemOperand,
         origin: Origin,
-    ) -> ValueRef {
-        self.push_inst(
-            Op::MemSet(dst.into(), val, count.into(), mem.into()),
+    ) -> MemValue {
+        let v = self.push_inst(
+            Op::MemSet(dst.into(), val, count.into(), mem),
             Type::Mem,
             None,
             origin,
             None,
-        )
+        );
+        MemValue::new(v, self.func)
     }
 
     // ── Atomic memory operations ──
@@ -1133,12 +1130,12 @@ impl<'a> Builder<'a> {
         ptr: Operand,
         ty: Type,
         ordering: MemoryOrdering,
-        mem: Operand,
+        mem: MemOperand,
         ann: Option<Annotation>,
         origin: Origin,
     ) -> (ValueRef, ValueRef) {
         let primary = self.push_inst_with_secondary(
-            Op::LoadAtomic(ptr.into(), ordering, mem.into()),
+            Op::LoadAtomic(ptr.into(), ordering, mem),
             Type::Mem,
             ty,
             origin,
@@ -1155,16 +1152,17 @@ impl<'a> Builder<'a> {
         val: Operand,
         ptr: Operand,
         ordering: MemoryOrdering,
-        mem: Operand,
+        mem: MemOperand,
         origin: Origin,
-    ) -> ValueRef {
-        self.push_inst(
-            Op::StoreAtomic(val, ptr.into(), ordering, mem.into()),
+    ) -> MemValue {
+        let v = self.push_inst(
+            Op::StoreAtomic(val, ptr.into(), ordering, mem),
             Type::Mem,
             None,
             origin,
             None,
-        )
+        );
+        MemValue::new(v, self.func)
     }
 
     /// Atomic read-modify-write. Returns (mem_out, old_value).
@@ -1176,12 +1174,12 @@ impl<'a> Builder<'a> {
         val: Operand,
         ty: Type,
         ordering: MemoryOrdering,
-        mem: Operand,
+        mem: MemOperand,
         ann: Option<Annotation>,
         origin: Origin,
     ) -> (ValueRef, ValueRef) {
         let primary = self.push_inst_with_secondary(
-            Op::AtomicRmw(op, ptr.into(), val, ordering, mem.into()),
+            Op::AtomicRmw(op, ptr.into(), val, ordering, mem),
             Type::Mem,
             ty,
             origin,
@@ -1202,19 +1200,12 @@ impl<'a> Builder<'a> {
         ty: Type,
         success_ord: MemoryOrdering,
         failure_ord: MemoryOrdering,
-        mem: Operand,
+        mem: MemOperand,
         ann: Option<Annotation>,
         origin: Origin,
     ) -> (ValueRef, ValueRef) {
         let primary = self.push_inst_with_secondary(
-            Op::AtomicCmpXchg(
-                ptr.into(),
-                expected,
-                desired,
-                success_ord,
-                failure_ord,
-                mem.into(),
-            ),
+            Op::AtomicCmpXchg(ptr.into(), expected, desired, success_ord, failure_ord, mem),
             Type::Mem,
             ty,
             origin,
@@ -1250,13 +1241,13 @@ impl<'a> Builder<'a> {
         callee: Operand,
         args: Vec<Operand>,
         ret_ty: Type,
-        mem: Operand,
+        mem: MemOperand,
         ann: Option<Annotation>,
         origin: Origin,
     ) -> (ValueRef, Option<ValueRef>) {
         if ret_ty == Type::Unit {
             let primary = self.push_inst(
-                Op::Call(callee.into(), args, mem.into()),
+                Op::Call(callee.into(), args, mem),
                 Type::Mem,
                 None,
                 origin,
@@ -1265,7 +1256,7 @@ impl<'a> Builder<'a> {
             (primary, None)
         } else {
             let primary = self.push_inst_with_secondary(
-                Op::Call(callee.into(), args, mem.into()),
+                Op::Call(callee.into(), args, mem),
                 Type::Mem,
                 ret_ty,
                 origin,
@@ -1357,18 +1348,19 @@ impl<'a> Builder<'a> {
     /// Pointer addition (preserves provenance).
     pub fn ptradd(
         &mut self,
-        ptr: Operand,
-        offset: Operand,
+        ptr: PtrOperand,
+        offset: IntOperand,
         addr_space: u32,
         origin: Origin,
-    ) -> ValueRef {
-        self.push_inst(
-            Op::PtrAdd(ptr.into(), offset.into()),
+    ) -> PtrValue {
+        let v = self.push_inst(
+            Op::PtrAdd(ptr, offset),
             Type::Ptr(addr_space),
             None,
             origin,
             None,
-        )
+        );
+        PtrValue::new(v, self.func)
     }
 
     /// Pointer difference (same allocation).
@@ -1460,7 +1452,7 @@ impl<'a> Builder<'a> {
     /// Conditional branch.
     pub fn brif(
         &mut self,
-        cond: Operand,
+        cond: BoolOperand,
         then_block: BlockRef,
         then_args: Vec<Operand>,
         else_block: BlockRef,
@@ -1468,7 +1460,7 @@ impl<'a> Builder<'a> {
         origin: Origin,
     ) -> ValueRef {
         self.push_inst(
-            Op::BrIf(cond.into(), then_block, then_args, else_block, else_args),
+            Op::BrIf(cond, then_block, then_args, else_block, else_args),
             Type::Unit,
             None,
             origin,

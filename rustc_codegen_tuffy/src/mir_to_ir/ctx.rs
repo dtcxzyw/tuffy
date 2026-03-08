@@ -397,7 +397,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         self.current_mem.into(),
                         Origin::synthetic(),
                     );
-                    self.current_mem = new_mem;
+                    self.current_mem = new_mem.raw();
 
                     // Use the local slot, not the parameter pointer
                     self.locals.set(local, local_slot);

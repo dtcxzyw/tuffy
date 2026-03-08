@@ -403,12 +403,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         IntSignedness::DontCare,
                                         Origin::synthetic(),
                                     );
-                                    self.builder.ptradd(
-                                        result_val.into(),
-                                        off.into(),
-                                        0,
-                                        Origin::synthetic(),
-                                    )
+                                    self.builder
+                                        .ptradd(
+                                            result_val.into(),
+                                            off.into(),
+                                            0,
+                                            Origin::synthetic(),
+                                        )
+                                        .raw()
                                 };
                                 let word = self.builder.load(
                                     src_addr.into(),
@@ -427,12 +429,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         IntSignedness::DontCare,
                                         Origin::synthetic(),
                                     );
-                                    self.builder.ptradd(
-                                        slot.into(),
-                                        off.into(),
-                                        0,
-                                        Origin::synthetic(),
-                                    )
+                                    self.builder
+                                        .ptradd(slot.into(), off.into(), 0, Origin::synthetic())
+                                        .raw()
                                 };
                                 self.current_mem = self
                                     .builder
@@ -830,6 +829,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             );
                             self.builder
                                 .ptradd(base.into(), off.into(), 0, Origin::synthetic())
+                                .raw()
                         };
                         if fsz <= 8 {
                             let fty = translate_ty(self.tcx, ft).unwrap_or(default_int_type());
@@ -1065,7 +1065,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 self.current_mem.into(),
                                 Origin::synthetic(),
                             );
-                            self.current_mem = new_mem;
+                            self.current_mem = new_mem.raw();
                             ir_args.push(tmp.into());
                         } else {
                             ir_args.push(v.into());
@@ -1236,13 +1236,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     );
                     let addr_annotated = IrOperand::annotated(addr, Annotation::Align(1));
                     let sret_annotated = IrOperand::annotated(sret, Annotation::Align(1));
-                    self.current_mem = self.builder.mem_copy(
-                        addr_annotated,
-                        sret_annotated,
-                        count.into(),
-                        self.current_mem.into(),
-                        Origin::synthetic(),
-                    );
+                    self.current_mem = self
+                        .builder
+                        .mem_copy(
+                            addr_annotated,
+                            sret_annotated,
+                            count.into(),
+                            self.current_mem.into(),
+                            Origin::synthetic(),
+                        )
+                        .raw();
                 } else {
                     self.current_mem = self
                         .builder

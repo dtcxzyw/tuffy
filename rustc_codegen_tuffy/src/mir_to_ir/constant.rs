@@ -131,7 +131,11 @@ pub(super) fn translate_const<'tcx>(
                             IntSignedness::DontCare,
                             Origin::synthetic(),
                         );
-                        Some(builder.ptradd(base.raw().into(), off.into(), 0, Origin::synthetic()))
+                        Some(
+                            builder
+                                .ptradd(base.raw().into(), off.into(), 0, Origin::synthetic())
+                                .raw(),
+                        )
                     } else {
                         Some(base.raw())
                     }
