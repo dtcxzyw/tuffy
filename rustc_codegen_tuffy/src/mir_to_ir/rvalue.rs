@@ -99,7 +99,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let word = self.builder.load(
                         src.into(),
                         chunk,
-                        default_int_type(),
+                        Type::Int,
                         self.current_mem.into(),
                         int_annotation_for_bytes(chunk),
                         Origin::synthetic(),
@@ -206,7 +206,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let loaded = self.builder.load(
                             idx_val.into(),
                             8,
-                            default_int_type(),
+                            Type::Int,
                             self.current_mem.into(),
                             int_annotation_for_bytes(8),
                             Origin::synthetic(),
@@ -387,7 +387,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         if bytes > 8 {
             return Some(addr);
         }
-        let ty = translate_ty(self.tcx, projected_ty).unwrap_or(default_int_type());
+        let ty = translate_ty(self.tcx, projected_ty).unwrap_or(Type::Int);
         let ann = if matches!(ty, Type::Int) {
             int_annotation_for_bytes(bytes)
         } else {
@@ -493,7 +493,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let tag_val = self.builder.load(
                     tag_addr.into(),
                     tag_size,
-                    default_int_type(),
+                    Type::Int,
                     self.current_mem.into(),
                     int_annotation_for_bytes(tag_size),
                     Origin::synthetic(),
@@ -541,7 +541,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 is_niche.into(),
                                 niche_discr.into(),
                                 untag_discr.into(),
-                                default_int_type(),
+                                Type::Int,
                                 default_int_annotation(),
                                 Origin::synthetic(),
                             ))
@@ -600,7 +600,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 in_range.into(),
                                 variant_idx.into(),
                                 untag_discr.into(),
-                                default_int_type(),
+                                Type::Int,
                                 default_int_annotation(),
                                 Origin::synthetic(),
                             ))
@@ -700,7 +700,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let meta = self.builder.load(
                             meta_addr.into(),
                             8,
-                            default_int_type(),
+                            Type::Int,
                             self.current_mem.into(),
                             int_annotation_for_bytes(8),
                             Origin::synthetic(),
@@ -1094,7 +1094,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     self.builder.load(
                         l_raw.into(),
                         lhs_size as u32,
-                        default_int_type(),
+                        Type::Int,
                         self.current_mem.into(),
                         None,
                         Origin::synthetic(),
@@ -1110,7 +1110,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     self.builder.load(
                         r_raw.into(),
                         rhs_size as u32,
-                        default_int_type(),
+                        Type::Int,
                         self.current_mem.into(),
                         None,
                         Origin::synthetic(),
@@ -1762,7 +1762,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             self.builder.load(
                                 val.into(),
                                 8,
-                                default_int_type(),
+                                Type::Int,
                                 self.current_mem.into(),
                                 int_annotation_for_bytes(8),
                                 Origin::synthetic(),
@@ -1843,12 +1843,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             )
                         };
                         let int_bits_val = if val_is_float {
-                            self.builder.bitcast(
-                                val.into(),
-                                default_int_type(),
-                                None,
-                                Origin::synthetic(),
-                            )
+                            self.builder
+                                .bitcast(val.into(), Type::Int, None, Origin::synthetic())
                         } else {
                             val
                         };
@@ -1931,7 +1927,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 is_nan.into(),
                                 zero.into(),
                                 raw.into(),
-                                default_int_type(),
+                                Type::Int,
                                 default_int_annotation(),
                                 Origin::synthetic(),
                             );
@@ -1939,7 +1935,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 is_large.into(),
                                 i64_max.into(),
                                 corrected.into(),
-                                default_int_type(),
+                                Type::Int,
                                 default_int_annotation(),
                                 Origin::synthetic(),
                             );
@@ -2026,7 +2022,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     is_large.into(),
                                     hi_c.into(),
                                     clamped.into(),
-                                    default_int_type(),
+                                    Type::Int,
                                     default_int_annotation(),
                                     Origin::synthetic(),
                                 );
@@ -2034,7 +2030,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     is_nan.into(),
                                     zero.into(),
                                     clamped.into(),
-                                    default_int_type(),
+                                    Type::Int,
                                     default_int_annotation(),
                                     Origin::synthetic(),
                                 )
@@ -2101,7 +2097,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     is_large.into(),
                                     result_large.into(),
                                     raw.into(),
-                                    default_int_type(),
+                                    Type::Int,
                                     default_int_annotation(),
                                     Origin::synthetic(),
                                 );
@@ -2109,7 +2105,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     is_huge.into(),
                                     max_u64.into(),
                                     tentative.into(),
-                                    default_int_type(),
+                                    Type::Int,
                                     default_int_annotation(),
                                     Origin::synthetic(),
                                 );
@@ -2162,7 +2158,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     is_neg.into(),
                                     zero.into(),
                                     tentative.into(),
-                                    default_int_type(),
+                                    Type::Int,
                                     default_int_annotation(),
                                     Origin::synthetic(),
                                 );
@@ -2170,7 +2166,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     is_nan.into(),
                                     zero.into(),
                                     tentative.into(),
-                                    default_int_type(),
+                                    Type::Int,
                                     default_int_annotation(),
                                     Origin::synthetic(),
                                 )
@@ -2286,8 +2282,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 let src_ty = self.monomorphize(self.mir.local_decls[src.local].ty);
                                 let src_size = type_size(self.tcx, src_ty).unwrap_or(0);
                                 if src_size > 8 {
-                                    let ir_ty = translate_ty(self.tcx, target_ty_mono)
-                                        .unwrap_or(default_int_type());
+                                    let ir_ty =
+                                        translate_ty(self.tcx, target_ty_mono).unwrap_or(Type::Int);
                                     let ann = if matches!(ir_ty, Type::Int) {
                                         int_annotation_for_bytes(target_size as u32)
                                     } else {
@@ -2787,7 +2783,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             let word = self.builder.load(
                                 src.into(),
                                 word_size,
-                                default_int_type(),
+                                Type::Int,
                                 self.current_mem.into(),
                                 int_annotation_for_bytes(word_size),
                                 Origin::synthetic(),
@@ -2824,7 +2820,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let loaded = self.builder.load(
                             val.into(),
                             bytes,
-                            default_int_type(),
+                            Type::Int,
                             self.current_mem.into(),
                             int_annotation_for_bytes(bytes),
                             Origin::synthetic(),
@@ -2895,7 +2891,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let data = self.builder.load(
                         len_addr.into(),
                         8,
-                        default_int_type(),
+                        Type::Int,
                         self.current_mem.into(),
                         int_annotation_for_bytes(8),
                         Origin::synthetic(),
@@ -2917,7 +2913,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let data = self.builder.load(
                         len_addr.into(),
                         8,
-                        default_int_type(),
+                        Type::Int,
                         self.current_mem.into(),
                         int_annotation_for_bytes(8),
                         Origin::synthetic(),
@@ -2964,7 +2960,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     self.builder.load(
                         v.into(),
                         sz,
-                        default_int_type(),
+                        Type::Int,
                         self.current_mem.into(),
                         int_annotation_for_bytes(sz),
                         Origin::synthetic(),
@@ -3062,7 +3058,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let loaded = self.builder.load(
                             v.into(),
                             sz,
-                            default_int_type(),
+                            Type::Int,
                             self.current_mem.into(),
                             int_annotation_for_bytes(sz),
                             Origin::synthetic(),
@@ -3216,7 +3212,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             let load_ty = if should_load_stack_ptr {
                                 Type::Ptr(0)
                             } else {
-                                ir_ty.unwrap_or(default_int_type())
+                                ir_ty.unwrap_or(Type::Int)
                             };
                             let ann = translate_annotation(ty);
                             let loaded = self.builder.load(
@@ -3250,7 +3246,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             let loaded = self.builder.load(
                                 v.into(),
                                 size as u32,
-                                default_int_type(),
+                                Type::Int,
                                 self.current_mem.into(),
                                 ann,
                                 Origin::synthetic(),

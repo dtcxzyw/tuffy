@@ -269,7 +269,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                     let word = self.builder.load(
                                                         src_addr.into(),
                                                         chunk,
-                                                        default_int_type(),
+                                                        Type::Int,
                                                         self.current_mem.into(),
                                                         int_annotation_for_bytes(chunk),
                                                         Origin::synthetic(),
@@ -430,7 +430,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                     let word = self.builder.load(
                                                         src_addr.into(),
                                                         chunk,
-                                                        default_int_type(),
+                                                        Type::Int,
                                                         self.current_mem.into(),
                                                         int_annotation_for_bytes(chunk),
                                                         Origin::synthetic(),
@@ -673,7 +673,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         let word = self.builder.load(
                                             src_addr.into(),
                                             chunk,
-                                            default_int_type(),
+                                            Type::Int,
                                             self.current_mem.into(),
                                             int_annotation_for_bytes(chunk),
                                             Origin::synthetic(),
@@ -818,7 +818,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         let word = self.builder.load(
                                             src_addr.into(),
                                             chunk,
-                                            default_int_type(),
+                                            Type::Int,
                                             self.current_mem.into(),
                                             int_annotation_for_bytes(chunk),
                                             Origin::synthetic(),
@@ -1106,7 +1106,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             let meta = self.builder.load(
                                 meta_addr.into(),
                                 8,
-                                default_int_type(),
+                                Type::Int,
                                 self.current_mem.into(),
                                 int_annotation_for_bytes(8),
                                 Origin::synthetic(),
@@ -1157,7 +1157,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             let (mem_out, _) = self.builder.call(
                                 callee.into(),
                                 vec![dst_v.into(), src_v.into(), byte_count.into()],
-                                default_int_type(),
+                                Type::Int,
                                 self.current_mem.into(),
                                 Some(Annotation::Int(I64)),
                                 Origin::synthetic(),

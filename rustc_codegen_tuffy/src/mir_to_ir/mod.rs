@@ -161,7 +161,7 @@ pub fn translate_function<'tcx>(
                 // as two register-sized values: data pointer + metadata
                 // (length or vtable pointer).  Add a second Int param.
                 if is_fat_ptr(tcx, ty) {
-                    params.push(default_int_type());
+                    params.push(Type::Int);
                     param_anns.push(default_int_annotation());
                     param_names.push(None);
                 }

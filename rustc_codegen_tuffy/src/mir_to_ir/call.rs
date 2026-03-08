@@ -251,7 +251,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 self.builder.load(
                                     v.into(),
                                     sz as u32,
-                                    default_int_type(),
+                                    Type::Int,
                                     self.current_mem.into(),
                                     None,
                                     Origin::synthetic(),
@@ -415,7 +415,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 let word = self.builder.load(
                                     src_addr.into(),
                                     chunk,
-                                    default_int_type(),
+                                    Type::Int,
                                     self.current_mem.into(),
                                     int_annotation_for_bytes(chunk),
                                     Origin::synthetic(),
@@ -661,7 +661,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let fn_ptr = self.builder.load(
                     fn_addr.into(),
                     8,
-                    default_int_type(),
+                    Type::Int,
                     self.current_mem.into(),
                     int_annotation_for_bytes(8),
                     Origin::synthetic(),
@@ -832,7 +832,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 .raw()
                         };
                         if fsz <= 8 {
-                            let fty = translate_ty(self.tcx, ft).unwrap_or(default_int_type());
+                            let fty = translate_ty(self.tcx, ft).unwrap_or(Type::Int);
                             let val = self.builder.load(
                                 addr.into(),
                                 fsz as u32,
@@ -847,7 +847,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             let w0 = self.builder.load(
                                 addr.into(),
                                 8,
-                                default_int_type(),
+                                Type::Int,
                                 self.current_mem.into(),
                                 int_annotation_for_bytes(8),
                                 Origin::synthetic(),
@@ -868,7 +868,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             let w1 = self.builder.load(
                                 a1.into(),
                                 8,
-                                default_int_type(),
+                                Type::Int,
                                 self.current_mem.into(),
                                 int_annotation_for_bytes(8),
                                 Origin::synthetic(),
@@ -898,7 +898,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     v = self.builder.load(
                         v.into(),
                         arg_size as u32,
-                        default_int_type(),
+                        Type::Int,
                         self.current_mem.into(),
                         None,
                         Origin::synthetic(),
@@ -931,7 +931,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let w0 = self.builder.load(
                         v.into(),
                         8,
-                        default_int_type(),
+                        Type::Int,
                         self.current_mem.into(),
                         int_annotation_for_bytes(8),
                         Origin::synthetic(),
@@ -946,7 +946,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let w1 = self.builder.load(
                         hi_addr.into(),
                         8,
-                        default_int_type(),
+                        Type::Int,
                         self.current_mem.into(),
                         int_annotation_for_bytes(8),
                         Origin::synthetic(),
@@ -973,7 +973,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             let w0 = self.builder.load(
                                 v.into(),
                                 8,
-                                default_int_type(),
+                                Type::Int,
                                 self.current_mem.into(),
                                 int_annotation_for_bytes(8),
                                 Origin::synthetic(),
@@ -991,7 +991,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             let w1 = self.builder.load(
                                 hi_addr.into(),
                                 8,
-                                default_int_type(),
+                                Type::Int,
                                 self.current_mem.into(),
                                 int_annotation_for_bytes(8),
                                 Origin::synthetic(),
@@ -1016,7 +1016,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let w0 = self.builder.load(
                             v.into(),
                             8,
-                            default_int_type(),
+                            Type::Int,
                             self.current_mem.into(),
                             int_annotation_for_bytes(8),
                             Origin::synthetic(),
@@ -1034,7 +1034,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let w1 = self.builder.load(
                             hi_addr.into(),
                             8,
-                            default_int_type(),
+                            Type::Int,
                             self.current_mem.into(),
                             int_annotation_for_bytes(8),
                             Origin::synthetic(),

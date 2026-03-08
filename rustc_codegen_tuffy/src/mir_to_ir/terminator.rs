@@ -93,7 +93,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // types (u8, u16, etc.) emit a correctly-sized load instead
                     // of reading garbage bytes beyond the stored value.
                     let load_size = size.min(8) as u32;
-                    let load_ty = translate_ty(self.tcx, ret_mir_ty).unwrap_or(default_int_type());
+                    let load_ty = translate_ty(self.tcx, ret_mir_ty).unwrap_or(Type::Int);
                     let ann = translate_annotation(ret_mir_ty);
                     let word0 = self.builder.load(
                         slot.into(),
@@ -126,7 +126,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let word1 = self.builder.load(
                             hi_addr.into(),
                             8,
-                            default_int_type(),
+                            Type::Int,
                             self.current_mem.into(),
                             int_annotation_for_bytes(8),
                             Origin::synthetic(),
@@ -164,7 +164,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 self.builder.load(
                                     v.into(),
                                     ret_size,
-                                    default_int_type(),
+                                    Type::Int,
                                     self.current_mem.into(),
                                     int_annotation_for_bytes(ret_size),
                                     Origin::synthetic(),
@@ -554,7 +554,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 discr_val = self.builder.load(
                     discr_val.into(),
                     byte_size,
-                    default_int_type(),
+                    Type::Int,
                     self.current_mem.into(),
                     int_annotation_for_bytes(byte_size),
                     Origin::synthetic(),

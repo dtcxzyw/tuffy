@@ -360,9 +360,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     Origin::synthetic(),
                 );
                 param_idx += 1;
-                let metadata =
-                    self.builder
-                        .param(param_idx, default_int_type(), None, Origin::synthetic());
+                let metadata = self
+                    .builder
+                    .param(param_idx, Type::Int, None, Origin::synthetic());
                 param_idx += 1;
                 self.locals.set(local, data_ptr);
                 self.fat_locals.set(local, metadata);

@@ -9,9 +9,7 @@ use tuffy_ir::value::ValueRef;
 
 use super::ctx::TranslationCtx;
 use super::types::int_annotation_for_bytes;
-use super::types::{
-    default_int_annotation, default_int_type, translate_annotation, type_align, type_size,
-};
+use super::types::{default_int_annotation, translate_annotation, type_align, type_size};
 
 const I64: IntAnnotation = IntAnnotation {
     bit_width: 64,
@@ -719,7 +717,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let (mem_out, data) = self.builder.call(
                     callee.into(),
                     vec![a.into(), b.into(), sz.into()],
-                    default_int_type(),
+                    Type::Int,
                     current_mem.into(),
                     None,
                     Origin::synthetic(),
@@ -777,7 +775,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let vx = self.builder.load(
                         xa.into(),
                         chunk,
-                        default_int_type(),
+                        Type::Int,
                         mem.into(),
                         int_annotation_for_bytes(chunk),
                         Origin::synthetic(),
@@ -785,7 +783,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let vy = self.builder.load(
                         ya.into(),
                         chunk,
-                        default_int_type(),
+                        Type::Int,
                         mem.into(),
                         int_annotation_for_bytes(chunk),
                         Origin::synthetic(),
@@ -815,7 +813,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let ordering = parse_atomic_ordering(name);
                 let (new_mem, val) = self.builder.load_atomic(
                     ptr.into(),
-                    default_int_type(),
+                    Type::Int,
                     ordering,
                     current_mem.into(),
                     default_int_annotation(),
@@ -857,7 +855,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     ptr.into(),
                     expected.into(),
                     new_val.into(),
-                    default_int_type(),
+                    Type::Int,
                     ordering,
                     ordering,
                     current_mem.into(),
@@ -918,7 +916,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     AtomicRmwOp::Xchg,
                     ptr.into(),
                     new_val.into(),
-                    default_int_type(),
+                    Type::Int,
                     ordering,
                     current_mem.into(),
                     default_int_annotation(),
@@ -966,7 +964,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         AtomicRmwOp::Add,
                         ptr.into(),
                         operand.into(),
-                        default_int_type(),
+                        Type::Int,
                         ordering,
                         current_mem.into(),
                         default_int_annotation(),
@@ -979,7 +977,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         AtomicRmwOp::Sub,
                         ptr.into(),
                         operand.into(),
-                        default_int_type(),
+                        Type::Int,
                         ordering,
                         current_mem.into(),
                         default_int_annotation(),
@@ -992,7 +990,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         AtomicRmwOp::And,
                         ptr.into(),
                         operand.into(),
-                        default_int_type(),
+                        Type::Int,
                         ordering,
                         current_mem.into(),
                         default_int_annotation(),
@@ -1005,7 +1003,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         AtomicRmwOp::Or,
                         ptr.into(),
                         operand.into(),
-                        default_int_type(),
+                        Type::Int,
                         ordering,
                         current_mem.into(),
                         default_int_annotation(),
@@ -1018,7 +1016,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         AtomicRmwOp::Xor,
                         ptr.into(),
                         operand.into(),
-                        default_int_type(),
+                        Type::Int,
                         ordering,
                         current_mem.into(),
                         default_int_annotation(),
@@ -1030,7 +1028,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // Unsupported ops: nand, max, min, umax, umin — use atomic load/store.
                     let (mem1, old) = self.builder.load_atomic(
                         ptr.into(),
-                        default_int_type(),
+                        Type::Int,
                         ordering,
                         current_mem.into(),
                         default_int_annotation(),
@@ -1062,7 +1060,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             gt.into(),
                             old.into(),
                             operand.into(),
-                            default_int_type(),
+                            Type::Int,
                             default_int_annotation(),
                             Origin::synthetic(),
                         )
@@ -1078,7 +1076,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             lt.into(),
                             old.into(),
                             operand.into(),
-                            default_int_type(),
+                            Type::Int,
                             default_int_annotation(),
                             Origin::synthetic(),
                         )
@@ -1094,7 +1092,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             gt.into(),
                             old.into(),
                             operand.into(),
-                            default_int_type(),
+                            Type::Int,
                             default_int_annotation(),
                             Origin::synthetic(),
                         )
@@ -1111,7 +1109,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             lt.into(),
                             old.into(),
                             operand.into(),
-                            default_int_type(),
+                            Type::Int,
                             default_int_annotation(),
                             Origin::synthetic(),
                         )

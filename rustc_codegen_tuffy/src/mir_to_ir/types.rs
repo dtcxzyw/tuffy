@@ -46,11 +46,6 @@ impl IntAnn {
     }
 }
 
-/// Helper to create a default Int type (64-bit, DontCare signedness).
-pub(super) fn default_int_type() -> Type {
-    Type::Int
-}
-
 /// Helper to create a default Int annotation (64-bit, DontCare signedness).
 pub(super) fn default_int_annotation() -> Option<Annotation> {
     Some(Annotation::Int(IntAnnotation {
