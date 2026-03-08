@@ -6,13 +6,8 @@ use rustc_middle::ty::{self, Instance, TyCtxt};
 use tuffy_ir::builder::Builder;
 use tuffy_ir::instruction::Origin;
 use tuffy_ir::module::SymbolTable;
-use tuffy_ir::types::{FloatType, IntAnnotation, IntSignedness, Type};
+use tuffy_ir::types::{FloatType, IntSignedness, Type};
 use tuffy_ir::value::ValueRef;
-
-const I64: IntAnnotation = IntAnnotation {
-    bit_width: 64,
-    signedness: IntSignedness::Unsigned,
-};
 
 pub(super) fn translate_int_to_int_cast(
     src_ty: ty::Ty<'_>,
@@ -30,16 +25,32 @@ pub(super) fn translate_int_to_int_cast(
     if dst_bits > src_bits {
         // Widening: use sext/zext with src_bits
         if is_signed_int(src_ty) {
-            Some(builder.sext(val.into(), src_bits, Origin::synthetic()))
+            Some(
+                builder
+                    .sext(val.into(), src_bits, Origin::synthetic())
+                    .raw(),
+            )
         } else {
-            Some(builder.zext(val.into(), src_bits, Origin::synthetic()))
+            Some(
+                builder
+                    .zext(val.into(), src_bits, Origin::synthetic())
+                    .raw(),
+            )
         }
     } else {
         // Narrowing: use sext/zext with dst_bits
         if is_signed_int(target_ty) {
-            Some(builder.sext(val.into(), dst_bits, Origin::synthetic()))
+            Some(
+                builder
+                    .sext(val.into(), dst_bits, Origin::synthetic())
+                    .raw(),
+            )
         } else {
-            Some(builder.zext(val.into(), dst_bits, Origin::synthetic()))
+            Some(
+                builder
+                    .zext(val.into(), dst_bits, Origin::synthetic())
+                    .raw(),
+            )
         }
     }
 }
@@ -106,7 +117,7 @@ pub(super) fn translate_const<'tcx>(
                     );
                     static_data.push((sym_id, bytes, relocs));
                     let base = builder.symbol_addr(sym_id, Origin::synthetic());
-                    Some(base)
+                    Some(base.raw())
                 }
                 rustc_middle::mir::interpret::GlobalAlloc::Static(def_id) => {
                     let instance = Instance::mono(tcx, def_id);
@@ -120,20 +131,16 @@ pub(super) fn translate_const<'tcx>(
                             IntSignedness::DontCare,
                             Origin::synthetic(),
                         );
-                        Some(
-                            builder
-                                .add(base.into(), off.into(), I64, Origin::synthetic())
-                                .raw(),
-                        )
+                        Some(builder.ptradd(base.raw().into(), off.into(), 0, Origin::synthetic()))
                     } else {
-                        Some(base)
+                        Some(base.raw())
                     }
                 }
                 rustc_middle::mir::interpret::GlobalAlloc::Function { instance } => {
                     let sym_name = tcx.symbol_name(instance).name.to_string();
                     let sym_id = symbols.intern(&sym_name);
                     referenced_instances.push(instance);
-                    Some(builder.symbol_addr(sym_id, Origin::synthetic()))
+                    Some(builder.symbol_addr(sym_id, Origin::synthetic()).raw())
                 }
                 rustc_middle::mir::interpret::GlobalAlloc::VTable(vtable_ty, vtable_trait_ref) => {
                     // Construct vtable as static data with function pointer relocations.
@@ -169,7 +176,7 @@ pub(super) fn translate_const<'tcx>(
 
                         static_data.push((sym_id, bytes, relocs));
                         let base = builder.symbol_addr(sym_id, Origin::synthetic());
-                        Some(base)
+                        Some(base.raw())
                     } else {
                         Some(
                             builder
@@ -245,7 +252,7 @@ pub(super) fn translate_const<'tcx>(
                 // separately by extract_fat_component.
                 if matches!(ty.kind(), ty::Ref(..) | ty::RawPtr(..)) {
                     let loaded = builder.load(
-                        base.into(),
+                        base.raw().into(),
                         8,
                         Type::Ptr(0),
                         (*current_mem).into(),
@@ -254,7 +261,7 @@ pub(super) fn translate_const<'tcx>(
                     );
                     Some(loaded)
                 } else {
-                    Some(base)
+                    Some(base.raw())
                 }
             } else {
                 None
@@ -498,5 +505,5 @@ pub(super) fn translate_const_slice<'tcx>(
     let _ = len_val;
 
     // Return pointer; the caller must also retrieve the length.
-    Some(ptr_val)
+    Some(ptr_val.raw())
 }

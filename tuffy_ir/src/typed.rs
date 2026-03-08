@@ -68,6 +68,10 @@ impl IntValue {
     pub fn raw(self) -> ValueRef {
         self.0
     }
+
+    pub fn is_secondary_result(self) -> bool {
+        self.0.is_secondary_result()
+    }
 }
 
 impl BoolValue {
@@ -82,6 +86,10 @@ impl BoolValue {
 
     pub fn raw(self) -> ValueRef {
         self.0
+    }
+
+    pub fn is_secondary_result(self) -> bool {
+        self.0.is_secondary_result()
     }
 }
 
@@ -98,6 +106,10 @@ impl FloatValue {
     pub fn raw(self) -> ValueRef {
         self.0
     }
+
+    pub fn is_secondary_result(self) -> bool {
+        self.0.is_secondary_result()
+    }
 }
 
 impl PtrValue {
@@ -112,6 +124,10 @@ impl PtrValue {
 
     pub fn raw(self) -> ValueRef {
         self.0
+    }
+
+    pub fn is_secondary_result(self) -> bool {
+        self.0.is_secondary_result()
     }
 }
 
@@ -128,6 +144,10 @@ impl MemValue {
     pub fn raw(self) -> ValueRef {
         self.0
     }
+
+    pub fn is_secondary_result(self) -> bool {
+        self.0.is_secondary_result()
+    }
 }
 
 impl UnitValue {
@@ -143,6 +163,10 @@ impl UnitValue {
     pub fn raw(self) -> ValueRef {
         self.0
     }
+
+    pub fn is_secondary_result(self) -> bool {
+        self.0.is_secondary_result()
+    }
 }
 
 impl ByteValue {
@@ -157,6 +181,10 @@ impl ByteValue {
 
     pub fn raw(self) -> ValueRef {
         self.0
+    }
+
+    pub fn is_secondary_result(self) -> bool {
+        self.0.is_secondary_result()
     }
 }
 

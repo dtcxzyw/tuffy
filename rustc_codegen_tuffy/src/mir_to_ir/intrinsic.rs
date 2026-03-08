@@ -68,7 +68,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             "ctpop" => {
                 if let Some(&v) = ir_args.first() {
                     let result = self.builder.count_ones(v.into(), 64, Origin::synthetic());
-                    self.locals.set(destination_local, result);
+                    self.locals.set(destination_local, result.raw());
                 }
                 true
             }
@@ -115,7 +115,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let result =
                             self.builder
                                 .bswap(v.into(), byte_size as u32, Origin::synthetic());
-                        self.locals.set(destination_local, result);
+                        self.locals.set(destination_local, result.raw());
                     }
                 }
                 true
@@ -136,7 +136,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let result =
                             self.builder
                                 .bit_reverse(v.into(), bit_size, Origin::synthetic());
-                        self.locals.set(destination_local, result);
+                        self.locals.set(destination_local, result.raw());
                     }
                 }
                 true
@@ -361,9 +361,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         );
                         self.builder
                             .div(diff.into(), sz.into(), I64, Origin::synthetic())
-                            .raw()
                     };
-                    self.locals.set(destination_local, result);
+                    self.locals.set(destination_local, result.raw());
                 }
                 true
             }
@@ -559,7 +558,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let result = self
                     .builder
                     .fminnum(a.into(), b.into(), ty, Origin::synthetic());
-                self.locals.set(destination_local, result);
+                self.locals.set(destination_local, result.raw());
                 true
             }
             "maxnumf32" | "maxnumf64" => {
@@ -573,7 +572,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let result = self
                     .builder
                     .fmaxnum(a.into(), b.into(), ty, Origin::synthetic());
-                self.locals.set(destination_local, result);
+                self.locals.set(destination_local, result.raw());
                 true
             }
 
@@ -935,7 +934,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let new_mem = self
                     .builder
                     .fence(ordering, current_mem.into(), Origin::synthetic());
-                Some(new_mem)
+                Some(new_mem.raw())
             }
 
             // Read-modify-write: atomic_{and,or,xor,nand,xadd,xsub,

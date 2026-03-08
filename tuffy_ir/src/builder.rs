@@ -9,7 +9,7 @@ use crate::instruction::{AtomicRmwOp, FCmpOp, ICmpOp, Instruction, Op, Operand, 
 use crate::module::SymbolId;
 use crate::typed::{
     BoolOperand, BoolValue, FloatOperand, FloatValue, IntOperand, IntValue, MemOperand, MemValue,
-    PtrOperand,
+    PtrOperand, PtrValue,
 };
 use crate::types::{Annotation, FloatType, FpRewriteFlags, MemoryOrdering, Type};
 use crate::value::{BlockRef, RegionRef, ValueRef};
@@ -593,28 +593,51 @@ impl<'a> Builder<'a> {
     }
 
     /// IEEE 754-2008 minNum.
-    pub fn fminnum(&mut self, a: Operand, b: Operand, ty: Type, origin: Origin) -> ValueRef {
-        self.push_inst(Op::FMinNum(a, b), ty, None, origin, None)
+    pub fn fminnum(
+        &mut self,
+        a: FloatOperand,
+        b: FloatOperand,
+        ty: Type,
+        origin: Origin,
+    ) -> FloatValue {
+        let v = self.push_inst(Op::FMinNum(a.raw(), b.raw()), ty, None, origin, None);
+        FloatValue::new(v, self.func)
     }
 
     /// IEEE 754-2008 maxNum.
-    pub fn fmaxnum(&mut self, a: Operand, b: Operand, ty: Type, origin: Origin) -> ValueRef {
-        self.push_inst(Op::FMaxNum(a, b), ty, None, origin, None)
+    pub fn fmaxnum(
+        &mut self,
+        a: FloatOperand,
+        b: FloatOperand,
+        ty: Type,
+        origin: Origin,
+    ) -> FloatValue {
+        let v = self.push_inst(Op::FMaxNum(a.raw(), b.raw()), ty, None, origin, None);
+        FloatValue::new(v, self.func)
     }
 
     /// Copy sign: magnitude from first operand, sign from second.
-    pub fn copysign(&mut self, mag: Operand, sign: Operand, ty: Type, origin: Origin) -> ValueRef {
-        self.push_inst(Op::CopySign(mag, sign), ty, None, origin, None)
+    pub fn copysign(
+        &mut self,
+        mag: FloatOperand,
+        sign: FloatOperand,
+        ty: Type,
+        origin: Origin,
+    ) -> FloatValue {
+        let v = self.push_inst(Op::CopySign(mag.raw(), sign.raw()), ty, None, origin, None);
+        FloatValue::new(v, self.func)
     }
 
     /// Floating point negation.
-    pub fn fneg(&mut self, val: Operand, ty: Type, origin: Origin) -> ValueRef {
-        self.push_inst(Op::FNeg(val), ty, None, origin, None)
+    pub fn fneg(&mut self, val: FloatOperand, ty: Type, origin: Origin) -> FloatValue {
+        let v = self.push_inst(Op::FNeg(val.raw()), ty, None, origin, None);
+        FloatValue::new(v, self.func)
     }
 
     /// Floating point absolute value.
-    pub fn fabs(&mut self, val: Operand, ty: Type, origin: Origin) -> ValueRef {
-        self.push_inst(Op::FAbs(val), ty, None, origin, None)
+    pub fn fabs(&mut self, val: FloatOperand, ty: Type, origin: Origin) -> FloatValue {
+        let v = self.push_inst(Op::FAbs(val.raw()), ty, None, origin, None);
+        FloatValue::new(v, self.func)
     }
 
     // ── Comparison ──
@@ -633,13 +656,14 @@ impl<'a> Builder<'a> {
     }
 
     /// Population count: count the number of set bits.
-    pub fn count_ones(&mut self, val: Operand, result_bits: u32, origin: Origin) -> ValueRef {
+    pub fn count_ones(&mut self, val: IntOperand, result_bits: u32, origin: Origin) -> IntValue {
         use crate::types::{IntAnnotation, IntSignedness};
         let ann = Annotation::Int(IntAnnotation {
             bit_width: result_bits,
             signedness: IntSignedness::Unsigned,
         });
-        self.push_inst(Op::CountOnes(val), Type::Int, None, origin, Some(ann))
+        let v = self.push_inst(Op::CountOnes(val.raw()), Type::Int, None, origin, Some(ann));
+        IntValue::new(v, self.func)
     }
 
     /// Count leading zeros after truncating to `bits` width.
@@ -686,63 +710,77 @@ impl<'a> Builder<'a> {
     }
 
     /// Byte-swap: reverse byte order of the low `bytes` bytes.
-    pub fn bswap(&mut self, val: Operand, bytes: u32, origin: Origin) -> ValueRef {
+    pub fn bswap(&mut self, val: IntOperand, bytes: u32, origin: Origin) -> IntValue {
+        let op = val.raw();
         let _ty = self
-            .value_type(val.value)
+            .value_type(op.value)
             .filter(|t| matches!(t, Type::Int))
             .expect("bswap operand must be Int type");
-        let ann = self.value_annotation(val.value).cloned();
-        self.push_inst(Op::Bswap(val, bytes), Type::Int, None, origin, ann)
+        let ann = self.value_annotation(op.value).cloned();
+        let v = self.push_inst(Op::Bswap(op, bytes), Type::Int, None, origin, ann);
+        IntValue::new(v, self.func)
     }
 
     /// Bit-reverse: reverse bit order of the low `bits` bits.
-    pub fn bit_reverse(&mut self, val: Operand, bits: u32, origin: Origin) -> ValueRef {
+    pub fn bit_reverse(&mut self, val: IntOperand, bits: u32, origin: Origin) -> IntValue {
+        let op = val.raw();
         let _ty = self
-            .value_type(val.value)
+            .value_type(op.value)
             .filter(|t| matches!(t, Type::Int))
             .expect("bit_reverse operand must be Int type");
-        let ann = self.value_annotation(val.value).cloned();
-        self.push_inst(Op::BitReverse(val, bits), Type::Int, None, origin, ann)
+        let ann = self.value_annotation(op.value).cloned();
+        let v = self.push_inst(Op::BitReverse(op, bits), Type::Int, None, origin, ann);
+        IntValue::new(v, self.func)
     }
 
     /// Merge: replace the low `width` bits of `a` with the low `width` bits of `b`.
-    pub fn merge(&mut self, a: Operand, b: Operand, width: u32, origin: Origin) -> ValueRef {
+    pub fn merge(&mut self, a: IntOperand, b: IntOperand, width: u32, origin: Origin) -> IntValue {
+        let op_a = a.raw();
+        let op_b = b.raw();
         let _ty = self
-            .value_type(a.value)
+            .value_type(op_a.value)
             .and_then(|t| match t {
                 Type::Int => Some(Type::Int),
                 _ => None,
             })
             .expect("merge operand must be Int type");
-        let ann = self.value_annotation(a.value).cloned();
-        self.push_inst(Op::Merge(a, b, width), Type::Int, None, origin, ann)
+        let ann = self.value_annotation(op_a.value).cloned();
+        let v = self.push_inst(Op::Merge(op_a, op_b, width), Type::Int, None, origin, ann);
+        IntValue::new(v, self.func)
     }
 
     /// Carry-less multiplication (polynomial multiplication over GF(2)).
-    pub fn clmul(&mut self, a: Operand, b: Operand, origin: Origin) -> ValueRef {
+    pub fn clmul(&mut self, a: IntOperand, b: IntOperand, origin: Origin) -> IntValue {
+        let op_a = a.raw();
+        let op_b = b.raw();
         let _ty = self
-            .value_type(a.value)
+            .value_type(op_a.value)
             .and_then(|t| match t {
                 Type::Int => Some(Type::Int),
                 _ => None,
             })
             .expect("clmul operand must be Int type");
-        let ann = self.value_annotation(a.value).cloned();
-        self.push_inst(Op::Clmul(a, b), Type::Int, None, origin, ann)
+        let ann = self.value_annotation(op_a.value).cloned();
+        let v = self.push_inst(Op::Clmul(op_a, op_b), Type::Int, None, origin, ann);
+        IntValue::new(v, self.func)
     }
 
     /// Split: decompose `a` at bit position `width`. Returns (hi, lo).
-    pub fn split(&mut self, a: Operand, width: u32, origin: Origin) -> (ValueRef, ValueRef) {
+    pub fn split(&mut self, a: IntOperand, width: u32, origin: Origin) -> (IntValue, IntValue) {
+        let op = a.raw();
         let ty = self
-            .value_type(a.value)
+            .value_type(op.value)
             .and_then(|t| match t {
                 Type::Int => Some(Type::Int),
                 _ => None,
             })
             .expect("split operand must be Int type");
-        let primary = self.push_inst(Op::Split(a, width), ty.clone(), Some(ty), origin, None);
+        let primary = self.push_inst(Op::Split(op, width), ty.clone(), Some(ty), origin, None);
         let secondary = ValueRef::inst_secondary_result(primary.index());
-        (primary, secondary)
+        (
+            IntValue::new(primary, self.func),
+            IntValue::new(secondary, self.func),
+        )
     }
 
     /// Rotate left in an `bits`-bit field.
@@ -1186,15 +1224,23 @@ impl<'a> Builder<'a> {
     }
 
     /// Memory fence. Returns mem token.
-    pub fn fence(&mut self, ordering: MemoryOrdering, mem: Operand, origin: Origin) -> ValueRef {
-        self.push_inst(Op::Fence(ordering, mem), Type::Mem, None, origin, None)
+    pub fn fence(&mut self, ordering: MemoryOrdering, mem: MemOperand, origin: Origin) -> MemValue {
+        let v = self.push_inst(
+            Op::Fence(ordering, mem.raw()),
+            Type::Mem,
+            None,
+            origin,
+            None,
+        );
+        MemValue::new(v, self.func)
     }
 
     // ── Symbol ──
 
     /// Load the address of a symbol (function or static data).
-    pub fn symbol_addr(&mut self, sym: SymbolId, origin: Origin) -> ValueRef {
-        self.push_inst(Op::SymbolAddr(sym), Type::Ptr(0), None, origin, None)
+    pub fn symbol_addr(&mut self, sym: SymbolId, origin: Origin) -> PtrValue {
+        let v = self.push_inst(Op::SymbolAddr(sym), Type::Ptr(0), None, origin, None);
+        PtrValue::new(v, self.func)
     }
 
     // ── Call ──
@@ -1244,58 +1290,95 @@ impl<'a> Builder<'a> {
     }
 
     /// Sign-extend to n bits.
-    pub fn sext(&mut self, val: Operand, bits: u32, origin: Origin) -> ValueRef {
+    pub fn sext(&mut self, val: IntOperand, bits: u32, origin: Origin) -> IntValue {
         use crate::types::{IntAnnotation, IntSignedness};
         let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Signed,
         });
-        self.push_inst(Op::Sext(val, bits), Type::Int, None, origin, Some(ann))
+        let v = self.push_inst(
+            Op::Sext(val.raw(), bits),
+            Type::Int,
+            None,
+            origin,
+            Some(ann),
+        );
+        IntValue::new(v, self.func)
     }
 
     /// Zero-extend to n bits.
-    pub fn zext(&mut self, val: Operand, bits: u32, origin: Origin) -> ValueRef {
+    pub fn zext(&mut self, val: IntOperand, bits: u32, origin: Origin) -> IntValue {
         use crate::types::{IntAnnotation, IntSignedness};
         let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Unsigned,
         });
-        self.push_inst(Op::Zext(val, bits), Type::Int, None, origin, Some(ann))
+        let v = self.push_inst(
+            Op::Zext(val.raw(), bits),
+            Type::Int,
+            None,
+            origin,
+            Some(ann),
+        );
+        IntValue::new(v, self.func)
     }
 
     /// Float to signed integer (truncation toward zero).
-    pub fn fp_to_si(&mut self, val: Operand, bits: u32, origin: Origin) -> ValueRef {
+    pub fn fp_to_si(&mut self, val: FloatOperand, bits: u32, origin: Origin) -> IntValue {
         use crate::types::{IntAnnotation, IntSignedness};
         let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Signed,
         });
-        self.push_inst(Op::FpToSi(val), Type::Int, None, origin, Some(ann))
+        let v = self.push_inst(Op::FpToSi(val.raw()), Type::Int, None, origin, Some(ann));
+        IntValue::new(v, self.func)
     }
 
     /// Float to unsigned integer (truncation toward zero).
-    pub fn fp_to_ui(&mut self, val: Operand, bits: u32, origin: Origin) -> ValueRef {
+    pub fn fp_to_ui(&mut self, val: FloatOperand, bits: u32, origin: Origin) -> IntValue {
         use crate::types::{IntAnnotation, IntSignedness};
         let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Unsigned,
         });
-        self.push_inst(Op::FpToUi(val), Type::Int, None, origin, Some(ann))
+        let v = self.push_inst(Op::FpToUi(val.raw()), Type::Int, None, origin, Some(ann));
+        IntValue::new(v, self.func)
     }
 
     /// Signed integer to float.
-    pub fn si_to_fp(&mut self, val: Operand, ft: FloatType, origin: Origin) -> ValueRef {
-        self.push_inst(Op::SiToFp(val, ft), Type::Float(ft), None, origin, None)
+    pub fn si_to_fp(&mut self, val: IntOperand, ft: FloatType, origin: Origin) -> FloatValue {
+        let v = self.push_inst(
+            Op::SiToFp(val.raw(), ft),
+            Type::Float(ft),
+            None,
+            origin,
+            None,
+        );
+        FloatValue::new(v, self.func)
     }
 
     /// Unsigned integer to float.
-    pub fn ui_to_fp(&mut self, val: Operand, ft: FloatType, origin: Origin) -> ValueRef {
-        self.push_inst(Op::UiToFp(val, ft), Type::Float(ft), None, origin, None)
+    pub fn ui_to_fp(&mut self, val: IntOperand, ft: FloatType, origin: Origin) -> FloatValue {
+        let v = self.push_inst(
+            Op::UiToFp(val.raw(), ft),
+            Type::Float(ft),
+            None,
+            origin,
+            None,
+        );
+        FloatValue::new(v, self.func)
     }
 
     /// Float-to-float conversion (widen or narrow).
-    pub fn fp_convert(&mut self, val: Operand, ft: FloatType, origin: Origin) -> ValueRef {
-        self.push_inst(Op::FpConvert(val), Type::Float(ft), None, origin, None)
+    pub fn fp_convert(&mut self, val: FloatOperand, ft: FloatType, origin: Origin) -> FloatValue {
+        let v = self.push_inst(
+            Op::FpConvert(val.raw()),
+            Type::Float(ft),
+            None,
+            origin,
+            None,
+        );
+        FloatValue::new(v, self.func)
     }
 
     // ── Pointer operations ──
@@ -1318,38 +1401,54 @@ impl<'a> Builder<'a> {
     }
 
     /// Pointer difference (same allocation).
-    pub fn ptrdiff(&mut self, a: Operand, b: Operand, bits: u32, origin: Origin) -> ValueRef {
+    pub fn ptrdiff(&mut self, a: PtrOperand, b: PtrOperand, bits: u32, origin: Origin) -> IntValue {
         use crate::types::{IntAnnotation, IntSignedness};
         let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Signed,
         });
-        self.push_inst(Op::PtrDiff(a, b), Type::Int, None, origin, Some(ann))
+        let v = self.push_inst(
+            Op::PtrDiff(a.raw(), b.raw()),
+            Type::Int,
+            None,
+            origin,
+            Some(ann),
+        );
+        IntValue::new(v, self.func)
     }
 
     /// Pointer to integer with provenance capture.
-    pub fn ptrtoint(&mut self, ptr: Operand, bits: u32, origin: Origin) -> ValueRef {
+    pub fn ptrtoint(&mut self, ptr: PtrOperand, bits: u32, origin: Origin) -> IntValue {
         use crate::types::{IntAnnotation, IntSignedness};
         let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Unsigned,
         });
-        self.push_inst(Op::PtrToInt(ptr), Type::Int, None, origin, Some(ann))
+        let v = self.push_inst(Op::PtrToInt(ptr.raw()), Type::Int, None, origin, Some(ann));
+        IntValue::new(v, self.func)
     }
 
     /// Pointer to address (discard provenance).
-    pub fn ptrtoaddr(&mut self, ptr: Operand, bits: u32, origin: Origin) -> ValueRef {
+    pub fn ptrtoaddr(&mut self, ptr: PtrOperand, bits: u32, origin: Origin) -> IntValue {
         use crate::types::{IntAnnotation, IntSignedness};
         let ann = Annotation::Int(IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Unsigned,
         });
-        self.push_inst(Op::PtrToAddr(ptr), Type::Int, None, origin, Some(ann))
+        let v = self.push_inst(Op::PtrToAddr(ptr.raw()), Type::Int, None, origin, Some(ann));
+        IntValue::new(v, self.func)
     }
 
     /// Integer to pointer (no valid provenance).
-    pub fn inttoptr(&mut self, val: Operand, addr_space: u32, origin: Origin) -> ValueRef {
-        self.push_inst(Op::IntToPtr(val), Type::Ptr(addr_space), None, origin, None)
+    pub fn inttoptr(&mut self, val: IntOperand, addr_space: u32, origin: Origin) -> PtrValue {
+        let v = self.push_inst(
+            Op::IntToPtr(val.raw()),
+            Type::Ptr(addr_space),
+            None,
+            origin,
+            None,
+        );
+        PtrValue::new(v, self.func)
     }
 
     // ── Aggregate operations ──
@@ -1389,9 +1488,9 @@ impl<'a> Builder<'a> {
     // ── Terminators ──
 
     /// Return from function. Takes mem token output.
-    pub fn ret(&mut self, val: Option<Operand>, mem: Operand, origin: Origin) -> ValueRef {
+    pub fn ret(&mut self, val: Option<Operand>, mem: MemOperand, origin: Origin) -> ValueRef {
         let ty = self.func.ret_ty.clone().unwrap_or(Type::Unit);
-        self.push_inst(Op::Ret(val, mem), ty, None, origin, None)
+        self.push_inst(Op::Ret(val, mem.raw()), ty, None, origin, None)
     }
 
     /// Unconditional branch with block arguments.

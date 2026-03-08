@@ -1185,7 +1185,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             fn_ptr
         } else if let Some(CallTarget::Direct(ref sym)) = callee_target {
             let sym_id = self.symbols.intern(sym);
-            self.builder.symbol_addr(sym_id, Origin::synthetic())
+            self.builder.symbol_addr(sym_id, Origin::synthetic()).raw()
         } else if let Some(fn_ptr) = self.translate_operand(func) {
             // Indirect call through a function pointer in a local.
             fn_ptr

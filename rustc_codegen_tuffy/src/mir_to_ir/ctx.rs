@@ -238,10 +238,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     pub(super) fn coerce_to_int(&mut self, val: ValueRef) -> ValueRef {
         let ptr_width = self.ptr_width();
         match self.builder.value_type(val) {
-            Some(Type::Ptr(_)) => {
-                self.builder
-                    .ptrtoaddr(val.into(), ptr_width, Origin::synthetic())
-            }
+            Some(Type::Ptr(_)) => self
+                .builder
+                .ptrtoaddr(val.into(), ptr_width, Origin::synthetic())
+                .raw(),
             Some(Type::Bool) => {
                 let one =
                     self.builder
@@ -268,7 +268,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     /// If `val` is an Int, insert inttoptr to coerce it to Ptr.
     pub(super) fn coerce_to_ptr(&mut self, val: ValueRef) -> ValueRef {
         match self.builder.value_type(val) {
-            Some(Type::Int) => self.builder.inttoptr(val.into(), 0, Origin::synthetic()),
+            Some(Type::Int) => self
+                .builder
+                .inttoptr(val.into(), 0, Origin::synthetic())
+                .raw(),
             _ => val,
         }
     }
@@ -309,7 +312,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         self.static_data
             .push((loc_sym_id, loc_bytes, vec![(0, file_sym_str)]));
 
-        self.builder.symbol_addr(loc_sym_id, Origin::synthetic())
+        self.builder
+            .symbol_addr(loc_sym_id, Origin::synthetic())
+            .raw()
     }
 
     pub(super) fn translate_params(&mut self) {

@@ -212,7 +212,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 IntSignedness::DontCare,
                                 Origin::synthetic(),
                             );
-                            self.builder.inttoptr(zero.into(), 0, Origin::synthetic())
+                            self.builder
+                                .inttoptr(zero.into(), 0, Origin::synthetic())
+                                .raw()
                         } else if let Some(Type::Float(ft)) = ret_ir_ty {
                             let zero = self.builder.iconst(
                                 0,
@@ -560,7 +562,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             } else {
                 discr_val = self
                     .builder
-                    .ptrtoaddr(discr_val.into(), 64, Origin::synthetic());
+                    .ptrtoaddr(discr_val.into(), 64, Origin::synthetic())
+                    .raw();
             }
         } else if matches!(self.builder.value_type(discr_val), Some(Type::Bool)) {
             let one = self

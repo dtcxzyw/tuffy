@@ -782,7 +782,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 self.data_counter,
                             );
                             self.static_data.push((sym_id, bytes, relocs));
-                            return Some(self.builder.symbol_addr(sym_id, Origin::synthetic()));
+                            return Some(
+                                self.builder.symbol_addr(sym_id, Origin::synthetic()).raw(),
+                            );
                         }
                     }
                     // Handle array-to-slice unsizing: &[T; N] → &[T].
@@ -879,7 +881,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     );
                                     self.static_data.push((sym_id, bytes, relocs));
                                     return Some(
-                                        self.builder.symbol_addr(sym_id, Origin::synthetic()),
+                                        self.builder.symbol_addr(sym_id, Origin::synthetic()).raw(),
                                     );
                                 }
                             }
@@ -959,22 +961,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         bits: u32,
     ) -> ValueRef {
         match res_ann.unwrap() {
-            IntAnn::Signed(_) => self.builder.sext(
-                IrOperand {
-                    value,
-                    annotation: None,
-                },
-                bits,
-                Origin::synthetic(),
-            ),
-            IntAnn::Unsigned(_) => self.builder.zext(
-                IrOperand {
-                    value,
-                    annotation: None,
-                },
-                bits,
-                Origin::synthetic(),
-            ),
+            IntAnn::Signed(_) => self
+                .builder
+                .sext(value.into(), bits, Origin::synthetic())
+                .raw(),
+            IntAnn::Unsigned(_) => self
+                .builder
+                .zext(value.into(), bits, Origin::synthetic())
+                .raw(),
             IntAnn::DontCare(_) => unreachable!("DontCare annotation in apply_int_extension"),
         }
     }
@@ -1788,7 +1782,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             let sym_name = self.tcx.symbol_name(resolved).name.to_string();
                             self.referenced_instances.push(resolved);
                             let sym_id = self.symbols.intern(&sym_name);
-                            Some(self.builder.symbol_addr(sym_id, Origin::synthetic()))
+                            Some(self.builder.symbol_addr(sym_id, Origin::synthetic()).raw())
                         } else {
                             Some(val)
                         }
@@ -1874,9 +1868,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             // For 128-bit types, fp_to_ui/fp_to_si produce 64-bit results.
                             // Explicitly extend to 128 bits.
                             if signed {
-                                self.builder.sext(raw.into(), 128, Origin::synthetic())
+                                self.builder
+                                    .sext(raw.into(), 128, Origin::synthetic())
+                                    .raw()
                             } else {
-                                self.builder.zext(raw.into(), 128, Origin::synthetic())
+                                self.builder
+                                    .zext(raw.into(), 128, Origin::synthetic())
+                                    .raw()
                             }
                         } else if signed {
                             // Signed: fix cvttss2si sentinel for NaN and positive overflow.
@@ -2196,11 +2194,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             int_val.into()
                         };
                         let float_res = if signed {
-                            self.builder.si_to_fp(operand, ft, Origin::synthetic())
+                            self.builder
+                                .si_to_fp(operand.into(), ft, Origin::synthetic())
                         } else {
-                            self.builder.ui_to_fp(operand, ft, Origin::synthetic())
+                            self.builder
+                                .ui_to_fp(operand.into(), ft, Origin::synthetic())
                         };
-                        Some(float_res)
+                        Some(float_res.raw())
                     }
                     CastKind::FloatToFloat => {
                         let Some(src_ty) = operand_ty_projected(operand, self.mir, self.tcx)
@@ -2226,7 +2226,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let converted =
                             self.builder
                                 .fp_convert(val.into(), dst_ft, Origin::synthetic());
-                        Some(converted)
+                        Some(converted.raw())
                     }
                     // PLACEHOLDER_CATCH_ALL_CAST
                     // Pointer casts and transmutes are bitwise moves.
@@ -2361,11 +2361,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             if let Some(st) = src_ty
                                 && matches!(st.kind(), ty::RawPtr(..) | ty::Ref(..) | ty::FnPtr(..))
                             {
-                                return Some(self.builder.ptrtoaddr(
-                                    val.into(),
-                                    64,
-                                    Origin::synthetic(),
-                                ));
+                                return Some(
+                                    self.builder
+                                        .ptrtoaddr(val.into(), 64, Origin::synthetic())
+                                        .raw(),
+                                );
                             }
                         }
                         Some(val)
@@ -2603,7 +2603,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 });
                                 let sym_id = self.symbols.intern(&sym);
                                 self.static_data.push((sym_id, bytes_vec, vec![]));
-                                val = self.builder.symbol_addr(sym_id, Origin::synthetic());
+                                val = self.builder.symbol_addr(sym_id, Origin::synthetic()).raw();
                             }
                         }
                     }
@@ -2924,7 +2924,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     };
                     return Some(
                         self.builder
-                            .fneg(v.into(), Type::Float(ft), Origin::synthetic()),
+                            .fneg(v.into(), Type::Float(ft), Origin::synthetic())
+                            .raw(),
                     );
                 }
                 let neg_ann = op_ty
@@ -2974,12 +2975,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     .builder
                     .sub(zero.into(), v.into(), sub_ann, Origin::synthetic());
                 Some(match neg_ann {
-                    Some(IntAnn::Signed(_)) => {
-                        self.builder.sext(result.into(), bits, Origin::synthetic())
-                    }
-                    Some(IntAnn::Unsigned(_)) => {
-                        self.builder.zext(result.into(), bits, Origin::synthetic())
-                    }
+                    Some(IntAnn::Signed(_)) => self
+                        .builder
+                        .sext(result.into(), bits, Origin::synthetic())
+                        .raw(),
+                    Some(IntAnn::Unsigned(_)) => self
+                        .builder
+                        .zext(result.into(), bits, Origin::synthetic())
+                        .raw(),
                     _ => result.raw(),
                 })
             }
@@ -3068,12 +3071,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     }
                 };
                 Some(match not_ann {
-                    Some(IntAnn::Signed(_)) => {
-                        self.builder.sext(result.into(), bits, Origin::synthetic())
-                    }
-                    Some(IntAnn::Unsigned(_)) => {
-                        self.builder.zext(result.into(), bits, Origin::synthetic())
-                    }
+                    Some(IntAnn::Signed(_)) => self
+                        .builder
+                        .sext(result.into(), bits, Origin::synthetic())
+                        .raw(),
+                    Some(IntAnn::Unsigned(_)) => self
+                        .builder
+                        .zext(result.into(), bits, Origin::synthetic())
+                        .raw(),
                     _ => result,
                 })
             }

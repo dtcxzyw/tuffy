@@ -400,12 +400,12 @@ fn build_extend_func(name: &str, ann: IntAnnotation, is_sext: bool) -> (Function
     let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let a = builder.param(0, src_type, src_ann, Origin::synthetic());
     let extended = if is_sext {
-        builder.sext(Operand::new(a), 64, Origin::synthetic())
+        builder.sext(Operand::new(a).into(), 64, Origin::synthetic())
     } else {
-        builder.zext(Operand::new(a), 64, Origin::synthetic())
+        builder.zext(Operand::new(a).into(), 64, Origin::synthetic())
     };
     builder.ret(
-        Some(Operand::new(extended)),
+        Some(Operand::new(extended.raw())),
         mem0.into(),
         Origin::synthetic(),
     );

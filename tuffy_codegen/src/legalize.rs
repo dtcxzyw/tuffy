@@ -750,12 +750,12 @@ fn legalize_inst<M: AbiMetadata + Clone>(
         // Truncation from 128-bit: just use the lo half.
         Op::Sext(val, bits) if is_wide(s, val.value) && *bits < 128 => {
             let lo = s.vmap.one(val.value);
-            let v = b.sext(Operand::new(lo), *bits, o());
+            let v = b.sext(Operand::new(lo).into(), *bits, o()).raw();
             s.vmap.set(old_vref, Mapped::One(v));
         }
         Op::Zext(val, bits) if is_wide(s, val.value) && *bits < 128 => {
             let lo = s.vmap.one(val.value);
-            let v = b.zext(Operand::new(lo), *bits, o());
+            let v = b.zext(Operand::new(lo).into(), *bits, o()).raw();
             s.vmap.set(old_vref, Mapped::One(v));
         }
         Op::Bitcast(val) if is_wide(s, val.value) => {
@@ -930,11 +930,11 @@ fn copy_inst<M: AbiMetadata + Clone>(
             .raw(),
         Op::Min(a, op_b) => b.min(remap_op(s, a), remap_op(s, op_b), ann, o()),
         Op::Max(a, op_b) => b.max(remap_op(s, a), remap_op(s, op_b), ann, o()),
-        Op::CountOnes(a) => b.count_ones(remap_op(s, a), 64, o()),
+        Op::CountOnes(a) => b.count_ones(remap_op(s, a).into(), 64, o()).raw(),
         Op::CountLeadingZeros(a, bits) => b.count_leading_zeros(remap_op(s, a), *bits, 64, o()),
         Op::CountTrailingZeros(a) => b.count_trailing_zeros(remap_op(s, a), 64, o()),
-        Op::Bswap(a, bytes) => b.bswap(remap_op(s, a), *bytes, o()),
-        Op::BitReverse(a, bits) => b.bit_reverse(remap_op(s, a), *bits, o()),
+        Op::Bswap(a, bytes) => b.bswap(remap_op(s, a).into(), *bytes, o()).raw(),
+        Op::BitReverse(a, bits) => b.bit_reverse(remap_op(s, a).into(), *bits, o()).raw(),
         Op::RotateLeft(a, amt, bits) => b.rotate_left(remap_op(s, a), remap_op(s, amt), *bits, o()),
         Op::RotateRight(a, amt, bits) => {
             b.rotate_right(remap_op(s, a), remap_op(s, amt), *bits, o())
@@ -1090,12 +1090,12 @@ fn copy_inst<M: AbiMetadata + Clone>(
             remap_op(s, mem),
             o(),
         ),
-        Op::SymbolAddr(sym) => b.symbol_addr(*sym, o()),
+        Op::SymbolAddr(sym) => b.symbol_addr(*sym, o()).raw(),
         Op::Bitcast(a) => b.bitcast(remap_op(s, a), inst.ty.clone(), ann, o()),
-        Op::Sext(a, bits) => b.sext(remap_op(s, a), *bits, o()),
-        Op::Zext(a, bits) => b.zext(remap_op(s, a), *bits, o()),
-        Op::FpToSi(a) => b.fp_to_si(remap_op(s, a), 64, o()),
-        Op::FpToUi(a) => b.fp_to_ui(remap_op(s, a), 64, o()),
+        Op::Sext(a, bits) => b.sext(remap_op(s, a).into(), *bits, o()).raw(),
+        Op::Zext(a, bits) => b.zext(remap_op(s, a).into(), *bits, o()).raw(),
+        Op::FpToSi(a) => b.fp_to_si(remap_op(s, a).into(), 64, o()).raw(),
+        Op::FpToUi(a) => b.fp_to_ui(remap_op(s, a).into(), 64, o()).raw(),
         Op::SiToFp(a, ft) => {
             let is_128 = s.wide.contains(&a.value.raw())
                 || value_annotation(old, a.value).is_some_and(|ann| {
@@ -1105,7 +1105,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
                 leg_int128_to_fp(s, b, old_vref, a, *ft, true, symbols);
                 return;
             }
-            b.si_to_fp(remap_op(s, a), *ft, o())
+            b.si_to_fp(remap_op(s, a).into(), *ft, o()).raw()
         }
         Op::UiToFp(a, ft) => {
             let is_128 = s.wide.contains(&a.value.raw())
@@ -1116,20 +1116,22 @@ fn copy_inst<M: AbiMetadata + Clone>(
                 leg_int128_to_fp(s, b, old_vref, a, *ft, false, symbols);
                 return;
             }
-            b.ui_to_fp(remap_op(s, a), *ft, o())
+            b.ui_to_fp(remap_op(s, a).into(), *ft, o()).raw()
         }
         Op::FpConvert(a) => {
             let ft = match &inst.ty {
                 Type::Float(ft) => *ft,
                 _ => tuffy_ir::types::FloatType::F64,
             };
-            b.fp_convert(remap_op(s, a), ft, o())
+            b.fp_convert(remap_op(s, a).into(), ft, o()).raw()
         }
         Op::PtrAdd(ptr, off) => b.ptradd(remap_op(s, ptr), remap_op(s, off), 0, o()),
-        Op::PtrDiff(a, op_b) => b.ptrdiff(remap_op(s, a), remap_op(s, op_b), 64, o()),
-        Op::PtrToInt(a) => b.ptrtoint(remap_op(s, a), 64, o()),
-        Op::PtrToAddr(a) => b.ptrtoaddr(remap_op(s, a), 64, o()),
-        Op::IntToPtr(a) => b.inttoptr(remap_op(s, a), 0, o()),
+        Op::PtrDiff(a, op_b) => b
+            .ptrdiff(remap_op(s, a).into(), remap_op(s, op_b).into(), 64, o())
+            .raw(),
+        Op::PtrToInt(a) => b.ptrtoint(remap_op(s, a).into(), 64, o()).raw(),
+        Op::PtrToAddr(a) => b.ptrtoaddr(remap_op(s, a).into(), 64, o()).raw(),
+        Op::IntToPtr(a) => b.inttoptr(remap_op(s, a).into(), 0, o()).raw(),
         Op::ExtractValue(agg, indices) => {
             // Expand struct field extraction: recursively extract nested fields
             let current = remap_op(s, agg).value;
@@ -1150,7 +1152,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
         }
         Op::Ret(val, mem) => {
             let rv = val.as_ref().map(|v| remap_op(s, v));
-            let new_ret = b.ret(rv, remap_op(s, mem), o());
+            let new_ret = b.ret(rv, remap_op(s, mem).into(), o());
             // Remap secondary-return move (non-i128 struct returns via RAX+RDX).
             if let Some(src_idx) = s.old_meta.get_secondary_return_move(old_vref.index()) {
                 let new_src = s.vmap.one(ValueRef::inst_result(src_idx));
@@ -1199,13 +1201,32 @@ fn copy_inst<M: AbiMetadata + Clone>(
             inst.ty.clone(),
             o(),
         ),
-        Op::FMinNum(a, op_b) => b.fminnum(remap_op(s, a), remap_op(s, op_b), inst.ty.clone(), o()),
-        Op::FMaxNum(a, op_b) => b.fmaxnum(remap_op(s, a), remap_op(s, op_b), inst.ty.clone(), o()),
-        Op::FNeg(a) => b.fneg(remap_op(s, a), inst.ty.clone(), o()),
-        Op::FAbs(a) => b.fabs(remap_op(s, a), inst.ty.clone(), o()),
-        Op::CopySign(a, op_b) => {
-            b.copysign(remap_op(s, a), remap_op(s, op_b), inst.ty.clone(), o())
-        }
+        Op::FMinNum(a, op_b) => b
+            .fminnum(
+                remap_op(s, a).into(),
+                remap_op(s, op_b).into(),
+                inst.ty.clone(),
+                o(),
+            )
+            .raw(),
+        Op::FMaxNum(a, op_b) => b
+            .fmaxnum(
+                remap_op(s, a).into(),
+                remap_op(s, op_b).into(),
+                inst.ty.clone(),
+                o(),
+            )
+            .raw(),
+        Op::FNeg(a) => b.fneg(remap_op(s, a).into(), inst.ty.clone(), o()).raw(),
+        Op::FAbs(a) => b.fabs(remap_op(s, a).into(), inst.ty.clone(), o()).raw(),
+        Op::CopySign(a, op_b) => b
+            .copysign(
+                remap_op(s, a).into(),
+                remap_op(s, op_b).into(),
+                inst.ty.clone(),
+                o(),
+            )
+            .raw(),
         Op::LoadAtomic(ptr, ord, mem) => {
             let (primary, secondary) = b.load_atomic(
                 remap_op(s, ptr),
@@ -1260,14 +1281,18 @@ fn copy_inst<M: AbiMetadata + Clone>(
             s.vmap.set(old_sec, Mapped::One(secondary));
             return;
         }
-        Op::Fence(ord, mem) => b.fence(*ord, remap_op(s, mem), o()),
-        Op::Merge(a, b_op, width) => b.merge(remap_op(s, a), remap_op(s, b_op), *width, o()),
-        Op::Clmul(a, b_op) => b.clmul(remap_op(s, a), remap_op(s, b_op), o()),
+        Op::Fence(ord, mem) => b.fence(*ord, remap_op(s, mem).into(), o()).raw(),
+        Op::Merge(a, b_op, width) => b
+            .merge(remap_op(s, a).into(), remap_op(s, b_op).into(), *width, o())
+            .raw(),
+        Op::Clmul(a, b_op) => b
+            .clmul(remap_op(s, a).into(), remap_op(s, b_op).into(), o())
+            .raw(),
         Op::Split(a, width) => {
-            let (hi, lo) = b.split(remap_op(s, a), *width, o());
-            s.vmap.set(old_vref, Mapped::One(hi));
+            let (hi, lo) = b.split(remap_op(s, a).into(), *width, o());
+            s.vmap.set(old_vref, Mapped::One(hi.raw()));
             let old_sec = ValueRef::inst_secondary_result(old_vref.index());
-            s.vmap.set(old_sec, Mapped::One(lo));
+            s.vmap.set(old_sec, Mapped::One(lo.raw()));
             return;
         }
     };
@@ -2157,7 +2182,7 @@ fn leg_fp_to_int128<M: AbiMetadata + Clone>(
         _ => panic!("unsupported float-to-i128: signed={signed} ft={ft:?}"),
     };
     let sym_id = symbols.intern(name);
-    let callee = b.symbol_addr(sym_id, o());
+    let callee = b.symbol_addr(sym_id, o()).raw();
 
     // The float value in the remapped IR.
     let float_val = s.vmap.one(fp_input_vref);
@@ -2197,7 +2222,8 @@ fn leg_bswap_128<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, val: 
     let (v_lo, v_hi) = s.vmap.pair(val.value);
     let new_lo = b.bswap(v_hi.into(), 8, o());
     let new_hi = b.bswap(v_lo.into(), 8, o());
-    s.vmap.set(old_vref, Mapped::Pair(new_lo, new_hi));
+    s.vmap
+        .set(old_vref, Mapped::Pair(new_lo.raw(), new_hi.raw()));
 }
 
 // ---------------------------------------------------------------------------
@@ -2263,7 +2289,7 @@ fn leg_div_rem_128<M: AbiMetadata + Clone>(
         (false, false) => "__umodti3",
     };
     let sym_id = symbols.intern(name);
-    let callee = b.symbol_addr(sym_id, o());
+    let callee = b.symbol_addr(sym_id, o()).raw();
 
     let (a_lo, a_hi) = wide_pair(s, old, b, a);
     let (b_lo, b_hi) = wide_pair(s, old, b, op_b);
@@ -2330,7 +2356,7 @@ fn leg_int128_to_fp<M: AbiMetadata + Clone>(
         _ => panic!("u128/i128 to f16/bf16 conversion not supported"),
     };
     let sym_id = symbols.intern(name);
-    let callee = b.symbol_addr(sym_id, o());
+    let callee = b.symbol_addr(sym_id, o()).raw();
 
     let (a_lo, a_hi) = if is_wide(s, a.value) {
         s.vmap.pair(a.value)
@@ -2394,12 +2420,12 @@ fn leg_ret<M: AbiMetadata>(
             };
             (lo, hi)
         };
-        let ret_inst = b.ret(Some(Operand::new(lo)), Operand::new(m), o());
+        let ret_inst = b.ret(Some(Operand::new(lo)), Operand::new(m).into(), o());
         let ret_idx = ret_inst.index();
         s.meta.mark_secondary_return_move(ret_idx, hi.index());
         s.vmap.set(old_vref, Mapped::One(ret_inst));
     } else {
-        let v = b.ret(None, Operand::new(m), o());
+        let v = b.ret(None, Operand::new(m).into(), o());
         s.vmap.set(old_vref, Mapped::One(v));
     }
 }
