@@ -372,6 +372,7 @@ def applyAnnotation (v : Int) (ann : Annotation) : Value :=
   | .signed n => checkSignedRange v n
   | .unsigned n => checkUnsignedRange v n
   | .dontCare n => .int (v % (2 ^ n))
+  | .align _ => .int v
 
 -- Memory load/store semantics
 -- Load/store operations support int, float, vec, and byte types.
