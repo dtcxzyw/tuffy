@@ -49,7 +49,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     8,
                     self.current_mem.into(),
                     Origin::synthetic(),
-                );
+                ).raw();
                 // Store fat component (length/vtable) into slot[8..16].
                 let off8 = self
                     .builder
@@ -63,7 +63,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     8,
                     self.current_mem.into(),
                     Origin::synthetic(),
-                );
+                ).raw();
             } else if matches!(self.builder.value_type(addr), Some(Type::Ptr(_)))
                 && self.builder.is_memory_address(addr)
             {
@@ -115,7 +115,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         chunk,
                         self.current_mem.into(),
                         Origin::synthetic(),
-                    );
+                    ).raw();
                 }
             } else {
                 self.current_mem = self.builder.store(
@@ -124,7 +124,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     size,
                     self.current_mem.into(),
                     Origin::synthetic(),
-                );
+                ).raw();
             }
             addr = slot;
             if persist_spill {
@@ -344,7 +344,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         64,
                         IntSignedness::DontCare,
                         Origin::synthetic(),
-                    ));
+                    ).raw());
                 }
             }
         }
@@ -355,7 +355,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         if bytes == 0 {
             return Some(
                 self.builder
-                    .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic()),
+                    .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic()).raw(),
             );
         }
         // For fat pointer types (e.g. &mut dyn Write, &[T]), load the
@@ -413,7 +413,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             rustc_abi::Variants::Empty => {
                 Some(
                     self.builder
-                        .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic()),
+                        .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic()).raw(),
                 )
             }
             rustc_abi::Variants::Single { index } => {
@@ -428,7 +428,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     64,
                     IntSignedness::DontCare,
                     Origin::synthetic(),
-                ))
+                ).raw())
             }
             rustc_abi::Variants::Multiple {
                 ref tag,
@@ -451,7 +451,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             size,
                             self.current_mem.into(),
                             Origin::synthetic(),
-                        );
+                        ).raw();
                         slot
                     }
                 } else {
@@ -2253,7 +2253,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     size,
                                     self.current_mem.into(),
                                     Origin::synthetic(),
-                                );
+                                ).raw();
                                 let loaded = self.builder.load(
                                     slot.into(),
                                     size,
@@ -2305,7 +2305,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             8,
                             self.current_mem.into(),
                             Origin::synthetic(),
-                        );
+                        ).raw();
                         if let Some(meta) = self.fat_locals.get(place.local) {
                             let off8 = self.builder.iconst(
                                 8,
@@ -2325,7 +2325,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 8,
                                 self.current_mem.into(),
                                 Origin::synthetic(),
-                            );
+                            ).raw();
                         }
                         self.locals.set(place.local, slot);
                         self.stack_locals.mark(place.local);
@@ -2446,7 +2446,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             chunk,
                             self.current_mem.into(),
                             Origin::synthetic(),
-                        );
+                        ).raw();
                     }
                 }
 
@@ -2617,7 +2617,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             8,
                             self.current_mem.into(),
                             Origin::synthetic(),
-                        );
+                        ).raw();
                         // Store fat component (length/vtable) into dst[8..16].
                         let off8 = self.builder.iconst(
                             8,
@@ -2637,7 +2637,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             8,
                             self.current_mem.into(),
                             Origin::synthetic(),
-                        );
+                        ).raw();
                     } else if is_ptr_val && bytes > 8 {
                         // val is a pointer to multi-word data — copy word-by-word.
                         let num_words = (bytes as u64).div_ceil(8);
@@ -2686,7 +2686,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 word_size,
                                 self.current_mem.into(),
                                 Origin::synthetic(),
-                            );
+                            ).raw();
                         }
                     } else if is_stack_op
                         && is_ptr_val
@@ -2707,7 +2707,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             bytes,
                             self.current_mem.into(),
                             Origin::synthetic(),
-                        );
+                        ).raw();
                     } else {
                         self.current_mem = self.builder.store(
                             val.into(),
@@ -2715,7 +2715,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             bytes,
                             self.current_mem.into(),
                             Origin::synthetic(),
-                        );
+                        ).raw();
                     }
                 }
 
@@ -3020,7 +3020,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         store_size,
                         self.current_mem.into(),
                         Origin::synthetic(),
-                    );
+                    ).raw();
                 }
                 // Only mark the local as stack when writing directly to it
                 // (no projection). For projected assignments like `(*ptr) = [v; n]`

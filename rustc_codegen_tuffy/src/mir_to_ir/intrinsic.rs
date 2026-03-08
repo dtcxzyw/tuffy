@@ -168,7 +168,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // is_val_statically_known: always false in a non-optimizing backend.
             "is_val_statically_known" => {
                 let result = self.builder.bconst(false, Origin::synthetic());
-                self.locals.set(destination_local, result);
+                self.locals.set(destination_local, result.raw());
                 true
             }
 
@@ -182,7 +182,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         IntSignedness::DontCare,
                         Origin::synthetic(),
                     );
-                    self.locals.set(destination_local, result);
+                    self.locals.set(destination_local, result.raw());
                 }
                 true
             }
@@ -197,7 +197,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         IntSignedness::DontCare,
                         Origin::synthetic(),
                     );
-                    self.locals.set(destination_local, result);
+                    self.locals.set(destination_local, result.raw());
                 }
                 true
             }
@@ -233,7 +233,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         I64,
                                         Origin::synthetic(),
                                     );
-                                    self.locals.set(destination_local, result);
+                                    self.locals.set(destination_local, result.raw());
                                 }
                             } else {
                                 let result = self.builder.iconst(
@@ -242,7 +242,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     IntSignedness::DontCare,
                                     Origin::synthetic(),
                                 );
-                                self.locals.set(destination_local, result);
+                                self.locals.set(destination_local, result.raw());
                             }
                         } else {
                             // str: size = len (metadata is byte length).
@@ -256,7 +256,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         IntSignedness::DontCare,
                                         Origin::synthetic(),
                                     );
-                                    self.locals.set(destination_local, result);
+                                    self.locals.set(destination_local, result.raw());
                                 }
                             } else {
                                 // dyn Trait: read size from vtable (fallback to 0 for now).
@@ -266,7 +266,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     IntSignedness::DontCare,
                                     Origin::synthetic(),
                                 );
-                                self.locals.set(destination_local, result);
+                                self.locals.set(destination_local, result.raw());
                             }
                         }
                     } else if let Some(sz) = type_size(tcx, t) {
@@ -277,7 +277,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             IntSignedness::DontCare,
                             Origin::synthetic(),
                         );
-                        self.locals.set(destination_local, result);
+                        self.locals.set(destination_local, result.raw());
                     } else {
                         let result = self.builder.iconst(
                             0,
@@ -285,7 +285,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             IntSignedness::DontCare,
                             Origin::synthetic(),
                         );
-                        self.locals.set(destination_local, result);
+                        self.locals.set(destination_local, result.raw());
                     }
                 }
                 true
@@ -301,7 +301,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         IntSignedness::DontCare,
                         Origin::synthetic(),
                     );
-                    self.locals.set(destination_local, result);
+                    self.locals.set(destination_local, result.raw());
                 }
                 true
             }
@@ -326,7 +326,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             Origin::synthetic(),
                         );
                         self.builder
-                            .mul(offset.into(), sz.into(), I64, Origin::synthetic())
+                            .mul(offset.into(), sz.into(), I64, Origin::synthetic()).raw()
                     };
                     let result =
                         self.builder
@@ -359,7 +359,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             Origin::synthetic(),
                         );
                         self.builder
-                            .div(diff.into(), sz.into(), I64, Origin::synthetic())
+                            .div(diff.into(), sz.into(), I64, Origin::synthetic()).raw()
                     };
                     self.locals.set(destination_local, result);
                 }
@@ -450,7 +450,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         I64,
                         Origin::synthetic(),
                     );
-                    self.locals.set(destination_local, result);
+                    self.locals.set(destination_local, result.raw());
                 }
                 true
             }
@@ -462,7 +462,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         I64,
                         Origin::synthetic(),
                     );
-                    self.locals.set(destination_local, result);
+                    self.locals.set(destination_local, result.raw());
                 }
                 true
             }
@@ -474,7 +474,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         I64,
                         Origin::synthetic(),
                     );
-                    self.locals.set(destination_local, result);
+                    self.locals.set(destination_local, result.raw());
                 }
                 true
             }
@@ -486,7 +486,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         None,
                         Origin::synthetic(),
                     );
-                    self.locals.set(destination_local, result);
+                    self.locals.set(destination_local, result.raw());
                 }
                 true
             }
@@ -498,7 +498,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         None,
                         Origin::synthetic(),
                     );
-                    self.locals.set(destination_local, result);
+                    self.locals.set(destination_local, result.raw());
                 }
                 true
             }
@@ -540,7 +540,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let result = self
                         .builder
                         .or(hi.into(), lo.into(), I64, Origin::synthetic());
-                    self.locals.set(destination_local, result);
+                    self.locals.set(destination_local, result.raw());
                 }
                 true
             }
@@ -620,7 +620,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         Origin::synthetic(),
                     );
                     self.builder
-                        .mul(count.into(), sz.into(), I64, Origin::synthetic())
+                        .mul(count.into(), sz.into(), I64, Origin::synthetic()).raw()
                 };
                 let dst_annotated = IrOperand::annotated(dst, Annotation::Align(elem_align as u32));
                 let mem_out = self.builder.mem_set(
@@ -651,7 +651,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         Origin::synthetic(),
                     );
                     self.builder
-                        .mul(count.into(), sz.into(), I64, Origin::synthetic())
+                        .mul(count.into(), sz.into(), I64, Origin::synthetic()).raw()
                 };
                 let dst_annotated = IrOperand::annotated(dst, Annotation::Align(elem_align as u32));
                 let src_annotated = IrOperand::annotated(src, Annotation::Align(elem_align as u32));
@@ -683,7 +683,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         Origin::synthetic(),
                     );
                     self.builder
-                        .mul(count.into(), sz.into(), I64, Origin::synthetic())
+                        .mul(count.into(), sz.into(), I64, Origin::synthetic()).raw()
                 };
                 let dst_annotated = IrOperand::annotated(dst, Annotation::Align(elem_align as u32));
                 let src_annotated = IrOperand::annotated(src, Annotation::Align(elem_align as u32));
@@ -734,7 +734,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     zero.into(),
                     Origin::synthetic(),
                 );
-                self.locals.set(destination_local, eq);
+                self.locals.set(destination_local, eq.raw());
                 Some(mem_out)
             }
 

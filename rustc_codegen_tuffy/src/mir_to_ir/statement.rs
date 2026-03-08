@@ -193,7 +193,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                     8,
                                                     self.current_mem.into(),
                                                     Origin::synthetic(),
-                                                );
+                                                ).raw();
                                                 // Store fat component (length/vtable) into slot[8..16].
                                                 let off8 = self.builder.iconst(
                                                     8,
@@ -213,7 +213,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                     8,
                                                     self.current_mem.into(),
                                                     Origin::synthetic(),
-                                                );
+                                                ).raw();
                                             } else {
                                                 // For word-by-word copy we need a SOURCE ADDRESS
                                                 // to load from. When the rvalue is Use(Copy/Move)
@@ -284,7 +284,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                         chunk,
                                                         self.current_mem.into(),
                                                         Origin::synthetic(),
-                                                    );
+                                                    ).raw();
                                                 }
                                             }
                                         }
@@ -326,7 +326,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                 8,
                                                 self.current_mem.into(),
                                                 Origin::synthetic(),
-                                            );
+                                            ).raw();
                                             // Store metadata (length/vtable) into slot[8..16].
                                             let off8 = self.builder.iconst(
                                                 8,
@@ -346,7 +346,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                 8,
                                                 self.current_mem.into(),
                                                 Origin::synthetic(),
-                                            );
+                                            ).raw();
                                         } else {
                                             let src_slot = match rvalue {
                                                 Rvalue::Use(
@@ -432,7 +432,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                         chunk,
                                                         self.current_mem.into(),
                                                         Origin::synthetic(),
-                                                    );
+                                                    ).raw();
                                                 }
                                             } else {
                                                 // CheckedBinaryOp stores (result, bool)
@@ -467,7 +467,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                     store_bytes,
                                                     self.current_mem.into(),
                                                     Origin::synthetic(),
-                                                );
+                                                ).raw();
                                                 if let Some(arith_bytes) = checked_rvalue
                                                     && arith_bytes >= 8
                                                 {
@@ -495,7 +495,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                         1,
                                                         self.current_mem.into(),
                                                         Origin::synthetic(),
-                                                    );
+                                                    ).raw();
                                                 }
                                             }
                                         } // close ref_fat_src else
@@ -506,7 +506,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                             bytes,
                                             self.current_mem.into(),
                                             Origin::synthetic(),
-                                        );
+                                        ).raw();
                                     }
                                 } else {
                                     self.locals.set(place.local, val);
@@ -659,7 +659,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                             chunk,
                                             self.current_mem.into(),
                                             Origin::synthetic(),
-                                        );
+                                        ).raw();
                                     }
                                     self.locals.set(place.local, new_slot);
                                 }
@@ -696,7 +696,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         8,
                                         self.current_mem.into(),
                                         Origin::synthetic(),
-                                    );
+                                    ).raw();
                                     // Store fat component into dst[8..16].
                                     let off8 = self.builder.iconst(
                                         8,
@@ -716,7 +716,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         8,
                                         self.current_mem.into(),
                                         Origin::synthetic(),
-                                    );
+                                    ).raw();
                                 } else if bytes > 8
                                     || matches!(rvalue, Rvalue::Aggregate(..))
                                     || !matches!(
@@ -791,7 +791,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                             chunk,
                                             self.current_mem.into(),
                                             Origin::synthetic(),
-                                        );
+                                        ).raw();
                                     }
                                 } else {
                                     // Scalar pointer value (≤8 bytes, e.g. &u32,
@@ -803,7 +803,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         bytes,
                                         self.current_mem.into(),
                                         Origin::synthetic(),
-                                    );
+                                    ).raw();
                                 }
                             } else if bytes > 8 {
                                 // Check if the rvalue's source type is also >8 bytes
@@ -888,7 +888,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         bytes,
                                         self.current_mem.into(),
                                         Origin::synthetic(),
-                                    );
+                                    ).raw();
                                 } else {
                                     // Scalar Int value being stored to a >8-byte
                                     // projected field (e.g. u16 as u128 → _2.0).
@@ -899,7 +899,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         8,
                                         self.current_mem.into(),
                                         Origin::synthetic(),
-                                    );
+                                    ).raw();
                                     let src_is_signed = match rvalue {
                                         Rvalue::Cast(CastKind::IntToInt, op, _) => {
                                             let src_ty =
@@ -952,7 +952,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         8,
                                         self.current_mem.into(),
                                         Origin::synthetic(),
-                                    );
+                                    ).raw();
                                 }
                             } else if bytes > 0 {
                                 self.current_mem = self.builder.store(
@@ -961,7 +961,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     bytes,
                                     self.current_mem.into(),
                                     Origin::synthetic(),
-                                );
+                                ).raw();
                             }
                         }
                     }
@@ -991,7 +991,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             8,
                             self.current_mem.into(),
                             Origin::synthetic(),
-                        );
+                        ).raw();
                     }
                 }
                 // Cast from a projected non-fat type to a fat pointer
@@ -1202,7 +1202,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             tag_size,
             self.current_mem.into(),
             Origin::synthetic(),
-        );
+        ).raw();
     }
 
     /// Write the discriminant tag for an enum variant into a slot pointer.
@@ -1283,6 +1283,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             tag_size,
             self.current_mem.into(),
             Origin::synthetic(),
-        );
+        ).raw();
     }
 }

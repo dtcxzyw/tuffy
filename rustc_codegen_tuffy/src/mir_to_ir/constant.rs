@@ -120,7 +120,7 @@ pub(super) fn translate_const<'tcx>(
                             IntSignedness::DontCare,
                             Origin::synthetic(),
                         );
-                        Some(builder.add(base.into(), off.into(), I64, Origin::synthetic()))
+                        Some(builder.add(base.into(), off.into(), I64, Origin::synthetic()).raw())
                     } else {
                         Some(base)
                     }
@@ -167,17 +167,17 @@ pub(super) fn translate_const<'tcx>(
                         let base = builder.symbol_addr(sym_id, Origin::synthetic());
                         Some(base)
                     } else {
-                        Some(builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic()))
+                        Some(builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic()).raw())
                     }
                 }
                 rustc_middle::mir::interpret::GlobalAlloc::TypeId { .. } => {
-                    Some(builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic()))
+                    Some(builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic()).raw())
                 }
             }
         }
         mir::ConstValue::Scalar(scalar) => translate_scalar(scalar, ty, builder),
         mir::ConstValue::ZeroSized => {
-            Some(builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic()))
+            Some(builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic()).raw())
         }
         mir::ConstValue::Slice { alloc_id, meta } => translate_const_slice(
             tcx,
@@ -369,22 +369,22 @@ pub(super) fn translate_scalar(
                 16 => BigInt::from(bits as i128),
                 _ => BigInt::from(bits as i128),
             };
-            Some(builder.iconst(val, 64, IntSignedness::DontCare, Origin::synthetic()))
+            Some(builder.iconst(val, 64, IntSignedness::DontCare, Origin::synthetic()).raw())
         }
         ty::Uint(_) => {
             // Unsigned: convert u128 directly to BigInt (always non-negative).
             let val = BigInt::from(bits);
-            Some(builder.iconst(val, 64, IntSignedness::DontCare, Origin::synthetic()))
+            Some(builder.iconst(val, 64, IntSignedness::DontCare, Origin::synthetic()).raw())
         }
-        ty::Bool => Some(builder.bconst(bits != 0, Origin::synthetic())),
+        ty::Bool => Some(builder.bconst(bits != 0, Origin::synthetic()).raw()),
         ty::Char => {
             let val = BigInt::from(bits as u32);
-            Some(builder.iconst(val, 64, IntSignedness::DontCare, Origin::synthetic()))
+            Some(builder.iconst(val, 64, IntSignedness::DontCare, Origin::synthetic()).raw())
         }
         ty::Ref(..) | ty::RawPtr(..) | ty::FnPtr(..) => {
             // Scalar::Int reference/pointer (e.g., null pointer constant)
             let val = bits as i64;
-            Some(builder.iconst(val, 64, IntSignedness::DontCare, Origin::synthetic()))
+            Some(builder.iconst(val, 64, IntSignedness::DontCare, Origin::synthetic()).raw())
         }
         ty::Float(float_ty) => {
             let ft = match float_ty {
@@ -392,19 +392,19 @@ pub(super) fn translate_scalar(
                 ty::FloatTy::F64 => FloatType::F64,
                 _ => return None,
             };
-            Some(builder.fconst(ft, bits as u64, Origin::synthetic()))
+            Some(builder.fconst(ft, bits as u64, Origin::synthetic()).raw())
         }
         ty::Adt(..) => {
             // Newtype structs (e.g., ExitCode(u8)) are represented as
             // scalars. Treat the raw bits as an unsigned integer.
             let val = BigInt::from(bits);
-            Some(builder.iconst(val, 64, IntSignedness::DontCare, Origin::synthetic()))
+            Some(builder.iconst(val, 64, IntSignedness::DontCare, Origin::synthetic()).raw())
         }
         ty::Tuple(_) => {
             // 1-tuples optimized to scalars by MIR (e.g., const (42_i32,)).
             // Treat the raw bits as an unsigned integer.
             let val = BigInt::from(bits);
-            Some(builder.iconst(val, 64, IntSignedness::DontCare, Origin::synthetic()))
+            Some(builder.iconst(val, 64, IntSignedness::DontCare, Origin::synthetic()).raw())
         }
         _ => None,
     }

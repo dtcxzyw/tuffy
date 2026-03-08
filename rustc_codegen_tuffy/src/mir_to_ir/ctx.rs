@@ -225,7 +225,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 slot_size,
                 self.current_mem.into(),
                 Origin::synthetic(),
-            );
+            ).raw();
         }
         self.locals.set(local, slot);
         self.stack_locals.mark(local);
@@ -327,7 +327,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let dummy =
                         self.builder
                             .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
-                    self.locals.set(local, dummy);
+                    self.locals.set(local, dummy.raw());
                     continue;
                 }
                 _ => {}
@@ -338,7 +338,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let dummy =
                     self.builder
                         .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
-                self.locals.set(local, dummy);
+                self.locals.set(local, dummy.raw());
                 continue;
             }
 

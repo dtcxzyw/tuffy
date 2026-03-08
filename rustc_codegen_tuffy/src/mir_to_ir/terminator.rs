@@ -367,7 +367,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                             8,
                                             self.current_mem.into(),
                                             Origin::synthetic(),
-                                        );
+                                        ).raw();
                                         let off8 = self.builder.iconst(
                                             8,
                                             64,
@@ -386,7 +386,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                             8,
                                             self.current_mem.into(),
                                             Origin::synthetic(),
-                                        );
+                                        ).raw();
                                         Some(slot)
                                     } else if ty_size > 8
                                         || matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
@@ -402,7 +402,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                             ty_size as u32,
                                             self.current_mem.into(),
                                             Origin::synthetic(),
-                                        );
+                                        ).raw();
                                         Some(slot)
                                     }
                                 } else {
