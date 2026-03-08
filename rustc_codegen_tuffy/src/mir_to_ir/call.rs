@@ -1302,13 +1302,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 .raw();
             // Mark the call as having a secondary return in RDX and
             // capture it via a placeholder instruction.
-            let call_idx = call_mem.raw().index();
+            let call_idx = call_mem.index();
             self.abi_metadata.mark_call_secondary_return(call_idx);
             let rdx_capture =
                 self.builder
                     .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
             self.abi_metadata
-                .mark_secondary_return_capture(rdx_capture.raw().index(), call_idx);
+                .mark_secondary_return_capture(rdx_capture.index(), call_idx);
             // Store RDX (secondary return) at offset 8.
             let off8 = self
                 .builder

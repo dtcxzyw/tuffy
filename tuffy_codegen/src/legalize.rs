@@ -888,7 +888,7 @@ fn legalize_inst<M: AbiMetadata + Clone>(
                         m.into(),
                         o(),
                     );
-                    s.vmap.set(old_vref, Mapped::One(new_mem.raw()));
+                    s.vmap.set(old_vref, Mapped::One(new_mem.into()));
                     return;
                 }
             }
@@ -902,7 +902,7 @@ fn legalize_inst<M: AbiMetadata + Clone>(
             // write the remaining bytes for the high half to avoid overflow.
             let hi_bytes = bytes.saturating_sub(8).max(1);
             let m2 = b.store(Operand::new(hi), hi_addr.into(), hi_bytes, m1.into(), o());
-            s.vmap.set(old_vref, Mapped::One(m2.raw()));
+            s.vmap.set(old_vref, Mapped::One(m2.into()));
         }
         _ => {
             // Skip instructions already remapped as RDX captures in leg_call.
@@ -1161,9 +1161,9 @@ fn copy_inst<M: AbiMetadata + Clone>(
                 *bits,
                 o(),
             );
-            s.vmap.set(old_vref, Mapped::One(primary.raw()));
+            s.vmap.set(old_vref, Mapped::One(primary.into()));
             let old_sec = ValueRef::inst_secondary_result(old_vref.index());
-            s.vmap.set(old_sec, Mapped::One(secondary.raw()));
+            s.vmap.set(old_sec, Mapped::One(secondary.into()));
             return;
         }
         Op::UAddWithOverflow(a, op_b, bits) => {
@@ -1173,9 +1173,9 @@ fn copy_inst<M: AbiMetadata + Clone>(
                 *bits,
                 o(),
             );
-            s.vmap.set(old_vref, Mapped::One(primary.raw()));
+            s.vmap.set(old_vref, Mapped::One(primary.into()));
             let old_sec = ValueRef::inst_secondary_result(old_vref.index());
-            s.vmap.set(old_sec, Mapped::One(secondary.raw()));
+            s.vmap.set(old_sec, Mapped::One(secondary.into()));
             return;
         }
         Op::SSubWithOverflow(a, op_b, bits) => {
@@ -1185,9 +1185,9 @@ fn copy_inst<M: AbiMetadata + Clone>(
                 *bits,
                 o(),
             );
-            s.vmap.set(old_vref, Mapped::One(primary.raw()));
+            s.vmap.set(old_vref, Mapped::One(primary.into()));
             let old_sec = ValueRef::inst_secondary_result(old_vref.index());
-            s.vmap.set(old_sec, Mapped::One(secondary.raw()));
+            s.vmap.set(old_sec, Mapped::One(secondary.into()));
             return;
         }
         Op::USubWithOverflow(a, op_b, bits) => {
@@ -1197,9 +1197,9 @@ fn copy_inst<M: AbiMetadata + Clone>(
                 *bits,
                 o(),
             );
-            s.vmap.set(old_vref, Mapped::One(primary.raw()));
+            s.vmap.set(old_vref, Mapped::One(primary.into()));
             let old_sec = ValueRef::inst_secondary_result(old_vref.index());
-            s.vmap.set(old_sec, Mapped::One(secondary.raw()));
+            s.vmap.set(old_sec, Mapped::One(secondary.into()));
             return;
         }
         Op::SMulWithOverflow(a, op_b, bits) => {
@@ -1209,9 +1209,9 @@ fn copy_inst<M: AbiMetadata + Clone>(
                 *bits,
                 o(),
             );
-            s.vmap.set(old_vref, Mapped::One(primary.raw()));
+            s.vmap.set(old_vref, Mapped::One(primary.into()));
             let old_sec = ValueRef::inst_secondary_result(old_vref.index());
-            s.vmap.set(old_sec, Mapped::One(secondary.raw()));
+            s.vmap.set(old_sec, Mapped::One(secondary.into()));
             return;
         }
         Op::UMulWithOverflow(a, op_b, bits) => {
@@ -1221,9 +1221,9 @@ fn copy_inst<M: AbiMetadata + Clone>(
                 *bits,
                 o(),
             );
-            s.vmap.set(old_vref, Mapped::One(primary.raw()));
+            s.vmap.set(old_vref, Mapped::One(primary.into()));
             let old_sec = ValueRef::inst_secondary_result(old_vref.index());
-            s.vmap.set(old_sec, Mapped::One(secondary.raw()));
+            s.vmap.set(old_sec, Mapped::One(secondary.into()));
             return;
         }
         Op::ICmp(cmp_op, a, op_b) => b
@@ -1488,7 +1488,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
                 inst.result_annotation,
                 o(),
             );
-            s.vmap.set(old_vref, Mapped::One(primary.raw()));
+            s.vmap.set(old_vref, Mapped::One(primary.into()));
             let old_sec = ValueRef::inst_secondary_result(old_vref.index());
             s.vmap.set(old_sec, Mapped::One(secondary));
             return;
@@ -1513,7 +1513,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
                 inst.result_annotation,
                 o(),
             );
-            s.vmap.set(old_vref, Mapped::One(primary.raw()));
+            s.vmap.set(old_vref, Mapped::One(primary.into()));
             let old_sec = ValueRef::inst_secondary_result(old_vref.index());
             s.vmap.set(old_sec, Mapped::One(secondary));
             return;
@@ -1530,7 +1530,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
                 inst.result_annotation,
                 o(),
             );
-            s.vmap.set(old_vref, Mapped::One(primary.raw()));
+            s.vmap.set(old_vref, Mapped::One(primary.into()));
             let old_sec = ValueRef::inst_secondary_result(old_vref.index());
             s.vmap.set(old_sec, Mapped::One(secondary));
             return;
@@ -1555,9 +1555,9 @@ fn copy_inst<M: AbiMetadata + Clone>(
             .raw(),
         Op::Split(a, width) => {
             let (hi, lo) = b.split(remap_op(s, &a.clone().raw()).into(), *width, o());
-            s.vmap.set(old_vref, Mapped::One(hi.raw()));
+            s.vmap.set(old_vref, Mapped::One(hi.into()));
             let old_sec = ValueRef::inst_secondary_result(old_vref.index());
-            s.vmap.set(old_sec, Mapped::One(lo.raw()));
+            s.vmap.set(old_sec, Mapped::One(lo.into()));
             return;
         }
     };
@@ -1850,7 +1850,7 @@ fn leg_uadd_with_overflow_128<M>(
 
     s.vmap.set(old_vref, Mapped::Pair(lo.raw(), hi.raw()));
     let old_sec = ValueRef::inst_secondary_result(old_vref.index());
-    s.vmap.set(old_sec, Mapped::One(overflow.raw()));
+    s.vmap.set(old_sec, Mapped::One(overflow.into()));
 }
 
 fn leg_sadd_with_overflow_128<M>(
@@ -1872,7 +1872,7 @@ fn leg_sadd_with_overflow_128<M>(
 
     s.vmap.set(old_vref, Mapped::Pair(lo, hi));
     let old_sec = ValueRef::inst_secondary_result(old_vref.index());
-    s.vmap.set(old_sec, Mapped::One(overflow.raw()));
+    s.vmap.set(old_sec, Mapped::One(overflow.into()));
 }
 
 fn leg_usub_with_overflow_128<M>(
@@ -1943,7 +1943,7 @@ fn leg_usub_with_overflow_128<M>(
 
     s.vmap.set(old_vref, Mapped::Pair(lo.raw(), hi.raw()));
     let old_sec = ValueRef::inst_secondary_result(old_vref.index());
-    s.vmap.set(old_sec, Mapped::One(overflow.raw()));
+    s.vmap.set(old_sec, Mapped::One(overflow.into()));
 }
 
 fn leg_ssub_with_overflow_128<M>(
@@ -1990,7 +1990,7 @@ fn leg_ssub_with_overflow_128<M>(
 
     s.vmap.set(old_vref, Mapped::Pair(lo.raw(), hi.raw()));
     let old_sec = ValueRef::inst_secondary_result(old_vref.index());
-    s.vmap.set(old_sec, Mapped::One(overflow.raw()));
+    s.vmap.set(old_sec, Mapped::One(overflow.into()));
 }
 
 fn leg_smul_with_overflow_128<M>(
@@ -2008,7 +2008,7 @@ fn leg_smul_with_overflow_128<M>(
     leg_mul(old, s, b, old_vref, a, op_b);
     let old_sec = ValueRef::inst_secondary_result(old_vref.index());
     let overflow = b.bconst(false, o());
-    s.vmap.set(old_sec, Mapped::One(overflow.raw()));
+    s.vmap.set(old_sec, Mapped::One(overflow.into()));
 }
 
 fn leg_umul_with_overflow_128<M>(
@@ -2022,7 +2022,7 @@ fn leg_umul_with_overflow_128<M>(
     leg_mul(old, s, b, old_vref, a, op_b);
     let old_sec = ValueRef::inst_secondary_result(old_vref.index());
     let overflow = b.bconst(false, o());
-    s.vmap.set(old_sec, Mapped::One(overflow.raw()));
+    s.vmap.set(old_sec, Mapped::One(overflow.into()));
 }
 
 fn leg_bitwise<M>(
@@ -2350,7 +2350,7 @@ fn leg_store_128<M>(
     let c8 = b.iconst(8i64, 64, IntSignedness::Unsigned, o());
     let p_hi = b.ptradd(p.into(), c8.into(), 0, o());
     let mem2 = b.store(v_hi.into(), p_hi.into(), 8, mem1.into(), o());
-    s.vmap.set(old_vref, Mapped::One(mem2.raw()));
+    s.vmap.set(old_vref, Mapped::One(mem2.into()));
 }
 
 // ---------------------------------------------------------------------------
@@ -2467,16 +2467,16 @@ fn leg_fp_to_int128<M: AbiMetadata + Clone>(
     );
     let data = data.unwrap();
 
-    s.vmap.set(old_mem, Mapped::One(call_mem.raw()));
+    s.vmap.set(old_mem, Mapped::One(call_mem.into()));
 
     // Record wide return: hi arrives in RDX.
-    let call_idx = call_mem.raw().index();
+    let call_idx = call_mem.index();
     s.meta.mark_call_secondary_return(call_idx);
     let hi_capture = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
     s.meta
-        .mark_secondary_return_capture(hi_capture.raw().index(), call_idx);
+        .mark_secondary_return_capture(hi_capture.index(), call_idx);
 
-    s.vmap.set(old_vref, Mapped::Pair(data, hi_capture.raw()));
+    s.vmap.set(old_vref, Mapped::Pair(data, hi_capture.into()));
 }
 
 // ---------------------------------------------------------------------------
@@ -2582,15 +2582,15 @@ fn leg_div_rem_128<M: AbiMetadata + Clone>(
 
     // Redirect all subsequent users of old_mem to call_mem so that later
     // stores/calls pick up the updated mem without rewriting their operands.
-    s.vmap.set(old_mem, Mapped::One(call_mem.raw()));
+    s.vmap.set(old_mem, Mapped::One(call_mem.into()));
 
     // Record the secondary-register return so the register allocator knows
     // that the hi half arrives in RDX.
-    let call_idx = call_mem.raw().index();
+    let call_idx = call_mem.index();
     s.meta.mark_call_secondary_return(call_idx);
     let hi_capture = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
     s.meta
-        .mark_secondary_return_capture(hi_capture.raw().index(), call_idx);
+        .mark_secondary_return_capture(hi_capture.index(), call_idx);
 
     // Map the old wide Div/Rem result to (lo, hi).
     s.vmap.set(old_vref, Mapped::Pair(data, hi_capture.raw()));
@@ -2653,7 +2653,7 @@ fn leg_int128_to_fp<M: AbiMetadata + Clone>(
     );
     let data = data.unwrap();
 
-    s.vmap.set(old_mem, Mapped::One(call_mem.raw()));
+    s.vmap.set(old_mem, Mapped::One(call_mem.into()));
     s.vmap.set(old_vref, Mapped::One(data));
 }
 
@@ -2765,20 +2765,20 @@ fn leg_call<M: AbiMetadata + Clone>(
     };
 
     let (mem_out, data_out) = b.call(c.into(), new_args, ret_ty, m.into(), ann, o());
-    s.vmap.set(old_vref, Mapped::One(mem_out.raw()));
+    s.vmap.set(old_vref, Mapped::One(mem_out.into()));
 
     if wide_ret {
         if let Some(data) = data_out {
-            let call_idx = mem_out.raw().index();
+            let call_idx = mem_out.index();
             s.meta.mark_call_secondary_return(call_idx);
 
             let hi_capture = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
-            let hi_idx = hi_capture.raw().index();
+            let hi_idx = hi_capture.index();
             s.meta.mark_secondary_return_capture(hi_idx, call_idx);
 
             s.vmap.set(
                 ValueRef::inst_secondary_result(old_vref.index()),
-                Mapped::Pair(data, hi_capture.raw()),
+                Mapped::Pair(data, hi_capture.into()),
             );
         }
     } else if let Some(data) = data_out {
@@ -2787,17 +2787,17 @@ fn leg_call<M: AbiMetadata + Clone>(
 
         let old_call_idx = old_vref.index();
         if s.old_meta.has_secondary_return(old_call_idx) {
-            let new_call_idx = mem_out.raw().index();
+            let new_call_idx = mem_out.index();
             s.meta.mark_call_secondary_return(new_call_idx);
 
             let rdx_capture = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
             s.meta
-                .mark_secondary_return_capture(rdx_capture.raw().index(), new_call_idx);
+                .mark_secondary_return_capture(rdx_capture.index(), new_call_idx);
 
             if let Some(old_cap_idx) = s.old_meta.find_capture_for_call(old_call_idx) {
                 let old_cap_vref = ValueRef::inst_result(old_cap_idx);
-                s.vmap.set(old_cap_vref, Mapped::One(rdx_capture.raw()));
-                s.rdx_capture_remap.insert(old_cap_idx, rdx_capture.raw());
+                s.vmap.set(old_cap_vref, Mapped::One(rdx_capture.into()));
+                s.rdx_capture_remap.insert(old_cap_idx, rdx_capture.into());
             }
         }
     }
