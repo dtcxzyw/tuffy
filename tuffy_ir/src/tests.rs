@@ -1516,7 +1516,7 @@ fn memssa_store_load_threading() {
         4,
         i32_type.clone(),
         mem1.into(),
-        None,
+        s32_ann,
         Origin::synthetic(),
     );
     // ret carries mem1 (load does not produce a new mem token)
@@ -1611,7 +1611,7 @@ fn memssa_block_arg_phi() {
     b.switch_to_block(bb0);
     let mem0 = b.add_block_arg(bb0, Type::Mem, None);
     let cond = b.param(0, Type::Bool, None, Origin::synthetic());
-    let val = b.param(1, i32_type.clone(), None, Origin::synthetic());
+    let val = b.param(1, i32_type.clone(), s32_ann, Origin::synthetic());
     let ptr = b.param(2, Type::Ptr(0), None, Origin::synthetic());
     b.brif(cond.into(), bb1, vec![], bb2, vec![], Origin::synthetic());
 
@@ -1632,7 +1632,7 @@ fn memssa_block_arg_phi() {
         4,
         i32_type,
         mem_phi.into(),
-        None,
+        s32_ann,
         Origin::synthetic(),
     );
     b.ret(Some(loaded.into()), mem_phi.into(), Origin::synthetic());

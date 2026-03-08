@@ -337,6 +337,25 @@ impl FuncVerifier<'_> {
             self.check_annotation(ann, check_ty, "result annotation", &loc);
         }
 
+        // Validate that Int results have annotations (skip terminators).
+        if !Self::is_terminator(&inst.op) {
+            if matches!(inst.ty, Type::Int) && inst.result_annotation.is_none() {
+                self.result.error(
+                    loc.clone(),
+                    "instruction result: Int type requires annotation".to_string(),
+                );
+            }
+            if let Some(ref sec_ty) = inst.secondary_ty
+                && matches!(sec_ty, Type::Int)
+                && inst.result_annotation.is_none()
+            {
+                self.result.error(
+                    loc.clone(),
+                    "instruction secondary result: Int type requires annotation".to_string(),
+                );
+            }
+        }
+
         match &inst.op {
             Op::Param(idx) => {
                 if *idx as usize >= self.func.params.len() {
