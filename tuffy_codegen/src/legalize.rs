@@ -499,7 +499,7 @@ fn wide_pair<M>(
             // Sign-extend: for positive values hi=0 (same as zero-extend); for negative
             // values (e.g. iconst(-1) used as all-ones in a 128-bit XOR) hi=-1.
             let c63 = b.iconst(63i64, 64, IntSignedness::Unsigned, o());
-            b.shr(Operand::new(lo), Operand::new(c63), None, o())
+            b.shr(lo.into(), c63.into(), None, o()).raw()
         };
         (lo, hi)
     }
@@ -684,18 +684,18 @@ fn legalize_inst<M: AbiMetadata + Clone>(
             let hi_bytes = bytes - 8;
             let p = s.vmap.one(ptr.value);
             let m = s.vmap.one(mem.value);
-            let lo = b.load(Operand::new(p), 8, I64_TYPE, Operand::new(m), None, o());
+            let lo = b.load(Operand::new(p).into(), 8, I64_TYPE, Operand::new(m).into(), None, o());
             let c8 = b.iconst(8i64, 64, IntSignedness::Unsigned, o());
-            let p_hi = b.ptradd(Operand::new(p), Operand::new(c8), 0, o());
+            let p_hi = b.ptradd(Operand::new(p), c8.raw().into(), 0, o());
             let hi = b.load(
-                Operand::new(p_hi),
+                Operand::new(p_hi).into(),
                 hi_bytes,
                 I64_TYPE,
-                Operand::new(m),
+                Operand::new(m).into(),
                 None,
                 o(),
             );
-            s.vmap.set(old_vref, Mapped::Pair(lo, hi));
+            s.vmap.set(old_vref, Mapped::Pair(lo.raw(), hi.raw()));
         }
         Op::Store(val, ptr, 16, mem) => {
             leg_store_128(old, s, b, old_vref, val, ptr, mem);
@@ -704,11 +704,11 @@ fn legalize_inst<M: AbiMetadata + Clone>(
             // Sext/Zext from 128-bit to 128-bit is an identity: the source
             // already occupies a full (lo, hi) pair.
             let (lo, hi) = s.vmap.pair(val.value);
-            s.vmap.set(old_vref, Mapped::Pair(lo, hi));
+            s.vmap.set(old_vref, Mapped::Pair(lo.raw(), hi.raw()));
         }
         Op::Zext(val, 128) if is_wide(s, val.value) => {
             let (lo, hi) = s.vmap.pair(val.value);
-            s.vmap.set(old_vref, Mapped::Pair(lo, hi));
+            s.vmap.set(old_vref, Mapped::Pair(lo.raw(), hi.raw()));
         }
         Op::Sext(val, 128) => {
             // If the source is FpToSi, use the proper saturating compiler-rt call.
@@ -858,22 +858,90 @@ fn copy_inst<M: AbiMetadata + Clone>(
     };
     let v = match &inst.op {
         Op::Param(idx) => b.param(*idx, inst.ty.clone(), ann, o()),
-        Op::Const(val) => b.iconst(val.clone(), 64, IntSignedness::Unsigned, o()),
-        Op::FConst(ft, bits) => b.fconst(*ft, *bits, o()),
-        Op::BConst(val) => b.bconst(*val, o()),
-        Op::Add(a, op_b) => b.add(remap_op(s, a), remap_op(s, op_b), int_ann, o()),
-        Op::Sub(a, op_b) => b.sub(remap_op(s, a), remap_op(s, op_b), int_ann, o()),
-        Op::Mul(a, op_b) => b.mul(remap_op(s, a), remap_op(s, op_b), int_ann, o()),
-        Op::Div(a, op_b) => b.div(remap_op(s, a), remap_op(s, op_b), int_ann, o()),
-        Op::Rem(a, op_b) => b.rem(remap_op(s, a), remap_op(s, op_b), int_ann, o()),
-        Op::And(a, op_b) => b.and(remap_op(s, a), remap_op(s, op_b), int_ann, o()),
-        Op::Or(a, op_b) => b.or(remap_op(s, a), remap_op(s, op_b), int_ann, o()),
-        Op::Xor(a, op_b) => b.xor(remap_op(s, a), remap_op(s, op_b), int_ann, o()),
-        Op::BAnd(a, op_b) => b.band(remap_op(s, a), remap_op(s, op_b), o()),
-        Op::BOr(a, op_b) => b.bor(remap_op(s, a), remap_op(s, op_b), o()),
-        Op::BXor(a, op_b) => b.bxor(remap_op(s, a), remap_op(s, op_b), o()),
-        Op::Shl(a, op_b) => b.shl(remap_op(s, a), remap_op(s, op_b), ann, o()),
-        Op::Shr(a, op_b) => b.shr(remap_op(s, a), remap_op(s, op_b), ann, o()),
+        Op::Const(val) => b
+            .iconst(val.clone(), 64, IntSignedness::Unsigned, o())
+            .raw(),
+        Op::FConst(ft, bits) => b.fconst(*ft, *bits, o()).raw(),
+        Op::BConst(val) => b.bconst(*val, o()).raw(),
+        Op::Add(a, op_b) => b
+            .add(
+                remap_op(s, a).into(),
+                remap_op(s, op_b).into(),
+                int_ann,
+                o(),
+            )
+            .raw(),
+        Op::Sub(a, op_b) => b
+            .sub(
+                remap_op(s, a).into(),
+                remap_op(s, op_b).into(),
+                int_ann,
+                o(),
+            )
+            .raw(),
+        Op::Mul(a, op_b) => b
+            .mul(
+                remap_op(s, a).into(),
+                remap_op(s, op_b).into(),
+                int_ann,
+                o(),
+            )
+            .raw(),
+        Op::Div(a, op_b) => b
+            .div(
+                remap_op(s, a).into(),
+                remap_op(s, op_b).into(),
+                int_ann,
+                o(),
+            )
+            .raw(),
+        Op::Rem(a, op_b) => b
+            .rem(
+                remap_op(s, a).into(),
+                remap_op(s, op_b).into(),
+                int_ann,
+                o(),
+            )
+            .raw(),
+        Op::And(a, op_b) => b
+            .and(
+                remap_op(s, a).into(),
+                remap_op(s, op_b).into(),
+                int_ann,
+                o(),
+            )
+            .raw(),
+        Op::Or(a, op_b) => b
+            .or(
+                remap_op(s, a).into(),
+                remap_op(s, op_b).into(),
+                int_ann,
+                o(),
+            )
+            .raw(),
+        Op::Xor(a, op_b) => b
+            .xor(
+                remap_op(s, a).into(),
+                remap_op(s, op_b).into(),
+                int_ann,
+                o(),
+            )
+            .raw(),
+        Op::BAnd(a, op_b) => b
+            .band(remap_op(s, a).into(), remap_op(s, op_b).into(), o())
+            .raw(),
+        Op::BOr(a, op_b) => b
+            .bor(remap_op(s, a).into(), remap_op(s, op_b).into(), o())
+            .raw(),
+        Op::BXor(a, op_b) => b
+            .bxor(remap_op(s, a).into(), remap_op(s, op_b).into(), o())
+            .raw(),
+        Op::Shl(a, op_b) => b
+            .shl(remap_op(s, a).into(), remap_op(s, op_b).into(), ann, o())
+            .raw(),
+        Op::Shr(a, op_b) => b
+            .shr(remap_op(s, a).into(), remap_op(s, op_b).into(), ann, o())
+            .raw(),
         Op::Min(a, op_b) => b.min(remap_op(s, a), remap_op(s, op_b), ann, o()),
         Op::Max(a, op_b) => b.max(remap_op(s, a), remap_op(s, op_b), ann, o()),
         Op::CountOnes(a) => b.count_ones(remap_op(s, a), 64, o()),
@@ -969,8 +1037,22 @@ fn copy_inst<M: AbiMetadata + Clone>(
             s.vmap.set(old_sec, Mapped::One(secondary));
             return;
         }
-        Op::ICmp(cmp_op, a, op_b) => b.icmp(*cmp_op, remap_op(s, a), remap_op(s, op_b), o()),
-        Op::FCmp(cmp_op, a, op_b) => b.fcmp(*cmp_op, remap_op(s, a), remap_op(s, op_b), o()),
+        Op::ICmp(cmp_op, a, op_b) => b
+            .icmp(
+                *cmp_op,
+                remap_op(s, a).into(),
+                remap_op(s, op_b).into(),
+                o(),
+            )
+            .raw(),
+        Op::FCmp(cmp_op, a, op_b) => b
+            .fcmp(
+                *cmp_op,
+                remap_op(s, a).into(),
+                remap_op(s, op_b).into(),
+                o(),
+            )
+            .raw(),
         Op::Select(c, tv, fv) => b.select(
             remap_op(s, c),
             remap_op(s, tv),
@@ -981,23 +1063,25 @@ fn copy_inst<M: AbiMetadata + Clone>(
         ),
         Op::Load(ptr, bytes, mem) => {
             let data = b.load(
-                remap_op(s, ptr),
+                remap_op(s, ptr).into(),
                 *bytes,
                 inst.ty.clone(),
-                remap_op(s, mem),
+                remap_op(s, mem).into(),
                 ann,
                 o(),
             );
             s.vmap.set(old_vref, Mapped::One(data));
             return;
         }
-        Op::Store(val, ptr, bytes, mem) => b.store(
-            remap_op(s, val),
-            remap_op(s, ptr),
-            *bytes,
-            remap_op(s, mem),
-            o(),
-        ),
+        Op::Store(val, ptr, bytes, mem) => b
+            .store(
+                remap_op(s, val),
+                remap_op(s, ptr).into(),
+                *bytes,
+                remap_op(s, mem).into(),
+                o(),
+            )
+            .raw(),
         Op::StackSlot(bytes) => b.stack_slot(*bytes, o()),
         Op::MemCopy(dst, src, count, mem) => b.mem_copy(
             remap_op(s, dst),
@@ -1221,7 +1305,7 @@ enum BitwiseKind {
 fn leg_param<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, lo_idx: u32, hi_idx: u32) {
     let lo = b.param(lo_idx, I64_TYPE, None, o());
     let hi = b.param(hi_idx, I64_TYPE, None, o());
-    s.vmap.set(old_vref, Mapped::Pair(lo, hi));
+    s.vmap.set(old_vref, Mapped::Pair(lo.raw(), hi.raw()));
 }
 
 // ---------------------------------------------------------------------------
@@ -1234,7 +1318,7 @@ fn leg_wide_const<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, val:
     let hi_big: BigInt = val >> 64;
     let lo = b.iconst(lo_big, 64, IntSignedness::Unsigned, o());
     let hi = b.iconst(hi_big, 64, IntSignedness::Unsigned, o());
-    s.vmap.set(old_vref, Mapped::Pair(lo, hi));
+    s.vmap.set(old_vref, Mapped::Pair(lo.raw(), hi.raw()));
 }
 
 // ---------------------------------------------------------------------------
@@ -1254,7 +1338,7 @@ fn leg_add<M>(
     let (b_lo, b_hi) = wide_pair(s, old, b, op_b);
 
     let lo = b.add(Operand::new(a_lo), Operand::new(b_lo), I64, o());
-    let carry = b.icmp(ICmpOp::Lt, Operand::new(lo), Operand::new(a_lo), o());
+    let carry = b.icmp(ICmpOp::Lt, lo.into(), a_lo.into(), o());
     let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
     let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
     let carry_int = b.select(
@@ -1270,7 +1354,7 @@ fn leg_add<M>(
     );
     let hi_sum = b.add(Operand::new(a_hi), Operand::new(b_hi), I64, o());
     let hi = b.add(Operand::new(hi_sum), Operand::new(carry_int), I64, o());
-    s.vmap.set(old_vref, Mapped::Pair(lo, hi));
+    s.vmap.set(old_vref, Mapped::Pair(lo.raw(), hi.raw()));
 }
 
 // ---------------------------------------------------------------------------
@@ -1288,12 +1372,12 @@ fn leg_sub<M>(
     let (a_lo, a_hi) = wide_pair(s, _old, b, a);
     let (b_lo, b_hi) = wide_pair(s, _old, b, op_b);
 
-    let lo = b.sub(Operand::new(a_lo), Operand::new(b_lo), I64, o());
-    let borrow = b.icmp(ICmpOp::Gt, Operand::new(lo), Operand::new(a_lo), o());
+    let lo = b.sub(a_lo.into(), b_lo.into(), I64, o());
+    let borrow = b.icmp(ICmpOp::Gt, lo.into(), a_lo.into(), o());
     let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
     let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
     let borrow_int = b.select(
-        Operand::new(borrow),
+        borrow.into(),
         one.into(),
         zero.into(),
         Type::Int,
@@ -1303,9 +1387,9 @@ fn leg_sub<M>(
         })),
         o(),
     );
-    let hi_diff = b.sub(Operand::new(a_hi), Operand::new(b_hi), I64, o());
-    let hi = b.sub(Operand::new(hi_diff), Operand::new(borrow_int), I64, o());
-    s.vmap.set(old_vref, Mapped::Pair(lo, hi));
+    let hi_diff = b.sub(a_hi.into(), b_hi.into(), I64, o());
+    let hi = b.sub(hi_diff.into(), borrow_int.into(), I64, o());
+    s.vmap.set(old_vref, Mapped::Pair(lo.raw(), hi.raw()));
 }
 
 // ---------------------------------------------------------------------------
@@ -1383,7 +1467,7 @@ fn leg_mul<M>(
     let cross2 = b.mul(Operand::new(a_hi), Operand::new(b_lo), I64, o());
     let hi = b.add(Operand::new(hi), Operand::new(cross2), I64, o());
 
-    s.vmap.set(old_vref, Mapped::Pair(lo, hi));
+    s.vmap.set(old_vref, Mapped::Pair(lo.raw(), hi.raw()));
 }
 
 // ---------------------------------------------------------------------------
@@ -1402,7 +1486,7 @@ fn leg_add128_core<M>(
     let (a_lo, a_hi) = wide_pair(s, old, b, a);
     let (b_lo, b_hi) = wide_pair(s, old, b, op_b);
     let lo = b.add(Operand::new(a_lo), Operand::new(b_lo), I64, o());
-    let carry = b.icmp(ICmpOp::Lt, Operand::new(lo), Operand::new(a_lo), o());
+    let carry = b.icmp(ICmpOp::Lt, lo.into(), a_lo.into(), o());
     let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
     let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
     let carry_int = b.select(
@@ -1433,7 +1517,7 @@ fn leg_uadd_with_overflow_128<M>(
     let (b_lo, b_hi) = wide_pair(s, old, b, op_b);
 
     let lo = b.add(Operand::new(a_lo), Operand::new(b_lo), I64, o());
-    let lo_carry = b.icmp(ICmpOp::Lt, Operand::new(lo), Operand::new(a_lo), o());
+    let lo_carry = b.icmp(ICmpOp::Lt, lo.into(), a_lo.into(), o());
     let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
     let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
     let lo_carry_int = b.select(
@@ -1449,9 +1533,9 @@ fn leg_uadd_with_overflow_128<M>(
     );
 
     let hi_sum = b.add(Operand::new(a_hi), Operand::new(b_hi), I64, o());
-    let hi_carry = b.icmp(ICmpOp::Lt, Operand::new(hi_sum), Operand::new(a_hi), o());
+    let hi_carry = b.icmp(ICmpOp::Lt, hi_sum.into(), a_hi.into(), o());
     let hi = b.add(Operand::new(hi_sum), Operand::new(lo_carry_int), I64, o());
-    let hi_carry2 = b.icmp(ICmpOp::Lt, Operand::new(hi), Operand::new(hi_sum), o());
+    let hi_carry2 = b.icmp(ICmpOp::Lt, hi.into(), hi_sum.into(), o());
     // overflow = hi_carry OR hi_carry2
     let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
     let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
@@ -1488,7 +1572,7 @@ fn leg_uadd_with_overflow_128<M>(
     let zero_cmp = b.iconst(0, 64, IntSignedness::DontCare, o());
     let overflow = b.icmp(ICmpOp::Ne, Operand::new(overflow_int), zero_cmp.into(), o());
 
-    s.vmap.set(old_vref, Mapped::Pair(lo, hi));
+    s.vmap.set(old_vref, Mapped::Pair(lo.raw(), hi.raw()));
     let old_sec = ValueRef::inst_secondary_result(old_vref.index());
     s.vmap.set(old_sec, Mapped::One(overflow));
 }
@@ -1508,9 +1592,9 @@ fn leg_sadd_with_overflow_128<M>(
     let bx = b.xor(Operand::new(b_hi), Operand::new(hi), I64, o());
     let combined = b.and(Operand::new(ax), Operand::new(bx), I64, o());
     let zero = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
-    let overflow = b.icmp(ICmpOp::Lt, Operand::new(combined), Operand::new(zero), o());
+    let overflow = b.icmp(ICmpOp::Lt, combined.into(), zero.into(), o());
 
-    s.vmap.set(old_vref, Mapped::Pair(lo, hi));
+    s.vmap.set(old_vref, Mapped::Pair(lo.raw(), hi.raw()));
     let old_sec = ValueRef::inst_secondary_result(old_vref.index());
     s.vmap.set(old_sec, Mapped::One(overflow));
 }
@@ -1526,8 +1610,8 @@ fn leg_usub_with_overflow_128<M>(
     let (a_lo, a_hi) = wide_pair(s, old, b, a);
     let (b_lo, b_hi) = wide_pair(s, old, b, op_b);
 
-    let lo = b.sub(Operand::new(a_lo), Operand::new(b_lo), I64, o());
-    let lo_borrow = b.icmp(ICmpOp::Gt, Operand::new(lo), Operand::new(a_lo), o());
+    let lo = b.sub(a_lo.into(), b_lo.into(), I64, o());
+    let lo_borrow = b.icmp(ICmpOp::Gt, lo.into(), a_lo.into(), o());
     let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
     let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
     let lo_borrow_int = b.select(
@@ -1542,10 +1626,10 @@ fn leg_usub_with_overflow_128<M>(
         o(),
     );
 
-    let hi_diff = b.sub(Operand::new(a_hi), Operand::new(b_hi), I64, o());
-    let hi_borrow = b.icmp(ICmpOp::Gt, Operand::new(hi_diff), Operand::new(a_hi), o());
-    let hi = b.sub(Operand::new(hi_diff), Operand::new(lo_borrow_int), I64, o());
-    let hi_borrow2 = b.icmp(ICmpOp::Gt, Operand::new(hi), Operand::new(hi_diff), o());
+    let hi_diff = b.sub(a_hi.into(), b_hi.into(), I64, o());
+    let hi_borrow = b.icmp(ICmpOp::Gt, hi_diff.into(), a_hi.into(), o());
+    let hi = b.sub(hi_diff.into(), lo_borrow_int.into(), I64, o());
+    let hi_borrow2 = b.icmp(ICmpOp::Gt, hi.into(), hi_diff.into(), o());
     let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
     let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
     let hi_borrow_int = b.select(
@@ -1581,7 +1665,7 @@ fn leg_usub_with_overflow_128<M>(
     let zero_cmp = b.iconst(0, 64, IntSignedness::DontCare, o());
     let overflow = b.icmp(ICmpOp::Ne, Operand::new(overflow_int), zero_cmp.into(), o());
 
-    s.vmap.set(old_vref, Mapped::Pair(lo, hi));
+    s.vmap.set(old_vref, Mapped::Pair(lo.raw(), hi.raw()));
     let old_sec = ValueRef::inst_secondary_result(old_vref.index());
     s.vmap.set(old_sec, Mapped::One(overflow));
 }
@@ -1598,8 +1682,8 @@ fn leg_ssub_with_overflow_128<M>(
     let (b_lo, b_hi) = wide_pair(s, old, b, op_b);
 
     // Compute (lo, hi) of a - b
-    let lo = b.sub(Operand::new(a_lo), Operand::new(b_lo), I64, o());
-    let lo_borrow = b.icmp(ICmpOp::Gt, Operand::new(lo), Operand::new(a_lo), o());
+    let lo = b.sub(a_lo.into(), b_lo.into(), I64, o());
+    let lo_borrow = b.icmp(ICmpOp::Gt, lo.into(), a_lo.into(), o());
     let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
     let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
     let lo_borrow_int = b.select(
@@ -1613,17 +1697,17 @@ fn leg_ssub_with_overflow_128<M>(
         })),
         o(),
     );
-    let hi_diff = b.sub(Operand::new(a_hi), Operand::new(b_hi), I64, o());
-    let hi = b.sub(Operand::new(hi_diff), Operand::new(lo_borrow_int), I64, o());
+    let hi_diff = b.sub(a_hi.into(), b_hi.into(), I64, o());
+    let hi = b.sub(hi_diff.into(), lo_borrow_int.into(), I64, o());
 
     // Signed overflow for subtraction: ((a_hi ^ b_hi) & (a_hi ^ hi)) has sign bit set
     let ax = b.xor(Operand::new(a_hi), Operand::new(b_hi), I64, o());
     let bx = b.xor(Operand::new(a_hi), Operand::new(hi), I64, o());
     let combined = b.and(Operand::new(ax), Operand::new(bx), I64, o());
     let zero = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
-    let overflow = b.icmp(ICmpOp::Lt, Operand::new(combined), Operand::new(zero), o());
+    let overflow = b.icmp(ICmpOp::Lt, combined.into(), zero.into(), o());
 
-    s.vmap.set(old_vref, Mapped::Pair(lo, hi));
+    s.vmap.set(old_vref, Mapped::Pair(lo.raw(), hi.raw()));
     let old_sec = ValueRef::inst_secondary_result(old_vref.index());
     s.vmap.set(old_sec, Mapped::One(overflow));
 }
@@ -1685,7 +1769,7 @@ fn leg_bitwise<M>(
             b.xor(Operand::new(a_hi), Operand::new(b_hi), I64, o()),
         ),
     };
-    s.vmap.set(old_vref, Mapped::Pair(lo, hi));
+    s.vmap.set(old_vref, Mapped::Pair(lo.raw(), hi.raw()));
 }
 
 // ---------------------------------------------------------------------------
@@ -1749,7 +1833,7 @@ fn leg_shl<M>(
         o(),
     );
 
-    s.vmap.set(old_vref, Mapped::Pair(lo, hi));
+    s.vmap.set(old_vref, Mapped::Pair(lo.raw(), hi.raw()));
 }
 
 // ---------------------------------------------------------------------------
@@ -1820,7 +1904,7 @@ fn leg_shr<M>(
         o(),
     );
 
-    s.vmap.set(old_vref, Mapped::Pair(lo, hi));
+    s.vmap.set(old_vref, Mapped::Pair(lo.raw(), hi.raw()));
 }
 
 // ---------------------------------------------------------------------------
@@ -1842,8 +1926,8 @@ fn leg_icmp<M>(
 
     let result = match cmp_op {
         ICmpOp::Eq => {
-            let hi_eq = b.icmp(ICmpOp::Eq, Operand::new(a_hi), Operand::new(b_hi), o());
-            let lo_eq = b.icmp(ICmpOp::Eq, Operand::new(a_lo), Operand::new(b_lo), o());
+            let hi_eq = b.icmp(ICmpOp::Eq, a_hi.into(), b_hi.into(), o());
+            let lo_eq = b.icmp(ICmpOp::Eq, a_lo.into(), b_lo.into(), o());
             let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
             let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
             let hi_int = b.select(
@@ -1875,8 +1959,8 @@ fn leg_icmp<M>(
             b.icmp(ICmpOp::Ne, Operand::new(both), zero.into(), o())
         }
         ICmpOp::Ne => {
-            let hi_ne = b.icmp(ICmpOp::Ne, Operand::new(a_hi), Operand::new(b_hi), o());
-            let lo_ne = b.icmp(ICmpOp::Ne, Operand::new(a_lo), Operand::new(b_lo), o());
+            let hi_ne = b.icmp(ICmpOp::Ne, a_hi.into(), b_hi.into(), o());
+            let lo_ne = b.icmp(ICmpOp::Ne, a_lo.into(), b_lo.into(), o());
             let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
             let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
             let hi_int = b.select(
@@ -1909,7 +1993,7 @@ fn leg_icmp<M>(
         }
         ICmpOp::Lt | ICmpOp::Le | ICmpOp::Gt | ICmpOp::Ge => {
             let hi_cmp = b.icmp(cmp_op, Operand::new(a_hi), Operand::new(b_hi), o());
-            let hi_eq = b.icmp(ICmpOp::Eq, Operand::new(a_hi), Operand::new(b_hi), o());
+            let hi_eq = b.icmp(ICmpOp::Eq, a_hi.into(), b_hi.into(), o());
             let lo_cmp = b.icmp(cmp_op, Operand::new(a_lo), Operand::new(b_lo), o());
             b.select(
                 Operand::new(hi_eq),
@@ -1942,7 +2026,7 @@ fn leg_load_128<M>(
     let c8 = b.iconst(8i64, 64, IntSignedness::Unsigned, o());
     let p_hi = b.ptradd(Operand::new(p), Operand::new(c8), 0, o());
     let hi = b.load(Operand::new(p_hi), 8, I64_TYPE, Operand::new(m), None, o());
-    s.vmap.set(old_vref, Mapped::Pair(lo, hi));
+    s.vmap.set(old_vref, Mapped::Pair(lo.raw(), hi.raw()));
 }
 
 // ---------------------------------------------------------------------------
@@ -2002,7 +2086,7 @@ fn leg_sext_128<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, val: &
     let lo = s.vmap.one(val.value);
     let c63 = b.iconst(63i64, 64, IntSignedness::Unsigned, o());
     let hi = b.shr(Operand::new(lo), Operand::new(c63), None, o());
-    s.vmap.set(old_vref, Mapped::Pair(lo, hi));
+    s.vmap.set(old_vref, Mapped::Pair(lo.raw(), hi.raw()));
 }
 
 // ---------------------------------------------------------------------------
@@ -2012,7 +2096,7 @@ fn leg_sext_128<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, val: &
 fn leg_zext_128<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, val: &Operand) {
     let lo = s.vmap.one(val.value);
     let hi = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
-    s.vmap.set(old_vref, Mapped::Pair(lo, hi));
+    s.vmap.set(old_vref, Mapped::Pair(lo.raw(), hi.raw()));
 }
 
 /// If `vref` is the result of a `FpToUi` or `FpToSi` instruction in `old`,
@@ -2068,14 +2152,14 @@ fn leg_fp_to_int128<M: AbiMetadata + Clone>(
                 } else {
                     b.iconst(0i64, 64, IntSignedness::Unsigned, o())
                 };
-                s.vmap.set(old_vref, Mapped::Pair(lo, hi));
+                s.vmap.set(old_vref, Mapped::Pair(lo.raw(), hi.raw()));
                 return;
             }
         },
         None => {
             let lo = s.vmap.one(zext_val.value);
             let hi = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
-            s.vmap.set(old_vref, Mapped::Pair(lo, hi));
+            s.vmap.set(old_vref, Mapped::Pair(lo.raw(), hi.raw()));
             return;
         }
     };
@@ -2163,7 +2247,7 @@ fn leg_select_128<M>(
         Some(Annotation::Int(I64)),
         o(),
     );
-    s.vmap.set(old_vref, Mapped::Pair(lo, hi));
+    s.vmap.set(old_vref, Mapped::Pair(lo.raw(), hi.raw()));
 }
 
 // ---------------------------------------------------------------------------

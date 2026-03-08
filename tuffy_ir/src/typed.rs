@@ -185,6 +185,18 @@ impl IntOperand {
     }
 }
 
+impl From<Operand> for IntOperand {
+    fn from(op: Operand) -> Self {
+        Self(op)
+    }
+}
+
+impl From<IntValue> for IntOperand {
+    fn from(v: IntValue) -> Self {
+        Self(Operand::new(v.0))
+    }
+}
+
 impl BoolOperand {
     pub fn new(op: Operand, func: &Function) -> Self {
         assert!(
@@ -208,6 +220,18 @@ impl BoolOperand {
     }
 }
 
+impl From<Operand> for BoolOperand {
+    fn from(op: Operand) -> Self {
+        Self(op)
+    }
+}
+
+impl From<BoolValue> for BoolOperand {
+    fn from(v: BoolValue) -> Self {
+        Self(Operand::new(v.0))
+    }
+}
+
 impl FloatOperand {
     pub fn new(op: Operand, func: &Function) -> Self {
         assert!(
@@ -228,6 +252,18 @@ impl FloatOperand {
 
     pub fn raw(self) -> Operand {
         self.0
+    }
+}
+
+impl From<Operand> for FloatOperand {
+    fn from(op: Operand) -> Self {
+        Self(op)
+    }
+}
+
+impl From<FloatValue> for FloatOperand {
+    fn from(v: FloatValue) -> Self {
+        Self(Operand::new(v.0))
     }
 }
 
@@ -320,5 +356,92 @@ impl ByteOperand {
 
     pub fn raw(self) -> Operand {
         self.0
+    }
+}
+
+// Conversions from typed values to Operand
+impl From<IntValue> for Operand {
+    fn from(v: IntValue) -> Self {
+        Operand::new(v.0)
+    }
+}
+
+impl From<BoolValue> for Operand {
+    fn from(v: BoolValue) -> Self {
+        Operand::new(v.0)
+    }
+}
+
+impl From<FloatValue> for Operand {
+    fn from(v: FloatValue) -> Self {
+        Operand::new(v.0)
+    }
+}
+
+impl From<PtrValue> for Operand {
+    fn from(v: PtrValue) -> Self {
+        Operand::new(v.0)
+    }
+}
+
+impl From<MemValue> for Operand {
+    fn from(v: MemValue) -> Self {
+        Operand::new(v.0)
+    }
+}
+
+// Conversions from ValueRef to typed operands
+impl From<ValueRef> for IntOperand {
+    fn from(v: ValueRef) -> Self {
+        Self(Operand::new(v))
+    }
+}
+
+impl From<ValueRef> for BoolOperand {
+    fn from(v: ValueRef) -> Self {
+        Self(Operand::new(v))
+    }
+}
+
+impl From<ValueRef> for FloatOperand {
+    fn from(v: ValueRef) -> Self {
+        Self(Operand::new(v))
+    }
+}
+
+impl From<ValueRef> for PtrOperand {
+    fn from(v: ValueRef) -> Self {
+        Self(Operand::new(v))
+    }
+}
+
+impl From<ValueRef> for MemOperand {
+    fn from(v: ValueRef) -> Self {
+        Self(Operand::new(v))
+    }
+}
+
+// Additional conversions from typed values to typed operands
+impl From<PtrValue> for PtrOperand {
+    fn from(v: PtrValue) -> Self {
+        Self(Operand::new(v.0))
+    }
+}
+
+impl From<MemValue> for MemOperand {
+    fn from(v: MemValue) -> Self {
+        Self(Operand::new(v.0))
+    }
+}
+
+impl From<UnitValue> for UnitOperand {
+    fn from(v: UnitValue) -> Self {
+        Self(Operand::new(v.0))
+    }
+}
+
+impl From<ByteValue> for ByteOperand {
+    fn from(v: ByteValue) -> Self {
+        Self(Operand::new(v.0))
     }
 }
