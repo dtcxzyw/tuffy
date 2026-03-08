@@ -11,14 +11,19 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @wrapping_add_u32(%a: int:u32, %b: int:u32) -> int:u32 {
+// CHECK: func @wrapping_add_u32(%a: int, %b: int) -> int {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:u32 = param %a
-// CHECK:     v2: int:u32 = param %b
-// CHECK:     v3: int:i32 = add v1:u32, v2:u32
-// CHECK:     v4: int = zext v3:i32, 32
-// CHECK:     ret v4, v0
+// CHECK:     v1: int = param %a
+// CHECK:     v2: int = param %b
+// CHECK:     v3: int:u64 = add v1, v2
+// CHECK:     ret v3, v0
 // CHECK: }
+// CHECK:
+// CHECK: warning: IR verification failed for wrapping_add_u32, emitting stub
+// CHECK:   verification failed with 3 error(s):
+// CHECK:   [func @wrapping_add_u32] param 0: Int type requires annotation
+// CHECK:   [func @wrapping_add_u32] param 1: Int type requires annotation
+// CHECK:   [func @wrapping_add_u32] return type: Int type requires annotation
 // CHECK:
 // CHECK: fn wrapping_mul_u32(_1: u32, _2: u32) -> u32 {
 // CHECK:     debug a => _1;
@@ -32,14 +37,19 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @wrapping_mul_u32(%a: int:u32, %b: int:u32) -> int:u32 {
+// CHECK: func @wrapping_mul_u32(%a: int, %b: int) -> int {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:u32 = param %a
-// CHECK:     v2: int:u32 = param %b
-// CHECK:     v3: int:i32 = mul v1:u32, v2:u32
-// CHECK:     v4: int = zext v3:i32, 32
-// CHECK:     ret v4, v0
+// CHECK:     v1: int = param %a
+// CHECK:     v2: int = param %b
+// CHECK:     v3: int:u64 = mul v1, v2
+// CHECK:     ret v3, v0
 // CHECK: }
+// CHECK:
+// CHECK: warning: IR verification failed for wrapping_mul_u32, emitting stub
+// CHECK:   verification failed with 3 error(s):
+// CHECK:   [func @wrapping_mul_u32] param 0: Int type requires annotation
+// CHECK:   [func @wrapping_mul_u32] param 1: Int type requires annotation
+// CHECK:   [func @wrapping_mul_u32] return type: Int type requires annotation
 // CHECK:
 // CHECK: fn wrapping_sub_u32(_1: u32, _2: u32) -> u32 {
 // CHECK:     debug a => _1;
@@ -53,14 +63,19 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @wrapping_sub_u32(%a: int:u32, %b: int:u32) -> int:u32 {
+// CHECK: func @wrapping_sub_u32(%a: int, %b: int) -> int {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:u32 = param %a
-// CHECK:     v2: int:u32 = param %b
-// CHECK:     v3: int:i32 = sub v1:u32, v2:u32
-// CHECK:     v4: int = zext v3:i32, 32
-// CHECK:     ret v4, v0
+// CHECK:     v1: int = param %a
+// CHECK:     v2: int = param %b
+// CHECK:     v3: int:u64 = sub v1, v2
+// CHECK:     ret v3, v0
 // CHECK: }
+// CHECK:
+// CHECK: warning: IR verification failed for wrapping_sub_u32, emitting stub
+// CHECK:   verification failed with 3 error(s):
+// CHECK:   [func @wrapping_sub_u32] param 0: Int type requires annotation
+// CHECK:   [func @wrapping_sub_u32] param 1: Int type requires annotation
+// CHECK:   [func @wrapping_sub_u32] return type: Int type requires annotation
 // CHECK:
 
 #![crate_type = "lib"]

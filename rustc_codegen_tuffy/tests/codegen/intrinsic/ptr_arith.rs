@@ -12,18 +12,22 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @arith_offset_u32(%ptr: ptr, %offset: int:s64) -> ptr {
+// CHECK: func @arith_offset_u32(%ptr: ptr, %offset: int) -> ptr {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param %ptr
-// CHECK:     v2: int:s64 = param %offset
-// CHECK:     v3: int = iconst 4
-// CHECK:     v4: int = mul v2, v3
+// CHECK:     v2: int = param %offset
+// CHECK:     v3: int:i64 = iconst 4
+// CHECK:     v4: int:u64 = mul v2, v3
 // CHECK:     v5: ptr = ptradd v1, v4
 // CHECK:     br bb1(v0)
 // CHECK:
 // CHECK:   bb1(v7: mem):
 // CHECK:     ret v5, v7
 // CHECK: }
+// CHECK:
+// CHECK: warning: IR verification failed for arith_offset_u32, emitting stub
+// CHECK:   verification failed with 1 error(s):
+// CHECK:   [func @arith_offset_u32] param 1: Int type requires annotation
 // CHECK:
 // CHECK: fn ptr_offset_from_u32(_1: *const u32, _2: *const u32) -> usize {
 // CHECK:     debug a => _1;
@@ -38,18 +42,22 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @ptr_offset_from_u32(%a: ptr, %b: ptr) -> int:u64 {
+// CHECK: func @ptr_offset_from_u32(%a: ptr, %b: ptr) -> int {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param %a
 // CHECK:     v2: ptr = param %b
-// CHECK:     v3: int = ptrdiff v1, v2
-// CHECK:     v4: int = iconst 4
-// CHECK:     v5: int = div v3, v4
+// CHECK:     v3: int:s64 = ptrdiff v1, v2
+// CHECK:     v4: int:i64 = iconst 4
+// CHECK:     v5: int:u64 = div v3, v4
 // CHECK:     br bb1(v0)
 // CHECK:
 // CHECK:   bb1(v7: mem):
 // CHECK:     ret v5, v7
 // CHECK: }
+// CHECK:
+// CHECK: warning: IR verification failed for ptr_offset_from_u32, emitting stub
+// CHECK:   verification failed with 1 error(s):
+// CHECK:   [func @ptr_offset_from_u32] return type: Int type requires annotation
 // CHECK:
 
 #![crate_type = "lib"]

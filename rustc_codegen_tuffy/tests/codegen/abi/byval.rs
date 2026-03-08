@@ -28,41 +28,46 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @use_large(%x: ptr) -> int:u64 {
+// CHECK: func @use_large() -> int {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: ptr = param %x
+// CHECK:     v1: int:i64 = iconst 0
 // CHECK:     v2: ptr = stack_slot 24
-// CHECK:     v3: int = iconst 24
-// CHECK:     v4: mem = memcopy v2:align8, v1:align8, v3, v0
-// CHECK:     v5: int = load.8 v2, v4
-// CHECK:     v6: int = iconst 8
-// CHECK:     v7: ptr = ptradd v2, v6
-// CHECK:     v8: int = load.8 v7, v4
-// CHECK:     v9: int, v10: bool = uadd_overflow.64 v5:u64, v8:u64
-// CHECK:     v11: int = bool_to_int v10
-// CHECK:     v12: int = iconst 0
-// CHECK:     v13: bool = icmp.eq v11, v12
-// CHECK:     brif v13, bb1(v4), bb3(v4)
+// CHECK:     v3: mem = store.24 v1, v2, v0
+// CHECK:     v4: int = load.8 v2, v3
+// CHECK:     v5: int:i64 = iconst 8
+// CHECK:     v6: ptr = ptradd v2, v5
+// CHECK:     v7: int = load.8 v6, v3
+// CHECK:     v8: int:u64, v9: bool = uadd_overflow.64 v4, v7
+// CHECK:     v10: int:u64 = bool_to_int v9
+// CHECK:     v11: int:i64 = iconst 0
+// CHECK:     v12: bool = icmp.eq v10, v11
+// CHECK:     brif v12, bb1(v3), bb3(v3)
 // CHECK:
-// CHECK:   bb1(v15: mem):
-// CHECK:     v16: int = iconst 16
-// CHECK:     v17: ptr = ptradd v2, v16
-// CHECK:     v18: int = load.8 v17, v15
-// CHECK:     v19: int, v20: bool = uadd_overflow.64 v9:u64, v18:u64
-// CHECK:     v21: int = bool_to_int v20
-// CHECK:     v22: int = iconst 0
-// CHECK:     v23: bool = icmp.eq v21, v22
-// CHECK:     brif v23, bb2(v15), bb4(v15)
+// CHECK:   bb1(v14: mem):
+// CHECK:     v15: int:i64 = iconst 16
+// CHECK:     v16: ptr = ptradd v2, v15
+// CHECK:     v17: int = load.8 v16, v14
+// CHECK:     v18: int:u64, v19: bool = uadd_overflow.64 v8, v17
+// CHECK:     v20: int:u64 = bool_to_int v19
+// CHECK:     v21: int:i64 = iconst 0
+// CHECK:     v22: bool = icmp.eq v20, v21
+// CHECK:     brif v22, bb2(v14), bb4(v14)
 // CHECK:
-// CHECK:   bb2(v25: mem):
-// CHECK:     ret v19, v25
+// CHECK:   bb2(v24: mem):
+// CHECK:     ret v18, v24
 // CHECK:
-// CHECK:   bb3(v27: mem):
+// CHECK:   bb3(v26: mem):
 // CHECK:     trap
 // CHECK:
-// CHECK:   bb4(v29: mem):
+// CHECK:   bb4(v28: mem):
 // CHECK:     trap
 // CHECK: }
+// CHECK:
+// CHECK: warning: IR verification failed for use_large, emitting stub
+// CHECK:   verification failed with 3 error(s):
+// CHECK:   [func @use_large] return type: Int type requires annotation
+// CHECK:   [func @use_large, bb0, inst 7] result annotation: int annotation on non-Int type Bool
+// CHECK:   [func @use_large, bb1, inst 3] result annotation: int annotation on non-Int type Bool
 // CHECK:
 
 #![crate_type = "lib"]

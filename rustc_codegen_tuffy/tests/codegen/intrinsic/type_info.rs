@@ -9,11 +9,15 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @align_of_u32() -> int:u64 {
+// CHECK: func @align_of_u32() -> int {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int = iconst 4
+// CHECK:     v1: int:i64 = iconst 4
 // CHECK:     ret v1, v0
 // CHECK: }
+// CHECK:
+// CHECK: warning: IR verification failed for align_of_u32, emitting stub
+// CHECK:   verification failed with 1 error(s):
+// CHECK:   [func @align_of_u32] return type: Int type requires annotation
 // CHECK:
 // CHECK: fn align_of_u64() -> usize {
 // CHECK:     let mut _0: usize;
@@ -25,11 +29,15 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @align_of_u64() -> int:u64 {
+// CHECK: func @align_of_u64() -> int {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int = iconst 8
+// CHECK:     v1: int:i64 = iconst 8
 // CHECK:     ret v1, v0
 // CHECK: }
+// CHECK:
+// CHECK: warning: IR verification failed for align_of_u64, emitting stub
+// CHECK:   verification failed with 1 error(s):
+// CHECK:   [func @align_of_u64] return type: Int type requires annotation
 // CHECK:
 // CHECK: fn size_of_u32() -> usize {
 // CHECK:     let mut _0: usize;
@@ -41,11 +49,15 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @size_of_u32() -> int:u64 {
+// CHECK: func @size_of_u32() -> int {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int = iconst 4
+// CHECK:     v1: int:i64 = iconst 4
 // CHECK:     ret v1, v0
 // CHECK: }
+// CHECK:
+// CHECK: warning: IR verification failed for size_of_u32, emitting stub
+// CHECK:   verification failed with 1 error(s):
+// CHECK:   [func @size_of_u32] return type: Int type requires annotation
 // CHECK:
 // CHECK: fn size_of_u64() -> usize {
 // CHECK:     let mut _0: usize;
@@ -57,11 +69,15 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @size_of_u64() -> int:u64 {
+// CHECK: func @size_of_u64() -> int {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int = iconst 8
+// CHECK:     v1: int:i64 = iconst 8
 // CHECK:     ret v1, v0
 // CHECK: }
+// CHECK:
+// CHECK: warning: IR verification failed for size_of_u64, emitting stub
+// CHECK:   verification failed with 1 error(s):
+// CHECK:   [func @size_of_u64] return type: Int type requires annotation
 // CHECK:
 
 #![crate_type = "lib"]

@@ -25,31 +25,31 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @div_i32(%a: int:s32, %b: int:s32) -> int:s32 {
+// CHECK: func @div_i32(%a: int, %b: int) -> int {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:s32 = param %a
-// CHECK:     v2: int:s32 = param %b
-// CHECK:     v3: int = iconst 0
-// CHECK:     v4: bool = icmp.eq v2:s32, v3:s32
-// CHECK:     v5: int = bool_to_int v4
-// CHECK:     v6: int = iconst 0
+// CHECK:     v1: int = param %a
+// CHECK:     v2: int = param %b
+// CHECK:     v3: int:i64 = iconst 0
+// CHECK:     v4: bool = icmp.eq v2, v3
+// CHECK:     v5: int:u64 = bool_to_int v4
+// CHECK:     v6: int:i64 = iconst 0
 // CHECK:     v7: bool = icmp.eq v5, v6
 // CHECK:     brif v7, bb1(v0), bb3(v0)
 // CHECK:
 // CHECK:   bb1(v9: mem):
-// CHECK:     v10: int = iconst -1
-// CHECK:     v11: bool = icmp.eq v2:s32, v10:s32
-// CHECK:     v12: int = bool_to_int v11
-// CHECK:     v13: int = iconst -2147483648
-// CHECK:     v14: bool = icmp.eq v1:s32, v13:s32
-// CHECK:     v15: int = bool_to_int v14
-// CHECK:     v16: int = and v12, v15
-// CHECK:     v17: int = iconst 0
+// CHECK:     v10: int:i64 = iconst -1
+// CHECK:     v11: bool = icmp.eq v2, v10
+// CHECK:     v12: int:u64 = bool_to_int v11
+// CHECK:     v13: int:i64 = iconst -2147483648
+// CHECK:     v14: bool = icmp.eq v1, v13
+// CHECK:     v15: int:u64 = bool_to_int v14
+// CHECK:     v16: int:u64 = and v12, v15
+// CHECK:     v17: int:i64 = iconst 0
 // CHECK:     v18: bool = icmp.eq v16, v17
 // CHECK:     brif v18, bb2(v9), bb4(v9)
 // CHECK:
 // CHECK:   bb2(v20: mem):
-// CHECK:     v21: int:s32 = div v1:s32, v2:s32
+// CHECK:     v21: int:u64 = div v1, v2
 // CHECK:     ret v21, v20
 // CHECK:
 // CHECK:   bb3(v23: mem):
@@ -58,6 +58,12 @@
 // CHECK:   bb4(v25: mem):
 // CHECK:     trap
 // CHECK: }
+// CHECK:
+// CHECK: warning: IR verification failed for div_i32, emitting stub
+// CHECK:   verification failed with 3 error(s):
+// CHECK:   [func @div_i32] param 0: Int type requires annotation
+// CHECK:   [func @div_i32] param 1: Int type requires annotation
+// CHECK:   [func @div_i32] return type: Int type requires annotation
 // CHECK:
 // CHECK: fn div_u32(_1: u32, _2: u32) -> u32 {
 // CHECK:     debug a => _1;
@@ -75,24 +81,30 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @div_u32(%a: int:u32, %b: int:u32) -> int:u32 {
+// CHECK: func @div_u32(%a: int, %b: int) -> int {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:u32 = param %a
-// CHECK:     v2: int:u32 = param %b
-// CHECK:     v3: int = iconst 0
-// CHECK:     v4: bool = icmp.eq v2:u32, v3:u32
-// CHECK:     v5: int = bool_to_int v4
-// CHECK:     v6: int = iconst 0
+// CHECK:     v1: int = param %a
+// CHECK:     v2: int = param %b
+// CHECK:     v3: int:i64 = iconst 0
+// CHECK:     v4: bool = icmp.eq v2, v3
+// CHECK:     v5: int:u64 = bool_to_int v4
+// CHECK:     v6: int:i64 = iconst 0
 // CHECK:     v7: bool = icmp.eq v5, v6
 // CHECK:     brif v7, bb1(v0), bb2(v0)
 // CHECK:
 // CHECK:   bb1(v9: mem):
-// CHECK:     v10: int:u32 = div v1:u32, v2:u32
+// CHECK:     v10: int:u64 = div v1, v2
 // CHECK:     ret v10, v9
 // CHECK:
 // CHECK:   bb2(v12: mem):
 // CHECK:     trap
 // CHECK: }
+// CHECK:
+// CHECK: warning: IR verification failed for div_u32, emitting stub
+// CHECK:   verification failed with 3 error(s):
+// CHECK:   [func @div_u32] param 0: Int type requires annotation
+// CHECK:   [func @div_u32] param 1: Int type requires annotation
+// CHECK:   [func @div_u32] return type: Int type requires annotation
 // CHECK:
 // CHECK: fn rem_i32(_1: i32, _2: i32) -> i32 {
 // CHECK:     debug a => _1;
@@ -120,31 +132,31 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @rem_i32(%a: int:s32, %b: int:s32) -> int:s32 {
+// CHECK: func @rem_i32(%a: int, %b: int) -> int {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:s32 = param %a
-// CHECK:     v2: int:s32 = param %b
-// CHECK:     v3: int = iconst 0
-// CHECK:     v4: bool = icmp.eq v2:s32, v3:s32
-// CHECK:     v5: int = bool_to_int v4
-// CHECK:     v6: int = iconst 0
+// CHECK:     v1: int = param %a
+// CHECK:     v2: int = param %b
+// CHECK:     v3: int:i64 = iconst 0
+// CHECK:     v4: bool = icmp.eq v2, v3
+// CHECK:     v5: int:u64 = bool_to_int v4
+// CHECK:     v6: int:i64 = iconst 0
 // CHECK:     v7: bool = icmp.eq v5, v6
 // CHECK:     brif v7, bb1(v0), bb3(v0)
 // CHECK:
 // CHECK:   bb1(v9: mem):
-// CHECK:     v10: int = iconst -1
-// CHECK:     v11: bool = icmp.eq v2:s32, v10:s32
-// CHECK:     v12: int = bool_to_int v11
-// CHECK:     v13: int = iconst -2147483648
-// CHECK:     v14: bool = icmp.eq v1:s32, v13:s32
-// CHECK:     v15: int = bool_to_int v14
-// CHECK:     v16: int = and v12, v15
-// CHECK:     v17: int = iconst 0
+// CHECK:     v10: int:i64 = iconst -1
+// CHECK:     v11: bool = icmp.eq v2, v10
+// CHECK:     v12: int:u64 = bool_to_int v11
+// CHECK:     v13: int:i64 = iconst -2147483648
+// CHECK:     v14: bool = icmp.eq v1, v13
+// CHECK:     v15: int:u64 = bool_to_int v14
+// CHECK:     v16: int:u64 = and v12, v15
+// CHECK:     v17: int:i64 = iconst 0
 // CHECK:     v18: bool = icmp.eq v16, v17
 // CHECK:     brif v18, bb2(v9), bb4(v9)
 // CHECK:
 // CHECK:   bb2(v20: mem):
-// CHECK:     v21: int:s32 = rem v1:s32, v2:s32
+// CHECK:     v21: int:u64 = rem v1, v2
 // CHECK:     ret v21, v20
 // CHECK:
 // CHECK:   bb3(v23: mem):
@@ -153,6 +165,12 @@
 // CHECK:   bb4(v25: mem):
 // CHECK:     trap
 // CHECK: }
+// CHECK:
+// CHECK: warning: IR verification failed for rem_i32, emitting stub
+// CHECK:   verification failed with 3 error(s):
+// CHECK:   [func @rem_i32] param 0: Int type requires annotation
+// CHECK:   [func @rem_i32] param 1: Int type requires annotation
+// CHECK:   [func @rem_i32] return type: Int type requires annotation
 // CHECK:
 // CHECK: fn rem_u32(_1: u32, _2: u32) -> u32 {
 // CHECK:     debug a => _1;
@@ -170,24 +188,30 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @rem_u32(%a: int:u32, %b: int:u32) -> int:u32 {
+// CHECK: func @rem_u32(%a: int, %b: int) -> int {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:u32 = param %a
-// CHECK:     v2: int:u32 = param %b
-// CHECK:     v3: int = iconst 0
-// CHECK:     v4: bool = icmp.eq v2:u32, v3:u32
-// CHECK:     v5: int = bool_to_int v4
-// CHECK:     v6: int = iconst 0
+// CHECK:     v1: int = param %a
+// CHECK:     v2: int = param %b
+// CHECK:     v3: int:i64 = iconst 0
+// CHECK:     v4: bool = icmp.eq v2, v3
+// CHECK:     v5: int:u64 = bool_to_int v4
+// CHECK:     v6: int:i64 = iconst 0
 // CHECK:     v7: bool = icmp.eq v5, v6
 // CHECK:     brif v7, bb1(v0), bb2(v0)
 // CHECK:
 // CHECK:   bb1(v9: mem):
-// CHECK:     v10: int:u32 = rem v1:u32, v2:u32
+// CHECK:     v10: int:u64 = rem v1, v2
 // CHECK:     ret v10, v9
 // CHECK:
 // CHECK:   bb2(v12: mem):
 // CHECK:     trap
 // CHECK: }
+// CHECK:
+// CHECK: warning: IR verification failed for rem_u32, emitting stub
+// CHECK:   verification failed with 3 error(s):
+// CHECK:   [func @rem_u32] param 0: Int type requires annotation
+// CHECK:   [func @rem_u32] param 1: Int type requires annotation
+// CHECK:   [func @rem_u32] return type: Int type requires annotation
 // CHECK:
 
 #![crate_type = "lib"]

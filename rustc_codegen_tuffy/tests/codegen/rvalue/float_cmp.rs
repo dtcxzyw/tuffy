@@ -27,7 +27,7 @@
 // CHECK:     v1: f32 = param %a
 // CHECK:     v2: f32 = param %b
 // CHECK:     v3: bool = fcmp.oeq v1, v2
-// CHECK:     v4: int = bool_to_int v3
+// CHECK:     v4: int:u64 = bool_to_int v3
 // CHECK:     v5: bool = int_to_bool v4
 // CHECK:     ret v5, v0
 // CHECK: }
@@ -47,7 +47,7 @@
 // CHECK:     v1: f32 = param %a
 // CHECK:     v2: f32 = param %b
 // CHECK:     v3: bool = fcmp.une v1, v2
-// CHECK:     v4: int = bool_to_int v3
+// CHECK:     v4: int:u64 = bool_to_int v3
 // CHECK:     v5: bool = int_to_bool v4
 // CHECK:     ret v5, v0
 // CHECK: }
@@ -81,7 +81,7 @@
 // CHECK:     v1: f64 = param %a
 // CHECK:     v2: f64 = param %b
 // CHECK:     v3: bool = fcmp.une v1, v2
-// CHECK:     v4: int = bool_to_int v3
+// CHECK:     v4: int:u64 = bool_to_int v3
 // CHECK:     v5: bool = int_to_bool v4
 // CHECK:     ret v5, v0
 // CHECK: }

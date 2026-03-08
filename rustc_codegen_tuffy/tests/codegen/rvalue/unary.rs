@@ -8,13 +8,18 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @neg_i128(%a: int:s128) -> int:s128 {
+// CHECK: func @neg_i128(%a: int) -> int {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:s128 = param %a
-// CHECK:     v2: int = iconst 0
-// CHECK:     v3: int:s128 = sub v2, v1
+// CHECK:     v1: int = param %a
+// CHECK:     v2: int:i64 = iconst 0
+// CHECK:     v3: int:u64 = sub v2, v1
 // CHECK:     ret v3, v0
 // CHECK: }
+// CHECK:
+// CHECK: warning: IR verification failed for neg_i128, emitting stub
+// CHECK:   verification failed with 2 error(s):
+// CHECK:   [func @neg_i128] param 0: Int type requires annotation
+// CHECK:   [func @neg_i128] return type: Int type requires annotation
 // CHECK:
 // CHECK: fn neg_i32(_1: i32) -> i32 {
 // CHECK:     debug a => _1;
@@ -25,13 +30,18 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @neg_i32(%a: int:s32) -> int:s32 {
+// CHECK: func @neg_i32(%a: int) -> int {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:s32 = param %a
-// CHECK:     v2: int = iconst 0
-// CHECK:     v3: int:s32 = sub v2, v1
+// CHECK:     v1: int = param %a
+// CHECK:     v2: int:i64 = iconst 0
+// CHECK:     v3: int:u64 = sub v2, v1
 // CHECK:     ret v3, v0
 // CHECK: }
+// CHECK:
+// CHECK: warning: IR verification failed for neg_i32, emitting stub
+// CHECK:   verification failed with 2 error(s):
+// CHECK:   [func @neg_i32] param 0: Int type requires annotation
+// CHECK:   [func @neg_i32] return type: Int type requires annotation
 // CHECK:
 // CHECK: fn not_bool(_1: bool) -> bool {
 // CHECK:     debug a => _1;
@@ -45,9 +55,9 @@
 // CHECK: func @not_bool(%a: bool) -> bool {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: bool = param %a
-// CHECK:     v2: int = bool_to_int v1
-// CHECK:     v3: int = iconst 1
-// CHECK:     v4: int = xor v2, v3
+// CHECK:     v2: int:u64 = bool_to_int v1
+// CHECK:     v3: int:i64 = iconst 1
+// CHECK:     v4: int:u64 = xor v2, v3
 // CHECK:     v5: bool = int_to_bool v4
 // CHECK:     ret v5, v0
 // CHECK: }
@@ -61,13 +71,18 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @not_i128(%a: int:s128) -> int:s128 {
+// CHECK: func @not_i128(%a: int) -> int {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:s128 = param %a
-// CHECK:     v2: int = iconst -1
-// CHECK:     v3: int:s128 = xor v1, v2
+// CHECK:     v1: int = param %a
+// CHECK:     v2: int:i64 = iconst -1
+// CHECK:     v3: int:u64 = xor v1, v2
 // CHECK:     ret v3, v0
 // CHECK: }
+// CHECK:
+// CHECK: warning: IR verification failed for not_i128, emitting stub
+// CHECK:   verification failed with 2 error(s):
+// CHECK:   [func @not_i128] param 0: Int type requires annotation
+// CHECK:   [func @not_i128] return type: Int type requires annotation
 // CHECK:
 // CHECK: fn not_u128(_1: u128) -> u128 {
 // CHECK:     debug a => _1;
@@ -78,13 +93,18 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @not_u128(%a: int:u128) -> int:u128 {
+// CHECK: func @not_u128(%a: int) -> int {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:u128 = param %a
-// CHECK:     v2: int = iconst -1
-// CHECK:     v3: int:u128 = xor v1, v2
+// CHECK:     v1: int = param %a
+// CHECK:     v2: int:i64 = iconst -1
+// CHECK:     v3: int:u64 = xor v1, v2
 // CHECK:     ret v3, v0
 // CHECK: }
+// CHECK:
+// CHECK: warning: IR verification failed for not_u128, emitting stub
+// CHECK:   verification failed with 2 error(s):
+// CHECK:   [func @not_u128] param 0: Int type requires annotation
+// CHECK:   [func @not_u128] return type: Int type requires annotation
 // CHECK:
 // CHECK: fn not_u32(_1: u32) -> u32 {
 // CHECK:     debug a => _1;
@@ -95,13 +115,18 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @not_u32(%a: int:u32) -> int:u32 {
+// CHECK: func @not_u32(%a: int) -> int {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:u32 = param %a
-// CHECK:     v2: int = iconst -1
-// CHECK:     v3: int:u32 = xor v1, v2
+// CHECK:     v1: int = param %a
+// CHECK:     v2: int:i64 = iconst -1
+// CHECK:     v3: int:u64 = xor v1, v2
 // CHECK:     ret v3, v0
 // CHECK: }
+// CHECK:
+// CHECK: warning: IR verification failed for not_u32, emitting stub
+// CHECK:   verification failed with 2 error(s):
+// CHECK:   [func @not_u32] param 0: Int type requires annotation
+// CHECK:   [func @not_u32] return type: Int type requires annotation
 // CHECK:
 
 #![crate_type = "lib"]
