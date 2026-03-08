@@ -13,7 +13,7 @@
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u32 = param %a
 // CHECK:     v2: int:u32 = param %b
-// CHECK:     v3: int:u64 = add v1, v2
+// CHECK:     v3: int:i64 = add v1, v2
 // CHECK:     ret v3, v0
 // CHECK: }
 // CHECK:
@@ -31,7 +31,7 @@
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u32 = param %a
 // CHECK:     v2: int:u32 = param %b
-// CHECK:     v3: int:u64 = mul v1, v2
+// CHECK:     v3: int:i64 = mul v1, v2
 // CHECK:     ret v3, v0
 // CHECK: }
 // CHECK:
@@ -50,7 +50,7 @@
 // CHECK:     v1: int:u32 = param %a
 // CHECK:     v2: int:u32 = param %b
 // CHECK:     v3: int:i64 = iconst 31
-// CHECK:     v4: int:u64 = and v2, v3
+// CHECK:     v4: int:i64 = and v2, v3
 // CHECK:     v5: int:u32 = shl v1, v4
 // CHECK:     ret v5, v0
 // CHECK: }
@@ -70,7 +70,7 @@
 // CHECK:     v1: int:u32 = param %a
 // CHECK:     v2: int:u32 = param %b
 // CHECK:     v3: int:i64 = iconst 31
-// CHECK:     v4: int:u64 = and v2, v3
+// CHECK:     v4: int:i64 = and v2, v3
 // CHECK:     v5: int:u32 = shr v1, v4
 // CHECK:     ret v5, v0
 // CHECK: }
@@ -89,7 +89,7 @@
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u32 = param %a
 // CHECK:     v2: int:u32 = param %b
-// CHECK:     v3: int:u64 = sub v1, v2
+// CHECK:     v3: int:i64 = sub v1, v2
 // CHECK:     ret v3, v0
 // CHECK: }
 // CHECK:

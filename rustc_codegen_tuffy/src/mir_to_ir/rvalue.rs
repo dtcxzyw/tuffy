@@ -10,7 +10,7 @@ use super::types::*;
 
 const I64: IntAnnotation = IntAnnotation {
     bit_width: 64,
-    signedness: IntSignedness::Unsigned,
+    signedness: IntSignedness::DontCare,
 };
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
@@ -2387,7 +2387,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             Origin::synthetic(),
                         ));
                     }
-                let _neg_ann = op_ty.and_then(translate_annotation);
+                let neg_ann = op_ty.and_then(translate_annotation).and_then(|a| IntAnn::from_annotation(&a));
                 // For large integral types (>8 bytes, e.g. i128) stored in memory,
                 // translate_place_to_value returns a Ptr to the stack slot.
                 // Load the value before negating.
@@ -2413,77 +2413,99 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 if !matches!(self.builder.value_type(v), Some(Type::Int)) {
                     return Some(self.builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic()));
                 }
+                let bits = match neg_ann {
+                    Some(IntAnn::Signed(n) | IntAnn::Unsigned(n) | IntAnn::DontCare(n)) => n,
+                    None => 64,
+                };
+                let sub_ann = IntAnnotation {
+                    bit_width: bits,
+                    signedness: IntSignedness::DontCare,
+                };
                 let zero = self.builder.iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
-                Some(
-                    self.builder
-                        .sub(zero.into(), v.into(), I64, Origin::synthetic()),
-                )
+                let result = self.builder.sub(zero.into(), v.into(), sub_ann, Origin::synthetic());
+                Some(match neg_ann {
+                    Some(IntAnn::Signed(_)) => self.builder.sext(result.into(), bits, Origin::synthetic()),
+                    Some(IntAnn::Unsigned(_)) => self.builder.zext(result.into(), bits, Origin::synthetic()),
+                    _ => result,
+                })
             }
             Rvalue::UnaryOp(mir::UnOp::Not, operand) => {
                 let v = self.translate_operand(operand)?;
                 let mir_ty = operand_ty_projected(operand, self.mir, self.tcx)
                     .map(|ty| self.monomorphize(ty));
-                let _not_ann = mir_ty.and_then(|t| translate_annotation(t));
+                let not_ann = mir_ty.and_then(|t| translate_annotation(t)).and_then(|a| IntAnn::from_annotation(&a));
                 let is_bool = mir_ty.is_some_and(|t| t.is_bool());
                 if is_bool {
                     // Boolean NOT: XOR 1.
                     let int_v = self.coerce_to_int(v);
                     let one = self.builder.iconst(1, 64, IntSignedness::DontCare, Origin::synthetic());
-                    Some(
+                    return Some(
                         self.builder
                             .xor(int_v.into(), one.into(), I64, Origin::synthetic()),
-                    )
-                } else {
-                    match self.builder.value_type(v) {
-                        Some(Type::Bool) => {
-                            let int_v = self.builder.bool_to_int(v.into(), 64, Origin::synthetic());
-                            let one = self.builder.iconst(1, 64, IntSignedness::DontCare, Origin::synthetic());
-                            Some(self.builder.xor(
-                                int_v.into(),
-                                one.into(),
-                                I64,
-                                Origin::synthetic(),
-                            ))
-                        }
-                        Some(Type::Ptr(_))
-                            if mir_ty.is_some_and(|t| t.is_integral())
-                                && mir_ty
-                                    .and_then(|t| type_size(self.tcx, t))
-                                    .is_some_and(|sz| sz > 8) =>
-                        {
-                            // The operand is a >8-byte integer (e.g. u128) stored in memory;
-                            // translate_place_to_value returned a Ptr to the stack slot.
-                            // Load the value as a 16-byte Int before bitwise NOT.
-                            let sz =
-                                mir_ty.and_then(|t| type_size(self.tcx, t)).unwrap_or(16) as u32;
-                            let loaded = self.builder.load(
-                                v.into(),
-                                sz,
-                                default_int_type(),
-                                self.current_mem.into(),
-                                int_annotation_for_bytes(sz),
-                                Origin::synthetic(),
-                            );
-                            let ones = self.builder.iconst(-1, 64, IntSignedness::DontCare, Origin::synthetic());
-                            Some(self.builder.xor(
-                                loaded.into(),
-                                ones.into(),
-                                I64,
-                                Origin::synthetic(),
-                            ))
-                        }
-                        _ => {
-                            // Bitwise NOT: XOR with -1.
-                            let ones = self.builder.iconst(-1, 64, IntSignedness::DontCare, Origin::synthetic());
-                            Some(self.builder.xor(
-                                v.into(),
-                                ones.into(),
-                                I64,
-                                Origin::synthetic(),
-                            ))
-                        }
-                    }
+                    );
                 }
+                let bits = match not_ann {
+                    Some(IntAnn::Signed(n) | IntAnn::Unsigned(n) | IntAnn::DontCare(n)) => n,
+                    None => 64,
+                };
+                let xor_ann = IntAnnotation {
+                    bit_width: bits,
+                    signedness: IntSignedness::DontCare,
+                };
+                let result = match self.builder.value_type(v) {
+                    Some(Type::Bool) => {
+                        let int_v = self.builder.bool_to_int(v.into(), 64, Origin::synthetic());
+                        let one = self.builder.iconst(1, 64, IntSignedness::DontCare, Origin::synthetic());
+                        self.builder.xor(
+                            int_v.into(),
+                            one.into(),
+                            I64,
+                            Origin::synthetic(),
+                        )
+                    }
+                    Some(Type::Ptr(_))
+                        if mir_ty.is_some_and(|t| t.is_integral())
+                            && mir_ty
+                                .and_then(|t| type_size(self.tcx, t))
+                                .is_some_and(|sz| sz > 8) =>
+                    {
+                        // The operand is a >8-byte integer (e.g. u128) stored in memory;
+                        // translate_place_to_value returned a Ptr to the stack slot.
+                        // Load the value as a 16-byte Int before bitwise NOT.
+                        let sz =
+                            mir_ty.and_then(|t| type_size(self.tcx, t)).unwrap_or(16) as u32;
+                        let loaded = self.builder.load(
+                            v.into(),
+                            sz,
+                            default_int_type(),
+                            self.current_mem.into(),
+                            int_annotation_for_bytes(sz),
+                            Origin::synthetic(),
+                        );
+                        let ones = self.builder.iconst(-1, 64, IntSignedness::DontCare, Origin::synthetic());
+                        self.builder.xor(
+                            loaded.into(),
+                            ones.into(),
+                            xor_ann,
+                            Origin::synthetic(),
+                        )
+                    }
+                    _ => {
+                        // Bitwise NOT: XOR with -1.
+                        let ones = self.builder.iconst(-1, 64, IntSignedness::DontCare, Origin::synthetic());
+                        self.builder.xor(
+                            v.into(),
+                            ones.into(),
+                            xor_ann,
+                            Origin::synthetic(),
+                        )
+                    }
+                };
+                Some(match not_ann {
+                    Some(IntAnn::Signed(_)) => self.builder.sext(result.into(), bits, Origin::synthetic()),
+                    Some(IntAnn::Unsigned(_)) => self.builder.zext(result.into(), bits, Origin::synthetic()),
+                    _ => result,
+                })
             }
             Rvalue::Discriminant(place) => self.translate_discriminant(place),
             Rvalue::Repeat(operand, count) => {

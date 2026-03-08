@@ -12,8 +12,9 @@
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:s128 = param %a
 // CHECK:     v2: int:i64 = iconst 0
-// CHECK:     v3: int:u64 = sub v2, v1
-// CHECK:     ret v3, v0
+// CHECK:     v3: int:i128 = sub v2, v1
+// CHECK:     v4: int:s128 = sext v3, 128
+// CHECK:     ret v4, v0
 // CHECK: }
 // CHECK:
 // CHECK: fn neg_i32(_1: i32) -> i32 {
@@ -29,8 +30,9 @@
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:s32 = param %a
 // CHECK:     v2: int:i64 = iconst 0
-// CHECK:     v3: int:u64 = sub v2, v1
-// CHECK:     ret v3, v0
+// CHECK:     v3: int:i32 = sub v2, v1
+// CHECK:     v4: int:s32 = sext v3, 32
+// CHECK:     ret v4, v0
 // CHECK: }
 // CHECK:
 // CHECK: fn not_bool(_1: bool) -> bool {
@@ -47,7 +49,7 @@
 // CHECK:     v1: bool = param %a
 // CHECK:     v2: int:u64 = bool_to_int v1
 // CHECK:     v3: int:i64 = iconst 1
-// CHECK:     v4: int:u64 = xor v2, v3
+// CHECK:     v4: int:i64 = xor v2, v3
 // CHECK:     v5: bool = int_to_bool v4
 // CHECK:     ret v5, v0
 // CHECK: }
@@ -65,8 +67,9 @@
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:s128 = param %a
 // CHECK:     v2: int:i64 = iconst -1
-// CHECK:     v3: int:u64 = xor v1, v2
-// CHECK:     ret v3, v0
+// CHECK:     v3: int:i128 = xor v1, v2
+// CHECK:     v4: int:s128 = sext v3, 128
+// CHECK:     ret v4, v0
 // CHECK: }
 // CHECK:
 // CHECK: fn not_u128(_1: u128) -> u128 {
@@ -82,8 +85,9 @@
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u128 = param %a
 // CHECK:     v2: int:i64 = iconst -1
-// CHECK:     v3: int:u64 = xor v1, v2
-// CHECK:     ret v3, v0
+// CHECK:     v3: int:i128 = xor v1, v2
+// CHECK:     v4: int:u128 = zext v3, 128
+// CHECK:     ret v4, v0
 // CHECK: }
 // CHECK:
 // CHECK: fn not_u32(_1: u32) -> u32 {
@@ -99,8 +103,9 @@
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u32 = param %a
 // CHECK:     v2: int:i64 = iconst -1
-// CHECK:     v3: int:u64 = xor v1, v2
-// CHECK:     ret v3, v0
+// CHECK:     v3: int:i32 = xor v1, v2
+// CHECK:     v4: int:u32 = zext v3, 32
+// CHECK:     ret v4, v0
 // CHECK: }
 // CHECK:
 
