@@ -66,10 +66,11 @@ while IFS= read -r line; do
         break
     fi
     # Add CHECK prefix, preserving empty lines and indentation
+    # Strip trailing whitespace from non-empty lines
     if [ -z "$line" ]; then
         echo "// CHECK:"
     else
-        echo "// CHECK: $line"
+        echo "// CHECK: $line" | sed 's/[[:space:]]*$//'
     fi
 done < "$ir_output" > "$check_lines"
 

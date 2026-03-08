@@ -63,11 +63,17 @@ run_codegen_test() {
         return
     fi
 
-    # Verify CHECK lines (exact match)
+    # Verify CHECK lines (exact match, ignoring trailing whitespace)
     local expected="$OUT_DIR/$name.expected"
+    local expected_clean="$OUT_DIR/$name.expected.clean"
+    local ir_clean="$OUT_DIR/$name.ir.clean"
     printf "%s\n" "${check_lines[@]}" > "$expected"
 
-    if ! diff -u "$expected" "$ir_output" > /dev/null; then
+    # Strip trailing whitespace from both files before comparison
+    sed 's/[[:space:]]*$//' "$expected" > "$expected_clean"
+    sed 's/[[:space:]]*$//' "$ir_output" > "$ir_clean"
+
+    if ! diff -u "$expected_clean" "$ir_clean" > /dev/null; then
         echo "FAIL (output mismatch)"
         echo "    diff:"
         diff -u "$expected" "$ir_output" | head -30
