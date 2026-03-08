@@ -11,7 +11,8 @@
 // CHECK: func @narrow_i64_to_i32(%a: int:s64) -> int:s32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:s64 = param %a
-// CHECK:     ret v1, v0
+// CHECK:     v2: int:s32 = sext v1, 32
+// CHECK:     ret v2, v0
 // CHECK: }
 // CHECK:
 // CHECK: fn widen_i32_to_i64(_1: i32) -> i64 {

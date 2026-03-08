@@ -35,8 +35,12 @@ pub(super) fn translate_int_to_int_cast(
             Some(builder.zext(val.into(), src_bits, Origin::synthetic()))
         }
     } else {
-        // Narrowing: return value directly
-        Some(val)
+        // Narrowing: use sext/zext with dst_bits
+        if is_signed_int(target_ty) {
+            Some(builder.sext(val.into(), dst_bits, Origin::synthetic()))
+        } else {
+            Some(builder.zext(val.into(), dst_bits, Origin::synthetic()))
+        }
     }
 }
 
