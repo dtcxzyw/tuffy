@@ -22,6 +22,7 @@ fi
 
 CODEGEN_DIR="$CRATE_ROOT/tests/codegen"
 OUT_DIR="/tmp/tuffy_codegen_test"
+rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
 trap "rm -rf $OUT_DIR" EXIT
 
