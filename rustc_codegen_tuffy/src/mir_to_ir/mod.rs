@@ -93,21 +93,30 @@ pub fn translate_function<'tcx>(
 
     // For SRET functions, the return type becomes Ptr (the SRET pointer is
     // returned in RAX per SysV ABI). Otherwise, use the semantic return type.
+    // For structs ≤16 bytes, use Type::Int to capture register return.
     let (ret_ty, ret_ann) = if needs_sret {
         (Some(Type::Ptr(0)), None)
     } else {
-        let ty = translate_ty(tcx, ret_mir_ty).filter(|t| !matches!(t, Type::Unit));
+        let ty = translate_ty(tcx, ret_mir_ty)
+            .filter(|t| !matches!(t, Type::Unit))
+            .or(if ret_size > 0 && ret_size <= 16 {
+                Some(Type::Int)
+            } else {
+                None
+            });
         let ann = if matches!(ty, Some(Type::Int)) {
-            int_bitwidth(ret_mir_ty).map(|bw| {
-                Annotation::Int(IntAnnotation {
-                    bit_width: bw,
-                    signedness: if is_signed_int(ret_mir_ty) {
-                        IntSignedness::Signed
-                    } else {
-                        IntSignedness::Unsigned
-                    },
+            int_bitwidth(ret_mir_ty)
+                .map(|bw| {
+                    Annotation::Int(IntAnnotation {
+                        bit_width: bw,
+                        signedness: if is_signed_int(ret_mir_ty) {
+                            IntSignedness::Signed
+                        } else {
+                            IntSignedness::Unsigned
+                        },
+                    })
                 })
-            })
+                .or_else(|| int_annotation_for_bytes(ret_size.min(8) as u32))
         } else {
             translate_annotation(ret_mir_ty)
         };

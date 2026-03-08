@@ -757,18 +757,19 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
         for arg in args {
             // Skip zero-sized (Unit) and untranslatable args — they don't
-            // occupy a runtime slot.
+            // occupy a runtime slot. But don't skip structs with non-zero size.
             let arg_ty = operand_ty_projected(&arg.node, self.mir, self.tcx)
                 .map(|ty| self.monomorphize(ty))
                 .unwrap_or_else(|| {
                     self.monomorphize(self.mir.local_decls[mir::Local::from_usize(0)].ty)
                 });
-            if matches!(translate_ty(self.tcx, arg_ty), Some(Type::Unit) | None) {
+            let arg_size = type_size(self.tcx, arg_ty).unwrap_or(0);
+            if matches!(translate_ty(self.tcx, arg_ty), Some(Type::Unit)) {
                 continue;
             }
             // Skip zero-sized ADTs (e.g. Global allocator) — they
             // don't occupy a runtime slot.
-            if type_size(self.tcx, arg_ty).unwrap_or(0) == 0 {
+            if arg_size == 0 {
                 continue;
             }
 
@@ -1194,9 +1195,21 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
                 .raw()
         };
-        let call_ret_ty = translate_ty(self.tcx, dest_ty).unwrap_or(Type::Unit);
+        // Determine the IR return type for the call instruction.
+        // For structs ≤16 bytes that translate_ty returns None for,
+        // use Type::Int so the call captures the register return value.
+        let call_ret_ty = translate_ty(self.tcx, dest_ty).unwrap_or_else(|| {
+            if dest_size.is_some_and(|sz| sz > 0 && sz <= 16) {
+                Type::Int
+            } else {
+                Type::Unit
+            }
+        });
         let call_ret_ann = if matches!(call_ret_ty, Type::Int) {
-            translate_annotation(dest_ty)
+            translate_annotation(dest_ty).or_else(|| {
+                // For structs, use annotation based on size
+                dest_size.and_then(|sz| int_annotation_for_bytes(sz.min(8) as u32))
+            })
         } else {
             None
         };

@@ -70,12 +70,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
                 let ret_local = mir::Local::from_usize(0);
                 let ret_mir_ty = self.monomorphize(self.mir.local_decls[ret_local].ty);
+                let ret_size = type_size(self.tcx, ret_mir_ty).unwrap_or(0);
 
-                if matches!(translate_ty(self.tcx, ret_mir_ty), Some(Type::Unit) | None) {
-                    // Unit-returning or untranslatable return type: bare ret, no value.
+                if matches!(translate_ty(self.tcx, ret_mir_ty), Some(Type::Unit))
+                    || (translate_ty(self.tcx, ret_mir_ty).is_none() && ret_size == 0)
+                {
+                    // Unit-returning or zero-sized untranslatable return type: bare ret, no value.
                     self.builder
                         .ret(None, self.current_mem.into(), Origin::synthetic());
-                } else if type_size(self.tcx, ret_mir_ty) == Some(0) {
+                } else if ret_size == 0 {
                     // Zero-sized return type: return a dummy value to satisfy the
                     // function signature (translate_ty maps ADTs to Int).
                     let dummy =
@@ -110,7 +113,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // of reading garbage bytes beyond the stored value.
                     let load_size = size.min(8) as u32;
                     let load_ty = translate_ty(self.tcx, ret_mir_ty).unwrap_or(Type::Int);
-                    let ann = translate_annotation(ret_mir_ty);
+                    let ann = translate_annotation(ret_mir_ty)
+                        .or_else(|| int_annotation_for_bytes(load_size));
                     let word0 = self.builder.load(
                         slot.into(),
                         load_size,
