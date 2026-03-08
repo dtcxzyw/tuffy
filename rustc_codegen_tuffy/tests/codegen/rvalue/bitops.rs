@@ -13,8 +13,9 @@
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u32 = param %a
 // CHECK:     v2: int:u32 = param %b
-// CHECK:     v3: int:u64 = and v1, v2
-// CHECK:     ret v3, v0
+// CHECK:     v3: int:u32 = and v1, v2
+// CHECK:     v4: int:u32 = zext v3, 32
+// CHECK:     ret v4, v0
 // CHECK: }
 // CHECK:
 // CHECK: fn bitor_u32(_1: u32, _2: u32) -> u32 {
@@ -31,8 +32,9 @@
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u32 = param %a
 // CHECK:     v2: int:u32 = param %b
-// CHECK:     v3: int:u64 = or v1, v2
-// CHECK:     ret v3, v0
+// CHECK:     v3: int:u32 = or v1, v2
+// CHECK:     v4: int:u32 = zext v3, 32
+// CHECK:     ret v4, v0
 // CHECK: }
 // CHECK:
 // CHECK: fn bitxor_u32(_1: u32, _2: u32) -> u32 {
@@ -49,8 +51,9 @@
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u32 = param %a
 // CHECK:     v2: int:u32 = param %b
-// CHECK:     v3: int:u64 = xor v1, v2
-// CHECK:     ret v3, v0
+// CHECK:     v3: int:u32 = xor v1, v2
+// CHECK:     v4: int:u32 = zext v3, 32
+// CHECK:     ret v4, v0
 // CHECK: }
 // CHECK:
 

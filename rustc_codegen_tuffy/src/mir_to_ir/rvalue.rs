@@ -914,6 +914,28 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         }
     }
 
+    /// Extract bit width from result annotation, defaulting to 64 if not specified.
+    fn extract_result_bits(&self, res_ann: Option<IntAnn>) -> u32 {
+        match res_ann {
+            Some(IntAnn::Signed(n) | IntAnn::Unsigned(n) | IntAnn::DontCare(n)) => n,
+            None => 64,
+        }
+    }
+
+    /// Apply sign/zero extension based on result annotation signedness.
+    fn apply_int_extension(
+        &mut self,
+        value: ValueRef,
+        res_ann: Option<IntAnn>,
+        bits: u32,
+    ) -> ValueRef {
+        match res_ann {
+            Some(IntAnn::Signed(_)) => self.builder.sext(value.into(), bits, Origin::synthetic()),
+            Some(IntAnn::Unsigned(_)) => self.builder.zext(value.into(), bits, Origin::synthetic()),
+            _ => value,
+        }
+    }
+
     pub(super) fn translate_rvalue(
         &mut self,
         rvalue: &Rvalue<'tcx>,
@@ -1093,12 +1115,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // Wrapping integer arithmetic: use DontCare signedness at target bit width,
                     // then extend to proper signedness.
                     BinOp::Add => {
-                        let bits = match res_ann {
-                            Some(IntAnn::Signed(n) | IntAnn::Unsigned(n) | IntAnn::DontCare(n)) => {
-                                n
-                            }
-                            None => 64,
-                        };
+                        let bits = self.extract_result_bits(res_ann);
                         let sum = self.builder.add(
                             l_op,
                             r_op,
@@ -1108,23 +1125,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             },
                             Origin::synthetic(),
                         );
-                        match res_ann {
-                            Some(IntAnn::Signed(_)) => {
-                                self.builder.sext(sum.into(), bits, Origin::synthetic())
-                            }
-                            Some(IntAnn::Unsigned(_)) => {
-                                self.builder.zext(sum.into(), bits, Origin::synthetic())
-                            }
-                            _ => sum,
-                        }
+                        self.apply_int_extension(sum, res_ann, bits)
                     }
                     BinOp::Sub => {
-                        let bits = match res_ann {
-                            Some(IntAnn::Signed(n) | IntAnn::Unsigned(n) | IntAnn::DontCare(n)) => {
-                                n
-                            }
-                            None => 64,
-                        };
+                        let bits = self.extract_result_bits(res_ann);
                         let diff = self.builder.sub(
                             l_op,
                             r_op,
@@ -1134,23 +1138,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             },
                             Origin::synthetic(),
                         );
-                        match res_ann {
-                            Some(IntAnn::Signed(_)) => {
-                                self.builder.sext(diff.into(), bits, Origin::synthetic())
-                            }
-                            Some(IntAnn::Unsigned(_)) => {
-                                self.builder.zext(diff.into(), bits, Origin::synthetic())
-                            }
-                            _ => diff,
-                        }
+                        self.apply_int_extension(diff, res_ann, bits)
                     }
                     BinOp::Mul => {
-                        let bits = match res_ann {
-                            Some(IntAnn::Signed(n) | IntAnn::Unsigned(n) | IntAnn::DontCare(n)) => {
-                                n
-                            }
-                            None => 64,
-                        };
+                        let bits = self.extract_result_bits(res_ann);
                         let prod = self.builder.mul(
                             l_op,
                             r_op,
@@ -1160,15 +1151,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             },
                             Origin::synthetic(),
                         );
-                        match res_ann {
-                            Some(IntAnn::Signed(_)) => {
-                                self.builder.sext(prod.into(), bits, Origin::synthetic())
-                            }
-                            Some(IntAnn::Unsigned(_)) => {
-                                self.builder.zext(prod.into(), bits, Origin::synthetic())
-                            }
-                            _ => prod,
-                        }
+                        self.apply_int_extension(prod, res_ann, bits)
                     }
                     // Unchecked variants: the caller guarantees no overflow so the
                     // result can carry a full Signed/Unsigned annotation directly.
@@ -1459,33 +1442,45 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         });
                         self.builder.shl(l_op, masked_op, ann, Origin::synthetic())
                     }
-                    BinOp::BitOr => self.builder.or(
-                        l_op,
-                        r_op,
-                        IntAnnotation {
-                            bit_width: 64,
-                            signedness: IntSignedness::DontCare,
-                        },
-                        Origin::synthetic(),
-                    ),
-                    BinOp::BitAnd => self.builder.and(
-                        l_op,
-                        r_op,
-                        IntAnnotation {
-                            bit_width: 64,
-                            signedness: IntSignedness::DontCare,
-                        },
-                        Origin::synthetic(),
-                    ),
-                    BinOp::BitXor => self.builder.xor(
-                        l_op,
-                        r_op,
-                        IntAnnotation {
-                            bit_width: 64,
-                            signedness: IntSignedness::DontCare,
-                        },
-                        Origin::synthetic(),
-                    ),
+                    BinOp::BitOr => {
+                        let bits = self.extract_result_bits(res_ann);
+                        let result = self.builder.or(
+                            l_op,
+                            r_op,
+                            IntAnnotation {
+                                bit_width: bits,
+                                signedness: IntSignedness::DontCare,
+                            },
+                            Origin::synthetic(),
+                        );
+                        self.apply_int_extension(result, res_ann, bits)
+                    }
+                    BinOp::BitAnd => {
+                        let bits = self.extract_result_bits(res_ann);
+                        let result = self.builder.and(
+                            l_op,
+                            r_op,
+                            IntAnnotation {
+                                bit_width: bits,
+                                signedness: IntSignedness::DontCare,
+                            },
+                            Origin::synthetic(),
+                        );
+                        self.apply_int_extension(result, res_ann, bits)
+                    }
+                    BinOp::BitXor => {
+                        let bits = self.extract_result_bits(res_ann);
+                        let result = self.builder.xor(
+                            l_op,
+                            r_op,
+                            IntAnnotation {
+                                bit_width: bits,
+                                signedness: IntSignedness::DontCare,
+                            },
+                            Origin::synthetic(),
+                        );
+                        self.apply_int_extension(result, res_ann, bits)
+                    }
                     BinOp::Shr | BinOp::ShrUnchecked => {
                         let shift_val = r_op.value;
                         let lhs_bits = type_size(self.tcx, lhs_mir_ty).unwrap_or(8) as i64 * 8;
