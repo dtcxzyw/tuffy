@@ -248,8 +248,9 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::Param(index), ty, None, origin, ann)
     }
 
-    /// Integer constant.
-    pub fn iconst(
+    /// Integer constant (untyped, deprecated).
+    #[deprecated(since = "0.2.0", note = "Use `iconst` with typed return instead")]
+    pub fn iconst_untyped(
         &mut self,
         val: impl Into<BigInt>,
         bit_width: u32,
@@ -264,18 +265,21 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::Const(val.into()), Type::Int, None, origin, Some(ann))
     }
 
-    /// Float constant. `bits` is the IEEE 754 bit pattern.
-    pub fn fconst(&mut self, ft: FloatType, bits: u64, origin: Origin) -> ValueRef {
+    /// Float constant (untyped, deprecated).
+    #[deprecated(since = "0.2.0", note = "Use `fconst` with typed return instead")]
+    pub fn fconst_untyped(&mut self, ft: FloatType, bits: u64, origin: Origin) -> ValueRef {
         self.push_inst(Op::FConst(ft, bits), Type::Float(ft), None, origin, None)
     }
 
-    /// Boolean constant.
-    pub fn bconst(&mut self, val: bool, origin: Origin) -> ValueRef {
+    /// Boolean constant (untyped, deprecated).
+    #[deprecated(since = "0.2.0", note = "Use `bconst` with typed return instead")]
+    pub fn bconst_untyped(&mut self, val: bool, origin: Origin) -> ValueRef {
         self.push_inst(Op::BConst(val), Type::Bool, None, origin, None)
     }
 
-    /// Integer addition.
-    pub fn add(
+    /// Integer addition (untyped, deprecated).
+    #[deprecated(since = "0.2.0", note = "Use `add` with typed operands instead")]
+    pub fn add_untyped(
         &mut self,
         a: Operand,
         b: Operand,
@@ -290,8 +294,9 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::Add(a, b), Type::Int, None, origin, res_ann)
     }
 
-    /// Integer subtraction.
-    pub fn sub(
+    /// Integer subtraction (untyped, deprecated).
+    #[deprecated(since = "0.2.0", note = "Use `sub` with typed operands instead")]
+    pub fn sub_untyped(
         &mut self,
         a: Operand,
         b: Operand,
@@ -306,8 +311,9 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::Sub(a, b), Type::Int, None, origin, res_ann)
     }
 
-    /// Integer multiplication.
-    pub fn mul(
+    /// Integer multiplication (untyped, deprecated).
+    #[deprecated(since = "0.2.0", note = "Use `mul` with typed operands instead")]
+    pub fn mul_untyped(
         &mut self,
         a: Operand,
         b: Operand,
@@ -322,8 +328,9 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::Mul(a, b), Type::Int, None, origin, res_ann)
     }
 
-    /// Integer division (poison on division by zero).
-    pub fn div(
+    /// Integer division (untyped, deprecated).
+    #[deprecated(since = "0.2.0", note = "Use `div` with typed operands instead")]
+    pub fn div_untyped(
         &mut self,
         a: Operand,
         b: Operand,
@@ -338,8 +345,9 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::Div(a, b), Type::Int, None, origin, res_ann)
     }
 
-    /// Integer remainder (poison on division by zero).
-    pub fn rem(
+    /// Integer remainder (untyped, deprecated).
+    #[deprecated(since = "0.2.0", note = "Use `rem` with typed operands instead")]
+    pub fn rem_untyped(
         &mut self,
         a: Operand,
         b: Operand,
@@ -354,8 +362,9 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::Rem(a, b), Type::Int, None, origin, res_ann)
     }
 
-    /// Bitwise AND.
-    pub fn and(
+    /// Bitwise AND (untyped, deprecated).
+    #[deprecated(since = "0.2.0", note = "Use `and` with typed operands instead")]
+    pub fn and_untyped(
         &mut self,
         a: Operand,
         b: Operand,
@@ -370,8 +379,9 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::And(a, b), Type::Int, None, origin, res_ann)
     }
 
-    /// Bitwise OR.
-    pub fn or(
+    /// Bitwise OR (untyped, deprecated).
+    #[deprecated(since = "0.2.0", note = "Use `or` with typed operands instead")]
+    pub fn or_untyped(
         &mut self,
         a: Operand,
         b: Operand,
@@ -386,8 +396,9 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::Or(a, b), Type::Int, None, origin, res_ann)
     }
 
-    /// Bitwise XOR.
-    pub fn xor(
+    /// Bitwise XOR (untyped, deprecated).
+    #[deprecated(since = "0.2.0", note = "Use `xor` with typed operands instead")]
+    pub fn xor_untyped(
         &mut self,
         a: Operand,
         b: Operand,
@@ -402,8 +413,9 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::Xor(a, b), Type::Int, None, origin, res_ann)
     }
 
-    /// Boolean AND.
-    pub fn band(&mut self, a: Operand, b: Operand, origin: Origin) -> ValueRef {
+    /// Boolean AND (untyped, deprecated).
+    #[deprecated(since = "0.2.0", note = "Use `band` with typed operands instead")]
+    pub fn band_untyped(&mut self, a: Operand, b: Operand, origin: Origin) -> ValueRef {
         let _ty = self
             .value_type(a.value)
             .filter(|t| matches!(t, Type::Bool))
@@ -411,8 +423,9 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::BAnd(a, b), Type::Bool, None, origin, None)
     }
 
-    /// Boolean OR.
-    pub fn bor(&mut self, a: Operand, b: Operand, origin: Origin) -> ValueRef {
+    /// Boolean OR (untyped, deprecated).
+    #[deprecated(since = "0.2.0", note = "Use `bor` with typed operands instead")]
+    pub fn bor_untyped(&mut self, a: Operand, b: Operand, origin: Origin) -> ValueRef {
         let _ty = self
             .value_type(a.value)
             .filter(|t| matches!(t, Type::Bool))
@@ -420,8 +433,9 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::BOr(a, b), Type::Bool, None, origin, None)
     }
 
-    /// Boolean XOR.
-    pub fn bxor(&mut self, a: Operand, b: Operand, origin: Origin) -> ValueRef {
+    /// Boolean XOR (untyped, deprecated).
+    #[deprecated(since = "0.2.0", note = "Use `bxor` with typed operands instead")]
+    pub fn bxor_untyped(&mut self, a: Operand, b: Operand, origin: Origin) -> ValueRef {
         let _ty = self
             .value_type(a.value)
             .filter(|t| matches!(t, Type::Bool))
@@ -429,8 +443,9 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::BXor(a, b), Type::Bool, None, origin, None)
     }
 
-    /// Left shift (poison if shift amount is negative).
-    pub fn shl(
+    /// Left shift (untyped, deprecated).
+    #[deprecated(since = "0.2.0", note = "Use `shl` with typed operands instead")]
+    pub fn shl_untyped(
         &mut self,
         a: Operand,
         b: Operand,
@@ -447,9 +462,9 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::Shl(a, b), ty, None, origin, ann)
     }
 
-    /// Right shift (poison if shift amount is negative).
-    /// Signedness is a property of operand annotations, not the operation.
-    pub fn shr(
+    /// Right shift (untyped, deprecated).
+    #[deprecated(since = "0.2.0", note = "Use `shr` with typed operands instead")]
+    pub fn shr_untyped(
         &mut self,
         mut a: Operand,
         b: Operand,
@@ -602,13 +617,15 @@ impl<'a> Builder<'a> {
 
     // ── Comparison ──
 
-    /// Integer comparison. Returns Bool.
-    pub fn icmp(&mut self, op: ICmpOp, a: Operand, b: Operand, origin: Origin) -> ValueRef {
+    /// Integer comparison (untyped, deprecated).
+    #[deprecated(since = "0.2.0", note = "Use `icmp` with typed operands instead")]
+    pub fn icmp_untyped(&mut self, op: ICmpOp, a: Operand, b: Operand, origin: Origin) -> ValueRef {
         self.push_inst(Op::ICmp(op, a, b), Type::Bool, None, origin, None)
     }
 
-    /// Float comparison. Returns Bool.
-    pub fn fcmp(&mut self, op: FCmpOp, a: Operand, b: Operand, origin: Origin) -> ValueRef {
+    /// Float comparison (untyped, deprecated).
+    #[deprecated(since = "0.2.0", note = "Use `fcmp` with typed operands instead")]
+    pub fn fcmp_untyped(&mut self, op: FCmpOp, a: Operand, b: Operand, origin: Origin) -> ValueRef {
         self.push_inst(Op::FCmp(op, a, b), Type::Bool, None, origin, None)
     }
 
@@ -1026,7 +1043,9 @@ impl<'a> Builder<'a> {
 
     /// Load from pointer. `bytes` is the access width in bytes. Takes mem token input.
     /// Load is a MemoryUse — it does not produce a new mem token.
-    pub fn load(
+    /// Load from pointer (untyped, deprecated).
+    #[deprecated(since = "0.2.0", note = "Use `load` with typed operands instead")]
+    pub fn load_untyped(
         &mut self,
         ptr: Operand,
         bytes: u32,
@@ -1039,7 +1058,8 @@ impl<'a> Builder<'a> {
     }
 
     /// Store value to pointer. `bytes` is the access width. Takes mem token, returns mem token.
-    pub fn store(
+    #[deprecated(since = "0.2.0", note = "Use `store` with typed operands instead")]
+    pub fn store_untyped(
         &mut self,
         val: Operand,
         ptr: Operand,
@@ -1486,194 +1506,192 @@ impl<'a> Builder<'a> {
 
     // ── Typed builder methods (Phase 1) ──
 
+    // ── Typed builder methods (Phase 1) ──
+    // Note: These methods call deprecated _untyped methods internally during the transition period.
+    #[allow(deprecated)]
+
     /// Integer constant (typed).
-    pub fn iconst_typed(
+    pub fn iconst(
         &mut self,
         val: impl Into<BigInt>,
         bit_width: u32,
         signedness: crate::types::IntSignedness,
         origin: Origin,
     ) -> IntValue {
-        let v = self.iconst(val, bit_width, signedness, origin);
+        let v = self.iconst_untyped(val, bit_width, signedness, origin);
         IntValue::new(v, self.func)
     }
 
     /// Boolean constant (typed).
-    pub fn bconst_typed(&mut self, val: bool, origin: Origin) -> BoolValue {
-        let v = self.bconst(val, origin);
+    pub fn bconst(&mut self, val: bool, origin: Origin) -> BoolValue {
+        let v = self.bconst_untyped(val, origin);
         BoolValue::new(v, self.func)
     }
 
     /// Float constant (typed).
-    pub fn fconst_typed(&mut self, ft: FloatType, bits: u64, origin: Origin) -> FloatValue {
-        let v = self.fconst(ft, bits, origin);
+    pub fn fconst(&mut self, ft: FloatType, bits: u64, origin: Origin) -> FloatValue {
+        let v = self.fconst_untyped(ft, bits, origin);
         FloatValue::new(v, self.func)
     }
 
     /// Integer addition (typed).
-    pub fn add_typed(
+    pub fn add(
         &mut self,
         a: IntOperand,
         b: IntOperand,
         int_ann: crate::types::IntAnnotation,
         origin: Origin,
     ) -> IntValue {
-        let v = self.add(a.raw(), b.raw(), int_ann, origin);
+        let v = self.add_untyped(a.raw(), b.raw(), int_ann, origin);
         IntValue::new(v, self.func)
     }
 
     /// Integer subtraction (typed).
-    pub fn sub_typed(
+    pub fn sub(
         &mut self,
         a: IntOperand,
         b: IntOperand,
         int_ann: crate::types::IntAnnotation,
         origin: Origin,
     ) -> IntValue {
-        let v = self.sub(a.raw(), b.raw(), int_ann, origin);
+        let v = self.sub_untyped(a.raw(), b.raw(), int_ann, origin);
         IntValue::new(v, self.func)
     }
 
     /// Integer multiplication (typed).
-    pub fn mul_typed(
+    pub fn mul(
         &mut self,
         a: IntOperand,
         b: IntOperand,
         int_ann: crate::types::IntAnnotation,
         origin: Origin,
     ) -> IntValue {
-        let v = self.mul(a.raw(), b.raw(), int_ann, origin);
+        let v = self.mul_untyped(a.raw(), b.raw(), int_ann, origin);
         IntValue::new(v, self.func)
     }
 
     /// Integer division (typed).
-    pub fn div_typed(
+    pub fn div(
         &mut self,
         a: IntOperand,
         b: IntOperand,
         int_ann: crate::types::IntAnnotation,
         origin: Origin,
     ) -> IntValue {
-        let v = self.div(a.raw(), b.raw(), int_ann, origin);
+        let v = self.div_untyped(a.raw(), b.raw(), int_ann, origin);
         IntValue::new(v, self.func)
     }
 
     /// Integer remainder (typed).
-    pub fn rem_typed(
+    pub fn rem(
         &mut self,
         a: IntOperand,
         b: IntOperand,
         int_ann: crate::types::IntAnnotation,
         origin: Origin,
     ) -> IntValue {
-        let v = self.rem(a.raw(), b.raw(), int_ann, origin);
+        let v = self.rem_untyped(a.raw(), b.raw(), int_ann, origin);
         IntValue::new(v, self.func)
     }
 
     /// Bitwise AND (typed).
-    pub fn and_typed(
+    pub fn and(
         &mut self,
         a: IntOperand,
         b: IntOperand,
         int_ann: crate::types::IntAnnotation,
         origin: Origin,
     ) -> IntValue {
-        let v = self.and(a.raw(), b.raw(), int_ann, origin);
+        let v = self.and_untyped(a.raw(), b.raw(), int_ann, origin);
         IntValue::new(v, self.func)
     }
 
     /// Bitwise OR (typed).
-    pub fn or_typed(
+    pub fn or(
         &mut self,
         a: IntOperand,
         b: IntOperand,
         int_ann: crate::types::IntAnnotation,
         origin: Origin,
     ) -> IntValue {
-        let v = self.or(a.raw(), b.raw(), int_ann, origin);
+        let v = self.or_untyped(a.raw(), b.raw(), int_ann, origin);
         IntValue::new(v, self.func)
     }
 
     /// Bitwise XOR (typed).
-    pub fn xor_typed(
+    pub fn xor(
         &mut self,
         a: IntOperand,
         b: IntOperand,
         int_ann: crate::types::IntAnnotation,
         origin: Origin,
     ) -> IntValue {
-        let v = self.xor(a.raw(), b.raw(), int_ann, origin);
+        let v = self.xor_untyped(a.raw(), b.raw(), int_ann, origin);
         IntValue::new(v, self.func)
     }
 
     /// Left shift (typed).
-    pub fn shl_typed(
+    pub fn shl(
         &mut self,
         a: IntOperand,
         b: IntOperand,
         ann: Option<Annotation>,
         origin: Origin,
     ) -> IntValue {
-        let v = self.shl(a.raw(), b.raw(), ann, origin);
+        let v = self.shl_untyped(a.raw(), b.raw(), ann, origin);
         IntValue::new(v, self.func)
     }
 
     /// Right shift (typed).
-    pub fn shr_typed(
+    pub fn shr(
         &mut self,
         a: IntOperand,
         b: IntOperand,
         ann: Option<Annotation>,
         origin: Origin,
     ) -> IntValue {
-        let v = self.shr(a.raw(), b.raw(), ann, origin);
+        let v = self.shr_untyped(a.raw(), b.raw(), ann, origin);
         IntValue::new(v, self.func)
     }
 
     /// Boolean AND (typed).
-    pub fn band_typed(&mut self, a: BoolOperand, b: BoolOperand, origin: Origin) -> BoolValue {
-        let v = self.band(a.raw(), b.raw(), origin);
+    pub fn band(&mut self, a: BoolOperand, b: BoolOperand, origin: Origin) -> BoolValue {
+        let v = self.band_untyped(a.raw(), b.raw(), origin);
         BoolValue::new(v, self.func)
     }
 
     /// Boolean OR (typed).
-    pub fn bor_typed(&mut self, a: BoolOperand, b: BoolOperand, origin: Origin) -> BoolValue {
-        let v = self.bor(a.raw(), b.raw(), origin);
+    pub fn bor(&mut self, a: BoolOperand, b: BoolOperand, origin: Origin) -> BoolValue {
+        let v = self.bor_untyped(a.raw(), b.raw(), origin);
         BoolValue::new(v, self.func)
     }
 
     /// Boolean XOR (typed).
-    pub fn bxor_typed(&mut self, a: BoolOperand, b: BoolOperand, origin: Origin) -> BoolValue {
-        let v = self.bxor(a.raw(), b.raw(), origin);
+    pub fn bxor(&mut self, a: BoolOperand, b: BoolOperand, origin: Origin) -> BoolValue {
+        let v = self.bxor_untyped(a.raw(), b.raw(), origin);
         BoolValue::new(v, self.func)
     }
 
     /// Integer comparison (typed).
-    pub fn icmp_typed(
-        &mut self,
-        op: ICmpOp,
-        a: IntOperand,
-        b: IntOperand,
-        origin: Origin,
-    ) -> BoolValue {
-        let v = self.icmp(op, a.raw(), b.raw(), origin);
+    pub fn icmp(&mut self, op: ICmpOp, a: IntOperand, b: IntOperand, origin: Origin) -> BoolValue {
+        let v = self.icmp_untyped(op, a.raw(), b.raw(), origin);
         BoolValue::new(v, self.func)
     }
 
     /// Float comparison (typed).
-    pub fn fcmp_typed(
+    pub fn fcmp(
         &mut self,
         op: FCmpOp,
         a: FloatOperand,
         b: FloatOperand,
         origin: Origin,
     ) -> BoolValue {
-        let v = self.fcmp(op, a.raw(), b.raw(), origin);
+        let v = self.fcmp_untyped(op, a.raw(), b.raw(), origin);
         BoolValue::new(v, self.func)
     }
 
     /// Load from pointer (typed). Returns loaded value (type determined by caller).
-    pub fn load_typed(
+    pub fn load(
         &mut self,
         ptr: PtrOperand,
         bytes: u32,
@@ -1682,11 +1700,11 @@ impl<'a> Builder<'a> {
         ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
-        self.load(ptr.raw(), bytes, ty, mem.raw(), ann, origin)
+        self.load_untyped(ptr.raw(), bytes, ty, mem.raw(), ann, origin)
     }
 
     /// Store to pointer (typed). Returns new mem token.
-    pub fn store_typed(
+    pub fn store(
         &mut self,
         val: Operand,
         ptr: PtrOperand,
@@ -1694,7 +1712,7 @@ impl<'a> Builder<'a> {
         mem: MemOperand,
         origin: Origin,
     ) -> MemValue {
-        let v = self.store(val, ptr.raw(), bytes, mem.raw(), origin);
+        let v = self.store_untyped(val, ptr.raw(), bytes, mem.raw(), origin);
         MemValue::new(v, self.func)
     }
 

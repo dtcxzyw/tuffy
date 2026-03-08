@@ -37,7 +37,7 @@ fn build_add_function() {
     let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let a = builder.param(0, i64_type.clone(), None, Origin::synthetic());
     let b = builder.param(1, i64_type, None, Origin::synthetic());
-    let sum = builder.add(a.into(), b.into(), I64, Origin::synthetic());
+    let sum = builder.add_untyped(a.into(), b.into(), I64, Origin::synthetic());
     builder.ret(Some(sum.into()), mem0.into(), Origin::synthetic());
 
     builder.exit_region();
@@ -76,7 +76,7 @@ fn build_with_annotations() {
     let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let a = builder.param(0, i32_type.clone(), None, Origin::synthetic());
     let b = builder.param(1, i32_type, None, Origin::synthetic());
-    let sum = builder.add(a.into(), b.into(), I64, Origin::synthetic());
+    let sum = builder.add_untyped(a.into(), b.into(), I64, Origin::synthetic());
     builder.ret(Some(sum.into()), mem0.into(), Origin::synthetic());
 
     builder.exit_region();
@@ -111,7 +111,7 @@ fn display_add_function() {
     let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let a = builder.param(0, i64_type.clone(), s64_ann, Origin::synthetic());
     let b = builder.param(1, i64_type, s64_ann, Origin::synthetic());
-    let sum = builder.add(
+    let sum = builder.add_untyped(
         a.into(),
         b.into(),
         IntAnnotation {
@@ -165,7 +165,7 @@ fn display_named_params() {
     let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let a = builder.param(0, i64_type.clone(), s64_ann, Origin::synthetic());
     let b = builder.param(1, i64_type, s64_ann, Origin::synthetic());
-    let sum = builder.add(
+    let sum = builder.add_untyped(
         a.into(),
         b.into(),
         IntAnnotation {
@@ -220,7 +220,7 @@ fn display_multi_block_branch() {
     let mem0 = builder.add_block_arg(bb0, Type::Mem, None);
     let a = builder.param(0, i64_type.clone(), s64_ann, Origin::synthetic());
     let b = builder.param(1, i64_type, s64_ann, Origin::synthetic());
-    let cmp = builder.icmp(ICmpOp::Gt, a.into(), b.into(), Origin::synthetic());
+    let cmp = builder.icmp_untyped(ICmpOp::Gt, a.into(), b.into(), Origin::synthetic());
     builder.brif(cmp.into(), bb1, vec![], bb2, vec![], Origin::synthetic());
 
     builder.switch_to_block(bb1);
@@ -289,21 +289,21 @@ fn display_nested_loop_region() {
     // bb0: entry
     builder.switch_to_block(bb0);
     let n = builder.param(0, i64_type.clone(), s64_ann, Origin::synthetic());
-    let one = builder.iconst(1, 64, IntSignedness::Signed, Origin::synthetic());
-    let init_acc = builder.iconst(1, 64, IntSignedness::Signed, Origin::synthetic());
+    let one = builder.iconst_untyped(1, 64, IntSignedness::Signed, Origin::synthetic());
+    let init_acc = builder.iconst_untyped(1, 64, IntSignedness::Signed, Origin::synthetic());
     builder.br(bb1, vec![init_acc.into(), one.into()], Origin::synthetic());
 
     // bb1: loop header with block args
     let acc = builder.add_block_arg(bb1, i64_type.clone(), s64_ann);
     let i = builder.add_block_arg(bb1, i64_type, s64_ann);
     builder.switch_to_block(bb1);
-    let cmp = builder.icmp(ICmpOp::Le, i.into(), n.into(), Origin::synthetic());
+    let cmp = builder.icmp_untyped(ICmpOp::Le, i.into(), n.into(), Origin::synthetic());
     builder.brif(cmp.into(), bb2, vec![], bb3, vec![], Origin::synthetic());
 
     // bb2: loop body
     builder.switch_to_block(bb2);
-    let new_acc = builder.mul(acc.into(), i.into(), s64, Origin::synthetic());
-    let new_i = builder.sub(i.into(), one.into(), s64, Origin::synthetic());
+    let new_acc = builder.mul_untyped(acc.into(), i.into(), s64, Origin::synthetic());
+    let new_i = builder.sub_untyped(i.into(), one.into(), s64, Origin::synthetic());
     builder.continue_(vec![new_acc.into(), new_i.into()], Origin::synthetic());
 
     // bb3: after loop
@@ -362,9 +362,9 @@ fn build_bitwise_ops() {
     let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let a = builder.param(0, i64_type.clone(), None, Origin::synthetic());
     let b = builder.param(1, i64_type, None, Origin::synthetic());
-    let v_and = builder.and(a.into(), b.into(), I64, Origin::synthetic());
-    let v_or = builder.or(a.into(), b.into(), I64, Origin::synthetic());
-    let v_xor = builder.xor(v_and.into(), v_or.into(), I64, Origin::synthetic());
+    let v_and = builder.and_untyped(a.into(), b.into(), I64, Origin::synthetic());
+    let v_or = builder.or_untyped(a.into(), b.into(), I64, Origin::synthetic());
+    let v_xor = builder.xor_untyped(v_and.into(), v_or.into(), I64, Origin::synthetic());
     builder.ret(Some(v_xor.into()), mem0.into(), Origin::synthetic());
     builder.exit_region();
 
@@ -401,8 +401,8 @@ fn display_shift_ops() {
     let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let a = builder.param(0, i64_type.clone(), s64_ann, Origin::synthetic());
     let b = builder.param(1, i64_type, s64_ann, Origin::synthetic());
-    let _v_shl = builder.shl(a.into(), b.into(), s64_ann, Origin::synthetic());
-    let v_shr = builder.shr(a.into(), b.into(), s64_ann, Origin::synthetic());
+    let _v_shl = builder.shl_untyped(a.into(), b.into(), s64_ann, Origin::synthetic());
+    let v_shr = builder.shr_untyped(a.into(), b.into(), s64_ann, Origin::synthetic());
     builder.ret(Some(v_shr.into()), mem0.into(), Origin::synthetic());
     builder.exit_region();
 
@@ -451,9 +451,9 @@ fn display_division_ops() {
     let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let a = builder.param(0, i64_type.clone(), s64_ann, Origin::synthetic());
     let b = builder.param(1, i64_type, s64_ann, Origin::synthetic());
-    let v_div = builder.div(a.into(), b.into(), s64, Origin::synthetic());
-    let v_rem = builder.rem(a.into(), b.into(), s64, Origin::synthetic());
-    let v_add = builder.add(v_div.into(), v_rem.into(), s64, Origin::synthetic());
+    let v_div = builder.div_untyped(a.into(), b.into(), s64, Origin::synthetic());
+    let v_rem = builder.rem_untyped(a.into(), b.into(), s64, Origin::synthetic());
+    let v_add = builder.add_untyped(v_div.into(), v_rem.into(), s64, Origin::synthetic());
     builder.ret(Some(v_add.into()), mem0.into(), Origin::synthetic());
     builder.exit_region();
 
@@ -997,7 +997,7 @@ fn build_valid_add_module() -> Module {
     let mem0 = b.add_block_arg(bb, Type::Mem, None);
     let a = b.param(0, i64_type.clone(), s64_ann, Origin::synthetic());
     let p1 = b.param(1, i64_type, s64_ann, Origin::synthetic());
-    let sum = b.add(a.into(), p1.into(), I64, Origin::synthetic());
+    let sum = b.add_untyped(a.into(), p1.into(), I64, Origin::synthetic());
     b.ret(Some(sum.into()), mem0.into(), Origin::synthetic());
     b.exit_region();
     module.add_function(func);
@@ -1040,7 +1040,7 @@ fn verify_valid_multi_block() {
     let mem0 = b.add_block_arg(bb0, Type::Mem, None);
     let a = b.param(0, i64_type.clone(), s64_ann, Origin::synthetic());
     let p1 = b.param(1, i64_type, s64_ann, Origin::synthetic());
-    let cmp = b.icmp(ICmpOp::Gt, a.into(), p1.into(), Origin::synthetic());
+    let cmp = b.icmp_untyped(ICmpOp::Gt, a.into(), p1.into(), Origin::synthetic());
     b.brif(cmp.into(), bb1, vec![], bb2, vec![], Origin::synthetic());
 
     b.switch_to_block(bb1);
@@ -1087,19 +1087,19 @@ fn verify_valid_loop_region() {
 
     b.switch_to_block(bb0);
     let n = b.param(0, i64_type.clone(), s64_ann, Origin::synthetic());
-    let one = b.iconst(1, 64, IntSignedness::Signed, Origin::synthetic());
-    let init = b.iconst(1, 64, IntSignedness::Signed, Origin::synthetic());
+    let one = b.iconst_untyped(1, 64, IntSignedness::Signed, Origin::synthetic());
+    let init = b.iconst_untyped(1, 64, IntSignedness::Signed, Origin::synthetic());
     b.br(bb1, vec![init.into(), one.into()], Origin::synthetic());
 
     let acc = b.add_block_arg(bb1, i64_type.clone(), s64_ann);
     let i = b.add_block_arg(bb1, i64_type, s64_ann);
     b.switch_to_block(bb1);
-    let cmp = b.icmp(ICmpOp::Le, i.into(), n.into(), Origin::synthetic());
+    let cmp = b.icmp_untyped(ICmpOp::Le, i.into(), n.into(), Origin::synthetic());
     b.brif(cmp.into(), bb2, vec![], bb3, vec![], Origin::synthetic());
 
     b.switch_to_block(bb2);
-    let new_acc = b.mul(acc.into(), i.into(), I64, Origin::synthetic());
-    let new_i = b.sub(i.into(), one.into(), I64, Origin::synthetic());
+    let new_acc = b.mul_untyped(acc.into(), i.into(), I64, Origin::synthetic());
+    let new_i = b.sub_untyped(i.into(), one.into(), I64, Origin::synthetic());
     b.continue_(vec![new_acc.into(), new_i.into()], Origin::synthetic());
 
     b.switch_to_block(bb3);
@@ -1134,7 +1134,7 @@ fn verify_detects_wrong_arith_operand_type() {
         let mem0 = b.add_block_arg(bb, Type::Mem, None);
         let a = b.param(0, i64_type.clone(), None, Origin::synthetic());
         let p1 = b.param(1, i64_type.clone(), None, Origin::synthetic());
-        let cmp = b.icmp(ICmpOp::Gt, a.into(), p1.into(), Origin::synthetic());
+        let cmp = b.icmp_untyped(ICmpOp::Gt, a.into(), p1.into(), Origin::synthetic());
 
         b.ret(Some(a.into()), mem0.into(), Origin::synthetic());
         b.exit_region();
@@ -1224,7 +1224,7 @@ fn verify_detects_load_non_ptr() {
     let mem0 = b.add_block_arg(bb, Type::Mem, None);
     let a = b.param(0, i64_type.clone(), None, Origin::synthetic());
     // Load from Int instead of Ptr — should be flagged.
-    let v = b.load(
+    let v = b.load_untyped(
         a.into(),
         4,
         i64_type,
@@ -1348,7 +1348,7 @@ fn display_min_max() {
     let b = builder.param(1, i64_type.clone(), s64_ann, Origin::synthetic());
     let v_min = builder.min(a.into(), b.into(), s64_ann, Origin::synthetic());
     let v_max = builder.max(a.into(), b.into(), s64_ann, Origin::synthetic());
-    let _sum = builder.add(v_min.into(), v_max.into(), s64, Origin::synthetic());
+    let _sum = builder.add_untyped(v_min.into(), v_max.into(), s64, Origin::synthetic());
     builder.ret(Some(_sum.into()), mem0.into(), Origin::synthetic());
     builder.exit_region();
 
@@ -1406,9 +1406,9 @@ fn memssa_store_load_threading() {
     let val = b.param(0, i32_type.clone(), s32_ann, Origin::synthetic());
     let ptr = b.param(1, Type::Ptr(0), None, Origin::synthetic());
     // store produces mem1
-    let mem1 = b.store(val.into(), ptr.into(), 4, mem0.into(), Origin::synthetic());
+    let mem1 = b.store_untyped(val.into(), ptr.into(), 4, mem0.into(), Origin::synthetic());
     // load consumes mem1 (MemoryUse), produces data only
-    let loaded = b.load(
+    let loaded = b.load_untyped(
         ptr.into(),
         4,
         i32_type.clone(),
@@ -1514,7 +1514,7 @@ fn memssa_block_arg_phi() {
 
     // bb1: store, then jump to bb3 with new mem
     b.switch_to_block(bb1);
-    let mem1 = b.store(val.into(), ptr.into(), 4, mem0.into(), Origin::synthetic());
+    let mem1 = b.store_untyped(val.into(), ptr.into(), 4, mem0.into(), Origin::synthetic());
     b.br(bb3, vec![mem1.into()], Origin::synthetic());
 
     // bb2: no store, jump to bb3 with original mem
@@ -1524,7 +1524,7 @@ fn memssa_block_arg_phi() {
     // bb3: mem phi via block arg
     let mem_phi = b.add_block_arg(bb3, Type::Mem, None);
     b.switch_to_block(bb3);
-    let loaded = b.load(
+    let loaded = b.load_untyped(
         ptr.into(),
         4,
         i32_type,
@@ -1567,8 +1567,8 @@ fn memssa_display_store_load() {
     let mem0 = b.add_block_arg(bb, Type::Mem, None);
     let val = b.param(0, i32_type.clone(), s32_ann, Origin::synthetic());
     let ptr = b.param(1, Type::Ptr(0), None, Origin::synthetic());
-    let mem1 = b.store(val.into(), ptr.into(), 4, mem0.into(), Origin::synthetic());
-    let loaded = b.load(
+    let mem1 = b.store_untyped(val.into(), ptr.into(), 4, mem0.into(), Origin::synthetic());
+    let loaded = b.load_untyped(
         ptr.into(),
         4,
         i32_type,
@@ -2085,12 +2085,12 @@ fn test_boolean_ops() {
     builder.switch_to_block(entry);
 
     let mem0 = builder.add_block_arg(entry, Type::Mem, None);
-    let t = builder.bconst(true, Origin::synthetic());
-    let f = builder.bconst(false, Origin::synthetic());
+    let t = builder.bconst_untyped(true, Origin::synthetic());
+    let f = builder.bconst_untyped(false, Origin::synthetic());
 
-    let and_result = builder.band(t.into(), f.into(), Origin::synthetic());
-    let _or_result = builder.bor(t.into(), f.into(), Origin::synthetic());
-    let _xor_result = builder.bxor(t.into(), f.into(), Origin::synthetic());
+    let and_result = builder.band_untyped(t.into(), f.into(), Origin::synthetic());
+    let _or_result = builder.bor_untyped(t.into(), f.into(), Origin::synthetic());
+    let _xor_result = builder.bxor_untyped(t.into(), f.into(), Origin::synthetic());
 
     builder.ret(Some(and_result.into()), mem0.into(), Origin::synthetic());
     builder.exit_region();
@@ -2119,11 +2119,11 @@ fn test_typed_builder_api() {
     let mem0 = builder.add_block_arg(entry, Type::Mem, None);
 
     // Test typed constants
-    let a = builder.iconst_typed(10, 64, IntSignedness::Signed, Origin::synthetic());
-    let b = builder.iconst_typed(20, 64, IntSignedness::Signed, Origin::synthetic());
+    let a = builder.iconst(10, 64, IntSignedness::Signed, Origin::synthetic());
+    let b = builder.iconst(20, 64, IntSignedness::Signed, Origin::synthetic());
 
     // Test typed arithmetic
-    let sum = builder.add_typed(
+    let sum = builder.add(
         IntOperand::from_value(a),
         IntOperand::from_value(b),
         I64,
@@ -2131,7 +2131,7 @@ fn test_typed_builder_api() {
     );
 
     // Test typed comparison
-    let cmp = builder.icmp_typed(
+    let cmp = builder.icmp(
         ICmpOp::Eq,
         IntOperand::from_value(a),
         IntOperand::from_value(b),
@@ -2139,8 +2139,8 @@ fn test_typed_builder_api() {
     );
 
     // Test typed boolean operations
-    let t = builder.bconst_typed(true, Origin::synthetic());
-    let _and = builder.band_typed(
+    let t = builder.bconst(true, Origin::synthetic());
+    let _and = builder.band(
         BoolOperand::from_value(cmp),
         BoolOperand::from_value(t),
         Origin::synthetic(),
