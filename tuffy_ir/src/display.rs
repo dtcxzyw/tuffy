@@ -300,7 +300,7 @@ fn fmt_inst(
             format!(
                 "{}, {}",
                 ctx.fmt_val_typed(vref, ty, &None),
-                ctx.fmt_val_typed(sec, sec_ty, result_ann)
+                ctx.fmt_val_typed(sec, sec_ty, &inst.secondary_result_annotation)
             )
         } else {
             format!(

@@ -825,7 +825,7 @@ struct CallAbiPlan {
 fn has_wide_scalar_annotation(func: &Function, inst_idx: u32) -> bool {
     let inst = func.inst(inst_idx);
     matches!(
-        &inst.result_annotation,
+        &inst.secondary_result_annotation,
         Some(Annotation::Int(IntAnnotation { bit_width: 128, .. }))
     )
 }
