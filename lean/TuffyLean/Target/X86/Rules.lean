@@ -60,6 +60,30 @@ def xorRule : IselRule := {
   result := .reg "dst"
 }
 
+def bandRule : IselRule := {
+  name := "band"
+  pattern := .binop "BAnd" ⟨"lhs", .any⟩ ⟨"rhs", .any⟩
+  emit := [movRR .s8 (.fresh "dst") (.named "lhs"),
+           andRR .s8 (.fresh "dst") (.named "rhs")]
+  result := .reg "dst"
+}
+
+def borRule : IselRule := {
+  name := "bor"
+  pattern := .binop "BOr" ⟨"lhs", .any⟩ ⟨"rhs", .any⟩
+  emit := [movRR .s8 (.fresh "dst") (.named "lhs"),
+           orRR .s8 (.fresh "dst") (.named "rhs")]
+  result := .reg "dst"
+}
+
+def bxorRule : IselRule := {
+  name := "bxor"
+  pattern := .binop "BXor" ⟨"lhs", .any⟩ ⟨"rhs", .any⟩
+  emit := [movRR .s8 (.fresh "dst") (.named "lhs"),
+           xorRR .s8 (.fresh "dst") (.named "rhs")]
+  result := .reg "dst"
+}
+
 -- Shifts: Shl, Shr (unsigned), Shr (signed/arithmetic)
 -- Pattern: mov dst, lhs; mov rcx, rhs; <shift> dst
 
@@ -185,6 +209,7 @@ def ptrDiffRule : IselRule := {
 def allRules : List IselRule := [
   addRule, subRule, mulRule,
   orRule, andRule, xorRule,
+  bandRule, borRule, bxorRule,
   shlRule, shrSignedRule, shrUnsignedRule,
   minSignedRule, minUnsignedRule,
   maxSignedRule, maxUnsignedRule,
