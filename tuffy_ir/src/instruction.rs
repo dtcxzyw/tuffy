@@ -3,6 +3,9 @@
 use num_bigint::BigInt;
 
 use crate::module::SymbolId;
+use crate::typed::{
+    BoolOperand, ByteOperand, FloatOperand, IntOperand, MemOperand, PtrOperand, UnitOperand,
+};
 use crate::types::{Annotation, FloatType, FpRewriteFlags, MemoryOrdering, Type};
 use crate::value::{BlockRef, ValueRef};
 
@@ -384,4 +387,48 @@ pub enum Op {
     Unreachable,
     /// Trap: unconditionally abort execution (e.g., failed assertion).
     Trap,
+}
+
+// ── Conversions from typed operands to Operand ──
+
+impl From<IntOperand> for Operand {
+    fn from(op: IntOperand) -> Self {
+        op.raw()
+    }
+}
+
+impl From<BoolOperand> for Operand {
+    fn from(op: BoolOperand) -> Self {
+        op.raw()
+    }
+}
+
+impl From<FloatOperand> for Operand {
+    fn from(op: FloatOperand) -> Self {
+        op.raw()
+    }
+}
+
+impl From<PtrOperand> for Operand {
+    fn from(op: PtrOperand) -> Self {
+        op.raw()
+    }
+}
+
+impl From<MemOperand> for Operand {
+    fn from(op: MemOperand) -> Self {
+        op.raw()
+    }
+}
+
+impl From<UnitOperand> for Operand {
+    fn from(op: UnitOperand) -> Self {
+        op.raw()
+    }
+}
+
+impl From<ByteOperand> for Operand {
+    fn from(op: ByteOperand) -> Self {
+        op.raw()
+    }
 }
