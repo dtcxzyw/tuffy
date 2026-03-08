@@ -290,6 +290,12 @@ impl PtrOperand {
     }
 }
 
+impl From<Operand> for PtrOperand {
+    fn from(op: Operand) -> Self {
+        Self(op)
+    }
+}
+
 impl MemOperand {
     pub fn new(op: Operand, func: &Function) -> Self {
         assert!(
@@ -310,6 +316,12 @@ impl MemOperand {
 
     pub fn raw(self) -> Operand {
         self.0
+    }
+}
+
+impl From<Operand> for MemOperand {
+    fn from(op: Operand) -> Self {
+        Self(op)
     }
 }
 
