@@ -4,7 +4,6 @@ use rustc_middle::mir::{self, Operand, TerminatorKind};
 use rustc_middle::ty::{self, TypeVisitableExt};
 
 use num_bigint::BigInt;
-use tuffy_ir::instruction::Operand as IrOperand;
 use tuffy_ir::instruction::{ICmpOp, Origin};
 use tuffy_ir::types::{Annotation, IntAnnotation, IntSignedness, Type};
 
@@ -22,9 +21,23 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             TerminatorKind::Return => {
                 // SRET: copy the constructed return value from local stack slot
                 // to the SRET pointer, then return the pointer.
+                // Exception: if local _0 IS the SRET pointer (because a call
+                // wrote directly to it), skip the copy.
                 if let Some(sret) = self.sret_ptr {
                     let ret_local = mir::Local::from_usize(0);
                     let local_slot = self.locals.get(ret_local).expect("sret local must be set");
+
+                    // If local _0 was updated to point to the SRET pointer
+                    // (by a call that wrote directly to it), skip the copy.
+                    if local_slot == sret {
+                        self.builder.ret(
+                            Some(sret.into()),
+                            self.current_mem.into(),
+                            Origin::synthetic(),
+                        );
+                        return;
+                    }
+
                     let ret_mir_ty = self.monomorphize(self.mir.local_decls[ret_local].ty);
                     let ret_size = type_size(self.tcx, ret_mir_ty).unwrap_or(0);
 
@@ -36,9 +49,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         Origin::synthetic(),
                     );
                     let align = 8; // TODO: compute proper alignment
-                    let sret_annotated = IrOperand::annotated(sret, Annotation::Align(align));
-                    let local_annotated =
-                        IrOperand::annotated(local_slot, Annotation::Align(align));
+                    let sret_annotated =
+                        tuffy_ir::instruction::Operand::annotated(sret, Annotation::Align(align));
+                    let local_annotated = tuffy_ir::instruction::Operand::annotated(
+                        local_slot,
+                        Annotation::Align(align),
+                    );
                     let new_mem = self.builder.mem_copy(
                         sret_annotated.into(),
                         local_annotated.into(),

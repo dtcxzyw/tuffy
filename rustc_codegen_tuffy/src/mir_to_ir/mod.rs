@@ -236,7 +236,6 @@ pub fn translate_function<'tcx>(
         let local_slot = ctx.builder.stack_slot(ret_size as u32, Origin::synthetic());
         ctx.locals.set(ret_local, local_slot);
         ctx.stack_locals.mark(ret_local);
-        ctx.stack_locals.mark(ret_local);
     }
     ctx.translate_params();
 
