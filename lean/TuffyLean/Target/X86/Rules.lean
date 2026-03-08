@@ -158,21 +158,21 @@ def maxUnsignedRule : IselRule := {
 def countOnesRule : IselRule := {
   name := "count_ones"
   pattern := .unop "CountOnes" ⟨"src", .any⟩
-  emit := [popcnt (.fresh "dst") (.named "src")]
+  emit := [popcnt .s64 (.fresh "dst") (.named "src")]
   result := .reg "dst"
 }
 
 def countLeadingZerosRule : IselRule := {
   name := "count_leading_zeros"
   pattern := .unop "CountLeadingZeros" ⟨"src", .any⟩
-  emit := [lzcnt (.fresh "dst") (.named "src")]
+  emit := [lzcnt .s64 (.fresh "dst") (.named "src")]
   result := .reg "dst"
 }
 
 def countTrailingZerosRule : IselRule := {
   name := "count_trailing_zeros"
   pattern := .unop "CountTrailingZeros" ⟨"src", .any⟩
-  emit := [tzcnt (.fresh "dst") (.named "src")]
+  emit := [tzcnt .s64 (.fresh "dst") (.named "src")]
   result := .reg "dst"
 }
 

@@ -181,26 +181,29 @@ private def emitInstToJson : EmitInst → String
         emitFieldRegToJson "src" src
       ])
     ]
-  | .popcnt dst src =>
+  | .popcnt size dst src =>
     jsonObj [
       ("rust_ctor", quote "MInst::Popcnt"),
       ("fields", jsonArr [
+        emitFieldValueToJson "size" "size" (opSizeToJson size),
         emitFieldRegToJson "dst" dst,
         emitFieldRegToJson "src" src
       ])
     ]
-  | .lzcnt dst src =>
+  | .lzcnt size dst src =>
     jsonObj [
       ("rust_ctor", quote "MInst::Lzcnt"),
       ("fields", jsonArr [
+        emitFieldValueToJson "size" "size" (opSizeToJson size),
         emitFieldRegToJson "dst" dst,
         emitFieldRegToJson "src" src
       ])
     ]
-  | .tzcnt dst src =>
+  | .tzcnt size dst src =>
     jsonObj [
       ("rust_ctor", quote "MInst::Tzcnt"),
       ("fields", jsonArr [
+        emitFieldValueToJson "size" "size" (opSizeToJson size),
         emitFieldRegToJson "dst" dst,
         emitFieldRegToJson "src" src
       ])
