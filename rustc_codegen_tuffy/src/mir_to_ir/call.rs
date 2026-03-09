@@ -1207,8 +1207,19 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         });
         let call_ret_ann = if matches!(call_ret_ty, Type::Int) {
             translate_annotation(dest_ty).or_else(|| {
-                // For structs, use annotation based on size
-                dest_size.and_then(|sz| int_annotation_for_bytes(sz as u32))
+                // For structs ≤8 bytes, use annotation based on size.
+                // For structs 9-16 bytes, use 64-bit annotation since the
+                // call returns the first 8 bytes in RAX; the remaining bytes
+                // are captured from RDX via ABI metadata (see below).
+                dest_size.and_then(|sz| {
+                    if sz <= 8 {
+                        int_annotation_for_bytes(sz as u32)
+                    } else if sz <= 16 {
+                        int_annotation_for_bytes(8)
+                    } else {
+                        None
+                    }
+                })
             })
         } else {
             None

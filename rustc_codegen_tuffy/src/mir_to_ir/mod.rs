@@ -116,7 +116,16 @@ pub fn translate_function<'tcx>(
                         },
                     })
                 })
-                .or_else(|| int_annotation_for_bytes(ret_size as u32))
+                .or_else(|| {
+                    // For structs 9-16 bytes, use 64-bit annotation since the
+                    // function returns the first 8 bytes in RAX; the remaining
+                    // bytes are returned in RDX via ABI metadata (see terminator.rs).
+                    if ret_size > 8 && ret_size <= 16 {
+                        int_annotation_for_bytes(8)
+                    } else {
+                        int_annotation_for_bytes(ret_size as u32)
+                    }
+                })
         } else {
             translate_annotation(ret_mir_ty)
         };
