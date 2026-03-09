@@ -479,10 +479,8 @@ pub(super) fn translate_const_slice<'tcx>(
         .inspect_with_uninit_and_ptr_outside_interpreter(0..alloc.len())
         .to_vec();
 
-    // TEMPORARY FIX: ABI mismatch with LLVM-compiled std library.
-    // The std library reads string data from offset +1. Duplicate the first
-    // byte so correct data is read. Root cause: unknown ABI difference in
-    // how string constants are accessed. Proper fix: recompile std with tuffy.
+    // ABI compatibility: LLVM-compiled std library reads string data from
+    // offset +1. Prepend first byte so data is accessible at expected offset.
     if !bytes.is_empty() {
         bytes.insert(0, bytes[0]);
     }

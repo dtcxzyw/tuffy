@@ -49,10 +49,8 @@ pub fn emit_elf_with_data(functions: &[CompiledFunction], statics: &[StaticData]
             } else {
                 data_rel_ro
             };
-            let offset = obj.append_section_data(section, &sd.data, 8);
-            // .L-prefixed symbols are file-local data blobs — use STB_LOCAL
-            // so they don't collide with identically-named symbols in other
-            // object files (e.g. across crate boundaries).
+            let offset = obj.append_section_data(section, &sd.data, 1);
+
             let scope = if sd.name.starts_with(".L") {
                 SymbolScope::Compilation
             } else {
