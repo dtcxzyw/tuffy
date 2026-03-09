@@ -30,12 +30,13 @@
 // CHECK: }
 // CHECK: func @test_constant_tuple() -> int:s32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: ptr = symbol_addr @consume_tuple
-// CHECK:     v2: mem, v3: int:s32 = call v1(), v0 -> int
-// CHECK:     br bb1(v2)
+// CHECK:     v1: int:i64 = iconst 42
+// CHECK:     v2: ptr = symbol_addr @consume_tuple
+// CHECK:     v3: mem, v4: int:s32 = call v2(v1), v0 -> int
+// CHECK:     br bb1(v3)
 // CHECK:
-// CHECK:   bb1(v5: mem):
-// CHECK:     ret v3, v5
+// CHECK:   bb1(v6: mem):
+// CHECK:     ret v4, v6
 // CHECK: }
 // CHECK:
 
