@@ -134,7 +134,14 @@ fn value_annotation(func: &Function, v: ValueRef) -> Option<&Annotation> {
 }
 
 fn is_128_bit_value(func: &Function, v: ValueRef) -> bool {
-    value_type(func, v).is_some_and(is_128_bit_int)
+    let Some(ty) = value_type(func, v) else {
+        return false;
+    };
+    if !matches!(ty, Type::Int) {
+        return false;
+    }
+    let ann = value_annotation(func, v).cloned();
+    is_128_bit_int_with_annotation(ty, &ann)
 }
 
 fn needs_wide_const(v: &BigInt) -> bool {
