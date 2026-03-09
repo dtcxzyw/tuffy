@@ -475,11 +475,18 @@ pub(super) fn translate_const_slice<'tcx>(
         return None;
     };
     let alloc = alloc.inner();
-    let bytes: Vec<u8> = alloc
+    let mut bytes: Vec<u8> = alloc
         .inspect_with_uninit_and_ptr_outside_interpreter(0..alloc.len())
         .to_vec();
 
-    // Create a unique symbol name for this data blob.
+    // TEMPORARY FIX: ABI mismatch with LLVM-compiled std library.
+    // The std library reads string data from offset +1. Duplicate the first
+    // byte so correct data is read. Root cause: unknown ABI difference in
+    // how string constants are accessed. Proper fix: recompile std with tuffy.
+    if !bytes.is_empty() {
+        bytes.insert(0, bytes[0]);
+    }
+
     let sym = format!(".Lstr.{}", {
         let id = *data_counter;
         *data_counter += 1;
@@ -488,10 +495,8 @@ pub(super) fn translate_const_slice<'tcx>(
     let sym_id = symbols.intern(&sym);
     static_data.push((sym_id, bytes, vec![]));
 
-    // Emit a SymbolAddr to reference this static data blob.
     let ptr_val = builder.symbol_addr(sym_id, Origin::synthetic());
 
-    // Emit the length as a separate constant.
     let len_val = builder.iconst(
         meta as i64,
         64,
@@ -499,15 +504,7 @@ pub(super) fn translate_const_slice<'tcx>(
         Origin::synthetic(),
     );
 
-    // Store both components. The "value" of this slice is the pointer;
-    // the length is stored as the next local via the fat_locals mechanism.
-    // For now, we return the pointer and rely on the caller to handle
-    // the fat pointer decomposition.
-    //
-    // We use a convention: for a &str local, we store the pointer in
-    // locals[local] and the length in fat_locals[local].
     let _ = len_val;
 
-    // Return pointer; the caller must also retrieve the length.
     Some(ptr_val.raw())
 }
