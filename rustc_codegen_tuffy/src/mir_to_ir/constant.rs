@@ -464,7 +464,7 @@ pub(super) fn translate_scalar(
 pub(super) fn translate_const_slice<'tcx>(
     tcx: TyCtxt<'tcx>,
     alloc_id: rustc_middle::mir::interpret::AllocId,
-    meta: u64,
+    _meta: u64,
     builder: &mut Builder<'_>,
     symbols: &mut SymbolTable,
     static_data: &mut StaticDataVec,
@@ -475,15 +475,9 @@ pub(super) fn translate_const_slice<'tcx>(
         return None;
     };
     let alloc = alloc.inner();
-    let mut bytes: Vec<u8> = alloc
+    let bytes: Vec<u8> = alloc
         .inspect_with_uninit_and_ptr_outside_interpreter(0..alloc.len())
         .to_vec();
-
-    // ABI compatibility: LLVM-compiled std library reads string data from
-    // offset +1. Prepend first byte so data is accessible at expected offset.
-    if !bytes.is_empty() {
-        bytes.insert(0, bytes[0]);
-    }
 
     let sym = format!(".Lstr.{}", {
         let id = *data_counter;
@@ -494,15 +488,6 @@ pub(super) fn translate_const_slice<'tcx>(
     static_data.push((sym_id, bytes, vec![]));
 
     let ptr_val = builder.symbol_addr(sym_id, Origin::synthetic());
-
-    let len_val = builder.iconst(
-        meta as i64,
-        64,
-        IntSignedness::DontCare,
-        Origin::synthetic(),
-    );
-
-    let _ = len_val;
 
     Some(ptr_val.raw())
 }

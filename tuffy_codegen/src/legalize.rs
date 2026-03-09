@@ -94,7 +94,16 @@ fn is_wide_width(width: Option<u32>, legality: &impl LegalityInfo) -> bool {
 }
 
 fn is_128_bit_int(ty: &Type) -> bool {
+    // This function name is misleading - it's used as a type check only.
+    // The actual bit width check happens via annotations elsewhere.
     matches!(ty, Type::Int)
+}
+
+fn is_128_bit_int_with_annotation(ty: &Type, ann: &Option<Annotation>) -> bool {
+    matches!(ty, Type::Int)
+        && ann
+            .as_ref()
+            .is_some_and(|a| matches!(a, Annotation::Int(ia) if ia.bit_width > 64))
 }
 
 fn is_signed_128_int(ty: &Type) -> bool {
@@ -138,23 +147,56 @@ fn has_wide_values<M: AbiMetadata>(
     legality: &impl LegalityInfo,
 ) -> bool {
     // Check for wide parameters
-    for ty in &func.params {
+    for (ty, ann) in func.params.iter().zip(func.param_annotations.iter()) {
         if is_wide_width(type_width(ty), legality) {
+            return true;
+        }
+        // Check annotation for integer bit width
+        if matches!(ty, Type::Int)
+            && let Some(Annotation::Int(ia)) = ann
+            && ia.bit_width > legality.max_int_width()
+        {
             return true;
         }
     }
 
     // Check for wide return type
-    if let Some(ref ty) = func.ret_ty
-        && is_wide_width(type_width(ty), legality)
-    {
-        return true;
+    if let Some(ref ty) = func.ret_ty {
+        if is_wide_width(type_width(ty), legality) {
+            return true;
+        }
+        // Check annotation for integer bit width
+        if matches!(ty, Type::Int)
+            && let Some(Annotation::Int(ia)) = &func.ret_annotation
+            && ia.bit_width > legality.max_int_width()
+        {
+            return true;
+        }
     }
 
     // Check for wide instructions
     for inst in &func.instructions {
         if is_wide_width(type_width(&inst.ty), legality) {
             return true;
+        }
+        // Check primary result annotation
+        if matches!(inst.ty, Type::Int)
+            && let Some(Annotation::Int(ia)) = &inst.result_annotation
+            && ia.bit_width > legality.max_int_width()
+        {
+            return true;
+        }
+        // Check secondary result annotation
+        if let Some(ref ty) = inst.secondary_ty {
+            if is_wide_width(type_width(ty), legality) {
+                return true;
+            }
+            if matches!(ty, Type::Int)
+                && let Some(Annotation::Int(ia)) = &inst.secondary_result_annotation
+                && ia.bit_width > legality.max_int_width()
+            {
+                return true;
+            }
         }
 
         // Check if operation needs legalization
@@ -2750,8 +2792,10 @@ fn leg_call<M: AbiMetadata + Clone>(
         }
     }
 
-    let wide_ret = inst.secondary_ty.as_ref().is_some_and(is_128_bit_int)
-        || s.old_meta.is_wide_return_call(old_vref.index());
+    let wide_ret = is_128_bit_int_with_annotation(
+        inst.secondary_ty.as_ref().unwrap_or(&Type::Unit),
+        &inst.secondary_result_annotation,
+    ) || s.old_meta.is_wide_return_call(old_vref.index());
     let ret_ty = if wide_ret {
         I64_TYPE
     } else {

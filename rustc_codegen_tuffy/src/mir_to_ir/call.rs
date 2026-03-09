@@ -1208,7 +1208,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let call_ret_ann = if matches!(call_ret_ty, Type::Int) {
             translate_annotation(dest_ty).or_else(|| {
                 // For structs, use annotation based on size
-                dest_size.and_then(|sz| int_annotation_for_bytes(sz.min(8) as u32))
+                dest_size.and_then(|sz| int_annotation_for_bytes(sz as u32))
             })
         } else {
             None
@@ -1222,6 +1222,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             Origin::synthetic(),
         );
         self.current_mem = call_mem.raw();
+
+        // Mark calls with 128-bit return values for legalization
+        if let Some(Annotation::Int(ia)) = call_ret_ann
+            && ia.bit_width == 128
+        {
+            self.abi_metadata.mark_wide_return_call(call_mem.index());
+        }
+
         // For non-void calls, call_data is Some(data_vref).
         // For void calls, call_data is None — use a dummy zero.
         let call_vref = call_data.unwrap_or_else(|| {

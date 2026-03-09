@@ -116,7 +116,7 @@ pub fn translate_function<'tcx>(
                         },
                     })
                 })
-                .or_else(|| int_annotation_for_bytes(ret_size.min(8) as u32))
+                .or_else(|| int_annotation_for_bytes(ret_size as u32))
         } else {
             translate_annotation(ret_mir_ty)
         };
@@ -127,7 +127,7 @@ pub fn translate_function<'tcx>(
     let func_sym = symbols.intern(&name);
 
     // Build all-args name map first, then filter to match params.
-    let all_names = extract_param_names(mir, &mut symbols);
+    let _all_names = extract_param_names(mir, &mut symbols);
     let mut param_names = Vec::new();
 
     // For SRET, prepend a hidden Ptr parameter (the return slot pointer).
@@ -165,7 +165,7 @@ pub fn translate_function<'tcx>(
                 };
                 params.push(param_ty);
                 param_anns.push(param_ann);
-                param_names.push(all_names.get(i).copied().flatten());
+                param_names.push(None);
                 // Fat pointer types (&str, &[T], &dyn Trait) are passed
                 // as two register-sized values: data pointer + metadata
                 // (length or vtable pointer).
