@@ -24,7 +24,7 @@ def test_seed(seed: int) -> tuple[str, int, str, str]:
 
         # Compile with LLVM
         result = subprocess.run(
-            ["rustc", "+nightly", "-Zmir-opt-level=3", "-C", "debug-assertions=off",
+            ["rustc", "+nightly", "-Zmir-opt-level=0", "-C", "debug-assertions=off",
              "-C", "opt-level=3", "-o", llvm_bin, src],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
@@ -33,7 +33,7 @@ def test_seed(seed: int) -> tuple[str, int, str, str]:
 
         # Compile with Tuffy
         result = subprocess.run(
-            ["rustc", "+nightly", "-Zmir-opt-level=3", "-C", "debug-assertions=off",
+            ["rustc", "+nightly", "-Zmir-opt-level=0", "-C", "debug-assertions=off",
              "-C", "opt-level=3", f"-Zcodegen-backend={CODEGEN}", "-o", tuffy_bin, src],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
