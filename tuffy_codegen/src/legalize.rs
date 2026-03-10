@@ -14,6 +14,7 @@ use tuffy_ir::builder::Builder;
 use tuffy_ir::function::{CfgNode, Function};
 use tuffy_ir::instruction::{ICmpOp, Op, Operand, Origin};
 use tuffy_ir::module::SymbolTable;
+use tuffy_ir::typed::IntOperand;
 use tuffy_ir::types::{Annotation, FloatType, IntAnnotation, IntSignedness, Type};
 use tuffy_ir::value::{BlockRef, ValueRef};
 
@@ -966,14 +967,17 @@ fn legalize_inst<M: AbiMetadata + Clone>(
             let (lo, hi) = s.vmap.pair(val.value);
             let p = remap_op(s, &ptr.clone().raw());
             let m = remap_op(s, &mem.clone().raw());
-            let m1 = b.store(Operand::new(lo), p.clone().into(), 8, m.into(), o());
-            let off = b.iconst(8i64, 64, IntSignedness::Unsigned, o());
-            let hi_addr = b.ptradd(p.into(), off.into(), 0, o());
-            // For stores narrower than 16 bytes (e.g. 12-byte structs), only
-            // write the remaining bytes for the high half to avoid overflow.
-            let hi_bytes = bytes.saturating_sub(8).max(1);
-            let m2 = b.store(Operand::new(hi), hi_addr.into(), hi_bytes, m1.into(), o());
-            s.vmap.set(old_vref, Mapped::One(m2.into()));
+            let lo_bytes = (*bytes).min(8);
+            let m1 = b.store(Operand::new(lo), p.clone().into(), lo_bytes, m.into(), o());
+            let hi_bytes = bytes.saturating_sub(8);
+            if hi_bytes > 0 {
+                let off = b.iconst(8i64, 64, IntSignedness::Unsigned, o());
+                let hi_addr = b.ptradd(p.into(), off.into(), 0, o());
+                let m2 = b.store(Operand::new(hi), hi_addr.into(), hi_bytes, m1.into(), o());
+                s.vmap.set(old_vref, Mapped::One(m2.into()));
+            } else {
+                s.vmap.set(old_vref, Mapped::One(m1.into()));
+            }
         }
         _ => {
             // Skip instructions already remapped as RDX captures in leg_call.
@@ -2288,7 +2292,7 @@ fn leg_icmp<M>(
 ) {
     let (a_lo, a_hi) = wide_pair(s, old, b, a);
     let (b_lo, b_hi) = wide_pair(s, old, b, op_b);
-    let _signed = value_type(old, a.value).is_some_and(is_signed_128_int);
+    let signed = value_type(old, a.value).is_some_and(is_signed_128_int);
 
     let result = match cmp_op {
         ICmpOp::Eq => {
@@ -2307,8 +2311,22 @@ fn leg_icmp<M>(
             b.icmp(ICmpOp::Ne, or_diff.into(), zero.into(), o()).raw()
         }
         ICmpOp::Lt | ICmpOp::Le | ICmpOp::Gt | ICmpOp::Ge => {
-            let hi_cmp = b.icmp(cmp_op, a_hi.into(), b_hi.into(), o());
+            // For signed i128: hi words carry the sign → signed comparison.
+            // Lo words are magnitude bits → always unsigned comparison.
+            // For unsigned u128: both halves are unsigned (no annotation needed).
+            let (hi_a_op, hi_b_op): (IntOperand, IntOperand) = if signed {
+                let ann = Annotation::Int(SIGNED_64_INT);
+                (
+                    Operand::annotated(a_hi, ann).into(),
+                    Operand::annotated(b_hi, ann).into(),
+                )
+            } else {
+                (a_hi.into(), b_hi.into())
+            };
+            let hi_cmp = b.icmp(cmp_op, hi_a_op, hi_b_op, o());
             let hi_eq = b.icmp(ICmpOp::Eq, a_hi.into(), b_hi.into(), o());
+            // Lo comparison is always unsigned: the low 64 bits are a
+            // non-negative magnitude regardless of the 128-bit signedness.
             let lo_cmp = b.icmp(cmp_op, a_lo.into(), b_lo.into(), o());
             b.select(
                 hi_eq.into(),
