@@ -1882,10 +1882,12 @@ fn select_inst(
                 double,
             });
             let dst = ctx.alloc.alloc();
+            let tmp = ctx.alloc.alloc();
             ctx.out.push(MInst::FpCmp {
                 dst,
                 lhs: l_xmm,
                 rhs: r_xmm,
+                tmp,
                 kind: *kind as u8,
                 double,
             });

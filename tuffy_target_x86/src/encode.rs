@@ -1021,10 +1021,11 @@ fn encode_inst(inst: &PInst, ctx: &mut EncodeContext) {
             dst,
             lhs,
             rhs,
+            tmp,
             kind,
             double,
         } => {
-            encode_fp_cmp(ctx, *dst, *lhs, *rhs, *kind, *double, Gpr::Rax, Gpr::Rcx);
+            encode_fp_cmp(ctx, *dst, *lhs, *rhs, *tmp, *kind, *double);
         }
     }
 }
@@ -1256,10 +1257,9 @@ fn encode_fp_cmp(
     dst: Gpr,
     lhs: Gpr,
     rhs: Gpr,
+    tmp: Gpr,
     kind: u8,
     double: bool,
-    _xmm_scratch0: Gpr,
-    _xmm_scratch1: Gpr,
 ) {
     let dst8 = gpr_to_iced(dst, OpSize::S8);
     let dst32 = gpr_to_iced(dst, OpSize::S32);
@@ -1279,60 +1279,98 @@ fn encode_fp_cmp(
     //   a < b:  ZF=0 PF=0 CF=1
     //   a == b: ZF=1 PF=0 CF=0
     //   NaN:    ZF=1 PF=1 CF=1
+    let tmp8 = gpr_to_iced(tmp, OpSize::S8);
     match kind {
+        // --- Trivial ---
+        0 => {
+            // False: always 0
+            ctx.emit(Instruction::with2(Code::Xor_r32_rm32, dst32, dst32).unwrap());
+            return;
+        }
+        15 => {
+            // True: always 1
+            ctx.emit(Instruction::with2(Code::Xor_r32_rm32, dst32, dst32).unwrap());
+            ctx.emit(Instruction::with2(Code::Inc_rm32, dst32, dst32).unwrap());
+            return;
+        }
+        // --- Single setcc (ordered, no PF concern) ---
         2 => {
             // OGt: CF=0 AND ZF=0 → seta
             ctx.emit(Instruction::with1(Code::Seta_rm8, dst8).unwrap());
-            ctx.emit(Instruction::with2(Code::Movzx_r32_rm8, dst32, dst8).unwrap());
         }
         3 => {
-            // OGe: CF=0 → setae
+            // OGe: CF=0 → setae (PF=0 implied when CF=0 except NaN→CF=1)
             ctx.emit(Instruction::with1(Code::Setae_rm8, dst8).unwrap());
-            ctx.emit(Instruction::with2(Code::Movzx_r32_rm8, dst32, dst8).unwrap());
         }
         6 => {
-            // ONe: ZF=0 → setne
+            // ONe: ZF=0 AND PF=0 → setne works because NaN sets ZF=1
             ctx.emit(Instruction::with1(Code::Setne_rm8, dst8).unwrap());
-            ctx.emit(Instruction::with2(Code::Movzx_r32_rm8, dst32, dst8).unwrap());
         }
         7 => {
             // Ord: PF=0 → setnp
             ctx.emit(Instruction::with1(Code::Setnp_rm8, dst8).unwrap());
-            ctx.emit(Instruction::with2(Code::Movzx_r32_rm8, dst32, dst8).unwrap());
         }
         8 => {
             // Uno: PF=1 → setp
             ctx.emit(Instruction::with1(Code::Setp_rm8, dst8).unwrap());
-            ctx.emit(Instruction::with2(Code::Movzx_r32_rm8, dst32, dst8).unwrap());
         }
-        _ => {
-            // OEq(1), OLt(4), OLe(5): need two setcc + AND
-            let tmp = gpr_to_iced(Gpr::Rcx, OpSize::S8);
-            let _tmp32 = gpr_to_iced(Gpr::Rcx, OpSize::S32);
-            match kind {
-                1 => {
-                    // OEq: ZF=1 AND PF=0
-                    ctx.emit(Instruction::with1(Code::Sete_rm8, dst8).unwrap());
-                    ctx.emit(Instruction::with1(Code::Setnp_rm8, tmp).unwrap());
-                }
-                4 => {
-                    // OLt: CF=1 AND PF=0
-                    ctx.emit(Instruction::with1(Code::Setb_rm8, dst8).unwrap());
-                    ctx.emit(Instruction::with1(Code::Setnp_rm8, tmp).unwrap());
-                }
-                5 => {
-                    // OLe: (CF=1 OR ZF=1) AND PF=0
-                    ctx.emit(Instruction::with1(Code::Setbe_rm8, dst8).unwrap());
-                    ctx.emit(Instruction::with1(Code::Setnp_rm8, tmp).unwrap());
-                }
-                _ => {
-                    // Fallback: return 0
-                    ctx.emit(Instruction::with2(Code::Xor_r32_rm32, dst32, dst32).unwrap());
-                    return;
-                }
-            }
-            ctx.emit(Instruction::with2(Code::And_r8_rm8, dst8, tmp).unwrap());
-            ctx.emit(Instruction::with2(Code::Movzx_r32_rm8, dst32, dst8).unwrap());
+        // --- Two setcc + AND (ordered, need PF=0 check) ---
+        1 => {
+            // OEq: ZF=1 AND PF=0
+            ctx.emit(Instruction::with1(Code::Sete_rm8, dst8).unwrap());
+            ctx.emit(Instruction::with1(Code::Setnp_rm8, tmp8).unwrap());
+            ctx.emit(Instruction::with2(Code::And_r8_rm8, dst8, tmp8).unwrap());
         }
+        4 => {
+            // OLt: CF=1 AND PF=0
+            ctx.emit(Instruction::with1(Code::Setb_rm8, dst8).unwrap());
+            ctx.emit(Instruction::with1(Code::Setnp_rm8, tmp8).unwrap());
+            ctx.emit(Instruction::with2(Code::And_r8_rm8, dst8, tmp8).unwrap());
+        }
+        5 => {
+            // OLe: (CF=1 OR ZF=1) AND PF=0
+            ctx.emit(Instruction::with1(Code::Setbe_rm8, dst8).unwrap());
+            ctx.emit(Instruction::with1(Code::Setnp_rm8, tmp8).unwrap());
+            ctx.emit(Instruction::with2(Code::And_r8_rm8, dst8, tmp8).unwrap());
+        }
+        // --- Two setcc + OR (unordered: true if NaN OR ordered condition) ---
+        9 => {
+            // UEq: ZF=1 OR PF=1
+            ctx.emit(Instruction::with1(Code::Sete_rm8, dst8).unwrap());
+            ctx.emit(Instruction::with1(Code::Setp_rm8, tmp8).unwrap());
+            ctx.emit(Instruction::with2(Code::Or_r8_rm8, dst8, tmp8).unwrap());
+        }
+        10 => {
+            // UGt: (CF=0 AND ZF=0) OR PF=1 → seta + setp + or
+            ctx.emit(Instruction::with1(Code::Seta_rm8, dst8).unwrap());
+            ctx.emit(Instruction::with1(Code::Setp_rm8, tmp8).unwrap());
+            ctx.emit(Instruction::with2(Code::Or_r8_rm8, dst8, tmp8).unwrap());
+        }
+        11 => {
+            // UGe: CF=0 OR PF=1 → setae + setp + or
+            ctx.emit(Instruction::with1(Code::Setae_rm8, dst8).unwrap());
+            ctx.emit(Instruction::with1(Code::Setp_rm8, tmp8).unwrap());
+            ctx.emit(Instruction::with2(Code::Or_r8_rm8, dst8, tmp8).unwrap());
+        }
+        12 => {
+            // ULt: CF=1 OR PF=1 → setb + setp + or
+            ctx.emit(Instruction::with1(Code::Setb_rm8, dst8).unwrap());
+            ctx.emit(Instruction::with1(Code::Setp_rm8, tmp8).unwrap());
+            ctx.emit(Instruction::with2(Code::Or_r8_rm8, dst8, tmp8).unwrap());
+        }
+        13 => {
+            // ULe: (CF=1 OR ZF=1) OR PF=1 → setbe + setp + or
+            ctx.emit(Instruction::with1(Code::Setbe_rm8, dst8).unwrap());
+            ctx.emit(Instruction::with1(Code::Setp_rm8, tmp8).unwrap());
+            ctx.emit(Instruction::with2(Code::Or_r8_rm8, dst8, tmp8).unwrap());
+        }
+        14 => {
+            // UNe: ZF=0 OR PF=1 → setne + setp + or
+            ctx.emit(Instruction::with1(Code::Setne_rm8, dst8).unwrap());
+            ctx.emit(Instruction::with1(Code::Setp_rm8, tmp8).unwrap());
+            ctx.emit(Instruction::with2(Code::Or_r8_rm8, dst8, tmp8).unwrap());
+        }
+        _ => unreachable!("invalid FCmpOp kind: {kind}"),
     }
+    ctx.emit(Instruction::with2(Code::Movzx_r32_rm8, dst32, dst8).unwrap());
 }

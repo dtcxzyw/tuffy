@@ -272,6 +272,8 @@ pub enum MInst<R: RegType> {
         dst: R,
         lhs: R,
         rhs: R,
+        /// Scratch GPR for two-setcc patterns (OEq, OLt, OLe).
+        tmp: R,
         /// FCmpOp discriminant (see tuffy_ir::instruction::FCmpOp).
         kind: u8,
         double: bool,
