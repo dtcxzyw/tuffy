@@ -117,8 +117,15 @@ fn is_128_bit_int_with_annotation(ty: &Type, ann: &Option<Annotation>) -> bool {
             .is_some_and(|a| matches!(a, Annotation::Int(ia) if ia.bit_width > 64))
 }
 
-fn is_signed_128_int(ty: &Type) -> bool {
-    matches!(ty, Type::Int)
+/// Check whether an operand annotation indicates a signed integer.
+fn is_signed_annotation(ann: Option<&Annotation>) -> bool {
+    matches!(
+        ann,
+        Some(Annotation::Int(IntAnnotation {
+            signedness: IntSignedness::Signed,
+            ..
+        }))
+    )
 }
 
 fn value_type(func: &Function, v: ValueRef) -> Option<&Type> {
@@ -2292,7 +2299,7 @@ fn leg_icmp<M>(
 ) {
     let (a_lo, a_hi) = wide_pair(s, old, b, a);
     let (b_lo, b_hi) = wide_pair(s, old, b, op_b);
-    let signed = value_type(old, a.value).is_some_and(is_signed_128_int);
+    let signed = is_signed_annotation(a.annotation.as_ref());
 
     let result = match cmp_op {
         ICmpOp::Eq => {
@@ -2600,7 +2607,7 @@ fn leg_div_rem_128<M: AbiMetadata + Clone>(
     is_div: bool,
     symbols: &mut SymbolTable,
 ) {
-    let signed = value_type(old, a.value).is_some_and(is_signed_128_int);
+    let signed = is_signed_annotation(a.annotation.as_ref());
     let name = match (is_div, signed) {
         (true, true) => "__divti3",
         (true, false) => "__udivti3",
@@ -2791,7 +2798,7 @@ fn leg_call<M: AbiMetadata + Clone>(
                 let mask64 = (BigInt::from(1u64) << 64u32) - BigInt::from(1u32);
                 let hi_big = (val >> 64u32) & &mask64;
                 b.iconst(hi_big, 64, IntSignedness::Unsigned, o())
-            } else if value_type(_old, arg.value).is_some_and(is_signed_128_int) {
+            } else if is_signed_annotation(arg.annotation.as_ref()) {
                 let c63 = b.iconst(63i64, 64, IntSignedness::Unsigned, o());
                 b.shr(
                     Operand::new(lo.value).into(),
