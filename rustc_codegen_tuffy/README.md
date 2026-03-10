@@ -168,21 +168,21 @@ git clone https://github.com/cbeuw/rustlantis.git /tmp/rustlantis
 cd /tmp/rustlantis
 git apply /tuffy/rustc_codegen_tuffy/rustlantis/patch/tuffy-backend.patch
 cp /tuffy/rustc_codegen_tuffy/rustlantis/patch/config.toml .
-cp /tuffy/rustc_codegen_tuffy/rustlantis/patch/fuzz.sh .
+cp /tuffy/rustc_codegen_tuffy/rustlantis/patch/fuzz.py .
 cargo build --release
 ```
 
 **Running:**
 
 ```bash
-./fuzz.sh <start_seed> <end_seed> [jobs]
+python3 fuzz.py <start_seed> <end_seed> [jobs]
 ```
 
 The script supports parallel execution. The optional `jobs` parameter controls concurrency (defaults to `nproc`):
 
 ```bash
-./fuzz.sh 0 1000        # Use all CPU cores
-./fuzz.sh 0 1000 8      # Use 8 parallel jobs
+python3 fuzz.py 0 1000        # Use all CPU cores
+python3 fuzz.py 0 1000 8      # Use 8 parallel jobs
 ```
 
 **Tips:**
