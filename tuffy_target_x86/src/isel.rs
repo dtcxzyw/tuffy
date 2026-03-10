@@ -857,6 +857,166 @@ fn classify_call_abi(
 
 /// Perform instruction selection on a tuffy IR function.
 ///
+/// Compute which values are used as operands in the function.
+fn compute_used_values(func: &Function) -> HashSet<u32> {
+    let mut used = HashSet::new();
+    for inst in &func.instructions {
+        match &inst.op {
+            Op::Add(a, b)
+            | Op::Sub(a, b)
+            | Op::Mul(a, b)
+            | Op::Div(a, b)
+            | Op::Rem(a, b)
+            | Op::Or(a, b)
+            | Op::And(a, b)
+            | Op::Xor(a, b) => {
+                let a_val = a.clone().raw().value;
+                let b_val = b.clone().raw().value;
+                if !a_val.is_block_arg() {
+                    used.insert(a_val.index());
+                }
+                if !b_val.is_block_arg() {
+                    used.insert(b_val.index());
+                }
+            }
+            Op::Shl(a, b) | Op::Shr(a, b) | Op::Min(a, b) | Op::Max(a, b) => {
+                let a_val = a.clone().raw().value;
+                let b_val = b.clone().raw().value;
+                if !a_val.is_block_arg() {
+                    used.insert(a_val.index());
+                }
+                if !b_val.is_block_arg() {
+                    used.insert(b_val.index());
+                }
+            }
+            Op::ICmp(_, a, b) => {
+                let a_val = a.clone().raw().value;
+                let b_val = b.clone().raw().value;
+                if !a_val.is_block_arg() {
+                    used.insert(a_val.index());
+                }
+                if !b_val.is_block_arg() {
+                    used.insert(b_val.index());
+                }
+            }
+            Op::Load(ptr, _, mem) => {
+                let ptr_val = ptr.clone().raw().value;
+                let mem_val = mem.clone().raw().value;
+                if !ptr_val.is_block_arg() {
+                    used.insert(ptr_val.index());
+                }
+                if !mem_val.is_block_arg() {
+                    used.insert(mem_val.index());
+                }
+            }
+            Op::Store(val, ptr, _, mem) => {
+                if !val.value.is_block_arg() {
+                    used.insert(val.value.index());
+                }
+                let ptr_val = ptr.clone().raw().value;
+                if !ptr_val.is_block_arg() {
+                    used.insert(ptr_val.index());
+                }
+                let mem_val = mem.clone().raw().value;
+                if !mem_val.is_block_arg() {
+                    used.insert(mem_val.index());
+                }
+            }
+            Op::Call(callee, args, mem) => {
+                let callee_val = callee.clone().raw().value;
+                if !callee_val.is_block_arg() {
+                    used.insert(callee_val.index());
+                }
+                for arg in args {
+                    if !arg.value.is_block_arg() {
+                        used.insert(arg.value.index());
+                    }
+                }
+                let mem_val = mem.clone().raw().value;
+                if !mem_val.is_block_arg() {
+                    used.insert(mem_val.index());
+                }
+            }
+            Op::Ret(val, mem) => {
+                if let Some(v) = val
+                    && !v.value.is_block_arg()
+                {
+                    used.insert(v.value.index());
+                }
+                let mem_val = mem.clone().raw().value;
+                if !mem_val.is_block_arg() {
+                    used.insert(mem_val.index());
+                }
+            }
+            Op::Br(_, args) => {
+                for arg in args {
+                    if !arg.value.is_block_arg() {
+                        used.insert(arg.value.index());
+                    }
+                }
+            }
+            Op::BrIf(cond, _, then_args, _, else_args) => {
+                let cond_val = cond.clone().raw().value;
+                if !cond_val.is_block_arg() {
+                    used.insert(cond_val.index());
+                }
+                for arg in then_args {
+                    if !arg.value.is_block_arg() {
+                        used.insert(arg.value.index());
+                    }
+                }
+                for arg in else_args {
+                    if !arg.value.is_block_arg() {
+                        used.insert(arg.value.index());
+                    }
+                }
+            }
+            Op::PtrAdd(ptr, offset) => {
+                let ptr_val = ptr.clone().raw().value;
+                let offset_val = offset.clone().raw().value;
+                if !ptr_val.is_block_arg() {
+                    used.insert(ptr_val.index());
+                }
+                if !offset_val.is_block_arg() {
+                    used.insert(offset_val.index());
+                }
+            }
+            Op::Sext(val, _) | Op::Zext(val, _) => {
+                let val_ref = val.clone().raw().value;
+                if !val_ref.is_block_arg() {
+                    used.insert(val_ref.index());
+                }
+            }
+            Op::CountOnes(val) | Op::CountTrailingZeros(val) => {
+                let val_ref = val.clone().raw().value;
+                if !val_ref.is_block_arg() {
+                    used.insert(val_ref.index());
+                }
+            }
+            Op::CountLeadingZeros(val, _) => {
+                let val_ref = val.clone().raw().value;
+                if !val_ref.is_block_arg() {
+                    used.insert(val_ref.index());
+                }
+            }
+            Op::Select(cond, t, f) => {
+                let cond_val = cond.clone().raw().value;
+                if !cond_val.is_block_arg() {
+                    used.insert(cond_val.index());
+                }
+                if !t.value.is_block_arg() {
+                    used.insert(t.value.index());
+                }
+                if !f.value.is_block_arg() {
+                    used.insert(f.value.index());
+                }
+            }
+            _ => {}
+        }
+    }
+    used
+}
+
 /// Emits `MInst<VReg>` with constraint metadata. Prologue/epilogue
 /// insertion is deferred to a post-regalloc step.
 ///
@@ -868,6 +1028,8 @@ pub fn isel(
     rdx_moves: &HashMap<u32, u32>,
     call_has_ret2: &HashSet<u32>,
 ) -> Option<IselResult<VInst>> {
+    let used_values = compute_used_values(func);
+
     let ba_cap = func.block_args.len();
     let mut ctx = IselCtx {
         regs: VRegMap::new(func.instructions.len(), ba_cap),
@@ -898,6 +1060,7 @@ pub fn isel(
                     rdx_captures,
                     rdx_moves,
                     call_has_ret2,
+                    &used_values,
                 )
                 .is_none()
                 {
@@ -963,6 +1126,7 @@ fn select_inst(
     rdx_captures: &HashMap<u32, u32>,
     rdx_moves: &HashMap<u32, u32>,
     call_has_ret2: &HashSet<u32>,
+    used_values: &HashSet<u32>,
 ) -> Option<()> {
     // Handle 128-bit integer operations before the generated rules.
     if has_wide_scalar_annotation(func, vref.index())
@@ -982,62 +1146,68 @@ fn select_inst(
             let wide = is_wide_scalar_type(&func.params[idx], &func.param_annotations[idx]);
             match classify_param_abi(&func.params, &func.param_annotations, idx) {
                 ParamAbi::Gpr(i) => {
-                    let fixed = ctx.alloc.alloc_fixed(ARG_REGS[i].to_preg());
-                    // Immediately copy the argument register into a fresh unconstrained
-                    // vreg. This lets the register allocator assign it to a callee-saved
-                    // register when the value is live across calls (which clobber
-                    // caller-saved argument registers like rdi, rsi, etc.).
-                    let dst = ctx.alloc.alloc();
-                    ctx.out.push(MInst::MovRR {
-                        size: OpSize::S64,
-                        dst,
-                        src: fixed,
-                    });
-                    ctx.regs.assign(vref, dst);
-                    // Wide scalars (int:u128 / int:s128) occupy two consecutive GPRs.
-                    // Capture the hi half from the next argument register.
-                    if wide && i + 1 < ARG_REGS.len() {
-                        let hi_fixed = ctx.alloc.alloc_fixed(ARG_REGS[i + 1].to_preg());
-                        let hi_dst = ctx.alloc.alloc();
+                    if used_values.contains(&vref.index()) {
+                        let fixed = ctx.alloc.alloc_fixed(ARG_REGS[i].to_preg());
+                        // Immediately copy the argument register into a fresh unconstrained
+                        // vreg. This lets the register allocator assign it to a callee-saved
+                        // register when the value is live across calls (which clobber
+                        // caller-saved argument registers like rdi, rsi, etc.).
+                        let dst = ctx.alloc.alloc();
                         ctx.out.push(MInst::MovRR {
                             size: OpSize::S64,
-                            dst: hi_dst,
-                            src: hi_fixed,
+                            dst,
+                            src: fixed,
                         });
-                        ctx.regs
-                            .assign(ValueRef::inst_secondary_result(vref.index()), hi_dst);
+                        ctx.regs.assign(vref, dst);
+                        // Wide scalars (int:u128 / int:s128) occupy two consecutive GPRs.
+                        // Capture the hi half from the next argument register.
+                        if wide && i + 1 < ARG_REGS.len() {
+                            let hi_fixed = ctx.alloc.alloc_fixed(ARG_REGS[i + 1].to_preg());
+                            let hi_dst = ctx.alloc.alloc();
+                            ctx.out.push(MInst::MovRR {
+                                size: OpSize::S64,
+                                dst: hi_dst,
+                                src: hi_fixed,
+                            });
+                            ctx.regs
+                                .assign(ValueRef::inst_secondary_result(vref.index()), hi_dst);
+                        }
                     }
                 }
                 ParamAbi::Xmm {
                     idx: xmm_idx,
                     double,
                 } => {
-                    // Float param: arrives in XMM register; move bits to a GPR.
-                    // PReg(0x20 + n) encodes XMMn (register class 1).
-                    let xmm = ctx.alloc.alloc_fixed(PReg(0x20 + xmm_idx as u8));
-                    let dst = ctx.alloc.alloc();
-                    ctx.out.push(MInst::MoveXmmToGpr {
-                        dst,
-                        src: xmm,
-                        double,
-                    });
-                    ctx.regs.assign(vref, dst);
+                    if used_values.contains(&vref.index()) {
+                        // Float param: arrives in XMM register; move bits to a GPR.
+                        // PReg(0x20 + n) encodes XMMn (register class 1).
+                        let xmm = ctx.alloc.alloc_fixed(PReg(0x20 + xmm_idx as u8));
+                        let dst = ctx.alloc.alloc();
+                        ctx.out.push(MInst::MoveXmmToGpr {
+                            dst,
+                            src: xmm,
+                            double,
+                        });
+                        ctx.regs.assign(vref, dst);
+                    }
                 }
                 ParamAbi::Stack(stack_idx) => {
-                    // Stack-passed argument.  After the prologue
-                    // (push rbp; mov rbp, rsp) the caller's stack args sit at
-                    // positive offsets from RBP:
-                    //   [rbp + 16] = first stack arg, [rbp + 24] = second, ...
-                    let offset = 16 + stack_idx * 8;
-                    let rbp = ctx.alloc.alloc_fixed(Gpr::Rbp.to_preg());
-                    let dst = ctx.alloc.alloc();
-                    ctx.out.push(MInst::MovRM {
-                        size: OpSize::S64,
-                        dst,
-                        base: rbp,
-                        offset,
-                    });
-                    ctx.regs.assign(vref, dst);
+                    if used_values.contains(&vref.index()) {
+                        // Stack-passed argument.  After the prologue
+                        // (push rbp; mov rbp, rsp) the caller's stack args sit at
+                        // positive offsets from RBP:
+                        //   [rbp + 16] = first stack arg, [rbp + 24] = second, ...
+                        let offset = 16 + stack_idx * 8;
+                        let rbp = ctx.alloc.alloc_fixed(Gpr::Rbp.to_preg());
+                        let dst = ctx.alloc.alloc();
+                        ctx.out.push(MInst::MovRM {
+                            size: OpSize::S64,
+                            dst,
+                            base: rbp,
+                            offset,
+                        });
+                        ctx.regs.assign(vref, dst);
+                    }
                 }
             }
         }
