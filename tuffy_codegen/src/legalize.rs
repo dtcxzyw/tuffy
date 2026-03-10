@@ -33,6 +33,11 @@ use tuffy_target::legality::LegalityInfo;
 // Helper constants
 // ---------------------------------------------------------------------------
 
+const SIGNED_64: Annotation = Annotation::Int(IntAnnotation {
+    bit_width: 64,
+    signedness: IntSignedness::Signed,
+});
+
 // ---------------------------------------------------------------------------
 // Value mapping
 // ---------------------------------------------------------------------------
@@ -362,7 +367,10 @@ fn build_new_func<M: AbiMetadata + Clone>(
 
     for (i, ty) in old.params.iter().enumerate() {
         let name = old.param_names.get(i).and_then(|n| *n);
-        if is_wide_width(type_width(ty), legality) {
+        let ann = old.param_annotations.get(i).cloned().flatten();
+        let param_is_wide =
+            is_wide_width(type_width(ty), legality) || is_128_bit_int_with_annotation(ty, &ann);
+        if param_is_wide {
             let lo_idx = params.len() as u32;
             params.push(Type::Int);
             param_anns.push(Some(Annotation::Int(IntAnnotation {
@@ -389,7 +397,9 @@ fn build_new_func<M: AbiMetadata + Clone>(
 
     let ret_ty = old.ret_ty.clone();
     let ret_ann = if let Some(ref ty) = ret_ty {
-        if is_wide_width(type_width(ty), legality) {
+        if is_wide_width(type_width(ty), legality)
+            || is_128_bit_int_with_annotation(ty, &old.ret_annotation)
+        {
             None
         } else {
             old.ret_annotation
@@ -427,7 +437,9 @@ fn collect_wide_values<M: AbiMetadata>(
     // Mark instructions that produce wide results.
     for (i, inst) in old.instructions.iter().enumerate() {
         let vref = ValueRef::inst_result(i as u32);
-        if is_wide_width(type_width(&inst.ty), legality) {
+        if is_wide_width(type_width(&inst.ty), legality)
+            || is_128_bit_int_with_annotation(&inst.ty, &inst.result_annotation)
+        {
             wide.insert(vref.raw());
             continue;
         }
@@ -548,7 +560,7 @@ fn wide_pair<M>(
             // Sign-extend: for positive values hi=0 (same as zero-extend); for negative
             // values (e.g. iconst(-1) used as all-ones in a 128-bit XOR) hi=-1.
             let c63 = b.iconst(63i64, 64, IntSignedness::Unsigned, o());
-            b.shr(lo.into(), c63.into(), None, o()).raw()
+            b.shr(lo.into(), c63.into(), Some(SIGNED_64), o()).raw()
         };
         (lo, hi)
     }
@@ -673,7 +685,7 @@ fn legalize_inst<M: AbiMetadata + Clone>(
     inst: &tuffy_ir::instruction::Instruction,
     symbols: &mut SymbolTable,
 ) {
-    let wide_result = is_128_bit_int(&inst.ty);
+    let wide_result = is_wide(s, old_vref);
 
     match &inst.op {
         Op::Param(idx) => {
@@ -687,7 +699,7 @@ fn legalize_inst<M: AbiMetadata + Clone>(
                 s.vmap.set(old_vref, Mapped::One(v));
             }
         }
-        Op::Const(val) if needs_wide_const(val) => {
+        Op::Const(val) if needs_wide_const(val) || is_wide(s, old_vref) => {
             leg_wide_const(s, b, old_vref, val);
         }
         Op::Add(a, op_b) if wide_result => {
@@ -777,7 +789,7 @@ fn legalize_inst<M: AbiMetadata + Clone>(
                 old_vref,
                 &a.clone().raw(),
                 &op_b.clone().raw(),
-                None,
+                a.clone().raw().annotation.as_ref(),
             );
         }
         Op::ICmp(cmp_op, a, op_b)
@@ -855,7 +867,12 @@ fn legalize_inst<M: AbiMetadata + Clone>(
         Op::Select(cond, tv, fv) if wide_result => {
             leg_select_128(old, s, b, old_vref, &cond.clone().raw(), tv, fv);
         }
-        Op::Ret(val, mem) if old.ret_ty.as_ref().is_some_and(is_128_bit_int) => {
+        Op::Ret(val, mem)
+            if old
+                .ret_ty
+                .as_ref()
+                .is_some_and(|t| is_128_bit_int_with_annotation(t, &old.ret_annotation)) =>
+        {
             leg_ret(s, b, old_vref, val, &mem.clone().raw());
         }
         Op::Call(callee, args, mem) => {
@@ -1628,8 +1645,12 @@ enum BitwiseKind {
 // ---------------------------------------------------------------------------
 
 fn leg_param<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, lo_idx: u32, hi_idx: u32) {
-    let lo = b.param(lo_idx, I64_TYPE, None, o());
-    let hi = b.param(hi_idx, I64_TYPE, None, o());
+    let ann64 = Some(Annotation::Int(IntAnnotation {
+        bit_width: 64,
+        signedness: IntSignedness::Unsigned,
+    }));
+    let lo = b.param(lo_idx, I64_TYPE, ann64, o());
+    let hi = b.param(hi_idx, I64_TYPE, ann64, o());
     s.vmap.set(old_vref, Mapped::Pair(lo, hi));
 }
 
@@ -2182,16 +2203,22 @@ fn leg_shr<M>(
     old_vref: ValueRef,
     a: &Operand,
     op_b: &Operand,
-    _ann: Option<&Annotation>,
+    ann: Option<&Annotation>,
 ) {
-    let signed = value_type(old, a.value).is_some_and(is_signed_128_int);
+    let signed = ann
+        .and_then(|a| match a {
+            Annotation::Int(ia) => Some(ia.signedness),
+            _ => None,
+        })
+        .is_some_and(|s| matches!(s, IntSignedness::Signed));
     let (a_lo, a_hi) = wide_pair(s, old, b, a);
     let amt = s.vmap.one(op_b.value);
 
     let c0 = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
     let c64 = b.iconst(64i64, 64, IntSignedness::Unsigned, o());
 
-    let hi_small = b.shr(a_hi.into(), amt.into(), None, o());
+    let hi_ann = if signed { Some(SIGNED_64) } else { None };
+    let hi_small = b.shr(a_hi.into(), amt.into(), hi_ann, o());
     let lo_shifted = b.shr(a_lo.into(), amt.into(), None, o());
     let comp = b.sub(c64.into(), amt.into(), I64, o());
     let hi_spill = b.shl(a_hi.into(), comp.into(), None, o());
@@ -2207,10 +2234,10 @@ fn leg_shr<M>(
     let lo_small = b.or(lo_shifted.into(), hi_spill_safe.into(), I64, o());
 
     let amt_minus_64 = b.sub(amt.into(), c64.into(), I64, o());
-    let lo_large = b.shr(a_hi.into(), amt_minus_64.into(), None, o());
+    let lo_large = b.shr(a_hi.into(), amt_minus_64.into(), hi_ann, o());
     let hi_large = if signed {
         let c63 = b.iconst(63i64, 64, IntSignedness::Unsigned, o());
-        b.shr(a_hi.into(), c63.into(), None, o())
+        b.shr(a_hi.into(), c63.into(), Some(SIGNED_64), o())
     } else {
         c0
     };
@@ -2256,70 +2283,19 @@ fn leg_icmp<M>(
 
     let result = match cmp_op {
         ICmpOp::Eq => {
-            let hi_eq = b.icmp(ICmpOp::Eq, a_hi.into(), b_hi.into(), o());
-            let lo_eq = b.icmp(ICmpOp::Eq, a_lo.into(), b_lo.into(), o());
-            let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
-            let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
-            let hi_int = b.select(
-                hi_eq.into(),
-                one.into(),
-                zero.into(),
-                Type::Int,
-                Some(Annotation::Int(IntAnnotation {
-                    bit_width: 64,
-                    signedness: IntSignedness::Unsigned,
-                })),
-                o(),
-            );
-            let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
-            let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
-            let lo_int = b.select(
-                lo_eq.into(),
-                one.into(),
-                zero.into(),
-                Type::Int,
-                Some(Annotation::Int(IntAnnotation {
-                    bit_width: 64,
-                    signedness: IntSignedness::Unsigned,
-                })),
-                o(),
-            );
-            let both = b.and(hi_int.into(), lo_int.into(), I64, o());
+            // XOR-based equality: avoids ISel flag-clobbering from back-to-back cmps.
+            let hi_diff = b.xor(a_hi.into(), b_hi.into(), I64, o());
+            let lo_diff = b.xor(a_lo.into(), b_lo.into(), I64, o());
+            let or_diff = b.or(hi_diff.into(), lo_diff.into(), I64, o());
             let zero = b.iconst(0, 64, IntSignedness::DontCare, o());
-            b.icmp(ICmpOp::Ne, both.into(), zero.into(), o()).raw()
+            b.icmp(ICmpOp::Eq, or_diff.into(), zero.into(), o()).raw()
         }
         ICmpOp::Ne => {
-            let hi_ne = b.icmp(ICmpOp::Ne, a_hi.into(), b_hi.into(), o());
-            let lo_ne = b.icmp(ICmpOp::Ne, a_lo.into(), b_lo.into(), o());
-            let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
-            let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
-            let hi_int = b.select(
-                hi_ne.into(),
-                one.into(),
-                zero.into(),
-                Type::Int,
-                Some(Annotation::Int(IntAnnotation {
-                    bit_width: 64,
-                    signedness: IntSignedness::Unsigned,
-                })),
-                o(),
-            );
-            let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
-            let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
-            let lo_int = b.select(
-                lo_ne.into(),
-                one.into(),
-                zero.into(),
-                Type::Int,
-                Some(Annotation::Int(IntAnnotation {
-                    bit_width: 64,
-                    signedness: IntSignedness::Unsigned,
-                })),
-                o(),
-            );
-            let either = b.or(hi_int.into(), lo_int.into(), I64, o());
+            let hi_diff = b.xor(a_hi.into(), b_hi.into(), I64, o());
+            let lo_diff = b.xor(a_lo.into(), b_lo.into(), I64, o());
+            let or_diff = b.or(hi_diff.into(), lo_diff.into(), I64, o());
             let zero = b.iconst(0, 64, IntSignedness::DontCare, o());
-            b.icmp(ICmpOp::Ne, either.into(), zero.into(), o()).raw()
+            b.icmp(ICmpOp::Ne, or_diff.into(), zero.into(), o()).raw()
         }
         ICmpOp::Lt | ICmpOp::Le | ICmpOp::Gt | ICmpOp::Ge => {
             let hi_cmp = b.icmp(cmp_op, a_hi.into(), b_hi.into(), o());
@@ -2409,7 +2385,9 @@ fn leg_store_128<M>(
 fn leg_sext_128<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, val: &Operand) {
     let lo = s.vmap.one(val.value);
     let c63 = b.iconst(63i64, 64, IntSignedness::Unsigned, o());
-    let hi = b.shr(lo.into(), c63.into(), None, o());
+    // Arithmetic shift right: propagate the sign bit of lo into hi.
+    // Must pass a Signed annotation so the ISel emits SAR, not SHR.
+    let hi = b.shr(lo.into(), c63.into(), Some(SIGNED_64), o());
     s.vmap.set(old_vref, Mapped::Pair(lo, hi.raw()));
 }
 
@@ -2472,7 +2450,7 @@ fn leg_fp_to_int128<M: AbiMetadata + Clone>(
                 let lo = s.vmap.one(zext_val.value);
                 let hi = if signed {
                     let c63 = b.iconst(63i64, 64, IntSignedness::Unsigned, o());
-                    b.shr(lo.into(), c63.into(), None, o())
+                    b.shr(lo.into(), c63.into(), Some(SIGNED_64), o())
                 } else {
                     b.iconst(0i64, 64, IntSignedness::Unsigned, o())
                 };
@@ -2680,7 +2658,7 @@ fn leg_int128_to_fp<M: AbiMetadata + Clone>(
         let lo = s.vmap.one(a.value);
         let hi = if signed {
             let c63 = b.iconst(63i64, 64, IntSignedness::Unsigned, o());
-            b.shr(lo.into(), c63.into(), None, o())
+            b.shr(lo.into(), c63.into(), Some(SIGNED_64), o())
         } else {
             b.iconst(0i64, 64, IntSignedness::Unsigned, o())
         };
@@ -2788,7 +2766,12 @@ fn leg_call<M: AbiMetadata + Clone>(
                 b.iconst(hi_big, 64, IntSignedness::Unsigned, o())
             } else if value_type(_old, arg.value).is_some_and(is_signed_128_int) {
                 let c63 = b.iconst(63i64, 64, IntSignedness::Unsigned, o());
-                b.shr(Operand::new(lo.value).into(), c63.into(), None, o())
+                b.shr(
+                    Operand::new(lo.value).into(),
+                    c63.into(),
+                    Some(SIGNED_64),
+                    o(),
+                )
             } else {
                 b.iconst(0i64, 64, IntSignedness::Unsigned, o())
             };
