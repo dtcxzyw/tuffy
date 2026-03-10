@@ -1487,13 +1487,7 @@ fn select_inst(
             let gpr_dst = ctx.alloc.alloc();
 
             let is_u64 = matches!(op, Op::UiToFp(..))
-                && matches!(
-                    val_ann,
-                    Some(IntAnnotation {
-                        bit_width: 64,
-                        signedness: IntSignedness::Unsigned,
-                    }) | None
-                );
+                && matches!(val_ann.map(|a| a.bit_width), Some(64) | None);
 
             if is_u64 {
                 // u64 → float: values > i64::MAX need special handling.
