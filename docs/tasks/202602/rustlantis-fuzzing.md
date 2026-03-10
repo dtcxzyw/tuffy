@@ -28,19 +28,21 @@ cargo build --release
 
 ### Running
 
-Two approaches are available:
-
-1. Built-in difftest framework: `./fuzz-one.sh <seed>`
-2. Standalone script: `./fuzz.sh <start_seed> <end_seed> [jobs]`
-
-The standalone script supports parallel execution. The optional `jobs` parameter controls concurrency (defaults to `nproc`). Examples:
+Use the Python script for fuzzing:
 
 ```bash
-./fuzz.sh 0 1000        # Use all CPU cores
-./fuzz.sh 0 1000 8      # Use 8 parallel jobs
+cd /tmp/rustlantis
+python3 /tuffy/rustc_codegen_tuffy/rustlantis/patch/fuzz.py <start_seed> <end_seed> [jobs]
 ```
 
-Both compare tuffy output against LLVM with `-Zmir-opt-level=3`.
+The script supports parallel execution. The optional `jobs` parameter controls concurrency (defaults to `nproc`). Examples:
+
+```bash
+python3 /tuffy/rustc_codegen_tuffy/rustlantis/patch/fuzz.py 0 1000      # Use all CPU cores
+python3 /tuffy/rustc_codegen_tuffy/rustlantis/patch/fuzz.py 0 1000 8    # Use 8 parallel jobs
+```
+
+The script uses `-Zmir-opt-level=0` (unoptimized MIR) and `-C opt-level=3` (LLVM optimizations) to compare tuffy output against LLVM.
 
 Hints:
 - Adjust `config.toml` to generate smaller inputs (fewer basic blocks, functions, args, etc.) when debugging — smaller programs are much easier to minimize and reason about. The shipped config already uses reduced values compared to upstream defaults.
