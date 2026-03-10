@@ -1035,6 +1035,10 @@ fn encode_inst(inst: &PInst, ctx: &mut EncodeContext) {
 
 /// Parallel copy of two register pairs, handling all ordering cases.
 fn encode_mov_rr2(ctx: &mut EncodeContext, dst1: Gpr, src1: Gpr, dst2: Gpr, src2: Gpr) {
+    debug_assert!(
+        dst1 != dst2 || (dst1 == src1 && dst2 == src2),
+        "MovRR2 dst1==dst2={dst1:?}, src1={src1:?}, src2={src2:?}"
+    );
     let need1 = dst1 != src1;
     let need2 = dst2 != src2;
     if !need1 && !need2 {

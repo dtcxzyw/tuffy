@@ -373,11 +373,6 @@ fn gen_icmp(
     cmp_op: ICmpOp,
     lhs_ann: Option<Annotation>,
 ) -> Option<()> {
-    ctx.out.push(MInst::CmpRR {
-        size: OpSize::S64,
-        src1: lhs,
-        src2: rhs,
-    });
     let int_ann = lhs_ann.and_then(|a| {
         if let Annotation::Int(ia) = a {
             Some(ia)
@@ -385,8 +380,29 @@ fn gen_icmp(
             None
         }
     });
+    // Use the annotation's bit_width for comparison size.  Sub-64-bit values
+    // loaded from stack slots are zero-extended (movzx), which loses sign
+    // information.  A 64-bit signed compare on zero-extended i8/i16 values
+    // gives wrong results for negative operands.
+    let cmp_size = match int_ann.as_ref().map(|a| a.bit_width) {
+        Some(8) => OpSize::S8,
+        Some(16) => OpSize::S16,
+        Some(32) => OpSize::S32,
+        _ => OpSize::S64,
+    };
+    ctx.out.push(MInst::CmpRR {
+        size: cmp_size,
+        src1: lhs,
+        src2: rhs,
+    });
     let cc = super::icmp_to_cc(cmp_op, int_ann);
-    ctx.cmps.set(vref, cc);
+    // Materialize the comparison result into a register immediately so that
+    // intervening instructions cannot clobber the FLAGS register.
+    let tmp = ctx.alloc.alloc();
+    let dst = ctx.alloc.alloc();
+    ctx.out.push(MInst::SetCC { cc, dst: tmp });
+    ctx.out.push(MInst::MovzxB { dst, src: tmp });
+    ctx.regs.assign(vref, dst);
     Some(())
 }
 

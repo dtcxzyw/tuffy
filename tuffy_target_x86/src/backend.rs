@@ -517,15 +517,29 @@ fn rewrite_with_spills(
                 }
             }
         } else {
-            // Multiple spilled operands: use R10 for Use operands and R11
-            // for the UseDef/Def operand to avoid clobbering.
+            // Multiple spilled operands: use R10 for one operand and R11
+            // for the other to avoid clobbering.
             //
             // Identify which vreg gets R10 (the secondary spill register).
-            // The Use-only operand gets R10; the UseDef operand keeps R11.
+            // Prefer assigning R10 to a Use-only operand. If there are
+            // multiple spilled Defs (e.g. MovRR2 with both dsts spilled),
+            // assign R10 to the second Def to keep them distinct.
             let r10_vreg = spilled
                 .iter()
                 .find(|sp| matches!(sp.kind, OpKind::Use))
-                .map(|sp| sp.vreg_idx);
+                .map(|sp| sp.vreg_idx)
+                .or_else(|| {
+                    // No Use operand to assign R10 — check for multiple Defs.
+                    let defs: Vec<_> = spilled
+                        .iter()
+                        .filter(|sp| matches!(sp.kind, OpKind::Def | OpKind::UseDef))
+                        .collect();
+                    if defs.len() >= 2 {
+                        Some(defs[1].vreg_idx)
+                    } else {
+                        None
+                    }
+                });
 
             // Emit loads: UseDef → R11, Use → R10.
             for sp in &spilled {
@@ -541,7 +555,7 @@ fn rewrite_with_spills(
                 }
             }
 
-            // Rewrite the instruction with R10 override for the Use operand.
+            // Rewrite the instruction with R10 override for the designated operand.
             if let Some(r10_vi) = r10_vreg {
                 let mut overrides = alloc_result.assignments.to_vec();
                 overrides[r10_vi as usize] = SPILL_REG2;
@@ -553,11 +567,16 @@ fn rewrite_with_spills(
             // Emit stores for Def/UseDef operands.
             for sp in &spilled {
                 if matches!(sp.kind, OpKind::Def | OpKind::UseDef) {
+                    let src_gpr = if r10_vreg == Some(sp.vreg_idx) {
+                        spill_gpr2
+                    } else {
+                        Gpr::R11
+                    };
                     out.push(MInst::MovMR {
                         size: OpSize::S64,
                         base: Gpr::Rbp,
                         offset: sp.offset,
-                        src: Gpr::R11,
+                        src: src_gpr,
                     });
                 }
             }
