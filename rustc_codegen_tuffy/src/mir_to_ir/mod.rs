@@ -89,7 +89,14 @@ pub fn translate_function<'tcx>(
 
     let ret_mir_ty = monomorphize(mir.local_decls[mir::RETURN_PLACE].ty);
     let ret_size = type_size(tcx, ret_mir_ty).unwrap_or(0);
-    let needs_sret = ret_size > 16;
+    let ret_repr = repr_kind(tcx, ret_mir_ty);
+    // In Rust ABI, Scalar and ScalarPair types are returned in registers.
+    // Memory types with size > 8 use SRET (hidden first pointer parameter).
+    // Memory types with size ≤ 8 are coerced to a single register.
+    let needs_sret = match ret_repr {
+        ReprKind::Scalar | ReprKind::ScalarPair | ReprKind::Zst => false,
+        ReprKind::Memory => ret_size > 8,
+    };
 
     // For SRET functions, the return type becomes Ptr (the SRET pointer is
     // returned in RAX per SysV ABI). Otherwise, use the semantic return type.
@@ -117,10 +124,11 @@ pub fn translate_function<'tcx>(
                     })
                 })
                 .or_else(|| {
-                    // For structs 9-16 bytes, use 64-bit annotation since the
-                    // function returns the first 8 bytes in RAX; the remaining
-                    // bytes are returned in RDX via ABI metadata (see terminator.rs).
-                    if ret_size > 8 && ret_size <= 16 {
+                    // For ScalarPair returns (e.g. fat pointers, Argument),
+                    // use 64-bit annotation since the function returns the first
+                    // 8 bytes in RAX; the remaining bytes are returned in RDX
+                    // via ABI metadata (see terminator.rs).
+                    if matches!(ret_repr, ReprKind::ScalarPair | ReprKind::Scalar) && ret_size > 8 {
                         int_annotation_for_bytes(8)
                     } else {
                         int_annotation_for_bytes(ret_size as u32)
@@ -149,50 +157,76 @@ pub fn translate_function<'tcx>(
     for i in 0..mir.arg_count {
         let local = mir::Local::from_usize(i + 1);
         let ty = monomorphize(mir.local_decls[local].ty);
-        match translate_ty(tcx, ty) {
-            Some(Type::Unit) | None => continue,
-            Some(ir_ty) => {
-                let sz = type_size(tcx, ty).unwrap_or(0);
-                let is_int = matches!(ir_ty, Type::Int);
-                // For >16 byte parameters, the caller passes a pointer per x86-64 ABI.
-                let param_ty = if sz > 16 { Type::Ptr(0) } else { ir_ty };
-                let param_ann = if sz > 16 {
-                    None
-                } else if is_int {
-                    int_bitwidth(ty).map(|bw| {
-                        Annotation::Int(IntAnnotation {
-                            bit_width: bw,
-                            signedness: if is_signed_int(ty) {
-                                IntSignedness::Signed
-                            } else {
-                                IntSignedness::Unsigned
-                            },
-                        })
-                    })
-                } else {
-                    translate_annotation(ty)
-                };
-                params.push(param_ty);
-                param_anns.push(param_ann);
+        let ir_ty = translate_ty(tcx, ty);
+        let sz = type_size(tcx, ty).unwrap_or(0);
+
+        if matches!(ir_ty, Some(Type::Unit)) || sz == 0 {
+            continue;
+        }
+
+        // Non-zero-sized aggregate with no direct IR type: use Int register(s).
+        if ir_ty.is_none() {
+            let prk = repr_kind(tcx, ty);
+            if matches!(prk, ReprKind::ScalarPair | ReprKind::Scalar) && sz > 8 {
+                // ScalarPair (e.g. fat pointer): two registers.
+                params.push(Type::Int);
+                param_anns.push(int_annotation_for_bytes(8));
                 param_names.push(None);
-                // Fat pointer types (&str, &[T], &dyn Trait) are passed
-                // as two register-sized values: data pointer + metadata
-                // (length or vtable pointer).
-                if is_fat_ptr(tcx, ty) {
-                    let (meta_ty, meta_ann) = match ty.kind() {
-                        ty::TyKind::Ref(_, pointee, _) | ty::TyKind::RawPtr(pointee, _) => {
-                            match pointee.kind() {
-                                ty::TyKind::Dynamic(..) => (Type::Ptr(0), None),
-                                _ => (Type::Int, default_int_annotation()),
-                            }
-                        }
-                        _ => (Type::Int, default_int_annotation()),
-                    };
-                    params.push(meta_ty);
-                    param_anns.push(meta_ann);
-                    param_names.push(None);
-                }
+                params.push(Type::Int);
+                param_anns.push(int_annotation_for_bytes((sz - 8) as u32));
+                param_names.push(None);
+            } else if sz > 8 {
+                // Memory type > 8 bytes: passed by hidden pointer.
+                params.push(Type::Ptr(0));
+                param_anns.push(None);
+                param_names.push(None);
+            } else {
+                params.push(Type::Int);
+                param_anns.push(int_annotation_for_bytes(sz as u32));
+                param_names.push(None);
             }
+            continue;
+        }
+
+        let ir_ty = ir_ty.unwrap();
+        let is_int = matches!(ir_ty, Type::Int);
+        // For >16 byte parameters, the caller passes a pointer per x86-64 ABI.
+        let param_ty = if sz > 16 { Type::Ptr(0) } else { ir_ty };
+        let param_ann = if sz > 16 {
+            None
+        } else if is_int {
+            int_bitwidth(ty).map(|bw| {
+                Annotation::Int(IntAnnotation {
+                    bit_width: bw,
+                    signedness: if is_signed_int(ty) {
+                        IntSignedness::Signed
+                    } else {
+                        IntSignedness::Unsigned
+                    },
+                })
+            })
+        } else {
+            translate_annotation(ty)
+        };
+        params.push(param_ty);
+        param_anns.push(param_ann);
+        param_names.push(None);
+        // Fat pointer types (&str, &[T], &dyn Trait) are passed
+        // as two register-sized values: data pointer + metadata
+        // (length or vtable pointer).
+        if is_fat_ptr(tcx, ty) {
+            let (meta_ty, meta_ann) = match ty.kind() {
+                ty::TyKind::Ref(_, pointee, _) | ty::TyKind::RawPtr(pointee, _) => {
+                    match pointee.kind() {
+                        ty::TyKind::Dynamic(..) => (Type::Ptr(0), None),
+                        _ => (Type::Int, default_int_annotation()),
+                    }
+                }
+                _ => (Type::Int, default_int_annotation()),
+            };
+            params.push(meta_ty);
+            param_anns.push(meta_ann);
+            param_names.push(None);
         }
     }
 
@@ -541,7 +575,7 @@ pub fn translate_function<'tcx>(
         if ret_size > 8
             && ret_size <= 16
             && !ctx.stack_locals.is_stack(ret_local)
-            && !matches!(repr_kind(ctx.tcx, ret_ty), ReprKind::Scalar)
+            && !matches!(repr_kind(ctx.tcx, ret_ty), ReprKind::Scalar if ret_size <= 8)
         {
             let slot = ctx.builder.stack_slot(ret_size as u32, Origin::synthetic());
             ctx.locals.set(ret_local, slot);

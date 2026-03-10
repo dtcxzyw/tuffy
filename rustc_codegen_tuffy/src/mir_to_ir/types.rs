@@ -62,6 +62,14 @@ pub(super) fn int_annotation_for_bytes(bytes: u32) -> Option<Annotation> {
     }))
 }
 
+/// Helper to create a *signed* Int annotation for a given number of bytes.
+pub(super) fn signed_int_annotation_for_bytes(bytes: u32) -> Option<Annotation> {
+    Some(Annotation::Int(IntAnnotation {
+        bit_width: bytes * 8,
+        signedness: IntSignedness::Signed,
+    }))
+}
+
 /// Look up the fully-monomorphized layout for a type, or return `None` on failure.
 ///
 /// All layout queries in this module use fully-monomorphized types, so this

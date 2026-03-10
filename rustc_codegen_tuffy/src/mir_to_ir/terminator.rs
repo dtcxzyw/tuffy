@@ -106,6 +106,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         .expect("return local _0 must be set");
                     let ret_ty = self.monomorphize(self.mir.local_decls[ret_local].ty);
                     let size = type_size(self.tcx, ret_ty).unwrap_or(8);
+                    let ret_repr = repr_kind(self.tcx, ret_ty);
+                    let is_two_reg =
+                        size > 8 && matches!(ret_repr, ReprKind::ScalarPair | ReprKind::Scalar);
 
                     // Load the first word from the stack slot.
                     // Use the actual type size (clamped to 8) so that sub-word
@@ -113,8 +116,22 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // of reading garbage bytes beyond the stored value.
                     let load_size = size.min(8) as u32;
                     let load_ty = translate_ty(self.tcx, ret_mir_ty).unwrap_or(Type::Int);
-                    let ann = translate_annotation(ret_mir_ty)
-                        .or_else(|| int_annotation_for_bytes(load_size));
+                    // For two-register returns (ScalarPair, e.g. fat pointers),
+                    // use i64 annotation for the low-half load.
+                    // translate_annotation would give the full-width annotation
+                    // (u128) which misleads the legalizer into treating this
+                    // 8-byte load as a 128-bit value.
+                    let ann = if is_two_reg {
+                        int_annotation_for_bytes(load_size)
+                    } else {
+                        translate_annotation(ret_mir_ty).or_else(|| {
+                            if matches!(load_ty, Type::Int) {
+                                int_annotation_for_bytes(load_size)
+                            } else {
+                                None
+                            }
+                        })
+                    };
                     let word0 = self.builder.load(
                         slot.into(),
                         load_size,
@@ -131,8 +148,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         _ => word0,
                     };
 
-                    if size > 8 {
-                        // Two-register return (9-16 bytes): load second word
+                    if is_two_reg {
+                        // Two-register return (ScalarPair): load second word
                         // and mark it for RDX via ABI metadata.
                         let off8 = self.builder.iconst(
                             8,
@@ -187,6 +204,25 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     Type::Int,
                                     self.current_mem.into(),
                                     int_annotation_for_bytes(ret_size),
+                                    Origin::synthetic(),
+                                )
+                            }
+                            // Aggregate type (tuple/struct) that translate_ty
+                            // maps to None but fits in ≤8 bytes.  The function
+                            // signature declares Int return; load the value from
+                            // the constant/stack pointer.
+                            (None, Some(Type::Ptr(_)))
+                                if self.builder.is_memory_address(v)
+                                    && ret_size > 0
+                                    && ret_size <= 8 =>
+                            {
+                                let sz = ret_size.min(8) as u32;
+                                self.builder.load(
+                                    v.into(),
+                                    sz,
+                                    Type::Int,
+                                    self.current_mem.into(),
+                                    int_annotation_for_bytes(sz),
                                     Origin::synthetic(),
                                 )
                             }
@@ -542,7 +578,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         // target values to the correct bit width.  MIR stores switch values
         // as u128, but the runtime discriminant is stored in a sized slot
         // (e.g. 32-bit for i32) and zero-extended on load.
-        let discr_ty = self.operand_ty_mono(discr);
+        // Use projected type so that e.g. `_x.1` where `_x: (u64, u128)`
+        // yields `u128` rather than the whole tuple type.
+        let discr_ty =
+            operand_ty_projected(discr, self.mir, self.tcx).map(|t| self.monomorphize(t));
         let discr_bits = discr_ty
             .and_then(|t| type_size(self.tcx, t))
             .map(|sz| sz * 8)
@@ -645,7 +684,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             };
             let const_val = self.builder.iconst(
                 BigInt::from(truncated),
-                64,
+                (discr_bits as u32).min(128),
                 IntSignedness::DontCare,
                 Origin::synthetic(),
             );
@@ -676,7 +715,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 };
                 let const_val = self.builder.iconst(
                     BigInt::from(truncated),
-                    64,
+                    (discr_bits as u32).min(128),
                     IntSignedness::DontCare,
                     Origin::synthetic(),
                 );

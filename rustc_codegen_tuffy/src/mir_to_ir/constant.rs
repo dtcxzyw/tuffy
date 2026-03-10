@@ -23,19 +23,22 @@ pub(super) fn translate_int_to_int_cast(
     }
 
     if dst_bits > src_bits {
-        // Widening: use sext/zext with src_bits
+        // Widening cast. For sub-64-bit sources targeting 128 bits, first
+        // extend to 64 bits so that leg_sext_128 / leg_zext_128 see a full
+        // 64-bit lo value (their `val >> 63` assumes 64-bit input).
+        let mut v = val;
+        if src_bits < 64 && dst_bits > 64 {
+            // Intermediate extension to 64 bits.
+            if is_signed_int(src_ty) {
+                v = builder.sext(v.into(), 64, Origin::synthetic()).raw();
+            } else {
+                v = builder.zext(v.into(), 64, Origin::synthetic()).raw();
+            }
+        }
         if is_signed_int(src_ty) {
-            Some(
-                builder
-                    .sext(val.into(), src_bits, Origin::synthetic())
-                    .raw(),
-            )
+            Some(builder.sext(v.into(), dst_bits, Origin::synthetic()).raw())
         } else {
-            Some(
-                builder
-                    .zext(val.into(), src_bits, Origin::synthetic())
-                    .raw(),
-            )
+            Some(builder.zext(v.into(), dst_bits, Origin::synthetic()).raw())
         }
     } else {
         // Narrowing: use sext/zext with dst_bits
@@ -392,18 +395,21 @@ pub(super) fn translate_scalar(
                 16 => BigInt::from(bits as i128),
                 _ => BigInt::from(bits as i128),
             };
+            let bit_width = (size_bytes * 8).min(128) as u32;
             Some(
                 builder
-                    .iconst(val, 64, IntSignedness::DontCare, Origin::synthetic())
+                    .iconst(val, bit_width, IntSignedness::DontCare, Origin::synthetic())
                     .raw(),
             )
         }
         ty::Uint(_) => {
             // Unsigned: convert u128 directly to BigInt (always non-negative).
+            let size_bytes = int.size().bytes();
             let val = BigInt::from(bits);
+            let bit_width = (size_bytes * 8).min(128) as u32;
             Some(
                 builder
-                    .iconst(val, 64, IntSignedness::DontCare, Origin::synthetic())
+                    .iconst(val, bit_width, IntSignedness::DontCare, Origin::synthetic())
                     .raw(),
             )
         }

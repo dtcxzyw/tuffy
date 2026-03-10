@@ -253,7 +253,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     sz as u32,
                                     Type::Int,
                                     self.current_mem.into(),
-                                    None,
+                                    translate_annotation(arg_ty),
                                     Origin::synthetic(),
                                 )
                             } else {
@@ -683,11 +683,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             self.monomorphize(destination.ty(&self.mir.local_decls, self.tcx).ty)
         };
         let dest_size = type_size(self.tcx, dest_ty);
+        let dest_repr = repr_kind(self.tcx, dest_ty);
 
-        // Check if this is a large struct return (>16 bytes) that requires SRET.
-        // On x86-64 SysV ABI, structs larger than 16 bytes are returned via
-        // a hidden pointer passed as the first argument.
-        let needs_sret = dest_size.is_some_and(|sz| sz > 16);
+        // In Rust ABI, Scalar and ScalarPair types are returned in registers.
+        // Memory types with size > 8 use SRET (hidden first pointer parameter).
+        // Memory types with size ≤ 8 are coerced to a single register.
+        let needs_sret = match dest_repr {
+            ReprKind::Scalar | ReprKind::ScalarPair | ReprKind::Zst => false,
+            ReprKind::Memory => dest_size.is_some_and(|sz| sz > 8),
+        };
         let sret_slot = if needs_sret {
             // If the destination is _0 and the function itself has an SRET
             // pointer, reuse it so the callee writes directly into the
@@ -901,7 +905,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         arg_size as u32,
                         Type::Int,
                         self.current_mem.into(),
-                        None,
+                        int_annotation_for_bytes(arg_size as u32),
                         Origin::synthetic(),
                     );
                 }
@@ -925,7 +929,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     };
                 let is_struct_arg = arg_size > 8
                     && arg_size <= 16
-                    && !matches!(repr_kind(self.tcx, arg_ty), ReprKind::Scalar)
+                    && matches!(repr_kind(self.tcx, arg_ty), ReprKind::ScalarPair)
                     && !is_fat_value_not_slot
                     && matches!(self.builder.value_type(v), Some(Type::Ptr(_)));
                 let decomposed = if is_struct_arg {
@@ -1042,10 +1046,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         );
                         ir_args.push(w1.into());
                     } else {
-                        // Large struct/array (>16 bytes): pass a pointer to a fresh copy.
+                        // Memory aggregate > 8 bytes: pass a pointer to a fresh copy.
                         // Passing the original slot directly would let the callee overwrite
                         // the caller's local (violating Rust pass-by-value semantics).
-                        if arg_size > 16 && matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
+                        let is_memory_indirect = arg_size > 8
+                            && matches!(repr_kind(self.tcx, arg_ty), ReprKind::Memory)
+                            && matches!(self.builder.value_type(v), Some(Type::Ptr(_)));
+                        if (arg_size > 16 || is_memory_indirect)
+                            && matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
                         {
                             let align = type_align(self.tcx, arg_ty).unwrap_or(1) as u32;
                             let tmp = self
@@ -1068,6 +1076,22 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             );
                             self.current_mem = new_mem.raw();
                             ir_args.push(tmp.into());
+                        } else if arg_size > 0
+                            && arg_size <= 8
+                            && matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
+                            && translate_ty(self.tcx, arg_ty).is_none()
+                        {
+                            // Small aggregate (1-8 bytes) in a stack slot:
+                            // load the value so it is passed by register.
+                            let loaded = self.builder.load(
+                                v.into(),
+                                arg_size as u32,
+                                Type::Int,
+                                self.current_mem.into(),
+                                int_annotation_for_bytes(arg_size as u32),
+                                Origin::synthetic(),
+                            );
+                            ir_args.push(loaded.into());
                         } else {
                             ir_args.push(v.into());
                         }
@@ -1302,15 +1326,42 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // slot as the destination local.
             self.locals.set(destination.local, slot);
             self.stack_locals.mark(destination.local);
-        } else if dest_size.unwrap_or(0) > 8 {
-            // Two-register return (9-16 bytes): RAX has the first 8 bytes,
-            // RDX has the remaining bytes.  Capture both and store to a
-            // stack slot.
-            //
-            // SRET (>16 bytes) is handled above, so any remaining >8-byte
-            // return — whether Scalar (u128/i128) or non-Scalar (small struct)
-            // — uses RAX+RDX on x86-64 SysV ABI.  No type-specific special
-            // casing is needed here.
+        } else if matches!(
+            dest_ty.kind(),
+            ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
+        ) {
+            // i128/u128 scalar return: the call result is annotated :s128.
+            // Emit a single store.16 and let legalization split the 128-bit
+            // value into lo/hi halves with the correct RDX capture.
+            // Do NOT manually create an RDX capture here — leg_call handles
+            // wide returns by splitting the call and capturing RDX itself.
+            let slot = if let Some(existing) = self.locals.get(destination.local) {
+                if self.stack_locals.is_stack(destination.local) {
+                    existing
+                } else {
+                    self.builder.stack_slot(16, Origin::synthetic())
+                }
+            } else {
+                self.builder.stack_slot(16, Origin::synthetic())
+            };
+            self.current_mem = self
+                .builder
+                .store(
+                    call_vref.into(),
+                    slot.into(),
+                    16,
+                    self.current_mem.into(),
+                    Origin::synthetic(),
+                )
+                .raw();
+            self.locals.set(destination.local, slot);
+            self.stack_locals.mark(destination.local);
+        } else if dest_size.unwrap_or(0) > 8
+            && matches!(dest_repr, ReprKind::ScalarPair | ReprKind::Scalar)
+        {
+            // Two-register return (ScalarPair, 16 bytes): RAX has the first
+            // 8 bytes, RDX has the remaining bytes.  Capture both and store
+            // to a stack slot.
             let size = dest_size.unwrap();
             let slot = if let Some(existing) = self.locals.get(destination.local) {
                 if self.stack_locals.is_stack(destination.local) {

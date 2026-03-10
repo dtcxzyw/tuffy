@@ -1096,7 +1096,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         lhs_size as u32,
                         Type::Int,
                         self.current_mem.into(),
-                        None,
+                        translate_annotation(lhs_mir_ty),
                         Origin::synthetic(),
                     )
                 } else {
@@ -1112,7 +1112,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         rhs_size as u32,
                         Type::Int,
                         self.current_mem.into(),
-                        None,
+                        translate_annotation(rhs_mir_ty),
                         Origin::synthetic(),
                     )
                 } else {
@@ -1663,30 +1663,44 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             .shr(l_op.into(), masked_op.into(), ann, Origin::synthetic())
                             .raw()
                     }
-                    BinOp::Div => self
-                        .builder
-                        .div(
-                            l_op.into(),
-                            r_op.into(),
-                            IntAnnotation {
-                                bit_width: 64,
-                                signedness: IntSignedness::DontCare,
-                            },
-                            Origin::synthetic(),
-                        )
-                        .raw(),
-                    BinOp::Rem => self
-                        .builder
-                        .rem(
-                            l_op.into(),
-                            r_op.into(),
-                            IntAnnotation {
-                                bit_width: 64,
-                                signedness: IntSignedness::DontCare,
-                            },
-                            Origin::synthetic(),
-                        )
-                        .raw(),
+                    BinOp::Div => {
+                        let bits = self.extract_result_bits(res_ann);
+                        let signedness = match res_ann {
+                            Some(IntAnn::Signed(_)) => IntSignedness::Signed,
+                            Some(IntAnn::Unsigned(_)) => IntSignedness::Unsigned,
+                            _ => IntSignedness::DontCare,
+                        };
+                        self.builder
+                            .div(
+                                l_op.into(),
+                                r_op.into(),
+                                IntAnnotation {
+                                    bit_width: bits,
+                                    signedness,
+                                },
+                                Origin::synthetic(),
+                            )
+                            .raw()
+                    }
+                    BinOp::Rem => {
+                        let bits = self.extract_result_bits(res_ann);
+                        let signedness = match res_ann {
+                            Some(IntAnn::Signed(_)) => IntSignedness::Signed,
+                            Some(IntAnn::Unsigned(_)) => IntSignedness::Unsigned,
+                            _ => IntSignedness::DontCare,
+                        };
+                        self.builder
+                            .rem(
+                                l_op.into(),
+                                r_op.into(),
+                                IntAnnotation {
+                                    bit_width: bits,
+                                    signedness,
+                                },
+                                Origin::synthetic(),
+                            )
+                            .raw()
+                    }
                     BinOp::Offset => {
                         // ptr.wrapping_offset(count) = ptr + count * sizeof(T).
                         let l_raw = self.translate_operand(lhs)?;
@@ -1751,9 +1765,22 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         // This only applies when the target type fits in 64 bits;
                         // 128-bit → 128-bit casts go through the wide_pair path.
                         let target_ty_m = self.monomorphize(*target_ty);
-                        let val = if type_size(self.tcx, src_ty).is_some_and(|s| s > 8)
+                        let src_size = type_size(self.tcx, src_ty).unwrap_or(0);
+                        let dst_size = type_size(self.tcx, target_ty_m).unwrap_or(0);
+                        if src_size > 8
+                            && dst_size > 8
                             && src_ty.is_integral()
-                            && type_size(self.tcx, target_ty_m).is_some_and(|s| s <= 8)
+                            && matches!(self.builder.value_type(val), Some(Type::Ptr(_)))
+                        {
+                            // Both source and target are >8-byte integers (e.g.
+                            // i128 → u128).  `val` is a Ptr to the source data.
+                            // Return it as-is so the assignment handler does a
+                            // word-by-word memory copy (same bit pattern).
+                            return Some(val);
+                        }
+                        let val = if src_size > 8
+                            && src_ty.is_integral()
+                            && dst_size <= 8
                             && matches!(self.builder.value_type(val), Some(Type::Ptr(_)))
                         {
                             // Load the low 8 bytes (little-endian) which hold
@@ -1970,11 +1997,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 let clamped_hi = self.builder.min(
                                     corrected.into(),
                                     hi_c.into(),
-                                    None,
+                                    signed_int_annotation_for_bytes(8),
                                     Origin::synthetic(),
                                 );
                                 self.builder
-                                    .max(clamped_hi.into(), lo_c.into(), None, Origin::synthetic())
+                                    .max(
+                                        clamped_hi.into(),
+                                        lo_c.into(),
+                                        signed_int_annotation_for_bytes(8),
+                                        Origin::synthetic(),
+                                    )
                                     .raw()
                             } else {
                                 corrected
@@ -2018,13 +2050,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 let clamped = self.builder.min(
                                     raw.into(),
                                     hi_c.into(),
-                                    None,
+                                    signed_int_annotation_for_bytes(8),
                                     Origin::synthetic(),
                                 );
                                 let clamped = self.builder.max(
                                     clamped.into(),
                                     zero.into(),
-                                    None,
+                                    signed_int_annotation_for_bytes(8),
                                     Origin::synthetic(),
                                 );
                                 // Override: float >= 2^63 → hi (overflow), NaN → 0.
@@ -2134,7 +2166,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 let sign = self.builder.shr(
                                     int_bits_val.into(),
                                     shift_c.into(),
-                                    None,
+                                    int_annotation_for_bytes(8),
                                     Origin::synthetic(),
                                 );
                                 let one = self.builder.iconst(
@@ -2197,14 +2229,38 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             ty::Float(ty::FloatTy::F64) => FloatType::F64,
                             _ => return Some(val),
                         };
-                        let int_val = self.coerce_to_int(val);
+
+                        let src_size = type_size(self.tcx, src_ty).unwrap_or(8);
+                        // When val is a Ptr (address of a >8-byte int like
+                        // i128/u128), load the full value so the legalizer can
+                        // split it.  Without this, coerce_to_int would convert
+                        // the address itself into an integer via ptrtoaddr.
+                        let int_val = if src_size > 8
+                            && matches!(self.builder.value_type(val), Some(Type::Ptr(_)))
+                        {
+                            let ann = if signed {
+                                signed_int_annotation_for_bytes(src_size as u32)
+                            } else {
+                                int_annotation_for_bytes(src_size as u32)
+                            };
+                            self.builder.load(
+                                val.into(),
+                                src_size as u32,
+                                Type::Int,
+                                self.current_mem.into(),
+                                ann,
+                                Origin::synthetic(),
+                            )
+                        } else {
+                            self.coerce_to_int(val)
+                        };
 
                         // Set annotation so the isel can sign/zero-extend narrow
                         // integers before cvtsi2ss/cvtsi2sd.  The x86 instruction
                         // operates on a full 64-bit value; without sign-extension
                         // a byte like 0xDA (-38 as i8) would be seen as 218.
-                        let annotation = if let Some(size) = type_size(self.tcx, src_ty) {
-                            let bits = (size * 8) as u32;
+                        let annotation = if src_size > 0 {
+                            let bits = (src_size * 8) as u32;
                             Some(if signed {
                                 IntAnn::Signed(bits)
                             } else {
@@ -3075,7 +3131,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         );
                         let ones = self.builder.iconst(
                             -1,
-                            64,
+                            bits,
                             IntSignedness::DontCare,
                             Origin::synthetic(),
                         );
@@ -3084,10 +3140,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             .raw()
                     }
                     _ => {
-                        // Bitwise NOT: XOR with -1.
                         let ones = self.builder.iconst(
                             -1,
-                            64,
+                            bits,
                             IntSignedness::DontCare,
                             Origin::synthetic(),
                         );
@@ -3215,16 +3270,36 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             && size <= 8
                             && slot_size.is_some_and(|sz| sz <= 8)
                             && matches!(ir_ty, Some(Type::Bool | Type::Float(_)));
+                        // Small aggregate types (closures, tuples, ADTs) where
+                        // translate_ty returns None but the value fits in a
+                        // register.  Without this, the stack slot address is
+                        // returned instead of the contained value.
+                        let should_load_stack_aggregate = ir_ty.is_none()
+                            && is_slot_ptr
+                            && size > 0
+                            && size <= 8
+                            && slot_size.is_some_and(|sz| sz <= 8);
                         if should_load_stack_int
                             || should_load_stack_ptr
                             || should_load_stack_scalar
+                            || should_load_stack_aggregate
                         {
                             let load_ty = if should_load_stack_ptr {
                                 Type::Ptr(0)
                             } else {
                                 ir_ty.unwrap_or(Type::Int)
                             };
-                            let ann = translate_annotation(ty);
+                            let ann = translate_annotation(ty).or_else(|| {
+                                // Aggregate types have no annotation from
+                                // translate_annotation.  When we load them as
+                                // Type::Int, supply a width annotation to
+                                // satisfy the IR verifier.
+                                if should_load_stack_aggregate {
+                                    int_annotation_for_bytes(size as u32)
+                                } else {
+                                    None
+                                }
+                            });
                             let loaded = self.builder.load(
                                 slot.into(),
                                 size as u32,

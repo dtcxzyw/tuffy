@@ -318,35 +318,120 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     }
 
     pub(super) fn translate_params(&mut self) {
+        // Two-phase param receiving: emit ALL param instructions first,
+        // THEN do stores/mem_copy.  mem_copy lowers to a memcpy call that
+        // clobbers caller-saved registers (RSI, RDI, …).  If a later
+        // param instruction appears after a mem_copy, the ABI register
+        // it reads may already be destroyed.
+
         // When SRET is active, param 0 is the hidden return pointer.
         // Real MIR params start at index 1.
         let mut param_idx: u32 = if self.sret_ptr.is_some() { 1 } else { 0 };
 
+        // Deferred store/copy actions executed after all params are received.
+        enum Deferred {
+            /// mem_copy from pointer param to local stack slot.
+            LargeCopy {
+                ptr: ValueRef,
+                slot: ValueRef,
+                sz: u64,
+            },
+            /// Two-register aggregate → store lo and hi halves.
+            TwoReg {
+                lo: ValueRef,
+                hi: ValueRef,
+                slot: ValueRef,
+                hi_bytes: u64,
+            },
+            /// One-register aggregate → store value.
+            OneReg {
+                val: ValueRef,
+                slot: ValueRef,
+                sz: u64,
+            },
+        }
+        let mut deferred: Vec<Deferred> = Vec::new();
+
+        // --- Phase 1: receive all param values ---
         for i in 0..self.mir.arg_count {
             let local = mir::Local::from_usize(i + 1);
             let ty = self.monomorphize(self.mir.local_decls[local].ty);
             let ir_ty = translate_ty(self.tcx, ty);
 
+            let sz = type_size(self.tcx, ty).unwrap_or(0);
+
             // Skip zero-sized (Unit) and untranslatable params — they don't
             // occupy a runtime slot. Assign a dummy value so downstream MIR
             // references to this local remain valid.
-            match ir_ty {
-                Some(Type::Unit) | None => {
-                    let dummy =
-                        self.builder
-                            .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
-                    self.locals.set(local, dummy.raw());
-                    continue;
-                }
-                _ => {}
-            }
-
-            // Zero-sized ADTs also do not occupy a runtime slot.
-            if type_size(self.tcx, ty).unwrap_or(0) == 0 {
+            if matches!(ir_ty, Some(Type::Unit)) || sz == 0 {
                 let dummy =
                     self.builder
                         .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
                 self.locals.set(local, dummy.raw());
+                continue;
+            }
+
+            // Non-zero-sized aggregate with no direct IR type (arrays,
+            // tuples, ADTs).  Receive register(s) and reconstruct on stack.
+            if ir_ty.is_none() {
+                let prk = repr_kind(self.tcx, ty);
+                if matches!(prk, ReprKind::ScalarPair | ReprKind::Scalar) && sz > 8 {
+                    // ScalarPair aggregate: passed in two registers
+                    let lo = self.builder.param(
+                        param_idx,
+                        Type::Int,
+                        int_annotation_for_bytes(8),
+                        Origin::synthetic(),
+                    );
+                    param_idx += 1;
+                    let hi = self.builder.param(
+                        param_idx,
+                        Type::Int,
+                        int_annotation_for_bytes((sz - 8) as u32),
+                        Origin::synthetic(),
+                    );
+                    param_idx += 1;
+                    let local_slot = self.builder.stack_slot(sz as u32, Origin::synthetic());
+                    deferred.push(Deferred::TwoReg {
+                        lo,
+                        hi,
+                        slot: local_slot,
+                        hi_bytes: sz - 8,
+                    });
+                    self.locals.set(local, local_slot);
+                    self.stack_locals.mark(local);
+                } else if sz > 8 {
+                    // Memory aggregate > 8 bytes: passed by pointer
+                    let ptr =
+                        self.builder
+                            .param(param_idx, Type::Ptr(0), None, Origin::synthetic());
+                    param_idx += 1;
+                    let local_slot = self.builder.stack_slot(sz as u32, Origin::synthetic());
+                    deferred.push(Deferred::LargeCopy {
+                        ptr,
+                        slot: local_slot,
+                        sz,
+                    });
+                    self.locals.set(local, local_slot);
+                    self.stack_locals.mark(local);
+                } else {
+                    // 1–8 byte aggregate: passed in one register
+                    let val = self.builder.param(
+                        param_idx,
+                        Type::Int,
+                        int_annotation_for_bytes(sz as u32),
+                        Origin::synthetic(),
+                    );
+                    param_idx += 1;
+                    let local_slot = self.builder.stack_slot(sz as u32, Origin::synthetic());
+                    deferred.push(Deferred::OneReg {
+                        val,
+                        slot: local_slot,
+                        sz,
+                    });
+                    self.locals.set(local, local_slot);
+                    self.stack_locals.mark(local);
+                }
                 continue;
             }
 
@@ -391,25 +476,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
                     // Allocate local stack space
                     let local_slot = self.builder.stack_slot(sz as u32, Origin::synthetic());
-
-                    // Copy data from caller's pointer to local
-                    let size_val = self.builder.iconst(
-                        sz as i64,
-                        64,
-                        IntSignedness::DontCare,
-                        Origin::synthetic(),
-                    );
-                    let align = 8; // TODO: compute proper alignment
-                    let local_annotated = Operand::annotated(local_slot, Annotation::Align(align));
-                    let ptr_annotated = Operand::annotated(ptr, Annotation::Align(align));
-                    let new_mem = self.builder.mem_copy(
-                        local_annotated.into(),
-                        ptr_annotated.into(),
-                        size_val.into(),
-                        self.current_mem.into(),
-                        Origin::synthetic(),
-                    );
-                    self.current_mem = new_mem.raw();
+                    deferred.push(Deferred::LargeCopy {
+                        ptr,
+                        slot: local_slot,
+                        sz,
+                    });
 
                     // Use the local slot, not the parameter pointer
                     self.locals.set(local, local_slot);
@@ -426,6 +497,76 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 }
 
                 param_idx += 1;
+            }
+        }
+
+        // --- Phase 2: emit stores and mem_copy after all params are received ---
+        for action in deferred {
+            match action {
+                Deferred::LargeCopy { ptr, slot, sz } => {
+                    let size_val = self.builder.iconst(
+                        sz as i64,
+                        64,
+                        IntSignedness::DontCare,
+                        Origin::synthetic(),
+                    );
+                    let align = 8;
+                    let slot_annotated = Operand::annotated(slot, Annotation::Align(align));
+                    let ptr_annotated = Operand::annotated(ptr, Annotation::Align(align));
+                    let new_mem = self.builder.mem_copy(
+                        slot_annotated.into(),
+                        ptr_annotated.into(),
+                        size_val.into(),
+                        self.current_mem.into(),
+                        Origin::synthetic(),
+                    );
+                    self.current_mem = new_mem.raw();
+                }
+                Deferred::TwoReg {
+                    lo,
+                    hi,
+                    slot,
+                    hi_bytes,
+                } => {
+                    self.current_mem = self
+                        .builder
+                        .store(
+                            lo.into(),
+                            slot.into(),
+                            8,
+                            self.current_mem.into(),
+                            Origin::synthetic(),
+                        )
+                        .raw();
+                    let off =
+                        self.builder
+                            .iconst(8i64, 64, IntSignedness::DontCare, Origin::synthetic());
+                    let hi_addr =
+                        self.builder
+                            .ptradd(slot.into(), off.into(), 0, Origin::synthetic());
+                    self.current_mem = self
+                        .builder
+                        .store(
+                            hi.into(),
+                            hi_addr.into(),
+                            hi_bytes as u32,
+                            self.current_mem.into(),
+                            Origin::synthetic(),
+                        )
+                        .raw();
+                }
+                Deferred::OneReg { val, slot, sz } => {
+                    self.current_mem = self
+                        .builder
+                        .store(
+                            val.into(),
+                            slot.into(),
+                            sz as u32,
+                            self.current_mem.into(),
+                            Origin::synthetic(),
+                        )
+                        .raw();
+                }
             }
         }
     }
