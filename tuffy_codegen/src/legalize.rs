@@ -33,10 +33,15 @@ use tuffy_target::legality::LegalityInfo;
 // Helper constants
 // ---------------------------------------------------------------------------
 
-const SIGNED_64: Annotation = Annotation::Int(IntAnnotation {
+const SIGNED_64_INT: IntAnnotation = IntAnnotation {
     bit_width: 64,
     signedness: IntSignedness::Signed,
-});
+};
+
+const UNSIGNED_64_INT: IntAnnotation = IntAnnotation {
+    bit_width: 64,
+    signedness: IntSignedness::Unsigned,
+};
 
 // ---------------------------------------------------------------------------
 // Value mapping
@@ -560,7 +565,7 @@ fn wide_pair<M>(
             // Sign-extend: for positive values hi=0 (same as zero-extend); for negative
             // values (e.g. iconst(-1) used as all-ones in a 128-bit XOR) hi=-1.
             let c63 = b.iconst(63i64, 64, IntSignedness::Unsigned, o());
-            b.shr(lo.into(), c63.into(), Some(SIGNED_64), o()).raw()
+            b.shr(lo.into(), c63.into(), SIGNED_64_INT, o()).raw()
         };
         (lo, hi)
     }
@@ -1105,7 +1110,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
             .shl(
                 remap_op(s, &a.clone().raw()).into(),
                 remap_op(s, &op_b.clone().raw()).into(),
-                ann,
+                int_ann,
                 o(),
             )
             .raw(),
@@ -1113,7 +1118,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
             .shr(
                 remap_op(s, &a.clone().raw()).into(),
                 remap_op(s, &op_b.clone().raw()).into(),
-                ann,
+                int_ann,
                 o(),
             )
             .raw(),
@@ -1121,7 +1126,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
             .min(
                 remap_op(s, &a.clone().raw()).into(),
                 remap_op(s, &op_b.clone().raw()).into(),
-                ann,
+                int_ann,
                 o(),
             )
             .raw(),
@@ -1129,7 +1134,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
             .max(
                 remap_op(s, &a.clone().raw()).into(),
                 remap_op(s, &op_b.clone().raw()).into(),
-                ann,
+                int_ann,
                 o(),
             )
             .raw(),
@@ -1758,16 +1763,16 @@ fn leg_mul<M>(
     let mask32 = b.iconst(0xFFFF_FFFFi64, 64, IntSignedness::Unsigned, o());
 
     let a0 = b.and(a_lo.into(), mask32.into(), I64, o());
-    let a1 = b.shr(a_lo.into(), c32.into(), None, o());
+    let a1 = b.shr(a_lo.into(), c32.into(), UNSIGNED_64_INT, o());
     let b0 = b.and(b_lo.into(), mask32.into(), I64, o());
-    let b1 = b.shr(b_lo.into(), c32.into(), None, o());
+    let b1 = b.shr(b_lo.into(), c32.into(), UNSIGNED_64_INT, o());
 
     let p0 = b.mul(a0.into(), b0.into(), I64, o());
     let p1 = b.mul(a0.into(), b1.into(), I64, o());
     let p2 = b.mul(a1.into(), b0.into(), I64, o());
     let p3 = b.mul(a1.into(), b1.into(), I64, o());
 
-    let p0_hi = b.shr(p0.into(), c32.into(), None, o());
+    let p0_hi = b.shr(p0.into(), c32.into(), UNSIGNED_64_INT, o());
     let mid1 = b.add(p0_hi.into(), p1.into(), I64, o());
     let carry1 = b.icmp(ICmpOp::Lt, mid1.into(), p1.into(), o());
     let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
@@ -1800,12 +1805,12 @@ fn leg_mul<M>(
     );
     let total_carry = b.add(carry1_int.into(), carry2_int.into(), I64, o());
 
-    let mid_shifted = b.shl(mid.into(), c32.into(), None, o());
+    let mid_shifted = b.shl(mid.into(), c32.into(), UNSIGNED_64_INT, o());
     let p0_lo = b.and(p0.into(), mask32.into(), I64, o());
     let lo = b.or(mid_shifted.into(), p0_lo.into(), I64, o());
 
-    let mid_hi = b.shr(mid.into(), c32.into(), None, o());
-    let carry_shifted = b.shl(total_carry.into(), c32.into(), None, o());
+    let mid_hi = b.shr(mid.into(), c32.into(), UNSIGNED_64_INT, o());
+    let carry_shifted = b.shl(total_carry.into(), c32.into(), UNSIGNED_64_INT, o());
     let hi = b.add(mid_hi.into(), carry_shifted.into(), I64, o());
     let hi = b.add(hi.into(), p3.into(), I64, o());
     let cross1 = b.mul(a_lo.into(), b_hi.into(), I64, o());
@@ -2152,10 +2157,10 @@ fn leg_shl<M>(
     let c0 = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
     let c64 = b.iconst(64i64, 64, IntSignedness::Unsigned, o());
 
-    let lo_small = b.shl(a_lo.into(), amt.into(), None, o());
-    let hi_shifted = b.shl(a_hi.into(), amt.into(), None, o());
+    let lo_small = b.shl(a_lo.into(), amt.into(), UNSIGNED_64_INT, o());
+    let hi_shifted = b.shl(a_hi.into(), amt.into(), UNSIGNED_64_INT, o());
     let comp = b.sub(c64.into(), amt.into(), I64, o());
-    let lo_spill = b.shr(a_lo.into(), comp.into(), None, o());
+    let lo_spill = b.shr(a_lo.into(), comp.into(), UNSIGNED_64_INT, o());
     let is_nonzero = b.icmp(ICmpOp::Ne, amt.into(), c0.into(), o());
     let lo_spill_safe = b.select(
         is_nonzero.into(),
@@ -2168,7 +2173,7 @@ fn leg_shl<M>(
     let hi_small = b.or(hi_shifted.into(), lo_spill_safe.into(), I64, o());
 
     let amt_minus_64 = b.sub(amt.into(), c64.into(), I64, o());
-    let hi_large = b.shl(a_lo.into(), amt_minus_64.into(), None, o());
+    let hi_large = b.shl(a_lo.into(), amt_minus_64.into(), UNSIGNED_64_INT, o());
 
     let is_large = b.icmp(ICmpOp::Ge, amt.into(), c64.into(), o());
 
@@ -2217,11 +2222,15 @@ fn leg_shr<M>(
     let c0 = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
     let c64 = b.iconst(64i64, 64, IntSignedness::Unsigned, o());
 
-    let hi_ann = if signed { Some(SIGNED_64) } else { None };
+    let hi_ann = if signed {
+        SIGNED_64_INT
+    } else {
+        UNSIGNED_64_INT
+    };
     let hi_small = b.shr(a_hi.into(), amt.into(), hi_ann, o());
-    let lo_shifted = b.shr(a_lo.into(), amt.into(), None, o());
+    let lo_shifted = b.shr(a_lo.into(), amt.into(), UNSIGNED_64_INT, o());
     let comp = b.sub(c64.into(), amt.into(), I64, o());
-    let hi_spill = b.shl(a_hi.into(), comp.into(), None, o());
+    let hi_spill = b.shl(a_hi.into(), comp.into(), UNSIGNED_64_INT, o());
     let is_nonzero = b.icmp(ICmpOp::Ne, amt.into(), c0.into(), o());
     let hi_spill_safe = b.select(
         is_nonzero.into(),
@@ -2237,7 +2246,7 @@ fn leg_shr<M>(
     let lo_large = b.shr(a_hi.into(), amt_minus_64.into(), hi_ann, o());
     let hi_large = if signed {
         let c63 = b.iconst(63i64, 64, IntSignedness::Unsigned, o());
-        b.shr(a_hi.into(), c63.into(), Some(SIGNED_64), o())
+        b.shr(a_hi.into(), c63.into(), SIGNED_64_INT, o())
     } else {
         c0
     };
@@ -2387,7 +2396,7 @@ fn leg_sext_128<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, val: &
     let c63 = b.iconst(63i64, 64, IntSignedness::Unsigned, o());
     // Arithmetic shift right: propagate the sign bit of lo into hi.
     // Must pass a Signed annotation so the ISel emits SAR, not SHR.
-    let hi = b.shr(lo.into(), c63.into(), Some(SIGNED_64), o());
+    let hi = b.shr(lo.into(), c63.into(), SIGNED_64_INT, o());
     s.vmap.set(old_vref, Mapped::Pair(lo, hi.raw()));
 }
 
@@ -2450,7 +2459,7 @@ fn leg_fp_to_int128<M: AbiMetadata + Clone>(
                 let lo = s.vmap.one(zext_val.value);
                 let hi = if signed {
                     let c63 = b.iconst(63i64, 64, IntSignedness::Unsigned, o());
-                    b.shr(lo.into(), c63.into(), Some(SIGNED_64), o())
+                    b.shr(lo.into(), c63.into(), SIGNED_64_INT, o())
                 } else {
                     b.iconst(0i64, 64, IntSignedness::Unsigned, o())
                 };
@@ -2658,7 +2667,7 @@ fn leg_int128_to_fp<M: AbiMetadata + Clone>(
         let lo = s.vmap.one(a.value);
         let hi = if signed {
             let c63 = b.iconst(63i64, 64, IntSignedness::Unsigned, o());
-            b.shr(lo.into(), c63.into(), Some(SIGNED_64), o())
+            b.shr(lo.into(), c63.into(), SIGNED_64_INT, o())
         } else {
             b.iconst(0i64, 64, IntSignedness::Unsigned, o())
         };
@@ -2769,7 +2778,7 @@ fn leg_call<M: AbiMetadata + Clone>(
                 b.shr(
                     Operand::new(lo.value).into(),
                     c63.into(),
-                    Some(SIGNED_64),
+                    SIGNED_64_INT,
                     o(),
                 )
             } else {

@@ -408,25 +408,28 @@ impl<'a> Builder<'a> {
         &mut self,
         a: IntOperand,
         b: IntOperand,
-        ann: Option<Annotation>,
+        int_ann: crate::types::IntAnnotation,
         origin: Origin,
     ) -> IntValue {
-        let v = self.push_inst(Op::Shl(a, b), Type::Int, None, origin, ann);
+        let res_ann = Some(Annotation::Int(int_ann));
+        let v = self.push_inst(Op::Shl(a, b), Type::Int, None, origin, res_ann);
         IntValue::new(v, self.func)
     }
 
     /// Right shift.
     pub fn shr(
         &mut self,
-        mut a: IntOperand,
+        a: IntOperand,
         b: IntOperand,
-        ann: Option<Annotation>,
+        int_ann: crate::types::IntAnnotation,
         origin: Origin,
     ) -> IntValue {
-        if let Some(annotation) = ann {
-            a = IntOperand::annotated(IntValue::new(a.raw().value, self.func), annotation);
-        }
-        let v = self.push_inst(Op::Shr(a, b), Type::Int, None, origin, ann);
+        let res_ann = Some(Annotation::Int(int_ann));
+        let a = IntOperand::annotated(
+            IntValue::new(a.raw().value, self.func),
+            Annotation::Int(int_ann),
+        );
+        let v = self.push_inst(Op::Shr(a, b), Type::Int, None, origin, res_ann);
         IntValue::new(v, self.func)
     }
 
@@ -485,19 +488,18 @@ impl<'a> Builder<'a> {
         &mut self,
         a: IntOperand,
         b: IntOperand,
-        ann: Option<Annotation>,
+        int_ann: crate::types::IntAnnotation,
         origin: Origin,
     ) -> IntValue {
+        let res_ann = Some(Annotation::Int(int_ann));
         let mut a_op = a.raw();
-        if ann.is_some() {
-            a_op.annotation = ann;
-        }
+        a_op.annotation = res_ann;
         let v = self.push_inst(
             Op::Min(a_op.into(), b.raw().into()),
             Type::Int,
             None,
             origin,
-            ann,
+            res_ann,
         );
         IntValue::new(v, self.func)
     }
@@ -507,19 +509,18 @@ impl<'a> Builder<'a> {
         &mut self,
         a: IntOperand,
         b: IntOperand,
-        ann: Option<Annotation>,
+        int_ann: crate::types::IntAnnotation,
         origin: Origin,
     ) -> IntValue {
+        let res_ann = Some(Annotation::Int(int_ann));
         let mut a_op = a.raw();
-        if ann.is_some() {
-            a_op.annotation = ann;
-        }
+        a_op.annotation = res_ann;
         let v = self.push_inst(
             Op::Max(a_op.into(), b.raw().into()),
             Type::Int,
             None,
             origin,
-            ann,
+            res_ann,
         );
         IntValue::new(v, self.func)
     }

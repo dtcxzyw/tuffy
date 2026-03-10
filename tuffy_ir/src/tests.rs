@@ -14,6 +14,11 @@ const I64: IntAnnotation = IntAnnotation {
     signedness: IntSignedness::Unsigned,
 };
 
+const S64: IntAnnotation = IntAnnotation {
+    bit_width: 64,
+    signedness: IntSignedness::Signed,
+};
+
 #[test]
 fn build_add_function() {
     let mut st = SymbolTable::new();
@@ -402,8 +407,8 @@ fn display_shift_ops() {
     let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let a = builder.param(0, i64_type.clone(), s64_ann, Origin::synthetic());
     let b = builder.param(1, i64_type, s64_ann, Origin::synthetic());
-    let _v_shl = builder.shl(a.into(), b.into(), s64_ann, Origin::synthetic());
-    let v_shr = builder.shr(a.into(), b.into(), s64_ann, Origin::synthetic());
+    let _v_shl = builder.shl(a.into(), b.into(), S64, Origin::synthetic());
+    let v_shr = builder.shr(a.into(), b.into(), S64, Origin::synthetic());
     builder.ret(Some(v_shr.into()), mem0.into(), Origin::synthetic());
     builder.exit_region();
 
@@ -1347,8 +1352,8 @@ fn display_min_max() {
     let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let a = builder.param(0, i64_type.clone(), s64_ann, Origin::synthetic());
     let b = builder.param(1, i64_type.clone(), s64_ann, Origin::synthetic());
-    let v_min = builder.min(a.into(), b.into(), s64_ann, Origin::synthetic());
-    let v_max = builder.max(a.into(), b.into(), s64_ann, Origin::synthetic());
+    let v_min = builder.min(a.into(), b.into(), S64, Origin::synthetic());
+    let v_max = builder.max(a.into(), b.into(), S64, Origin::synthetic());
     let _sum = builder.add(v_min.into(), v_max.into(), s64, Origin::synthetic());
     builder.ret(Some(_sum.into()), mem0.into(), Origin::synthetic());
     builder.exit_region();

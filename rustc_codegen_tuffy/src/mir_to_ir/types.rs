@@ -70,6 +70,22 @@ pub(super) fn signed_int_annotation_for_bytes(bytes: u32) -> Option<Annotation> 
     }))
 }
 
+/// Helper to create an IntAnnotation (not wrapped in Option) for shift operations.
+pub(super) fn int_ann_for_bytes(bytes: u32) -> IntAnnotation {
+    IntAnnotation {
+        bit_width: bytes * 8,
+        signedness: IntSignedness::DontCare,
+    }
+}
+
+/// Helper to create a signed IntAnnotation (not wrapped in Option) for shift operations.
+pub(super) fn signed_int_ann_for_bytes(bytes: u32) -> IntAnnotation {
+    IntAnnotation {
+        bit_width: bytes * 8,
+        signedness: IntSignedness::Signed,
+    }
+}
+
 /// Look up the fully-monomorphized layout for a type, or return `None` on failure.
 ///
 /// All layout queries in this module use fully-monomorphized types, so this

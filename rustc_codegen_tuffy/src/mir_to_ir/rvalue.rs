@@ -1557,22 +1557,27 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             value: masked.raw(),
                             annotation: None,
                         };
-                        let ann = res_ann.map(|ia| match ia {
-                            IntAnn::Signed(n) => Annotation::Int(IntAnnotation {
-                                bit_width: n,
-                                signedness: IntSignedness::Signed,
-                            }),
-                            IntAnn::Unsigned(n) => Annotation::Int(IntAnnotation {
-                                bit_width: n,
-                                signedness: IntSignedness::Unsigned,
-                            }),
-                            IntAnn::DontCare(n) => Annotation::Int(IntAnnotation {
-                                bit_width: n,
+                        let int_ann = res_ann
+                            .map(|ia| match ia {
+                                IntAnn::Signed(n) => IntAnnotation {
+                                    bit_width: n,
+                                    signedness: IntSignedness::Signed,
+                                },
+                                IntAnn::Unsigned(n) => IntAnnotation {
+                                    bit_width: n,
+                                    signedness: IntSignedness::Unsigned,
+                                },
+                                IntAnn::DontCare(n) => IntAnnotation {
+                                    bit_width: n,
+                                    signedness: IntSignedness::DontCare,
+                                },
+                            })
+                            .unwrap_or(IntAnnotation {
+                                bit_width: 64,
                                 signedness: IntSignedness::DontCare,
-                            }),
-                        });
+                            });
                         self.builder
-                            .shl(l_op.into(), masked_op.into(), ann, Origin::synthetic())
+                            .shl(l_op.into(), masked_op.into(), int_ann, Origin::synthetic())
                             .raw()
                     }
                     BinOp::BitOr => {
@@ -1645,22 +1650,27 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             value: masked.raw(),
                             annotation: None,
                         };
-                        let ann = res_ann.map(|ia| match ia {
-                            IntAnn::Signed(n) => Annotation::Int(IntAnnotation {
-                                bit_width: n,
-                                signedness: IntSignedness::Signed,
-                            }),
-                            IntAnn::Unsigned(n) => Annotation::Int(IntAnnotation {
-                                bit_width: n,
-                                signedness: IntSignedness::Unsigned,
-                            }),
-                            IntAnn::DontCare(n) => Annotation::Int(IntAnnotation {
-                                bit_width: n,
+                        let int_ann = res_ann
+                            .map(|ia| match ia {
+                                IntAnn::Signed(n) => IntAnnotation {
+                                    bit_width: n,
+                                    signedness: IntSignedness::Signed,
+                                },
+                                IntAnn::Unsigned(n) => IntAnnotation {
+                                    bit_width: n,
+                                    signedness: IntSignedness::Unsigned,
+                                },
+                                IntAnn::DontCare(n) => IntAnnotation {
+                                    bit_width: n,
+                                    signedness: IntSignedness::DontCare,
+                                },
+                            })
+                            .unwrap_or(IntAnnotation {
+                                bit_width: 64,
                                 signedness: IntSignedness::DontCare,
-                            }),
-                        });
+                            });
                         self.builder
-                            .shr(l_op.into(), masked_op.into(), ann, Origin::synthetic())
+                            .shr(l_op.into(), masked_op.into(), int_ann, Origin::synthetic())
                             .raw()
                     }
                     BinOp::Div => {
@@ -1997,14 +2007,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 let clamped_hi = self.builder.min(
                                     corrected.into(),
                                     hi_c.into(),
-                                    signed_int_annotation_for_bytes(8),
+                                    signed_int_ann_for_bytes(8),
                                     Origin::synthetic(),
                                 );
                                 self.builder
                                     .max(
                                         clamped_hi.into(),
                                         lo_c.into(),
-                                        signed_int_annotation_for_bytes(8),
+                                        signed_int_ann_for_bytes(8),
                                         Origin::synthetic(),
                                     )
                                     .raw()
@@ -2050,13 +2060,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 let clamped = self.builder.min(
                                     raw.into(),
                                     hi_c.into(),
-                                    signed_int_annotation_for_bytes(8),
+                                    signed_int_ann_for_bytes(8),
                                     Origin::synthetic(),
                                 );
                                 let clamped = self.builder.max(
                                     clamped.into(),
                                     zero.into(),
-                                    signed_int_annotation_for_bytes(8),
+                                    signed_int_ann_for_bytes(8),
                                     Origin::synthetic(),
                                 );
                                 // Override: float >= 2^63 → hi (overflow), NaN → 0.
@@ -2166,7 +2176,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 let sign = self.builder.shr(
                                     int_bits_val.into(),
                                     shift_c.into(),
-                                    int_annotation_for_bytes(8),
+                                    int_ann_for_bytes(8),
                                     Origin::synthetic(),
                                 );
                                 let one = self.builder.iconst(

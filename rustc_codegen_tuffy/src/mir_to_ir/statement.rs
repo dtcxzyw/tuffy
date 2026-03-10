@@ -991,7 +991,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         self.builder.shr(
                                             signed_op,
                                             c63.into(),
-                                            int_annotation_for_bytes(8),
+                                            int_ann_for_bytes(8),
                                             Origin::synthetic(),
                                         )
                                     } else {

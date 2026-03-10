@@ -9,7 +9,9 @@ use tuffy_ir::value::ValueRef;
 
 use super::ctx::TranslationCtx;
 use super::types::int_annotation_for_bytes;
-use super::types::{default_int_annotation, translate_annotation, type_align, type_size};
+use super::types::{
+    default_int_annotation, int_ann_for_bytes, translate_annotation, type_align, type_size,
+};
 
 const I64: IntAnnotation = IntAnnotation {
     bit_width: 64,
@@ -483,7 +485,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         .first()
                         .and_then(|a| a.as_type())
                         .and_then(|t| type_size(tcx, t))
-                        .and_then(|sz| int_annotation_for_bytes(sz as u32));
+                        .map(|sz| int_ann_for_bytes(sz as u32))
+                        .unwrap_or_else(|| int_ann_for_bytes(8));
                     let result = self.builder.shl(
                         ir_args[0].into(),
                         ir_args[1].into(),
@@ -500,7 +503,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         .first()
                         .and_then(|a| a.as_type())
                         .and_then(|t| type_size(tcx, t))
-                        .and_then(|sz| int_annotation_for_bytes(sz as u32));
+                        .map(|sz| int_ann_for_bytes(sz as u32))
+                        .unwrap_or_else(|| int_ann_for_bytes(8));
                     let result = self.builder.shr(
                         ir_args[0].into(),
                         ir_args[1].into(),
@@ -525,6 +529,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         .map(|sz| (sz * 8) as i64)
                         .unwrap_or(64);
                     let ann = ty.and_then(translate_annotation);
+                    let int_ann = match ann {
+                        Some(Annotation::Int(ia)) => ia,
+                        _ => IntAnnotation {
+                            bit_width: bits as u32,
+                            signedness: IntSignedness::DontCare,
+                        },
+                    };
                     let bits_val =
                         self.builder
                             .iconst(bits, 64, IntSignedness::DontCare, Origin::synthetic());
@@ -534,16 +545,24 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let (hi, lo) = if name == "unchecked_funnel_shl" {
                         (
                             self.builder
-                                .shl(a.into(), c.into(), ann, Origin::synthetic()),
-                            self.builder
-                                .shr(b.into(), complement.into(), ann, Origin::synthetic()),
+                                .shl(a.into(), c.into(), int_ann, Origin::synthetic()),
+                            self.builder.shr(
+                                b.into(),
+                                complement.into(),
+                                int_ann,
+                                Origin::synthetic(),
+                            ),
                         )
                     } else {
                         (
+                            self.builder.shl(
+                                a.into(),
+                                complement.into(),
+                                int_ann,
+                                Origin::synthetic(),
+                            ),
                             self.builder
-                                .shl(a.into(), complement.into(), ann, Origin::synthetic()),
-                            self.builder
-                                .shr(b.into(), c.into(), ann, Origin::synthetic()),
+                                .shr(b.into(), c.into(), int_ann, Origin::synthetic()),
                         )
                     };
                     let result = self
