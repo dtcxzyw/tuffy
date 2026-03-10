@@ -375,8 +375,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // tuples, ADTs).  Receive register(s) and reconstruct on stack.
             if ir_ty.is_none() {
                 let prk = repr_kind(self.tcx, ty);
-                if matches!(prk, ReprKind::ScalarPair | ReprKind::Scalar) && sz > 8 {
-                    // ScalarPair aggregate: passed in two registers
+                if matches!(prk, ReprKind::ScalarPair | ReprKind::Scalar) && sz > 8 && sz <= 16 {
+                    // ScalarPair aggregate ≤ 16 bytes: passed in two registers
                     let lo = self.builder.param(
                         param_idx,
                         Type::Int,

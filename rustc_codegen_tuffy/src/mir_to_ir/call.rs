@@ -685,11 +685,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let dest_size = type_size(self.tcx, dest_ty);
         let dest_repr = repr_kind(self.tcx, dest_ty);
 
-        // In Rust ABI, Scalar and ScalarPair types are returned in registers.
-        // Memory types with size > 8 use SRET (hidden first pointer parameter).
-        // Memory types with size ≤ 8 are coerced to a single register.
+        // In Rust ABI, Scalar and ScalarPair ≤ 16 bytes are returned in
+        // registers.  Larger types use SRET (hidden first pointer parameter).
         let needs_sret = match dest_repr {
-            ReprKind::Scalar | ReprKind::ScalarPair | ReprKind::Zst => false,
+            ReprKind::Zst => false,
+            ReprKind::Scalar => false,
+            ReprKind::ScalarPair => dest_size.is_some_and(|sz| sz > 16),
             ReprKind::Memory => dest_size.is_some_and(|sz| sz > 8),
         };
         let sret_slot = if needs_sret {

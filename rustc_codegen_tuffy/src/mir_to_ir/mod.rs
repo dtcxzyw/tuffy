@@ -90,11 +90,13 @@ pub fn translate_function<'tcx>(
     let ret_mir_ty = monomorphize(mir.local_decls[mir::RETURN_PLACE].ty);
     let ret_size = type_size(tcx, ret_mir_ty).unwrap_or(0);
     let ret_repr = repr_kind(tcx, ret_mir_ty);
-    // In Rust ABI, Scalar and ScalarPair types are returned in registers.
-    // Memory types with size > 8 use SRET (hidden first pointer parameter).
-    // Memory types with size ≤ 8 are coerced to a single register.
+    // In Rust ABI, Scalar and ScalarPair types ≤ 16 bytes are returned in
+    // registers.  Larger types (including ScalarPair > 16 bytes, e.g.
+    // (u64, i128)) and Memory types > 8 bytes use SRET.
     let needs_sret = match ret_repr {
-        ReprKind::Scalar | ReprKind::ScalarPair | ReprKind::Zst => false,
+        ReprKind::Zst => false,
+        ReprKind::Scalar => false,
+        ReprKind::ScalarPair => ret_size > 16,
         ReprKind::Memory => ret_size > 8,
     };
 
@@ -167,8 +169,8 @@ pub fn translate_function<'tcx>(
         // Non-zero-sized aggregate with no direct IR type: use Int register(s).
         if ir_ty.is_none() {
             let prk = repr_kind(tcx, ty);
-            if matches!(prk, ReprKind::ScalarPair | ReprKind::Scalar) && sz > 8 {
-                // ScalarPair (e.g. fat pointer): two registers.
+            if matches!(prk, ReprKind::ScalarPair | ReprKind::Scalar) && sz > 8 && sz <= 16 {
+                // ScalarPair ≤ 16 bytes (e.g. fat pointer): two registers.
                 params.push(Type::Int);
                 param_anns.push(int_annotation_for_bytes(8));
                 param_names.push(None);
