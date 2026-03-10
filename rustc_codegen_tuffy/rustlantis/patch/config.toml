@@ -1,16 +1,16 @@
-bb_max_len = 2
-max_switch_targets = 2
-max_bb_count = 2
-max_bb_count_hard = 2
-max_fn_count = 2
-max_args_count = 2
+bb_max_len = 5
+max_switch_targets = 5
+max_bb_count = 5
+max_bb_count_hard = 5
+max_fn_count = 5
+max_args_count = 5
 var_dump_chance = 0.5
-tuple_max_len = 2
-array_max_len = 2
-struct_max_fields = 2
-adt_max_variants = 2
-composite_count = 2
-adt_count = 2
+tuple_max_len = 5
+array_max_len = 5
+struct_max_fields = 5
+adt_max_variants = 5
+composite_count = 5
+adt_count = 5
 
 [backends.llvm]
 type = "llvm"
