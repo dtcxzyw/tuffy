@@ -480,6 +480,83 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             );
             if let Some(new_mem) = mem_handled {
                 self.current_mem = new_mem;
+                // Store-back for stack locals: translate_memory_intrinsic
+                // may set the local to a raw result value via locals.set().
+                // If the destination is a stack local, persist the value
+                // into the stack slot so that merge points (multiple BBs
+                // converging on a common successor) read the correct data.
+                if let Some(slot) = saved_slot
+                    && let Some(result_val) = self.locals.get(destination.local)
+                    && result_val != slot
+                {
+                    let dest_ty = self.monomorphize(self.mir.local_decls[destination.local].ty);
+                    let size = type_size(self.tcx, dest_ty).unwrap_or(8) as u32;
+                    let val_is_ptr =
+                        matches!(self.builder.value_type(result_val), Some(Type::Ptr(_)));
+                    if val_is_ptr && size > 8 {
+                        let mut offset = 0u32;
+                        while offset < size {
+                            let chunk = std::cmp::min(8, size - offset);
+                            let src_addr = if offset == 0 {
+                                result_val
+                            } else {
+                                let off = self.builder.iconst(
+                                    offset as i64,
+                                    64,
+                                    IntSignedness::DontCare,
+                                    Origin::synthetic(),
+                                );
+                                self.builder
+                                    .ptradd(result_val.into(), off.into(), 0, Origin::synthetic())
+                                    .raw()
+                            };
+                            let word = self.builder.load(
+                                src_addr.into(),
+                                chunk,
+                                Type::Int,
+                                self.current_mem.into(),
+                                int_annotation_for_bytes(chunk),
+                                Origin::synthetic(),
+                            );
+                            let dst_addr = if offset == 0 {
+                                slot
+                            } else {
+                                let off = self.builder.iconst(
+                                    offset as i64,
+                                    64,
+                                    IntSignedness::DontCare,
+                                    Origin::synthetic(),
+                                );
+                                self.builder
+                                    .ptradd(slot.into(), off.into(), 0, Origin::synthetic())
+                                    .raw()
+                            };
+                            self.current_mem = self
+                                .builder
+                                .store(
+                                    word.into(),
+                                    dst_addr.into(),
+                                    chunk,
+                                    self.current_mem.into(),
+                                    Origin::synthetic(),
+                                )
+                                .raw();
+                            offset += chunk;
+                        }
+                    } else {
+                        self.current_mem = self
+                            .builder
+                            .store(
+                                result_val.into(),
+                                slot.into(),
+                                size.max(1),
+                                self.current_mem.into(),
+                                Origin::synthetic(),
+                            )
+                            .raw();
+                    }
+                    self.locals.set(destination.local, slot);
+                }
                 if let Some(target) = target {
                     let target_block = self.block_map.get(*target);
                     self.builder.br(
