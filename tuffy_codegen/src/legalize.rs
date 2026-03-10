@@ -1028,7 +1028,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
     let v = match &inst.op {
         Op::Param(idx) => b.param(*idx, inst.ty.clone(), ann, o()),
         Op::Const(val) => b
-            .iconst(val.clone(), 64, IntSignedness::Unsigned, o())
+            .iconst(val.clone(), int_ann.bit_width, int_ann.signedness, o())
             .raw(),
         Op::FConst(ft, bits) => b.fconst(*ft, *bits, o()).raw(),
         Op::BConst(val) => b.bconst(*val, o()).raw(),
