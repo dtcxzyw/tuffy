@@ -300,3 +300,14 @@ The IR definition in Lean 4 (`lean/TuffyLean/IR/`) is the **source of truth**. T
 `docs/initial.md` is frozen — it records early design decisions and must not be modified. New design discussions belong in `docs/RFCs/`.
 
 Source code architecture overviews are documented in the `README.md` within each component's directory. For example, when modifying `rustc_codegen_tuffy`, you must follow the requirements defined in `rustc_codegen_tuffy/README.md`.
+
+**CRITICAL: Do Not Assume LLVM Semantics**
+
+Tuffy is NOT LLVM. Do not infer Tuffy's design, IR semantics, or behavior based on your knowledge of LLVM or other compiler infrastructures. Tuffy has its own unique design principles and semantics that may differ significantly from conventional compilers.
+
+Before taking any action:
+1. **Read the relevant documentation** — consult `docs/spec/`, component READMEs, Lean definitions, and RFCs
+2. **Explore the codebase structure** — use Glob/Grep to understand how components are organized and how they interact
+3. **Verify your understanding** — base decisions on what you've actually read, not on assumptions from other compilers
+
+Never fabricate or guess at semantics, instruction behavior, or design decisions. If documentation is unclear or missing, ask the user for clarification rather than proceeding with assumptions.
