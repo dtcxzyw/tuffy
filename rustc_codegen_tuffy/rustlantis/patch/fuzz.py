@@ -60,6 +60,13 @@ def test_seed(seed: int) -> tuple[str, int, str, str]:
 
 
 def main():
+    # Check working directory
+    cwd = Path.cwd().resolve()
+    expected = Path("/tmp/rustlantis").resolve()
+    if not (cwd == expected or cwd.is_relative_to(expected)):
+        print(f"Error: Working directory must be under /tmp/rustlantis, got {cwd}", file=sys.stderr)
+        sys.exit(1)
+
     parser = argparse.ArgumentParser(description="Rustlantis differential fuzzing")
     parser.add_argument("start", type=int, help="Start seed")
     parser.add_argument("end", type=int, help="End seed (inclusive)")
