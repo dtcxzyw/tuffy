@@ -2460,6 +2460,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 );
                             }
                         }
+                        // Transmute from Bool to an integer type: materialize
+                        // the 0/1 integer value so downstream integer ops
+                        // (bitwise NOT, shifts, etc.) see Type::Int, not Bool.
+                        if matches!(kind, CastKind::Transmute)
+                            && matches!(self.builder.value_type(val), Some(Type::Bool))
+                            && target_ty_mono.is_integral()
+                        {
+                            return Some(self.coerce_to_int(val));
+                        }
                         Some(val)
                     }
                 }

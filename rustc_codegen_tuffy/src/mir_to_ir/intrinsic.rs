@@ -1190,6 +1190,57 @@ pub(super) fn intrinsic_to_libc(name: &str) -> Option<&'static str> {
     match name {
         // compare_bytes(left, right, count) -> i32 maps directly to memcmp.
         "compare_bytes" => Some("memcmp"),
+
+        // Fused multiply-add: fma(a, b, c) = a * b + c (single rounding).
+        "fmaf32" => Some("fmaf"),
+        "fmaf64" => Some("fma"),
+
+        // Square root.
+        "sqrtf32" => Some("sqrtf"),
+        "sqrtf64" => Some("sqrt"),
+
+        // Trigonometric functions.
+        "sinf32" => Some("sinf"),
+        "sinf64" => Some("sin"),
+        "cosf32" => Some("cosf"),
+        "cosf64" => Some("cos"),
+
+        // Exponential / logarithmic functions.
+        "expf32" => Some("expf"),
+        "expf64" => Some("exp"),
+        "exp2f32" => Some("exp2f"),
+        "exp2f64" => Some("exp2"),
+        "logf32" => Some("logf"),
+        "logf64" => Some("log"),
+        "log2f32" => Some("log2f"),
+        "log2f64" => Some("log2"),
+        "log10f32" => Some("log10f"),
+        "log10f64" => Some("log10"),
+
+        // Power functions.
+        "powf32" => Some("powf"),
+        "powf64" => Some("pow"),
+        "powif32" => Some("__powisf2"),
+        "powif64" => Some("__powidf2"),
+
+        // Rounding functions.
+        "ceilf32" => Some("ceilf"),
+        "ceilf64" => Some("ceil"),
+        "floorf32" => Some("floorf"),
+        "floorf64" => Some("floor"),
+        "truncf32" => Some("truncf"),
+        "truncf64" => Some("trunc"),
+        "roundf32" => Some("roundf"),
+        "roundf64" => Some("round"),
+        "round_ties_even_f32" => Some("rintf"),
+        "round_ties_even_f64" => Some("rint"),
+
+        // Absolute value and sign manipulation.
+        "fabsf32" => Some("fabsf"),
+        "fabsf64" => Some("fabs"),
+        "copysignf32" => Some("copysignf"),
+        "copysignf64" => Some("copysign"),
+
         _ => None,
     }
 }

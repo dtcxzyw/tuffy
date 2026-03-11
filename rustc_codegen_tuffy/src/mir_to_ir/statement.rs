@@ -637,9 +637,19 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 // overwritten, _6 would see the new value
                                 // instead of the copied one.  Allocate a
                                 // private slot and copy the data.
+                                //
+                                // The same aliasing problem occurs for plain
+                                // copy/move of stack locals without projections:
+                                // `_8 = _6` where both are >8-byte stack types.
+                                // Without a copy, writing to _6's slot later
+                                // (e.g. `_6.0 = 3`) would corrupt _8.
                                 let needs_copy = matches!(rvalue,
                                     Rvalue::Use(Operand::Copy(src) | Operand::Move(src))
                                         if !src.projection.is_empty()
+                                ) || matches!(rvalue,
+                                    Rvalue::Use(Operand::Copy(src) | Operand::Move(src))
+                                        if src.projection.is_empty()
+                                            && self.stack_locals.is_stack(src.local)
                                 );
                                 if needs_copy {
                                     let dest_ty =

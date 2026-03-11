@@ -302,6 +302,18 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             let (proj_addr, proj_size, saved_local_for_proj, spilled_local_for_proj) =
                 if has_dest_projection {
                     let saved = self.locals.get(destination.local);
+                    // When the local has no value yet (first assignment to a
+                    // projected field like `_8.0 = bswap(...)`), allocate a
+                    // stack slot so translate_place_to_addr_inner can compute
+                    // the field address.  Without this, it returns None and
+                    // the intrinsic result is never stored — causing reads in
+                    // other basic blocks to see uninitialized memory.
+                    if saved.is_none() && !dest_is_deref_projection {
+                        let dest_ty = self.monomorphize(self.mir.local_decls[destination.local].ty);
+                        let size = type_size(self.tcx, dest_ty).unwrap_or(8) as u32;
+                        let slot = self.builder.stack_slot(size, Origin::synthetic());
+                        self.locals.set(destination.local, slot);
+                    }
                     let info = if dest_is_deref_projection {
                         self.translate_place_to_addr(destination)
                     } else {
@@ -809,6 +821,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let call_dest_is_deref = has_call_dest_proj
             && matches!(destination.projection.first(), Some(mir::PlaceElem::Deref));
         let (call_proj_addr, call_proj_size, call_spilled_local) = if has_call_dest_proj {
+            // Ensure the local has a stack slot before computing the projected
+            // address — same rationale as the intrinsic path above.
+            if self.locals.get(destination.local).is_none() && !call_dest_is_deref {
+                let dest_ty = self.monomorphize(self.mir.local_decls[destination.local].ty);
+                let size = type_size(self.tcx, dest_ty).unwrap_or(8) as u32;
+                let slot = self.builder.stack_slot(size, Origin::synthetic());
+                self.locals.set(destination.local, slot);
+            }
             let info = if call_dest_is_deref {
                 self.translate_place_to_addr(destination)
             } else {
