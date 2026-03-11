@@ -180,6 +180,7 @@ where
                             &call_positions,
                             &callee_saved_set,
                             &caller_saved_set,
+                            vreg_class,
                         )
                     })
             } else {
@@ -552,18 +553,24 @@ fn evict_callee_saved_for_call(
     call_positions: &[u32],
     callee_saved_set: &HashSet<u8>,
     caller_saved_set: &HashSet<u8>,
+    vreg_class: u8,
 ) -> Option<u8> {
-    // Find a free caller-saved register to give to the evicted interval.
+    // Find a free caller-saved register in the same register class
+    // to give to the evicted interval.
     let caller_reg = free
         .iter()
         .copied()
-        .find(|r| caller_saved_set.contains(r))?;
+        .find(|r| caller_saved_set.contains(r) && (r >> 5) == vreg_class)?;
 
-    // Find an active interval on a callee-saved register that doesn't span a call.
+    // Find an active interval on a callee-saved register (in the same class)
+    // that doesn't span a call.
     let mut best: Option<(usize, u8)> = None;
     for (idx, &(_, avi)) in active.iter().enumerate() {
         let preg = assignments[avi as usize]?;
         if !callee_saved_set.contains(&preg.0) {
+            continue;
+        }
+        if (preg.0 >> 5) != vreg_class {
             continue;
         }
         let evict_range = ranges.iter().find(|r| r.vreg.0 == avi)?;
