@@ -86,9 +86,14 @@ impl Gpr {
     }
 
     /// Convert from target-agnostic physical register.
-    /// Works for both GPR (class 0) and XMM (class 1) registers.
-    /// Extracts the register number (lower 5 bits) regardless of class.
+    /// The PReg must be a GPR (class 0). Panics if given an XMM or other class register.
     pub fn from_preg(preg: PReg) -> Self {
+        debug_assert!(
+            preg.0 < 16,
+            "Gpr::from_preg called with non-GPR PReg({}), class={}",
+            preg.0,
+            preg.0 >> 5
+        );
         ALL_GPRS[(preg.0 & 0x1F) as usize]
     }
 }

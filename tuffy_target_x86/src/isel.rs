@@ -1595,7 +1595,33 @@ fn select_inst(
                         _ => src,
                     }
                 } else {
-                    src
+                    // For unsigned sub-64-bit conversions, zero-extend
+                    // before cvtsi2ss/cvtsi2sd.  The instruction treats
+                    // the source as signed 64-bit, so the upper bits must
+                    // be clear to get the correct unsigned interpretation.
+                    match val_ann.map(|a| a.bit_width) {
+                        Some(8) => {
+                            let ext = ctx.alloc.alloc();
+                            ctx.out.push(MInst::MovzxB { dst: ext, src });
+                            ext
+                        }
+                        Some(16) => {
+                            let ext = ctx.alloc.alloc();
+                            ctx.out.push(MInst::MovzxW { dst: ext, src });
+                            ext
+                        }
+                        Some(32) => {
+                            // 32-bit mov zeros upper 32 bits on x86-64.
+                            let ext = ctx.alloc.alloc();
+                            ctx.out.push(MInst::MovRR {
+                                size: OpSize::S32,
+                                dst: ext,
+                                src,
+                            });
+                            ext
+                        }
+                        _ => src,
+                    }
                 };
                 let xmm_dst = ctx.alloc.alloc_class(1);
                 ctx.out.push(MInst::CvtIntToFp {
