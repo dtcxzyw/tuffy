@@ -44,6 +44,32 @@ Before modifying any component:
 - Avoid shortcuts or partial solutions when complete fixes are achievable
 - Only escalate or defer issues when genuinely blocked by external factors
 
+## Handling Uncertainty
+
+When facing uncertainty during development, follow this decision framework:
+
+**Always ask the user when:**
+- Design decisions have multiple valid approaches with different trade-offs
+- Requirements are ambiguous or could be interpreted in multiple ways
+- The change would affect user-facing behavior or APIs
+- You need to make architectural decisions that impact multiple components
+- You're unsure whether a breaking change is acceptable
+
+**Proceed autonomously when:**
+- The implementation approach is clear from existing code patterns and documentation
+- The change is internal and doesn't affect external behavior
+- You're fixing an obvious bug with a clear correct behavior
+- The decision is reversible and low-risk
+- Component documentation provides explicit guidance
+
+**Never proceed when:**
+- You don't understand the existing design or semantics
+- Documentation is missing or contradictory
+- You would need to guess at intended behavior
+- The change could break existing functionality
+
+When in doubt, err on the side of asking. A brief clarification is better than implementing the wrong solution.
+
 ## First Principles Thinking
 
 **IMPORTANT:** When approaching any problem, design decision, or implementation task, you MUST apply first principles thinking. Break down complex problems into fundamental truths and rebuild solutions from the ground up.
@@ -278,6 +304,31 @@ Before starting a task, check `docs/SOPs/` for a matching SOP. If one exists, fo
 ## Tool Output Policy
 
 When outputting content using tools, output in multiple smaller segments rather than one large block. Avoid writing excessively large amounts of content in a single tool call.
+
+## Dependency Management
+
+**Adding New Dependencies:**
+
+Before adding a new Cargo dependency, verify:
+- The functionality cannot be reasonably implemented using existing dependencies or the standard library
+- The crate is actively maintained (recent commits, responsive to issues)
+- The license is compatible (prefer MIT/Apache-2.0)
+- The dependency tree is reasonable (avoid heavy transitive dependencies)
+
+Prefer standard library solutions over external crates when feasible. For small, well-defined functionality, consider implementing it directly rather than adding a dependency.
+
+When adding a dependency, document in the commit message why it's necessary and what alternatives were considered.
+
+## Documentation Maintenance
+
+**When code changes, update documentation synchronously:**
+
+- **Inline documentation (doc comments):** Update when function signatures, behavior, or semantics change
+- **Component READMEs:** Update when architecture, conventions, or major workflows change
+- **`docs/spec/`:** Update when IR semantics or formal specifications change
+- **Lean definitions:** Update when fundamental semantics or type definitions change (these are the source of truth)
+
+If you modify code behavior, check whether related documentation needs updates. Do not defer documentation updates to "later" — include them in the same commit as the code change.
 
 ## Coding Rules
 
