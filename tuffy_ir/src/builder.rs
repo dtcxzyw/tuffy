@@ -135,8 +135,13 @@ impl<'a> Builder<'a> {
     }
 
     pub fn value_annotation(&self, v: ValueRef) -> Option<&Annotation> {
-        if v.is_block_arg() || v.is_secondary_result() {
+        if v.is_block_arg() {
             None
+        } else if v.is_secondary_result() {
+            self.func
+                .instructions
+                .get(v.inst_index() as usize)
+                .and_then(|i| i.secondary_result_annotation.as_ref())
         } else {
             self.func
                 .instructions
