@@ -250,10 +250,13 @@ impl<'a> Builder<'a> {
         ann: Option<Annotation>,
         origin: Origin,
     ) -> ValueRef {
-        assert!(
-            !matches!(ty, Type::Int) || matches!(ann, Some(Annotation::Int(_))),
-            "Int type parameter must have IntAnnotation"
-        );
+        let ann = ann.or_else(|| {
+            self.func
+                .param_annotations
+                .get(index as usize)
+                .copied()
+                .flatten()
+        });
         self.push_inst(Op::Param(index), ty, None, origin, ann)
     }
 
