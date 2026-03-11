@@ -78,10 +78,23 @@ impl CodegenBackend for TuffyCodegenBackend {
         let target_triple = tcx.sess.target.llvm_target.as_ref();
         let session = CodegenSession::new(target_triple);
         let dump_ir = tcx.sess.opts.cg.llvm_args.iter().any(|a| a == "dump-ir");
+        let dump_module_path = tcx
+            .sess
+            .opts
+            .cg
+            .llvm_args
+            .iter()
+            .find_map(|a| a.strip_prefix("dump-module="))
+            .map(|s| s.to_string());
         let cgus = tcx.collect_and_partition_mono_items(()).codegen_units;
         let mut modules = Vec::new();
         let mut compiled_symbols: HashSet<String> = HashSet::new();
         let mut pending_instances: Vec<Instance<'tcx>> = Vec::new();
+        let mut module_ir_text = if dump_module_path.is_some() {
+            Some(String::new())
+        } else {
+            None
+        };
 
         for cgu in cgus {
             let cgu_name = cgu.name().to_string();
@@ -115,15 +128,40 @@ impl CodegenBackend for TuffyCodegenBackend {
                     if let Some(mut result) = result_opt {
                         pending_instances.extend(result.referenced_instances.iter().copied());
                         if dump_ir {
-                            for (sym_id, data, _relocs) in &result.static_data {
+                            for (sym_id, data, relocs) in &result.static_data {
                                 let name = result.symbols.resolve(*sym_id);
+                                let reloc_strs: Vec<(usize, &str)> =
+                                    relocs.iter().map(|(o, s)| (*o, s.as_str())).collect();
                                 eprintln!(
                                     "{}",
-                                    tuffy_ir::display::StaticDataDisplay { name, data }
+                                    tuffy_ir::display::StaticDataDisplay {
+                                        name,
+                                        data,
+                                        relocs: &reloc_strs
+                                    }
                                 );
                             }
                             eprintln!("{}", result.func.display(&result.symbols));
                             eprintln!();
+                        }
+                        if let Some(ref mut buf) = module_ir_text {
+                            use std::fmt::Write;
+                            for (sym_id, data, relocs) in &result.static_data {
+                                let name = result.symbols.resolve(*sym_id);
+                                let reloc_strs: Vec<(usize, &str)> =
+                                    relocs.iter().map(|(o, s)| (*o, s.as_str())).collect();
+                                writeln!(
+                                    buf,
+                                    "{}",
+                                    tuffy_ir::display::StaticDataDisplay {
+                                        name,
+                                        data,
+                                        relocs: &reloc_strs
+                                    }
+                                )
+                                .unwrap();
+                            }
+                            writeln!(buf, "{}\n", result.func.display(&result.symbols)).unwrap();
                         }
 
                         let vr = tuffy_ir::verifier::verify_function(&result.func, &result.symbols);
@@ -239,6 +277,23 @@ impl CodegenBackend for TuffyCodegenBackend {
                         &mut pending_instances,
                         &mut data_counter,
                     );
+                    if let Some(ref mut buf) = module_ir_text {
+                        use std::fmt::Write;
+                        let reloc_strs: Vec<(usize, &str)> = relocs
+                            .iter()
+                            .map(|r| (r.offset, r.symbol.as_str()))
+                            .collect();
+                        writeln!(
+                            buf,
+                            "{}",
+                            tuffy_ir::display::StaticDataDisplay {
+                                name: &sym_name,
+                                data: &bytes,
+                                relocs: &reloc_strs
+                            }
+                        )
+                        .unwrap();
+                    }
                     all_static_data.push(StaticData {
                         name: sym_name,
                         data: bytes,
@@ -337,6 +392,25 @@ impl CodegenBackend for TuffyCodegenBackend {
                     }
                 };
                 pending_instances.extend(result.referenced_instances.iter().copied());
+                if let Some(ref mut buf) = module_ir_text {
+                    use std::fmt::Write;
+                    for (sym_id, data, relocs) in &result.static_data {
+                        let name = result.symbols.resolve(*sym_id);
+                        let reloc_strs: Vec<(usize, &str)> =
+                            relocs.iter().map(|(o, s)| (*o, s.as_str())).collect();
+                        writeln!(
+                            buf,
+                            "{}",
+                            tuffy_ir::display::StaticDataDisplay {
+                                name,
+                                data,
+                                relocs: &reloc_strs
+                            }
+                        )
+                        .unwrap();
+                    }
+                    writeln!(buf, "{}\n", result.func.display(&result.symbols)).unwrap();
+                }
                 let vr = tuffy_ir::verifier::verify_function(&result.func, &result.symbols);
                 if !vr.is_ok() {
                     let func_name = result.symbols.resolve(result.func.name);
@@ -408,6 +482,15 @@ impl CodegenBackend for TuffyCodegenBackend {
         // Generate C `main` entry point if this is a binary crate.
         if let Some(entry_module) = generate_entry_point(tcx, &session) {
             modules.push(entry_module);
+        }
+
+        // Write complete module IR to file if dump-module was requested.
+        if let Some(path) = dump_module_path
+            && let Some(text) = module_ir_text
+        {
+            fs::write(&path, text).unwrap_or_else(|e| {
+                panic!("failed to write module IR to {path}: {e}");
+            });
         }
 
         Box::new(CompiledModules {

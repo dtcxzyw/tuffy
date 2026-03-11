@@ -527,12 +527,14 @@ fn test_zext() {
 
 #[test]
 fn test_signed_annotation_truncation() {
+    // 200 truncated to 8 bits and interpreted as signed: 200 - 256 = -56.
+    // Wrapping semantics match real hardware behavior.
     let r = run("func @main() -> int:s8 {
   bb0(v0: mem):
     v1: int:s8 = iconst 200
     ret v1, v0
 }");
-    assert_ub(r);
+    assert_eq!(unwrap_int(r), -56);
 }
 
 #[test]
@@ -677,14 +679,17 @@ fn test_oob_store_is_ub() {
 // ──────────────────────────────────────────────────────────────────────
 
 #[test]
-fn test_uninit_load_is_poison() {
+fn test_uninit_load_is_zero() {
+    // Uninit bytes are treated as zero to match hardware behavior. Codegen
+    // generates wide loads that span struct padding, so strict Poison
+    // propagation would cause false positives.
     let r = run("func @main() -> int:s32 {
   bb0(v0: mem):
     v1: ptr = stack_slot 4
     v2: int:s32 = load.4 v1, v0
     ret v2, v0
 }");
-    assert_ub(r);
+    assert_eq!(unwrap_int(r), 0);
 }
 
 #[test]

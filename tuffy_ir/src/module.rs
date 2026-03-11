@@ -74,6 +74,16 @@ impl Default for SymbolTable {
 pub struct StaticData {
     pub name: SymbolId,
     pub data: Vec<u8>,
+    /// Relocations: at `offset`, write the address of `symbol`.
+    pub relocations: Vec<StaticRelocation>,
+}
+
+/// A relocation inside static data: the 8 bytes at `offset` should be
+/// patched with the address of `symbol`.
+#[derive(Debug, Clone)]
+pub struct StaticRelocation {
+    pub offset: usize,
+    pub symbol: SymbolId,
 }
 
 /// Top-level IR container.
@@ -114,7 +124,25 @@ impl Module {
 
     /// Add static data to the module.
     pub fn add_static_data(&mut self, name: SymbolId, data: Vec<u8>) {
-        self.static_data.push(StaticData { name, data });
+        self.static_data.push(StaticData {
+            name,
+            data,
+            relocations: Vec::new(),
+        });
+    }
+
+    /// Add static data with relocations to the module.
+    pub fn add_static_data_with_relocs(
+        &mut self,
+        name: SymbolId,
+        data: Vec<u8>,
+        relocations: Vec<StaticRelocation>,
+    ) {
+        self.static_data.push(StaticData {
+            name,
+            data,
+            relocations,
+        });
     }
 }
 

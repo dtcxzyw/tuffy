@@ -1056,7 +1056,12 @@ impl Function {
 /// Format a static data blob as a text declaration.
 ///
 /// Output: `data @name = "printable\xHH..."` (mixed printable + hex escapes).
-fn write_static_data(f: &mut fmt::Formatter<'_>, name: &str, data: &[u8]) -> fmt::Result {
+fn write_static_data(
+    f: &mut fmt::Formatter<'_>,
+    name: &str,
+    data: &[u8],
+    relocs: &[(usize, &str)],
+) -> fmt::Result {
     write!(f, "data @{name} = \"")?;
     for &b in data {
         if b == b'\\' {
@@ -1077,18 +1082,30 @@ fn write_static_data(f: &mut fmt::Formatter<'_>, name: &str, data: &[u8]) -> fmt
             write!(f, "\\x{b:02x}")?;
         }
     }
-    write!(f, "\"")
+    write!(f, "\"")?;
+    if !relocs.is_empty() {
+        write!(f, " relocs [")?;
+        for (i, (offset, sym)) in relocs.iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{offset}: @{sym}")?;
+        }
+        write!(f, "]")?;
+    }
+    Ok(())
 }
 
 /// Wrapper for displaying static data with a resolved symbol name.
 pub struct StaticDataDisplay<'a> {
     pub name: &'a str,
     pub data: &'a [u8],
+    pub relocs: &'a [(usize, &'a str)],
 }
 
 impl fmt::Display for StaticDataDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write_static_data(f, self.name, self.data)
+        write_static_data(f, self.name, self.data, self.relocs)
     }
 }
 
@@ -1100,7 +1117,12 @@ impl fmt::Display for crate::module::Module {
                 writeln!(f)?;
             }
             let name = self.symbols.resolve(sd.name);
-            write_static_data(f, name, &sd.data)?;
+            let relocs: Vec<(usize, &str)> = sd
+                .relocations
+                .iter()
+                .map(|r| (r.offset, self.symbols.resolve(r.symbol)))
+                .collect();
+            write_static_data(f, name, &sd.data, &relocs)?;
         }
 
         for (i, func) in self.functions.iter().enumerate() {

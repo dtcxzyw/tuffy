@@ -407,6 +407,24 @@ impl<'a> Parser<'a> {
                 self.advance();
                 s
             }
+            // Names can start with a dot (e.g. `.Lvtable.0`)
+            Token::Dot => {
+                self.advance();
+                let suffix = match &self.current {
+                    Token::Ident(s) => {
+                        let s = s.clone();
+                        self.advance();
+                        s
+                    }
+                    Token::Integer(s) => {
+                        let s = s.clone();
+                        self.advance();
+                        s
+                    }
+                    _ => String::new(),
+                };
+                format!(".{suffix}")
+            }
             other => return Err(self.error(format!("expected name, got {:?}", other))),
         };
         // Continue consuming dots/idents to build a compound name
@@ -812,17 +830,50 @@ impl<'a> Parser<'a> {
         self.expect(&Token::Eq)?;
         // Parse string literal — the lexer doesn't handle strings, so we do it manually
         let data = self.parse_string_literal()?;
-        module.add_static_data(sym_id, data);
+
+        // Parse optional relocations: relocs [offset: @sym, ...]
+        let mut relocations = Vec::new();
+        if matches!(&self.current, Token::Ident(s) if s == "relocs") {
+            self.advance(); // consume "relocs"
+            self.expect(&Token::LBracket)?;
+            while self.current != Token::RBracket {
+                let offset_str = self.expect_integer()?;
+                let offset: usize = offset_str
+                    .parse()
+                    .map_err(|_| self.error(format!("invalid relocation offset: {offset_str}")))?;
+                self.expect(&Token::Colon)?;
+                let sym_name = self.read_symbol_name()?;
+                let sym = self.intern(&sym_name);
+                relocations.push(crate::module::StaticRelocation {
+                    offset,
+                    symbol: sym,
+                });
+                // Optional comma separator
+                if self.current == Token::Comma {
+                    self.advance();
+                }
+            }
+            self.expect(&Token::RBracket)?;
+        }
+
+        module.add_static_data_with_relocs(sym_id, data, relocations);
         Ok(())
     }
 
     fn parse_string_literal(&mut self) -> Result<Vec<u8>, ParseError> {
-        // Expect a '"' character. We need to read from the raw lexer input.
-        self.lexer.skip_whitespace_no_newline();
-        if self.lexer.peek_byte() != Some(b'"') {
-            return Err(self.error("expected '\"' for string literal"));
+        // The opening `"` may have already been consumed by the lexer as a token
+        // (since `"` is not a recognized token, the lexer produces Ident("\"")).
+        // Check if that happened; otherwise, consume it from raw input.
+        let quote_already_consumed = matches!(&self.current, Token::Ident(s) if s == "\"");
+        if quote_already_consumed {
+            // Lexer already consumed the `"`. Raw position is right after it.
+        } else {
+            self.lexer.skip_whitespace_no_newline();
+            if self.lexer.peek_byte() != Some(b'"') {
+                return Err(self.error("expected '\"' for string literal"));
+            }
+            self.lexer.advance(); // consume opening quote
         }
-        self.lexer.advance(); // consume opening quote
 
         let mut data = Vec::new();
         loop {

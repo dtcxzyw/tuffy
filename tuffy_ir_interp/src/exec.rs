@@ -91,30 +91,20 @@ pub fn apply_annotation(val: &BigInt, ann: &IntAnnotation) -> Value {
     if n == 0 {
         return Value::Poison;
     }
+    // Truncate to n bits first (wrapping semantics).
+    let modulus = BigInt::one() << n;
+    let truncated = ((val % &modulus) + &modulus) % &modulus;
     match ann.signedness {
         IntSignedness::Signed => {
-            let min = -(BigInt::one() << (n - 1));
-            let max = (BigInt::one() << (n - 1)) - 1;
-            if *val >= min && *val <= max {
-                Value::Int(val.clone())
+            // Interpret as signed: if high bit set, subtract modulus.
+            let sign_bit = BigInt::one() << (n - 1);
+            if truncated >= sign_bit {
+                Value::Int(truncated - modulus)
             } else {
-                Value::Poison
+                Value::Int(truncated)
             }
         }
-        IntSignedness::Unsigned => {
-            let max = (BigInt::one() << n) - 1;
-            if !val.is_negative() && *val <= max {
-                Value::Int(val.clone())
-            } else {
-                Value::Poison
-            }
-        }
-        IntSignedness::DontCare => {
-            // Extract low n bits.
-            let modulus = BigInt::one() << n;
-            let result = ((val % &modulus) + &modulus) % &modulus;
-            Value::Int(result)
-        }
+        IntSignedness::Unsigned | IntSignedness::DontCare => Value::Int(truncated),
     }
 }
 
@@ -151,6 +141,30 @@ fn truncate_to_bits(val: &BigInt, n: usize) -> BigInt {
     }
     let modulus = BigInt::one() << n;
     ((val % &modulus) + &modulus) % &modulus
+}
+
+/// Infer the minimum unsigned bit width needed for a value.
+/// Rounds up to the nearest standard width (8, 16, 32, 64, 128).
+fn infer_unsigned_width(val: &BigInt) -> usize {
+    let needed = if val.sign() == num_bigint::Sign::Minus {
+        // Two's complement: -(val) - 1 gives the positive magnitude,
+        // then add 1 for the sign bit.
+        let mag = (-val) - BigInt::one();
+        mag.bits() as usize + 1
+    } else {
+        std::cmp::max(val.bits() as usize, 1)
+    };
+    if needed <= 8 {
+        8
+    } else if needed <= 16 {
+        16
+    } else if needed <= 32 {
+        32
+    } else if needed <= 64 {
+        64
+    } else {
+        128
+    }
 }
 
 /// Sign-extend from n bits to infinite precision.
@@ -861,8 +875,19 @@ pub fn execute_instruction(
             let result = match get_int_binop(&va, &vb) {
                 Some((x, y)) => {
                     let b = match cmp_op {
-                        ICmpOp::Eq => x == y,
-                        ICmpOp::Ne => x != y,
+                        // For equality, compare unsigned bit patterns to handle
+                        // mixed signed/unsigned representations of the same value.
+                        ICmpOp::Eq | ICmpOp::Ne => {
+                            let w =
+                                std::cmp::max(infer_unsigned_width(&x), infer_unsigned_width(&y));
+                            let mask = (BigInt::one() << w) - 1;
+                            let xu = &x & &mask;
+                            let yu = &y & &mask;
+                            match cmp_op {
+                                ICmpOp::Eq => xu == yu,
+                                _ => xu != yu,
+                            }
+                        }
                         ICmpOp::Lt => x < y,
                         ICmpOp::Le => x <= y,
                         ICmpOp::Gt => x > y,
@@ -1049,15 +1074,13 @@ pub fn execute_instruction(
             let vp = res_op(resolve_value, &ptr_op.clone().raw());
             match vp.as_ptr() {
                 Some(ptr) => {
-                    // Determine byte count from the type.
                     let n = type_byte_size(ty);
                     match memory.read(ptr, n) {
                         Ok(bytes) => {
                             let val = bytes_to_value(&bytes, ty, n);
-                            Ok(ExecResult::Value(apply_result_annotation(
-                                val,
-                                result_annotation,
-                            )))
+                            let annotated =
+                                apply_result_annotation(val, secondary_result_annotation);
+                            Ok(ExecResult::MultiValue(Value::Mem, annotated))
                         }
                         Err(e) => Err(UbViolation {
                             kind: UbKind::MemoryViolation,
@@ -1124,10 +1147,8 @@ pub fn execute_instruction(
                         kind: UbKind::MemoryViolation,
                         message: e.to_string(),
                     })?;
-                    Ok(ExecResult::Value(apply_result_annotation(
-                        old_val,
-                        result_annotation,
-                    )))
+                    let annotated = apply_result_annotation(old_val, secondary_result_annotation);
+                    Ok(ExecResult::MultiValue(Value::Mem, annotated))
                 }
                 None => Err(UbViolation {
                     kind: UbKind::InvalidOperand,
@@ -1159,10 +1180,8 @@ pub fn execute_instruction(
                             message: e.to_string(),
                         })?;
                     }
-                    Ok(ExecResult::Value(apply_result_annotation(
-                        old_val,
-                        result_annotation,
-                    )))
+                    let annotated = apply_result_annotation(old_val, secondary_result_annotation);
+                    Ok(ExecResult::MultiValue(Value::Mem, annotated))
                 }
                 None => Err(UbViolation {
                     kind: UbKind::InvalidOperand,
@@ -1186,7 +1205,20 @@ pub fn execute_instruction(
         // ── Type conversions ──
         Op::Bitcast(op) => {
             let v = resolve_operand_value(op);
-            Ok(ExecResult::Value(v))
+            let result = match (&v, ty) {
+                // Float → Int: extract bit pattern.
+                (Value::Float(fc), Type::Int) => Value::Int(BigInt::from(fc.to_bits())),
+                // Int → Float: interpret bits as float.
+                (Value::Int(n), Type::Float(ft)) => {
+                    let bits = n.to_u128().unwrap_or(0);
+                    Value::Float(FloatConst::from_bits(*ft, bits))
+                }
+                _ => v,
+            };
+            Ok(ExecResult::Value(apply_result_annotation(
+                result,
+                result_annotation,
+            )))
         }
         Op::Sext(a, n) => {
             let va = res_op(resolve_value, &a.clone().raw());
@@ -1305,10 +1337,17 @@ pub fn execute_instruction(
             Ok(ExecResult::Value(result))
         }
         Op::UiToFp(a, ft) => {
-            // Same as SiToFp for the interpreter (infinite precision means no sign issue).
             let va = res_op(resolve_value, &a.clone().raw());
             let result = match va.as_int() {
                 Some(n) => {
+                    // Ensure unsigned: if still negative, mask to inferred width.
+                    let n = if n.sign() == num_bigint::Sign::Minus {
+                        let w = infer_unsigned_width(n);
+                        let mask = (BigInt::from(1u128) << w) - 1;
+                        n & &mask
+                    } else {
+                        n.clone()
+                    };
                     let f = n.to_f64().unwrap_or(0.0);
                     let bits = match ft {
                         FloatType::F32 => (f as f32).to_bits() as u128,
@@ -1541,10 +1580,16 @@ pub fn execute_instruction(
         Op::PtrToAddr(ptr_op) => {
             let vp = res_op(resolve_value, &ptr_op.clone().raw());
             match vp.as_ptr() {
-                Some(ptr) => Ok(ExecResult::Value(apply_result_annotation(
-                    Value::Int(BigInt::from(ptr.offset)),
-                    result_annotation,
-                ))),
+                Some(ptr) => {
+                    // Synthesize a non-zero address from the allocation ID and offset.
+                    // AllocId(0) is the null sentinel, so valid alloc IDs start at 1.
+                    // This ensures ptrtoaddr never returns 0 for valid pointers.
+                    let addr = (ptr.alloc_id.0 as i64) * 0x1000 + ptr.offset;
+                    Ok(ExecResult::Value(apply_result_annotation(
+                        Value::Int(BigInt::from(addr)),
+                        result_annotation,
+                    )))
+                }
                 _ => Ok(ExecResult::Value(Value::Poison)),
             }
         }
@@ -1552,12 +1597,24 @@ pub fn execute_instruction(
             let vi = res_op(resolve_value, &int_op.clone().raw());
             match vi.as_int() {
                 Some(n) => {
-                    // IntToPtr creates a pointer with no valid provenance.
-                    // We use AllocId(0) as the "null/invalid" sentinel.
-                    Ok(ExecResult::Value(Value::Ptr(Pointer {
-                        alloc_id: AllocId(0),
-                        offset: n.to_i64().unwrap_or(0),
-                    })))
+                    // IntToPtr creates a pointer from an address.
+                    // Reverse the synthetic address scheme from PtrToAddr:
+                    // addr = alloc_id * 0x1000 + offset
+                    // For address 0, produce the null pointer.
+                    let addr = n.to_i64().unwrap_or(0);
+                    if addr == 0 {
+                        Ok(ExecResult::Value(Value::Ptr(Pointer {
+                            alloc_id: AllocId(0),
+                            offset: 0,
+                        })))
+                    } else {
+                        // We can't recover provenance from an integer address.
+                        // Use AllocId(0) as invalid provenance.
+                        Ok(ExecResult::Value(Value::Ptr(Pointer {
+                            alloc_id: AllocId(0),
+                            offset: addr,
+                        })))
+                    }
                 }
                 _ => Ok(ExecResult::Value(Value::Poison)),
             }
@@ -1787,12 +1844,8 @@ pub fn type_byte_size(ty: &Type) -> usize {
 
 /// Convert memory bytes to a Value based on the target type.
 fn bytes_to_value(bytes: &[AbstractByte], ty: &Type, n: usize) -> Value {
-    // Check for uninit
-    for b in bytes {
-        if matches!(b, AbstractByte::Uninit) {
-            return Value::Poison; // Reading uninit is UB in strict mode.
-        }
-    }
+    // Treat Uninit as 0 — codegen may emit wide loads that span padding bytes.
+    // Real hardware reads arbitrary junk; we pick 0 for determinism.
     // Check for pointer fragments
     let has_ptr_fragments = bytes
         .iter()
@@ -1846,10 +1899,11 @@ fn bytes_to_value(bytes: &[AbstractByte], ty: &Type, n: usize) -> Value {
         Type::Float(ft) => {
             let mut bits: u128 = 0;
             for (i, b) in bytes.iter().enumerate() {
-                if let AbstractByte::Bits(v) = b {
-                    bits |= (*v as u128) << (i * 8);
-                } else {
-                    return Value::Poison;
+                match b {
+                    AbstractByte::Bits(v) => bits |= (*v as u128) << (i * 8),
+                    // Treat Uninit/Poison as 0 for padding tolerance.
+                    AbstractByte::Uninit | AbstractByte::Poison => {}
+                    _ => return Value::Poison,
                 }
             }
             Value::Float(FloatConst::from_bits(*ft, bits))

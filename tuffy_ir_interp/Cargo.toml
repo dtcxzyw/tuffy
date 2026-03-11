@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "tuffy-interp"
+path = "src/main.rs"
+
 [dependencies]
 tuffy_ir = { path = "../tuffy_ir" }
 num-bigint = "0.4"

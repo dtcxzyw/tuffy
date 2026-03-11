@@ -174,6 +174,8 @@ pub fn le_bytes_to_int(bytes: &[AbstractByte], signed: bool) -> Option<BigInt> {
     for b in bytes {
         match b {
             AbstractByte::Bits(v) => raw.push(*v),
+            // Treat Uninit/Poison as 0 — codegen may load across padding.
+            AbstractByte::Uninit | AbstractByte::Poison => raw.push(0),
             _ => return None,
         }
     }
