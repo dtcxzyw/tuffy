@@ -189,6 +189,7 @@ python3 fuzz.py 0 1000 8      # Use 8 parallel jobs
 
 - Adjust `config.toml` to generate smaller inputs when debugging (fewer basic blocks, functions, args)
 - Use `minimise.py` to reduce reproducers: copy failing program to `repro.rs`, run `python3 minimise.py`
+  - Note: `minimise.py` comments out MIR code rather than deleting lines, so line numbers remain stable. The minimization is still effective.
 - Always minimize reproducers before reading them — raw generated programs contain noise
 
 ## Error Policy
