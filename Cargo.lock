@@ -372,6 +372,9 @@ dependencies = [
 name = "tuffy_ir_interp"
 version = "0.1.0"
 dependencies = [
+ "num-bigint",
+ "num-traits",
+ "rustc_apfloat",
  "tuffy_ir",
 ]
 

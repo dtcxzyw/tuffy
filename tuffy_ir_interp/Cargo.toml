@@ -6,3 +6,6 @@ license.workspace = true
 
 [dependencies]
 tuffy_ir = { path = "../tuffy_ir" }
+num-bigint = "0.4"
+num-traits = "0.2"
+rustc_apfloat = "0.2.3+llvm-462a31f5a5ab"
