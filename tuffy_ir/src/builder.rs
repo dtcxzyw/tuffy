@@ -5,7 +5,9 @@
 use num_bigint::BigInt;
 
 use crate::function::{BasicBlock, BlockArg, CfgNode, Function, Region, RegionKind};
-use crate::instruction::{AtomicRmwOp, FCmpOp, ICmpOp, Instruction, Op, Operand, Origin};
+use crate::instruction::{
+    AtomicRmwOp, FCmpOp, FloatConst, ICmpOp, Instruction, Op, Operand, Origin,
+};
 use crate::module::SymbolId;
 use crate::typed::{
     BoolOperand, BoolValue, FloatOperand, FloatValue, IntOperand, IntValue, MemOperand, MemValue,
@@ -388,8 +390,19 @@ impl<'a> Builder<'a> {
     }
 
     /// Float constant.
-    pub fn fconst(&mut self, ft: FloatType, bits: u64, origin: Origin) -> FloatValue {
-        let v = self.push_inst(Op::FConst(ft, bits), Type::Float(ft), None, origin, None);
+    pub fn fconst(&mut self, ft: FloatType, bits: u128, origin: Origin) -> FloatValue {
+        self.fconst_value(FloatConst::from_bits(ft, bits), origin)
+    }
+
+    /// Float constant backed by `rustc_apfloat`.
+    pub fn fconst_value(&mut self, value: FloatConst, origin: Origin) -> FloatValue {
+        let v = self.push_inst(
+            Op::FConst(value),
+            Type::Float(value.float_type()),
+            None,
+            origin,
+            None,
+        );
         FloatValue::new(v, self.func)
     }
 

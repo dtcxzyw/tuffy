@@ -1030,7 +1030,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
         Op::Const(val) => b
             .iconst(val.clone(), int_ann.bit_width, int_ann.signedness, o())
             .raw(),
-        Op::FConst(ft, bits) => b.fconst(*ft, *bits, o()).raw(),
+        Op::FConst(value) => b.fconst_value(*value, o()).raw(),
         Op::BConst(val) => b.bconst(*val, o()).raw(),
         Op::Add(a, op_b) => b
             .add(

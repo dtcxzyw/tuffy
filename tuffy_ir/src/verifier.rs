@@ -575,11 +575,15 @@ impl FuncVerifier<'_> {
                 }
             }
 
-            Op::FConst(ft, _) => {
-                if inst.ty != Type::Float(*ft) {
+            Op::FConst(value) => {
+                if inst.ty != Type::Float(value.float_type()) {
                     self.result.error(
                         loc,
-                        format!("fconst result must be Float({ft:?}), got {:?}", inst.ty),
+                        format!(
+                            "fconst result must be Float({:?}), got {:?}",
+                            value.float_type(),
+                            inst.ty
+                        ),
                     );
                 }
             }

@@ -1,6 +1,10 @@
 //! Instruction definitions for tuffy IR.
 
+use core::fmt;
+
 use num_bigint::BigInt;
+use rustc_apfloat::Float;
+use rustc_apfloat::ieee::{BFloat, Double, Half, Quad, Single};
 
 use crate::module::SymbolId;
 use crate::typed::{BoolOperand, FloatOperand, IntOperand, MemOperand, PtrOperand};
@@ -75,6 +79,75 @@ impl Instruction {
     /// Number of results this instruction produces (1 or 2).
     pub fn result_count(&self) -> u8 {
         if self.secondary_ty.is_some() { 2 } else { 1 }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum FloatConstRepr {
+    BF16(BFloat),
+    F16(Half),
+    F32(Single),
+    F64(Double),
+    F128(Quad),
+}
+
+/// A floating-point constant backed by `rustc_apfloat`.
+#[derive(Clone, Copy)]
+pub struct FloatConst(FloatConstRepr);
+
+impl FloatConst {
+    /// Construct a float constant from the raw IEEE 754 bit pattern for `ft`.
+    pub fn from_bits(ft: FloatType, bits: u128) -> Self {
+        Self(match ft {
+            FloatType::BF16 => FloatConstRepr::BF16(BFloat::from_bits(bits)),
+            FloatType::F16 => FloatConstRepr::F16(Half::from_bits(bits)),
+            FloatType::F32 => FloatConstRepr::F32(Single::from_bits(bits)),
+            FloatType::F64 => FloatConstRepr::F64(Double::from_bits(bits)),
+            FloatType::F128 => FloatConstRepr::F128(Quad::from_bits(bits)),
+        })
+    }
+
+    /// The float width carried by this constant.
+    pub fn float_type(self) -> FloatType {
+        match self.0 {
+            FloatConstRepr::BF16(_) => FloatType::BF16,
+            FloatConstRepr::F16(_) => FloatType::F16,
+            FloatConstRepr::F32(_) => FloatType::F32,
+            FloatConstRepr::F64(_) => FloatType::F64,
+            FloatConstRepr::F128(_) => FloatType::F128,
+        }
+    }
+
+    /// The exact IEEE 754 bit pattern of this constant.
+    pub fn to_bits(self) -> u128 {
+        match self.0 {
+            FloatConstRepr::BF16(v) => v.to_bits(),
+            FloatConstRepr::F16(v) => v.to_bits(),
+            FloatConstRepr::F32(v) => v.to_bits(),
+            FloatConstRepr::F64(v) => v.to_bits(),
+            FloatConstRepr::F128(v) => v.to_bits(),
+        }
+    }
+}
+
+impl PartialEq for FloatConst {
+    fn eq(&self, other: &Self) -> bool {
+        self.float_type() == other.float_type() && self.to_bits() == other.to_bits()
+    }
+}
+
+impl Eq for FloatConst {}
+
+impl fmt::Debug for FloatConst {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = match self.float_type() {
+            FloatType::BF16 => "bf16",
+            FloatType::F16 => "f16",
+            FloatType::F32 => "f32",
+            FloatType::F64 => "f64",
+            FloatType::F128 => "f128",
+        };
+        write!(f, "FloatConst({name} {:#x})", self.to_bits())
     }
 }
 
@@ -251,8 +324,8 @@ pub enum Op {
     Const(BigInt),
     /// Boolean constant: true or false.
     BConst(bool),
-    /// Float constant stored as IEEE 754 bit pattern.
-    FConst(FloatType, u64),
+    /// Float constant stored as a `rustc_apfloat` value.
+    FConst(FloatConst),
 
     // -- Comparison --
     /// Integer comparison. Returns Bool.

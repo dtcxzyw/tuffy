@@ -50,8 +50,8 @@ At CFG join points, memory versions merge via regular block parameters of type `
 ## `float`
 
 IEEE 754 floating point type. Variants: `bf16` (bfloat16), `f16` (half), `f32` (single),
-`f64` (double). Floating point operations (`fadd`, `fsub`, etc.) operate on float-typed
-values. The result type of a float operation matches the operand float width.
+`f64` (double), `f128` (quadruple). Floating point operations (`fadd`, `fsub`, etc.) operate
+on float-typed values. The result type of a float operation matches the operand float width.
 
 ## `vec(VT)`
 

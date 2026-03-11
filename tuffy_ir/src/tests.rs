@@ -711,6 +711,42 @@ fn display_float_ops() {
 }
 
 #[test]
+fn display_f128_const() {
+    let f128_ty = Type::Float(FloatType::F128);
+    let mut st = SymbolTable::new();
+    let name = st.intern("f128_const");
+    let mut func = Function::new(name, vec![], vec![], vec![], Some(f128_ty.clone()), None);
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+    let entry = builder.create_block();
+    builder.switch_to_block(entry);
+
+    let mem0 = builder.add_block_arg(entry, Type::Mem, None);
+    let bits = 0x0123_4567_89ab_cdef_fedc_ba98_7654_3210_u128;
+    let value = builder.fconst(FloatType::F128, bits, Origin::synthetic());
+    builder.ret(Some(value.into()), mem0.into(), Origin::synthetic());
+    builder.exit_region();
+
+    let Op::FConst(constant) = &func.instructions[0].op else {
+        panic!("expected fconst instruction");
+    };
+    assert_eq!(constant.float_type(), FloatType::F128);
+    assert_eq!(constant.to_bits(), bits);
+
+    let output = format!("{}", func.display(&st));
+    assert_eq!(
+        output,
+        "func @f128_const() -> f128 {\n\
+         \x20\x20bb0(v0: mem):\n\
+         \x20\x20\x20\x20v1: f128 = fconst.f128 0x123456789abcdeffedcba9876543210\n\
+         \x20\x20\x20\x20ret v1, v0\n\
+         }"
+    );
+}
+
+#[test]
 fn build_atomic_ops() {
     let mut st = SymbolTable::new();
     let name = st.intern("atomic_test");

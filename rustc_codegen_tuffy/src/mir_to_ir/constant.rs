@@ -433,11 +433,12 @@ pub(super) fn translate_scalar(
         }
         ty::Float(float_ty) => {
             let ft = match float_ty {
+                ty::FloatTy::F16 => FloatType::F16,
                 ty::FloatTy::F32 => FloatType::F32,
                 ty::FloatTy::F64 => FloatType::F64,
-                _ => return None,
+                ty::FloatTy::F128 => FloatType::F128,
             };
-            Some(builder.fconst(ft, bits as u64, Origin::synthetic()).raw())
+            Some(builder.fconst(ft, bits, Origin::synthetic()).raw())
         }
         ty::Adt(..) => {
             // Newtype structs (e.g., ExitCode(u8)) are represented as

@@ -33,7 +33,8 @@ Produces a boolean constant (true or false).
 vN = fconst <float_type> <bits>
 ```
 
-Produces a floating-point constant. The bits represent the IEEE 754 bit pattern.
+Produces a floating-point constant. The bits represent the IEEE 754 bit pattern for the
+declared float width and may use up to 128 bits for `f128`.
 
 **Semantics**: `Value.float(bits)`
 

@@ -1190,11 +1190,15 @@ fn select_inst(
             ctx.regs.assign(vref, dst);
         }
 
-        Op::FConst(_, bits) => {
+        Op::FConst(value) => {
+            if !matches!(value.float_type(), FloatType::F32 | FloatType::F64) {
+                return None;
+            }
             let dst = ctx.alloc.alloc();
+            let raw_bits = u64::try_from(value.to_bits()).ok()?;
             ctx.out.push(MInst::MovRI64 {
                 dst,
-                imm: *bits as i64,
+                imm: i64::from_ne_bytes(raw_bits.to_ne_bytes()),
             });
             ctx.regs.assign(vref, dst);
         }

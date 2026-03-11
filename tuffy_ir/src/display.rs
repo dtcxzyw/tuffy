@@ -492,7 +492,11 @@ fn fmt_inst(
             )
         }
         Op::Const(imm) => format!("{v} = iconst {imm}"),
-        Op::FConst(ft, bits) => format!("{v} = fconst.{} {:#x}", fmt_float_type(ft), bits),
+        Op::FConst(value) => format!(
+            "{v} = fconst.{} {:#x}",
+            fmt_float_type(&value.float_type()),
+            value.to_bits()
+        ),
         Op::BConst(val) => format!("{v} = bconst {val}"),
         Op::ICmp(cmp, a, b) => {
             format!(

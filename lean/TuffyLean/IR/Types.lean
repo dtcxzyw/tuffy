@@ -12,6 +12,7 @@ inductive FloatType where
   | f16    -- IEEE 754 half precision
   | f32    -- IEEE 754 single precision
   | f64    -- IEEE 754 double precision
+  | f128   -- IEEE 754 quadruple precision
   deriving DecidableEq, Repr
 
 /-- Vector type parameterized by total bit-width.

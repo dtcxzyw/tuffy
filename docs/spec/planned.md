@@ -19,7 +19,7 @@ unfolded in proofs. Properties that follow from the IEEE 754 standard (e.g.,
 (see `IR/FloatAxioms.lean`). This is unsatisfactory for a formal-first project.
 
 We need a Lean 4 library that provides a transparent, proof-friendly model of IEEE 754
-floating-point arithmetic covering all widths (f16, bf16, f32, f64), rounding modes,
+floating-point arithmetic covering all widths (f16, bf16, f32, f64, f128), rounding modes,
 NaN payloads, subnormals, and signed zeros. Existing efforts:
 
 - [HOLFloat-Lean](https://github.com/opencompl/HOLFloat-Lean) — formalizes FP
