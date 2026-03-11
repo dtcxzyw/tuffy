@@ -6,7 +6,7 @@ use tuffy_ir::function::Function;
 use tuffy_ir::module::SymbolTable;
 use tuffy_regalloc::{OpKind, PReg, RegAllocInst};
 use tuffy_target::backend::{AbiMetadata, Backend};
-use tuffy_target::regbank::RegBank;
+use tuffy_target::regbank::{RegBank, preg_reg_num};
 use tuffy_target::reloc::{RelocKind, Relocation};
 use tuffy_target::types::{CompiledFunction, StaticData};
 
@@ -139,7 +139,13 @@ impl AbiMetadata for X86AbiMetadata {
 
 /// Rewrite a VReg instruction to a Gpr instruction using the assignment map.
 fn rewrite_inst(inst: &VInst, assignments: &[PReg]) -> PInst {
-    let r = |vreg: &tuffy_regalloc::VReg| -> Gpr { Gpr::from_preg(assignments[vreg.0 as usize]) };
+    let r = |vreg: &tuffy_regalloc::VReg| -> Gpr {
+        let preg = assignments[vreg.0 as usize];
+        // PInst stores all physical registers in the `Gpr` slot, and the encoder
+        // interprets some of them as XMM registers based on the instruction kind.
+        // Strip the register-class bits here so XMM0..XMM15 map to indices 0..15.
+        Gpr::from_preg(PReg(preg_reg_num(preg)))
+    };
     match inst {
         MInst::MovRR { size, dst, src } => MInst::MovRR {
             size: *size,

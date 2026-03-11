@@ -22,7 +22,7 @@ use tuffy_ir::builder::Builder;
 use tuffy_ir::function::{Function, RegionKind};
 use tuffy_ir::instruction::{ICmpOp, Operand, Origin};
 use tuffy_ir::module::SymbolTable;
-use tuffy_ir::types::{IntAnnotation, IntSignedness, Type};
+use tuffy_ir::types::{FloatType, IntAnnotation, IntSignedness, Type};
 
 const I64: IntAnnotation = IntAnnotation {
     bit_width: 64,
@@ -68,6 +68,21 @@ fn encode_add_function() {
 }
 
 #[test]
+fn encode_f64_const_return_function() {
+    let (func, symbols) = build_f64_const_func();
+    let no_rdx_captures = HashMap::new();
+    let no_rdx_moves = HashMap::new();
+    let no_ret2 = HashSet::new();
+    let result = isel::isel(&func, &symbols, &no_rdx_captures, &no_rdx_moves, &no_ret2)
+        .expect("isel should succeed for f64 const");
+    let pinsts = lower_isel_result(&result);
+    let enc = encode::encode_function(&pinsts);
+
+    assert!(!enc.code.is_empty());
+    assert!(enc.code.contains(&0xc3), "expected ret in encoded output");
+}
+
+#[test]
 fn emit_elf_valid() {
     let (func, symbols) = build_add_func();
     let no_rdx_captures = HashMap::new();
@@ -108,6 +123,32 @@ fn build_add_func() -> (Function, SymbolTable) {
     let b = builder.param(1, i32_type.clone(), None, Origin::synthetic());
     let sum = builder.add(a.into(), b.into(), I64, Origin::synthetic());
     builder.ret(Some(sum.into()), mem0.into(), Origin::synthetic());
+
+    builder.exit_region();
+
+    (func, st)
+}
+
+fn build_f64_const_func() -> (Function, SymbolTable) {
+    let f64_type = Type::Float(FloatType::F64);
+    let mut st = SymbolTable::new();
+    let name = st.intern("const_f64");
+    let mut func = Function::new(name, vec![], vec![], vec![], Some(f64_type.clone()), None);
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+
+    let entry = builder.create_block();
+    builder.switch_to_block(entry);
+
+    let mem0 = builder.add_block_arg(entry, Type::Mem, None);
+    let value = builder.fconst(
+        FloatType::F64,
+        0x3ff8_0000_0000_0000_u128,
+        Origin::synthetic(),
+    );
+    builder.ret(Some(value.into()), mem0.into(), Origin::synthetic());
 
     builder.exit_region();
 

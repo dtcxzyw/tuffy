@@ -9,10 +9,10 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @f32_eq(%a: f32, %b: f32) -> bool {
+// CHECK: func @f32_eq(f32, f32) -> bool {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: f32 = param %a
-// CHECK:     v2: f32 = param %b
+// CHECK:     v1: f32 = param 0
+// CHECK:     v2: f32 = param 1
 // CHECK:     v3: bool = fcmp.oeq v1, v2
 // CHECK:     ret v3, v0
 // CHECK: }
@@ -27,10 +27,10 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @f32_ne(%a: f32, %b: f32) -> bool {
+// CHECK: func @f32_ne(f32, f32) -> bool {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: f32 = param %a
-// CHECK:     v2: f32 = param %b
+// CHECK:     v1: f32 = param 0
+// CHECK:     v2: f32 = param 1
 // CHECK:     v3: bool = fcmp.une v1, v2
 // CHECK:     ret v3, v0
 // CHECK: }
@@ -61,10 +61,10 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @f64_ne(%a: f64, %b: f64) -> bool {
+// CHECK: func @f64_ne(f64, f64) -> bool {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: f64 = param %a
-// CHECK:     v2: f64 = param %b
+// CHECK:     v1: f64 = param 0
+// CHECK:     v2: f64 = param 1
 // CHECK:     v3: bool = fcmp.une v1, v2
 // CHECK:     ret v3, v0
 // CHECK: }
