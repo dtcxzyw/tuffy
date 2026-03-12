@@ -929,9 +929,22 @@ pub fn execute_instruction(
                     let b = match cmp_op {
                         // For equality, compare unsigned bit patterns to handle
                         // mixed signed/unsigned representations of the same value.
+                        // Use operand annotations to determine the comparison width
+                        // rather than inferring from value magnitude, which can
+                        // incorrectly equate values like -128_i64 and 128_i64
+                        // (both fit in 8 bits but differ at 64-bit width).
                         ICmpOp::Eq | ICmpOp::Ne => {
-                            let w =
-                                std::cmp::max(infer_unsigned_width(&x), infer_unsigned_width(&y));
+                            let wa = operand_bit_width(&a.clone().raw(), def_annotation);
+                            let wb = operand_bit_width(&b.clone().raw(), def_annotation);
+                            let w = match (wa, wb) {
+                                (Some(a), Some(b)) => std::cmp::max(a, b),
+                                (Some(a), None) => a,
+                                (None, Some(b)) => b,
+                                (None, None) => std::cmp::max(
+                                    infer_unsigned_width(&x),
+                                    infer_unsigned_width(&y),
+                                ),
+                            };
                             let mask = (BigInt::one() << w) - 1;
                             let xu = &x & &mask;
                             let yu = &y & &mask;
