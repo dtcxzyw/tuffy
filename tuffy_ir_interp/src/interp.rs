@@ -960,14 +960,17 @@ impl<'a> Interpreter<'a> {
 
                     // Intercept Arguments::new to capture template+args pointers
                     // before ptrtoaddr loses provenance.
+                    // When the function uses SRET (ScalarPair returns), the first
+                    // argument is the output pointer; shift indices accordingly.
                     if func_name.contains("Arguments")
                         && func_name.contains("new")
                         && !func_name.contains("new_display")
                     {
-                        if let Some(Value::Ptr(template)) = args.first() {
+                        let sret_offset = if args.len() >= 3 { 1 } else { 0 };
+                        if let Some(Value::Ptr(template)) = args.get(sret_offset) {
                             self.pending_fmt_template = Some(template.clone());
                         }
-                        if let Some(Value::Ptr(fmt_args)) = args.get(1) {
+                        if let Some(Value::Ptr(fmt_args)) = args.get(sret_offset + 1) {
                             self.pending_fmt_args = Some(fmt_args.clone());
                         }
                     }
@@ -1035,6 +1038,11 @@ impl<'a> Interpreter<'a> {
         // bcmp/memcmp
         if sym_name == "bcmp" || sym_name == "memcmp" {
             return self.extern_memcmp(&args);
+        }
+
+        // fma/fmaf — fused multiply-add
+        if sym_name == "fma" || sym_name == "fmaf" {
+            return self.extern_fma(sym_name, &args);
         }
 
         // std::io::stdio::_print / __print — format Arguments and write to stdout
@@ -1220,6 +1228,56 @@ impl<'a> Interpreter<'a> {
             Ok(Some(Value::Int(num_bigint::BigInt::from(0))))
         } else {
             Ok(Some(Value::Int(num_bigint::BigInt::from(0))))
+        }
+    }
+
+    /// extern fma(a, b, c) -> a*b+c (fused multiply-add)
+    fn extern_fma(&self, name: &str, args: &[Value]) -> Result<Option<Value>, UbViolation> {
+        use tuffy_ir::instruction::FloatConst;
+        use tuffy_ir::types::FloatType;
+        let is_f32 = name == "fmaf";
+        if is_f32 {
+            let a = args
+                .first()
+                .and_then(|v| v.as_float())
+                .map(|fc| super::exec::float_to_f64(fc) as f32)
+                .unwrap_or(0.0);
+            let b = args
+                .get(1)
+                .and_then(|v| v.as_float())
+                .map(|fc| super::exec::float_to_f64(fc) as f32)
+                .unwrap_or(0.0);
+            let c = args
+                .get(2)
+                .and_then(|v| v.as_float())
+                .map(|fc| super::exec::float_to_f64(fc) as f32)
+                .unwrap_or(0.0);
+            let result = a.mul_add(b, c);
+            Ok(Some(Value::Float(FloatConst::from_bits(
+                FloatType::F32,
+                result.to_bits() as u128,
+            ))))
+        } else {
+            let a = args
+                .first()
+                .and_then(|v| v.as_float())
+                .map(super::exec::float_to_f64)
+                .unwrap_or(0.0);
+            let b = args
+                .get(1)
+                .and_then(|v| v.as_float())
+                .map(super::exec::float_to_f64)
+                .unwrap_or(0.0);
+            let c = args
+                .get(2)
+                .and_then(|v| v.as_float())
+                .map(super::exec::float_to_f64)
+                .unwrap_or(0.0);
+            let result = a.mul_add(b, c);
+            Ok(Some(Value::Float(FloatConst::from_bits(
+                FloatType::F64,
+                result.to_bits() as u128,
+            ))))
         }
     }
 
