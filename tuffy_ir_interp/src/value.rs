@@ -32,8 +32,8 @@ pub struct Pointer {
 pub enum AbstractByte {
     /// A concrete byte value.
     Bits(u8),
-    /// Part of a stored pointer (fragment index within the pointer's byte representation).
-    PtrFragment(AllocId, usize),
+    /// Part of a stored pointer (alloc_id, pointer offset, fragment index).
+    PtrFragment(AllocId, i64, usize),
     /// Uninitialized memory.
     Uninit,
     /// Poison byte.
@@ -81,6 +81,9 @@ impl Value {
     pub fn as_bool(&self) -> Option<bool> {
         match self {
             Value::Bool(b) => Some(*b),
+            // MIR-to-IR may pass int values where bool is expected
+            // (e.g., `xor` result used as a Select condition).
+            Value::Int(n) => Some(n.sign() != num_bigint::Sign::NoSign),
             _ => None,
         }
     }
@@ -139,7 +142,9 @@ impl fmt::Display for AbstractByte {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             AbstractByte::Bits(b) => write!(f, "{b:#04x}"),
-            AbstractByte::PtrFragment(id, idx) => write!(f, "ptr_frag(alloc{}, {idx})", id.0),
+            AbstractByte::PtrFragment(id, off, idx) => {
+                write!(f, "ptr_frag(alloc{}+{off}, {idx})", id.0)
+            }
             AbstractByte::Uninit => write!(f, "uninit"),
             AbstractByte::Poison => write!(f, "poison"),
         }
@@ -211,6 +216,6 @@ pub fn float_to_le_bytes(fc: &FloatConst) -> Vec<AbstractByte> {
 /// Encode a pointer as little-endian abstract bytes (8 bytes, pointer-sized).
 pub fn ptr_to_le_bytes(ptr: &Pointer) -> Vec<AbstractByte> {
     (0..8)
-        .map(|i| AbstractByte::PtrFragment(ptr.alloc_id, i))
+        .map(|i| AbstractByte::PtrFragment(ptr.alloc_id, ptr.offset, i))
         .collect()
 }

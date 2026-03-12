@@ -249,7 +249,7 @@ impl<'a> Interpreter<'a> {
     fn call_function(
         &mut self,
         func_idx: usize,
-        args: Vec<Value>,
+        args_with_ann: Vec<(Value, Option<Annotation>)>,
         depth: usize,
     ) -> Result<Option<Value>, UbViolation> {
         if depth >= MAX_CALL_DEPTH {
@@ -262,8 +262,20 @@ impl<'a> Interpreter<'a> {
         let func = &self.module.functions[func_idx];
         let func_name = self.module.symbols.resolve(func.name).to_string();
 
+        // The MIR-to-IR translation splits 128-bit arguments into two
+        // 64-bit call arguments (lo, hi) but keeps function signatures
+        // with single 128-bit parameters. Reconstruct 128-bit values
+        // from pairs of 64-bit args so param indices align correctly.
+        let param_values = Self::reconstruct_wide_params(&func.param_annotations, args_with_ann);
+
         let mut frame = CallFrame::new(func);
-        let param_values: Vec<Value> = args;
+
+        // Pre-allocate all stack slots at function entry, matching native
+        // code behavior where the function prologue reserves all stack space.
+        // The MIR-to-IR dump may have cross-block references to stack_slot
+        // values that aren't yet executed on the current path.
+        self.preallocate_stack_slots(&mut frame);
+
         let root = func.root_region;
         let result = self
             .execute_region(&mut frame, root, &param_values, depth)
@@ -277,6 +289,162 @@ impl<'a> Interpreter<'a> {
         }
 
         Ok(result)
+    }
+
+    /// Detect sext(fp_to_si, 128) or zext(fp_to_ui, 128) patterns and execute
+    /// the float-to-int conversion at 128-bit precision instead of going through
+    /// a 64-bit intermediate (which would saturate for large values).
+    fn try_wide_fp_to_int(
+        &self,
+        op: &Op,
+        func: &Function,
+        resolve_operand_value: &dyn Fn(&Operand) -> Value,
+    ) -> Option<Value> {
+        use crate::exec::{apply_annotation, float_to_f64};
+        use num_bigint::BigInt;
+        use tuffy_ir::types::{IntAnnotation, IntSignedness};
+
+        let (val_op, target_bits, is_signed) = match op {
+            Op::Sext(a, n) if *n > 64 => (a, *n as usize, true),
+            Op::Zext(a, n) if *n > 64 => (a, *n as usize, false),
+            _ => return None,
+        };
+
+        // Check if the source value was produced by FpToSi or FpToUi.
+        let src_vref = val_op.clone().raw().value;
+        if src_vref.is_block_arg() {
+            return None;
+        }
+        let src_inst = func.instructions.get(src_vref.index() as usize)?;
+        let float_op = match &src_inst.op {
+            Op::FpToSi(a) if is_signed => Some(a.clone().raw()),
+            Op::FpToUi(a) if !is_signed => Some(a.clone().raw()),
+            _ => return None,
+        };
+        let float_op = float_op?;
+
+        // Get the float value and do the conversion at full 128-bit precision.
+        let float_val = resolve_operand_value(&float_op);
+        let fc = float_val.as_float()?;
+        let f = float_to_f64(fc);
+
+        let int_val = if is_signed {
+            BigInt::from(f as i128)
+        } else {
+            BigInt::from(f as u128)
+        };
+
+        let signedness = if is_signed {
+            IntSignedness::Signed
+        } else {
+            IntSignedness::Unsigned
+        };
+        Some(apply_annotation(
+            &int_val,
+            &IntAnnotation {
+                bit_width: target_bits as u32,
+                signedness,
+            },
+        ))
+    }
+
+    /// Pre-allocate all StackSlot instructions in a function.
+    ///
+    /// Native code allocates all stack slots in the function prologue, so
+    /// they are available regardless of which blocks execute. The dumped IR
+    /// (pre-legalization) may have cross-block references to stack slots
+    /// defined in blocks that haven't been visited yet on the current path.
+    fn preallocate_stack_slots(&mut self, frame: &mut CallFrame<'a>) {
+        for (idx, inst) in frame.func.instructions.iter().enumerate() {
+            if let Op::StackSlot(bytes) = &inst.op {
+                let id = self.memory.allocate(*bytes as usize, "stack_slot");
+                frame.stack_allocs.push(id);
+                let vref = ValueRef::inst_result(idx as u32);
+                frame.set_value(
+                    vref,
+                    Value::Ptr(Pointer {
+                        alloc_id: id,
+                        offset: 0,
+                    }),
+                );
+            }
+        }
+    }
+
+    /// Reconstruct 128-bit parameter values from pairs of 64-bit call arguments.
+    ///
+    /// When the MIR-to-IR translation encounters a 128-bit argument stored in
+    /// memory (a Ptr), it emits two load.8 instructions and pushes both halves
+    /// as separate call arguments. When the value is already in a register (not
+    /// a Ptr), it's passed as a single arg with a 128-bit annotation. This
+    /// function uses the call arg annotations to determine which args are split
+    /// and which are already full 128-bit values.
+    fn reconstruct_wide_params(
+        param_annotations: &[Option<Annotation>],
+        args: Vec<(Value, Option<Annotation>)>,
+    ) -> Vec<Value> {
+        use num_bigint::BigInt;
+        use tuffy_ir::types::{Annotation, IntAnnotation};
+
+        // Fast path: if arg count matches param count, no reconstruction needed.
+        if args.len() == param_annotations.len() {
+            return args.into_iter().map(|(v, _)| v).collect();
+        }
+
+        let mut result = Vec::with_capacity(param_annotations.len());
+        let mut arg_idx = 0;
+
+        for ann in param_annotations {
+            if arg_idx >= args.len() {
+                break;
+            }
+            let param_is_wide = matches!(
+                ann,
+                Some(Annotation::Int(IntAnnotation { bit_width, .. })) if *bit_width > 64
+            );
+            if param_is_wide {
+                // Check if the current arg already has a 128-bit annotation
+                // (not split — passed as a single value).
+                let arg_is_wide = matches!(
+                    &args[arg_idx].1,
+                    Some(Annotation::Int(IntAnnotation { bit_width, .. })) if *bit_width > 64
+                );
+                if arg_is_wide {
+                    // Already a full 128-bit value, no combining needed.
+                    result.push(args[arg_idx].0.clone());
+                    arg_idx += 1;
+                } else if arg_idx + 1 < args.len() {
+                    // Combine lo (arg_idx) and hi (arg_idx+1).
+                    let lo = &args[arg_idx].0;
+                    let hi = &args[arg_idx + 1].0;
+                    match (lo.as_int(), hi.as_int()) {
+                        (Some(lo_n), Some(hi_n)) => {
+                            let mask64 = (BigInt::from(1u128) << 64) - 1;
+                            let lo_unsigned = lo_n & &mask64;
+                            let hi_unsigned = hi_n & &mask64;
+                            let combined = (hi_unsigned << 64) | lo_unsigned;
+                            result.push(Value::Int(combined));
+                        }
+                        _ => {
+                            result.push(args[arg_idx].0.clone());
+                            result.push(args[arg_idx + 1].0.clone());
+                        }
+                    }
+                    arg_idx += 2;
+                } else {
+                    result.push(args[arg_idx].0.clone());
+                    arg_idx += 1;
+                }
+            } else {
+                result.push(args[arg_idx].0.clone());
+                arg_idx += 1;
+            }
+        }
+        while arg_idx < args.len() {
+            result.push(args[arg_idx].0.clone());
+            arg_idx += 1;
+        }
+        result
     }
 
     /// Execute a region, returning the value from Ret or RegionYield.
@@ -500,6 +668,17 @@ impl<'a> Interpreter<'a> {
                 } else {
                     Value::Poison
                 };
+                // Convert Int to Bool when the param type is Bool.
+                // The MIR-to-IR translation may pass int values (e.g.,
+                // from xor) where the callee expects a bool parameter.
+                let val = if matches!(inst.ty, Type::Bool) {
+                    match &val {
+                        Value::Int(n) => Value::Bool(n.sign() != num_bigint::Sign::NoSign),
+                        other => other.clone(),
+                    }
+                } else {
+                    val
+                };
                 frame.set_value_with_ann(vref, val, inst.result_annotation);
                 continue;
             }
@@ -510,13 +689,13 @@ impl<'a> Interpreter<'a> {
                     let base = frame.get_value(func_ptr.clone().raw().value);
                     crate::exec::apply_result_annotation(base, &func_ptr.clone().raw().annotation)
                 };
-                let arg_vals: Vec<Value> = args
+                let arg_vals_with_ann: Vec<(Value, Option<Annotation>)> = args
                     .iter()
                     .map(|a| {
                         let base = frame.get_value(a.value);
                         let def_ann = frame.get_def_annotation(a.value);
                         let effective_ann = a.annotation.as_ref().or(def_ann.as_ref());
-                        match effective_ann {
+                        let val = match effective_ann {
                             Some(ann) => match (&base, ann) {
                                 (Value::Int(n), tuffy_ir::types::Annotation::Int(ia)) => {
                                     crate::exec::apply_annotation(n, ia)
@@ -524,12 +703,13 @@ impl<'a> Interpreter<'a> {
                                 _ => base,
                             },
                             None => base,
-                        }
+                        };
+                        (val, effective_ann.cloned())
                     })
                     .collect();
 
                 // Look up the function by pointer.
-                let call_result = self.resolve_call(&vp, arg_vals, depth)?;
+                let call_result = self.resolve_call(&vp, arg_vals_with_ann, depth)?;
                 frame.set_value_with_ann(vref, Value::Mem, inst.result_annotation); // Primary result is Mem token
                 if let Some(_sec_ty) = &inst.secondary_ty {
                     let sec_vref = ValueRef::inst_secondary_result(inst_idx);
@@ -615,16 +795,20 @@ impl<'a> Interpreter<'a> {
             };
 
             // Handle StackSlot specially to avoid borrow conflicts.
-            if let Op::StackSlot(bytes) = &inst_op {
-                let id = self.memory.allocate(*bytes as usize, "stack_slot");
-                frame.stack_allocs.push(id);
-                frame.set_value(
-                    vref,
-                    Value::Ptr(Pointer {
-                        alloc_id: id,
-                        offset: 0,
-                    }),
-                );
+            // Pre-allocated by preallocate_stack_slots — just skip.
+            if let Op::StackSlot(_) = &inst_op {
+                continue;
+            }
+
+            // Intercept sext(fp_to_si, 128) and zext(fp_to_ui, 128) patterns.
+            // The MIR-to-IR codegen emits fp_to_si→i64→sext→i128 but the
+            // legalization pass transforms this to a compiler-rt call for
+            // correct 128-bit float-to-int conversion. The interpreter must
+            // replicate this since it works on pre-legalization IR.
+            if let Some(result) =
+                self.try_wide_fp_to_int(&inst_op, frame.func, &resolve_operand_value)
+            {
+                frame.set_value_with_ann(vref, result, inst_result_ann);
                 continue;
             }
 
@@ -746,9 +930,12 @@ impl<'a> Interpreter<'a> {
     fn resolve_call(
         &mut self,
         func_ptr: &Value,
-        args: Vec<Value>,
+        args_with_ann: Vec<(Value, Option<Annotation>)>,
         depth: usize,
     ) -> Result<Option<Value>, UbViolation> {
+        // Extract plain values for callers that don't need annotations.
+        let args: Vec<Value> = args_with_ann.iter().map(|(v, _)| v.clone()).collect();
+
         // Find which function this pointer refers to.
         if let Value::Ptr(ptr) = func_ptr {
             for (i, func) in self.module.functions.iter().enumerate() {
@@ -784,7 +971,7 @@ impl<'a> Interpreter<'a> {
                             self.pending_fmt_args = Some(fmt_args.clone());
                         }
                     }
-                    return self.call_function(i, args, depth + 1);
+                    return self.call_function(i, args_with_ann, depth + 1);
                 }
             }
             // Not a known function body — try extern function handling.
@@ -1147,17 +1334,23 @@ impl<'a> Interpreter<'a> {
             let shadow = get_or_create(&mut self.shadow_hashers, p.alloc_id.0);
             if let Some(Value::Int(val)) = args.get(1) {
                 if func_name.contains("write_u8") {
-                    shadow.write_u8(val.to_u8().unwrap_or(0));
+                    let v = val.to_u8().unwrap_or(0);
+                    shadow.write_u8(v);
                 } else if func_name.contains("write_u16") {
-                    shadow.write_u16(val.to_u16().unwrap_or(0));
+                    let v = val.to_u16().unwrap_or(0);
+                    shadow.write_u16(v);
                 } else if func_name.contains("write_u32") {
-                    shadow.write_u32(val.to_u32().unwrap_or(0));
+                    let v = val.to_u32().unwrap_or(0);
+                    shadow.write_u32(v);
                 } else if func_name.contains("write_u64") {
-                    shadow.write_u64(val.to_u64().unwrap_or(0));
+                    let v = val.to_u64().unwrap_or(0);
+                    shadow.write_u64(v);
                 } else if func_name.contains("write_u128") {
-                    shadow.write_u128(val.to_u128().unwrap_or(0));
+                    let v = val.to_u128().unwrap_or(0);
+                    shadow.write_u128(v);
                 } else if func_name.contains("write_usize") {
-                    shadow.write_usize(val.to_usize().unwrap_or(0));
+                    let v = val.to_usize().unwrap_or(0);
+                    shadow.write_usize(v);
                 } else if func_name.contains("write_i8") {
                     let v = val
                         .to_i8()
@@ -1327,18 +1520,15 @@ impl<'a> Interpreter<'a> {
         // Check for PtrFragment first.
         let has_ptr_fragments = data_bytes
             .iter()
-            .any(|b| matches!(b, crate::value::AbstractByte::PtrFragment(_, _)));
+            .any(|b| matches!(b, crate::value::AbstractByte::PtrFragment(_, _, _)));
 
         if has_ptr_fragments {
             // Reconstruct pointer from fragments.
-            if let Some((alloc_id, _)) = data_bytes.iter().find_map(|b| match b {
-                crate::value::AbstractByte::PtrFragment(id, idx) => Some((*id, *idx)),
+            if let Some((alloc_id, offset)) = data_bytes.iter().find_map(|b| match b {
+                crate::value::AbstractByte::PtrFragment(id, off, _) => Some((*id, *off)),
                 _ => None,
             }) {
-                let data_ptr = Pointer {
-                    alloc_id,
-                    offset: 0,
-                };
+                let data_ptr = Pointer { alloc_id, offset };
                 return self.read_and_format_value(&data_ptr);
             }
         }
@@ -1356,8 +1546,8 @@ impl<'a> Interpreter<'a> {
             if addr == 0 {
                 return "0".to_string();
             }
-            let alloc_id = AllocId((addr / 0x1000) as u64);
-            let offset = addr % 0x1000;
+            let alloc_id = AllocId((addr / crate::exec::SYNTH_ADDR_BASE) as u64);
+            let offset = addr - (alloc_id.0 as i64) * crate::exec::SYNTH_ADDR_BASE;
             let data_ptr = Pointer { alloc_id, offset };
             return self.read_and_format_value(&data_ptr);
         }

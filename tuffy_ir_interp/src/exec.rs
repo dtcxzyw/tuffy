@@ -18,6 +18,37 @@ use crate::value::{
     ptr_to_le_bytes,
 };
 
+/// Base multiplier for synthetic addresses in `PtrToAddr`/`IntToPtr`.
+/// Pointer addresses are synthesized as `alloc_id * SYNTH_ADDR_BASE + offset`.
+/// Must be large enough that no allocation offset exceeds this value.
+pub const SYNTH_ADDR_BASE: i64 = 1 << 32;
+
+/// Reverse the synthetic address scheme: recover `(alloc_id, offset)` from an
+/// address produced by `ptrtoaddr`.
+fn addr_to_pointer(addr: i64) -> Pointer {
+    if addr == 0 {
+        Pointer {
+            alloc_id: AllocId(0),
+            offset: 0,
+        }
+    } else {
+        let alloc_id = addr / SYNTH_ADDR_BASE;
+        let offset = addr - alloc_id * SYNTH_ADDR_BASE;
+        if alloc_id > 0 {
+            Pointer {
+                alloc_id: AllocId(alloc_id as u64),
+                offset,
+            }
+        } else {
+            // Can't recover provenance; use alloc_id 0 as sentinel.
+            Pointer {
+                alloc_id: AllocId(0),
+                offset: addr,
+            }
+        }
+    }
+}
+
 /// Result of executing a single instruction.
 #[derive(Debug)]
 pub enum ExecResult {
@@ -290,7 +321,7 @@ fn float_compare(a: &FloatConst, b: &FloatConst) -> (bool, bool, bool, bool) {
     (a_f64 < b_f64, a_f64 == b_f64, a_f64 > b_f64, false)
 }
 
-fn float_to_f64(fc: &FloatConst) -> f64 {
+pub fn float_to_f64(fc: &FloatConst) -> f64 {
     match fc.float_type() {
         FloatType::F64 => f64::from_bits(fc.to_bits() as u64),
         FloatType::F32 => f32::from_bits(fc.to_bits() as u32) as f64,
@@ -1281,10 +1312,16 @@ pub fn execute_instruction(
             let result = match va.as_float() {
                 Some(fc) => {
                     let f = float_to_f64(fc);
-                    if f.is_nan() || f.is_infinite() {
-                        Value::Poison
+                    // Check result annotation to determine conversion width.
+                    let result_bw = match result_annotation {
+                        Some(Annotation::Int(ia)) => ia.bit_width as usize,
+                        _ => 64,
+                    };
+                    if result_bw > 64 {
+                        // Use i128 saturating semantics for wide results.
+                        Value::Int(BigInt::from(f as i128))
                     } else {
-                        Value::Int(BigInt::from(f.trunc() as i64))
+                        Value::Int(BigInt::from(f as i64))
                     }
                 }
                 None => Value::Poison,
@@ -1299,10 +1336,14 @@ pub fn execute_instruction(
             let result = match va.as_float() {
                 Some(fc) => {
                     let f = float_to_f64(fc);
-                    if f.is_nan() || f.is_infinite() || f < 0.0 {
-                        Value::Poison
+                    let result_bw = match result_annotation {
+                        Some(Annotation::Int(ia)) => ia.bit_width as usize,
+                        _ => 64,
+                    };
+                    if result_bw > 64 {
+                        Value::Int(BigInt::from(f as u128))
                     } else {
-                        Value::Int(BigInt::from(f.trunc() as u64))
+                        Value::Int(BigInt::from(f as u64))
                     }
                 }
                 None => Value::Poison,
@@ -1585,10 +1626,7 @@ pub fn execute_instruction(
             let vp = res_op(resolve_value, &ptr_op.clone().raw());
             match vp.as_ptr() {
                 Some(ptr) => {
-                    // Synthesize a non-zero address from the allocation ID and offset.
-                    // AllocId(0) is the null sentinel, so valid alloc IDs start at 1.
-                    // This ensures ptrtoaddr never returns 0 for valid pointers.
-                    let addr = (ptr.alloc_id.0 as i64) * 0x1000 + ptr.offset;
+                    let addr = (ptr.alloc_id.0 as i64) * SYNTH_ADDR_BASE + ptr.offset;
                     Ok(ExecResult::Value(apply_result_annotation(
                         Value::Int(BigInt::from(addr)),
                         result_annotation,
@@ -1601,24 +1639,8 @@ pub fn execute_instruction(
             let vi = res_op(resolve_value, &int_op.clone().raw());
             match vi.as_int() {
                 Some(n) => {
-                    // IntToPtr creates a pointer from an address.
-                    // Reverse the synthetic address scheme from PtrToAddr:
-                    // addr = alloc_id * 0x1000 + offset
-                    // For address 0, produce the null pointer.
                     let addr = n.to_i64().unwrap_or(0);
-                    if addr == 0 {
-                        Ok(ExecResult::Value(Value::Ptr(Pointer {
-                            alloc_id: AllocId(0),
-                            offset: 0,
-                        })))
-                    } else {
-                        // We can't recover provenance from an integer address.
-                        // Use AllocId(0) as invalid provenance.
-                        Ok(ExecResult::Value(Value::Ptr(Pointer {
-                            alloc_id: AllocId(0),
-                            offset: addr,
-                        })))
-                    }
+                    Ok(ExecResult::Value(Value::Ptr(addr_to_pointer(addr))))
                 }
                 _ => Ok(ExecResult::Value(Value::Poison)),
             }
@@ -1853,30 +1875,19 @@ fn bytes_to_value(bytes: &[AbstractByte], ty: &Type, n: usize) -> Value {
     // Check for pointer fragments
     let has_ptr_fragments = bytes
         .iter()
-        .any(|b| matches!(b, AbstractByte::PtrFragment(_, _)));
+        .any(|b| matches!(b, AbstractByte::PtrFragment(_, _, _)));
     if has_ptr_fragments && n == 8 {
         // Try to reconstruct a pointer
-        if let Some((alloc_id, _)) = bytes.iter().find_map(|b| match b {
-            AbstractByte::PtrFragment(id, idx) => Some((*id, *idx)),
+        if let Some((alloc_id, offset)) = bytes.iter().find_map(|b| match b {
+            AbstractByte::PtrFragment(id, off, _) => Some((*id, *off)),
             _ => None,
         }) {
             // Verify all bytes are fragments of the same pointer
             let all_same = bytes.iter().enumerate().all(|(i, b)| {
-                matches!(b, AbstractByte::PtrFragment(id, idx) if *id == alloc_id && *idx == i)
+                matches!(b, AbstractByte::PtrFragment(id, off, idx) if *id == alloc_id && *off == offset && *idx == i)
             });
             if all_same {
-                // Read offset from the raw bytes (we stored fragments, offset is in the pointer)
-                // For fragment-based storage, we need the original offset.
-                // Since we store PtrFragment without the offset in memory bytes, we need
-                // the allocation info to reconstruct. For simplicity, we return offset 0
-                // and note that the real implementation would track this differently.
-                // Actually, in our memory model, pointer bytes don't carry the offset.
-                // The offset should be stored in a side table or encoded differently.
-                // For now, we'll return a pointer to the start of the allocation.
-                return Value::Ptr(Pointer {
-                    alloc_id,
-                    offset: 0,
-                });
+                return Value::Ptr(Pointer { alloc_id, offset });
             }
         }
     }
@@ -1890,14 +1901,10 @@ fn bytes_to_value(bytes: &[AbstractByte], ty: &Type, n: usize) -> Value {
             _ => Value::Poison,
         },
         Type::Ptr(_) => {
-            // If not reconstructed as pointer fragments above, try as integer address
+            // If not reconstructed as pointer fragments above, try as integer address.
+            // Reverse the synthetic address scheme from PtrToAddr.
             le_bytes_to_int(bytes, false)
-                .map(|n| {
-                    Value::Ptr(Pointer {
-                        alloc_id: AllocId(0),
-                        offset: n.to_i64().unwrap_or(0),
-                    })
-                })
+                .map(|n| Value::Ptr(addr_to_pointer(n.to_i64().unwrap_or(0))))
                 .unwrap_or(Value::Poison)
         }
         Type::Float(ft) => {
