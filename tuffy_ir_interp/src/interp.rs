@@ -22,7 +22,12 @@ use crate::value::{AllocId, Pointer, Value};
 const MAX_CALL_DEPTH: usize = 1024;
 
 /// Maximum number of instructions to execute before aborting (infinite loop protection).
-const MAX_STEPS: u64 = 100_000_000;
+fn max_steps() -> u64 {
+    std::env::var("TUFFY_MAX_STEPS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(500_000_000)
+}
 
 /// Execution mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,8 +69,10 @@ impl std::fmt::Display for InterpResult {
 /// A frame on the call stack.
 struct CallFrame<'a> {
     func: &'a Function,
-    /// SSA value environment: maps ValueRef (raw encoding) to runtime Value.
-    env: HashMap<u32, Value>,
+    /// SSA value environment: maps ValueRef (raw encoding) to runtime Value
+    /// along with the definition-site annotation (used as fallback when no
+    /// use-site annotation is present, e.g. for sext/zext source width).
+    env: HashMap<u32, (Value, Option<Annotation>)>,
     /// Stack slot allocations to deallocate on return.
     stack_allocs: Vec<AllocId>,
 }
@@ -80,14 +87,24 @@ impl<'a> CallFrame<'a> {
     }
 
     fn set_value(&mut self, vref: ValueRef, val: Value) {
-        self.env.insert(vref.raw(), val);
+        // Store with no definition annotation (callers that know the annotation
+        // should use set_value_with_ann instead).
+        self.env.insert(vref.raw(), (val, None));
+    }
+
+    fn set_value_with_ann(&mut self, vref: ValueRef, val: Value, ann: Option<Annotation>) {
+        self.env.insert(vref.raw(), (val, ann));
     }
 
     fn get_value(&self, vref: ValueRef) -> Value {
         self.env
             .get(&vref.raw())
-            .cloned()
+            .map(|(v, _)| v.clone())
             .unwrap_or_else(|| panic!("undefined value reference: {:?} (raw={})", vref, vref.raw()))
+    }
+
+    fn get_def_annotation(&self, vref: ValueRef) -> Option<Annotation> {
+        self.env.get(&vref.raw()).and_then(|(_, ann)| *ann)
     }
 }
 
@@ -104,6 +121,8 @@ pub struct Interpreter<'a> {
     alloc_to_symbol: HashMap<u64, String>,
     /// Step counter.
     steps: u64,
+    /// Maximum step count before aborting.
+    max_steps: u64,
     /// Warnings accumulated in Normal mode.
     pub warnings: Vec<UbViolation>,
     /// Captured stdout output.
@@ -137,6 +156,7 @@ impl<'a> Interpreter<'a> {
             symbol_addrs: HashMap::new(),
             alloc_to_symbol: HashMap::new(),
             steps: 0,
+            max_steps: max_steps(),
             warnings: Vec::new(),
             stdout: Vec::new(),
             stderr: Vec::new(),
@@ -242,12 +262,6 @@ impl<'a> Interpreter<'a> {
         let func = &self.module.functions[func_idx];
         let func_name = self.module.symbols.resolve(func.name).to_string();
 
-        // Debug trace for key hash functions.
-        let trace = std::env::var("TUFFY_TRACE").is_ok();
-        if trace {
-            eprintln!("TRACE CALL: {} args={:?}", func_name, args);
-        }
-
         let mut frame = CallFrame::new(func);
         let param_values: Vec<Value> = args;
         let root = func.root_region;
@@ -257,10 +271,6 @@ impl<'a> Interpreter<'a> {
                 e.message = format!("{}\n  in {func_name}", e.message);
                 e
             })?;
-
-        if trace {
-            eprintln!("TRACE RET:  {} -> {:?}", func_name, result);
-        }
 
         for alloc_id in &frame.stack_allocs {
             let _ = self.memory.deallocate(*alloc_id);
@@ -326,11 +336,16 @@ impl<'a> Interpreter<'a> {
         let mut child_idx = 0;
         let mut pending_block_args: Option<(BlockRef, Vec<Value>)> = None;
 
-        // Set up initial block args for the first block if param_values provided.
-        if !param_values.is_empty()
-            && let Some(CfgNode::Block(first_block)) = children.first()
-        {
+        // Set up initial block args for the first block.
+        // Function entry blocks have v0: mem as their first arg — ensure it's set
+        // even when param_values is empty (zero-param functions).
+        if let Some(CfgNode::Block(first_block)) = children.first() {
             let bb = frame.func.block(*first_block);
+            let block_args = frame.func.block_args(*first_block);
+            if bb.arg_count > 0 && block_args[0].ty == tuffy_ir::types::Type::Mem {
+                let mem_vref = ValueRef::block_arg(bb.arg_start);
+                frame.set_value(mem_vref, Value::Mem);
+            }
             for (i, val) in param_values.iter().enumerate() {
                 if i < bb.arg_count as usize {
                     let vref = ValueRef::block_arg(bb.arg_start + i as u32);
@@ -460,7 +475,7 @@ impl<'a> Interpreter<'a> {
 
         for i in 0..inst_count {
             self.steps += 1;
-            if self.steps > MAX_STEPS {
+            if self.steps > self.max_steps {
                 return Err(UbViolation {
                     kind: UbKind::InvalidOperand,
                     message: "step limit exceeded".into(),
@@ -485,7 +500,7 @@ impl<'a> Interpreter<'a> {
                 } else {
                     Value::Poison
                 };
-                frame.set_value(vref, val);
+                frame.set_value_with_ann(vref, val, inst.result_annotation);
                 continue;
             }
 
@@ -499,7 +514,9 @@ impl<'a> Interpreter<'a> {
                     .iter()
                     .map(|a| {
                         let base = frame.get_value(a.value);
-                        match &a.annotation {
+                        let def_ann = frame.get_def_annotation(a.value);
+                        let effective_ann = a.annotation.as_ref().or(def_ann.as_ref());
+                        match effective_ann {
                             Some(ann) => match (&base, ann) {
                                 (Value::Int(n), tuffy_ir::types::Annotation::Int(ia)) => {
                                     crate::exec::apply_annotation(n, ia)
@@ -513,14 +530,22 @@ impl<'a> Interpreter<'a> {
 
                 // Look up the function by pointer.
                 let call_result = self.resolve_call(&vp, arg_vals, depth)?;
-                frame.set_value(vref, Value::Mem); // Primary result is Mem token
+                frame.set_value_with_ann(vref, Value::Mem, inst.result_annotation); // Primary result is Mem token
                 if let Some(_sec_ty) = &inst.secondary_ty {
                     let sec_vref = ValueRef::inst_secondary_result(inst_idx);
-                    frame.set_value(sec_vref, call_result.unwrap_or(Value::Unit));
+                    frame.set_value_with_ann(
+                        sec_vref,
+                        call_result.unwrap_or(Value::Unit),
+                        inst.secondary_result_annotation,
+                    );
                 } else {
                     // Single-result call: the result is the return value, type permitting
                     if !matches!(inst.ty, Type::Mem) {
-                        frame.set_value(vref, call_result.unwrap_or(Value::Unit));
+                        frame.set_value_with_ann(
+                            vref,
+                            call_result.unwrap_or(Value::Unit),
+                            inst.result_annotation,
+                        );
                     }
                 }
                 continue;
@@ -539,30 +564,38 @@ impl<'a> Interpreter<'a> {
             let func_name_for_debug = self.module.symbols.resolve(frame.func.name).to_string();
             let inst_idx_for_debug = inst_idx;
             let resolve_value = |v: ValueRef| -> Value {
-                env_snapshot.get(&v.raw()).cloned().unwrap_or_else(|| {
-                    panic!(
-                        "undefined value: {:?} (secondary={}) at inst {} in {}",
-                        v,
-                        v.is_secondary_result(),
-                        inst_idx_for_debug,
-                        func_name_for_debug
-                    )
-                })
-            };
-            let resolve_operand_value = |op: &Operand| -> Value {
-                let base = env_snapshot
-                    .get(&op.value.raw())
-                    .cloned()
+                env_snapshot
+                    .get(&v.raw())
+                    .map(|(val, _)| val.clone())
                     .unwrap_or_else(|| {
                         panic!(
                             "undefined value: {:?} (secondary={}) at inst {} in {}",
-                            op.value,
-                            op.value.is_secondary_result(),
+                            v,
+                            v.is_secondary_result(),
                             inst_idx_for_debug,
                             func_name_for_debug
                         )
-                    });
-                match &op.annotation {
+                    })
+            };
+            let resolve_operand_value = |op: &Operand| -> Value {
+                let (base, def_ann) =
+                    env_snapshot
+                        .get(&op.value.raw())
+                        .cloned()
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "undefined value: {:?} (secondary={}) at inst {} in {}",
+                                op.value,
+                                op.value.is_secondary_result(),
+                                inst_idx_for_debug,
+                                func_name_for_debug
+                            )
+                        });
+                // Use the use-site annotation if present, otherwise fall back
+                // to the definition-site annotation (critical for sext/zext
+                // which need source width from the defining instruction).
+                let effective_ann = op.annotation.as_ref().or(def_ann.as_ref());
+                match effective_ann {
                     Some(ann) => match (&base, ann) {
                         (Value::Int(n), tuffy_ir::types::Annotation::Int(ia)) => {
                             crate::exec::apply_annotation(n, ia)
@@ -598,6 +631,10 @@ impl<'a> Interpreter<'a> {
             let mut noop_alloc =
                 |_size: usize| -> AllocId { unreachable!("StackSlot handled above") };
 
+            let def_annotation = |v: ValueRef| -> Option<Annotation> {
+                env_snapshot.get(&v.raw()).and_then(|(_, ann)| *ann)
+            };
+
             let result = execute_instruction(
                 &inst_op,
                 &inst_ty,
@@ -609,16 +646,17 @@ impl<'a> Interpreter<'a> {
                 &mut self.memory,
                 &mut noop_alloc,
                 &resolve_symbol,
+                &def_annotation,
             );
 
             match result {
                 Ok(ExecResult::Value(val)) => {
-                    frame.set_value(vref, val);
+                    frame.set_value_with_ann(vref, val, inst_result_ann);
                 }
                 Ok(ExecResult::MultiValue(v1, v2)) => {
-                    frame.set_value(vref, v1);
+                    frame.set_value_with_ann(vref, v1, inst_result_ann);
                     let sec_vref = ValueRef::inst_secondary_result(inst_idx);
-                    frame.set_value(sec_vref, v2);
+                    frame.set_value_with_ann(sec_vref, v2, inst_secondary_result_ann);
                 }
                 Ok(ExecResult::Terminator(action)) => {
                     // Still set the terminator's value (for display consistency).

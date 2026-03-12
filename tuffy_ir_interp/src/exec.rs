@@ -329,11 +329,32 @@ pub fn execute_instruction(
     memory: &mut Memory,
     alloc_stack_slot: &mut dyn FnMut(usize) -> AllocId,
     resolve_symbol: &dyn Fn(tuffy_ir::module::SymbolId) -> Value,
+    def_annotation: &dyn Fn(ValueRef) -> Option<Annotation>,
 ) -> Result<ExecResult, UbViolation> {
     /// Helper: resolve an operand with its annotation applied.
     fn res_op(resolve_value: &dyn Fn(ValueRef) -> Value, op: &Operand) -> Value {
         let base = resolve_value(op.value);
         resolve_operand(&base, &op.annotation)
+    }
+
+    /// Get the source bit width from an operand: prefer use-site annotation,
+    /// fall back to definition-site annotation.
+    fn operand_bit_width(
+        op: &Operand,
+        def_annotation: &dyn Fn(ValueRef) -> Option<Annotation>,
+    ) -> Option<usize> {
+        op.annotation
+            .as_ref()
+            .and_then(|ann| match ann {
+                Annotation::Int(ia) => Some(ia.bit_width as usize),
+                _ => None,
+            })
+            .or_else(|| {
+                def_annotation(op.value).and_then(|ann| match ann {
+                    Annotation::Int(ia) => Some(ia.bit_width as usize),
+                    _ => None,
+                })
+            })
     }
 
     match op {
@@ -537,26 +558,26 @@ pub fn execute_instruction(
         Op::Min(a, b) => {
             let va = res_op(resolve_value, &a.clone().raw());
             let vb = res_op(resolve_value, &b.clone().raw());
+            // Apply result annotation before comparison so signed values
+            // are properly interpreted (e.g. DontCare u64 -32768 → s64 -32768).
+            let va = apply_result_annotation(va, result_annotation);
+            let vb = apply_result_annotation(vb, result_annotation);
             let result = match get_int_binop(&va, &vb) {
                 Some((x, y)) => Value::Int(x.min(y)),
                 _ => Value::Poison,
             };
-            Ok(ExecResult::Value(apply_result_annotation(
-                result,
-                result_annotation,
-            )))
+            Ok(ExecResult::Value(result))
         }
         Op::Max(a, b) => {
             let va = res_op(resolve_value, &a.clone().raw());
             let vb = res_op(resolve_value, &b.clone().raw());
+            let va = apply_result_annotation(va, result_annotation);
+            let vb = apply_result_annotation(vb, result_annotation);
             let result = match get_int_binop(&va, &vb) {
                 Some((x, y)) => Value::Int(x.max(y)),
                 _ => Value::Poison,
             };
-            Ok(ExecResult::Value(apply_result_annotation(
-                result,
-                result_annotation,
-            )))
+            Ok(ExecResult::Value(result))
         }
 
         // ── Bit manipulation ──
@@ -1225,16 +1246,7 @@ pub fn execute_instruction(
             let _n = *n as usize;
             let result = match &va {
                 Value::Int(v) => {
-                    // Get the source bit width from the operand annotation.
-                    let src_bits = a
-                        .clone()
-                        .raw()
-                        .annotation
-                        .as_ref()
-                        .and_then(|ann| match ann {
-                            Annotation::Int(ia) => Some(ia.bit_width as usize),
-                            _ => None,
-                        });
+                    let src_bits = operand_bit_width(&a.clone().raw(), def_annotation);
                     match src_bits {
                         Some(src) => Value::Int(sign_extend(&truncate_to_bits(v, src), src)),
                         None => Value::Int(v.clone()),
@@ -1251,15 +1263,7 @@ pub fn execute_instruction(
             let va = res_op(resolve_value, &a.clone().raw());
             let result = match &va {
                 Value::Int(v) => {
-                    let src_bits = a
-                        .clone()
-                        .raw()
-                        .annotation
-                        .as_ref()
-                        .and_then(|ann| match ann {
-                            Annotation::Int(ia) => Some(ia.bit_width as usize),
-                            _ => None,
-                        });
+                    let src_bits = operand_bit_width(&a.clone().raw(), def_annotation);
                     match src_bits {
                         Some(src) => Value::Int(truncate_to_bits(v, src)),
                         None => Value::Int(v.clone()),

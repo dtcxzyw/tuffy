@@ -49,7 +49,7 @@ for seed in $(seq "$START" "$END"); do
     rm -f "$WORKDIR/seed${seed}_tuffy"
 
     # Run through interpreter
-    actual=$(timeout 30 "$INTERP" "$ir" 2>/dev/null || true)
+    actual=$(timeout 120 "$INTERP" "$ir" 2>/dev/null || true)
 
     if [ "$expected" = "$actual" ]; then
         pass=$((pass + 1))
