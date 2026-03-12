@@ -501,9 +501,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                         Origin::synthetic(),
                                                     )
                                                     .raw();
-                                                if let Some(arith_bytes) = checked_rvalue
-                                                    && arith_bytes >= 8
-                                                {
+                                                if let Some(arith_bytes) = checked_rvalue {
                                                     let off = self.builder.iconst(
                                                         arith_bytes as i64,
                                                         64,
@@ -516,16 +514,25 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                         0,
                                                         Origin::synthetic(),
                                                     );
-                                                    let zero = self.builder.iconst(
-                                                        0,
-                                                        64,
-                                                        IntSignedness::DontCare,
-                                                        Origin::synthetic(),
-                                                    );
+                                                    // Store the actual overflow flag
+                                                    // from the WithOverflow result.
+                                                    let flag_val = self
+                                                        .overflow_locals
+                                                        .get(place.local)
+                                                        .unwrap_or_else(|| {
+                                                            self.builder
+                                                                .iconst(
+                                                                    0,
+                                                                    64,
+                                                                    IntSignedness::DontCare,
+                                                                    Origin::synthetic(),
+                                                                )
+                                                                .raw()
+                                                        });
                                                     self.current_mem = self
                                                         .builder
                                                         .store(
-                                                            zero.into(),
+                                                            flag_val.into(),
                                                             flag_addr.into(),
                                                             1,
                                                             self.current_mem.into(),
@@ -546,6 +553,46 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                 Origin::synthetic(),
                                             )
                                             .raw();
+                                        // For checked ops (AddWithOverflow etc.), the
+                                        // primary result was stored but the overflow
+                                        // flag must also be written to its field offset
+                                        // inside the (T, bool) tuple.
+                                        if let Rvalue::BinaryOp(
+                                            BinOp::AddWithOverflow
+                                            | BinOp::SubWithOverflow
+                                            | BinOp::MulWithOverflow,
+                                            box (lhs, _),
+                                        ) = rvalue
+                                            && let Some(overflow_flag) =
+                                                self.overflow_locals.get(place.local)
+                                        {
+                                            let lhs_ty = lhs.ty(&self.mir.local_decls, self.tcx);
+                                            let lhs_ty = self.monomorphize(lhs_ty);
+                                            let flag_offset =
+                                                type_size(self.tcx, lhs_ty).unwrap_or(8) as i64;
+                                            let off = self.builder.iconst(
+                                                flag_offset,
+                                                64,
+                                                IntSignedness::DontCare,
+                                                Origin::synthetic(),
+                                            );
+                                            let flag_addr = self.builder.ptradd(
+                                                slot.into(),
+                                                off.into(),
+                                                0,
+                                                Origin::synthetic(),
+                                            );
+                                            self.current_mem = self
+                                                .builder
+                                                .store(
+                                                    overflow_flag.into(),
+                                                    flag_addr.into(),
+                                                    1,
+                                                    self.current_mem.into(),
+                                                    Origin::synthetic(),
+                                                )
+                                                .raw();
+                                        }
                                     }
                                 } else {
                                     self.locals.set(place.local, val);

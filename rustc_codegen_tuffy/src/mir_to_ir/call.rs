@@ -775,11 +775,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let dest_repr = repr_kind(self.tcx, dest_ty);
 
         // In Rust ABI, Scalar and ScalarPair ≤ 16 bytes are returned in
-        // registers.  Larger types use SRET (hidden first pointer parameter).
+        // registers.  For IR correctness (the interpreter cannot observe ABI
+        // metadata for two-register returns), ScalarPair always uses SRET.
         let needs_sret = match dest_repr {
             ReprKind::Zst => false,
             ReprKind::Scalar => false,
-            ReprKind::ScalarPair => dest_size.is_some_and(|sz| sz > 16),
+            ReprKind::ScalarPair => dest_size.is_some_and(|sz| sz > 0),
             ReprKind::Memory => dest_size.is_some_and(|sz| sz > 8),
         };
         let sret_slot = if needs_sret {
@@ -1192,6 +1193,84 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             ir_args.push(loaded.into());
                         } else {
                             ir_args.push(v.into());
+                        }
+                    }
+                    // If this arg is a Copy/Move of a checked-op local (e.g.
+                    // (i64, bool) from AddWithOverflow), pack or append the
+                    // overflow flag.  Small tuples (primary ≤ 4 bytes) fit in
+                    // one register — pack the bool at the primary-size offset.
+                    // Larger tuples use a second register argument.
+                    if let Operand::Copy(place) | Operand::Move(place) = &arg.node
+                        && place.projection.is_empty()
+                        && !self.stack_locals.is_stack(place.local)
+                        && let Some(overflow_flag) = self.overflow_locals.get(place.local)
+                    {
+                        let local_ty = self.monomorphize(self.mir.local_decls[place.local].ty);
+                        if let ty::Tuple(fields) = local_ty.kind()
+                            && fields.len() == 2
+                            && fields[1].is_bool()
+                            && !fields[0].is_bool()
+                        {
+                            let primary_bytes = type_size(self.tcx, fields[0]).unwrap_or(8);
+                            if primary_bytes <= 4 {
+                                // Pack overflow flag into the same register:
+                                // value |= (flag_as_int << (primary_bytes * 8))
+                                let shift_bits = (primary_bytes * 8) as i64;
+                                let shift_val = self.builder.iconst(
+                                    shift_bits,
+                                    64,
+                                    IntSignedness::DontCare,
+                                    Origin::synthetic(),
+                                );
+                                let one = self.builder.iconst(
+                                    1,
+                                    64,
+                                    IntSignedness::DontCare,
+                                    Origin::synthetic(),
+                                );
+                                let zero = self.builder.iconst(
+                                    0,
+                                    64,
+                                    IntSignedness::DontCare,
+                                    Origin::synthetic(),
+                                );
+                                let flag_int = self.builder.select(
+                                    overflow_flag.into(),
+                                    one.into(),
+                                    zero.into(),
+                                    Type::Int,
+                                    Some(Annotation::Int(IntAnnotation {
+                                        bit_width: 64,
+                                        signedness: IntSignedness::DontCare,
+                                    })),
+                                    Origin::synthetic(),
+                                );
+                                let ann64 = IntAnnotation {
+                                    bit_width: 64,
+                                    signedness: IntSignedness::DontCare,
+                                };
+                                let shifted = self.builder.shl(
+                                    flag_int.into(),
+                                    shift_val.into(),
+                                    ann64,
+                                    Origin::synthetic(),
+                                );
+                                // Replace the last pushed arg with the packed value.
+                                if let Some(last) = ir_args.last_mut() {
+                                    let last_op: tuffy_ir::typed::IntOperand =
+                                        (*last).clone().into();
+                                    let packed = self.builder.or(
+                                        last_op,
+                                        shifted.into(),
+                                        ann64,
+                                        Origin::synthetic(),
+                                    );
+                                    *last = packed.into();
+                                }
+                            } else {
+                                // Large primary (8 bytes): separate register arg.
+                                ir_args.push(overflow_flag.into());
+                            }
                         }
                     }
                     // If this arg is a Copy/Move of a fat local, also pass the high part.

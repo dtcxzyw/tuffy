@@ -91,12 +91,12 @@ pub fn translate_function<'tcx>(
     let ret_size = type_size(tcx, ret_mir_ty).unwrap_or(0);
     let ret_repr = repr_kind(tcx, ret_mir_ty);
     // In Rust ABI, Scalar and ScalarPair types ≤ 16 bytes are returned in
-    // registers.  Larger types (including ScalarPair > 16 bytes, e.g.
-    // (u64, i128)) and Memory types > 8 bytes use SRET.
+    // registers.  For IR correctness (the interpreter cannot observe ABI
+    // metadata for two-register returns), ScalarPair always uses SRET.
     let needs_sret = match ret_repr {
         ReprKind::Zst => false,
         ReprKind::Scalar => false,
-        ReprKind::ScalarPair => ret_size > 16,
+        ReprKind::ScalarPair => ret_size > 0,
         ReprKind::Memory => ret_size > 8,
     };
 
