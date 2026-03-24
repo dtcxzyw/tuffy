@@ -57,6 +57,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 true
             }
 
+            // transmute: bitwise reinterpretation. The intrinsic arg loader
+            // already loaded the value from memory, so just copy it.
+            "transmute" => {
+                if let Some(&v) = ir_args.first() {
+                    self.locals.set(destination_local, v);
+                }
+                true
+            }
+
             // assume: optimizer hint, no runtime effect. Treat as no-op.
             "assume" => true,
 

@@ -1783,10 +1783,21 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             && matches!(self.builder.value_type(val), Some(Type::Ptr(_)))
                         {
                             // Both source and target are >8-byte integers (e.g.
-                            // i128 → u128).  `val` is a Ptr to the source data.
-                            // Return it as-is so the assignment handler does a
-                            // word-by-word memory copy (same bit pattern).
-                            return Some(val);
+                            // i128 → u128).  Load the full value now to capture
+                            // the correct memory state.  Returning the Ptr would
+                            // defer the load to use-time, reading stale data if
+                            // the source memory is overwritten in between.
+                            let ann = translate_annotation(src_ty)
+                                .or_else(|| int_annotation_for_bytes(src_size as u32));
+                            let loaded = self.builder.load(
+                                val.into(),
+                                src_size as u32,
+                                Type::Int,
+                                self.current_mem.into(),
+                                ann,
+                                Origin::synthetic(),
+                            );
+                            return Some(loaded);
                         }
                         let val = if src_size > 8
                             && src_ty.is_integral()
@@ -2468,6 +2479,29 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             && target_ty_mono.is_integral()
                         {
                             return Some(self.coerce_to_int(val));
+                        }
+                        // Transmute / cast from a memory address (e.g. projected
+                        // field like RET.fld0) into an integral type.  Load the
+                        // value now to avoid deferred-load aliasing bugs: if the
+                        // source memory is overwritten before the local is used,
+                        // the lazy load would read stale data.
+                        if matches!(kind, CastKind::Transmute)
+                            && matches!(self.builder.value_type(val), Some(Type::Ptr(_)))
+                            && target_ty_mono.is_integral()
+                        {
+                            let target_size = type_size(self.tcx, target_ty_mono).unwrap_or(0);
+                            if target_size > 0 {
+                                let ann = int_annotation_for_bytes(target_size as u32);
+                                let loaded = self.builder.load(
+                                    val.into(),
+                                    target_size as u32,
+                                    Type::Int,
+                                    self.current_mem.into(),
+                                    ann,
+                                    Origin::synthetic(),
+                                );
+                                return Some(loaded);
+                            }
                         }
                         Some(val)
                     }
