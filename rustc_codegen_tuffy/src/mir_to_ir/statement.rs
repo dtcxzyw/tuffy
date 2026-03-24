@@ -1001,12 +1001,27 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     _ => src_bytes > 8,
                                 };
                                 if val_is_wide {
+                                    // For checked ops, store only the primary
+                                    // result width, not the full tuple size.
+                                    let wide_bytes = if let Rvalue::BinaryOp(
+                                        BinOp::AddWithOverflow
+                                        | BinOp::SubWithOverflow
+                                        | BinOp::MulWithOverflow,
+                                        box (lhs, _),
+                                    ) = rvalue
+                                    {
+                                        let lhs_ty = lhs.ty(&self.mir.local_decls, self.tcx);
+                                        let lhs_ty = self.monomorphize(lhs_ty);
+                                        type_size(self.tcx, lhs_ty).unwrap_or(16) as u32
+                                    } else {
+                                        bytes
+                                    };
                                     self.current_mem = self
                                         .builder
                                         .store(
                                             val.into(),
                                             addr.into(),
-                                            bytes,
+                                            wide_bytes,
                                             self.current_mem.into(),
                                             Origin::synthetic(),
                                         )
@@ -1083,12 +1098,89 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         .raw();
                                 }
                             } else if bytes > 0 {
+                                // For checked ops, only store primary result
+                                // bytes (not the full tuple including overflow
+                                // flag). The overflow flag is stored separately
+                                // below.
+                                let store_bytes = if let Rvalue::BinaryOp(
+                                    BinOp::AddWithOverflow
+                                    | BinOp::SubWithOverflow
+                                    | BinOp::MulWithOverflow,
+                                    box (lhs, _),
+                                ) = rvalue
+                                {
+                                    let lhs_ty = lhs.ty(&self.mir.local_decls, self.tcx);
+                                    let lhs_ty = self.monomorphize(lhs_ty);
+                                    type_size(self.tcx, lhs_ty).unwrap_or(8) as u32
+                                } else {
+                                    bytes
+                                };
                                 self.current_mem = self
                                     .builder
                                     .store(
                                         val.into(),
                                         addr.into(),
-                                        bytes,
+                                        store_bytes,
+                                        self.current_mem.into(),
+                                        Origin::synthetic(),
+                                    )
+                                    .raw();
+                            }
+                            // For checked ops (AddWithOverflow etc.) into a
+                            // projected destination, the overflow flag must be
+                            // stored at the end of the primary result.
+                            if let Rvalue::BinaryOp(
+                                BinOp::AddWithOverflow
+                                | BinOp::SubWithOverflow
+                                | BinOp::MulWithOverflow,
+                                box (lhs, _),
+                            ) = rvalue
+                                && let Some(overflow_flag) = self.overflow_locals.get(place.local)
+                            {
+                                let lhs_ty = lhs.ty(&self.mir.local_decls, self.tcx);
+                                let lhs_ty = self.monomorphize(lhs_ty);
+                                let flag_offset = type_size(self.tcx, lhs_ty).unwrap_or(8) as i64;
+                                let off = self.builder.iconst(
+                                    flag_offset,
+                                    64,
+                                    IntSignedness::DontCare,
+                                    Origin::synthetic(),
+                                );
+                                let flag_addr = self.builder.ptradd(
+                                    addr.into(),
+                                    off.into(),
+                                    0,
+                                    Origin::synthetic(),
+                                );
+                                let one = self.builder.iconst(
+                                    1,
+                                    64,
+                                    IntSignedness::DontCare,
+                                    Origin::synthetic(),
+                                );
+                                let zero = self.builder.iconst(
+                                    0,
+                                    64,
+                                    IntSignedness::DontCare,
+                                    Origin::synthetic(),
+                                );
+                                let flag_int = self.builder.select(
+                                    overflow_flag.into(),
+                                    one.into(),
+                                    zero.into(),
+                                    Type::Int,
+                                    Some(Annotation::Int(IntAnnotation {
+                                        bit_width: 8,
+                                        signedness: IntSignedness::Unsigned,
+                                    })),
+                                    Origin::synthetic(),
+                                );
+                                self.current_mem = self
+                                    .builder
+                                    .store(
+                                        flag_int.into(),
+                                        flag_addr.into(),
+                                        1,
                                         self.current_mem.into(),
                                         Origin::synthetic(),
                                     )
