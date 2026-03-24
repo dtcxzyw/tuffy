@@ -1256,17 +1256,100 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     Origin::synthetic(),
                                 );
                                 // Replace the last pushed arg with the packed value.
+                                // Mask the primary value to its type width first
+                                // to prevent sign-extended bits from bleeding into
+                                // the overflow flag position.
                                 if let Some(last) = ir_args.last_mut() {
                                     let last_op: tuffy_ir::typed::IntOperand =
                                         (*last).clone().into();
-                                    let packed = self.builder.or(
+                                    let mask_val =
+                                        (1u64 << (primary_bytes * 8)).wrapping_sub(1) as i64;
+                                    let mask = self.builder.iconst(
+                                        mask_val,
+                                        64,
+                                        IntSignedness::DontCare,
+                                        Origin::synthetic(),
+                                    );
+                                    let masked = self.builder.and(
                                         last_op,
+                                        mask.into(),
+                                        ann64,
+                                        Origin::synthetic(),
+                                    );
+                                    let packed = self.builder.or(
+                                        masked.into(),
                                         shifted.into(),
                                         ann64,
                                         Origin::synthetic(),
                                     );
                                     *last = packed.into();
                                 }
+                            } else if primary_bytes > 8 {
+                                // Very large primary (>8 bytes, e.g. u128): the full
+                                // tuple is >16 bytes, so the callee expects a pointer.
+                                // Store primary + overflow flag into a stack slot and
+                                // pass its address.
+                                let full_size = type_size(self.tcx, local_ty).unwrap_or(32) as u32;
+                                let slot = self.builder.stack_slot(full_size, Origin::synthetic());
+                                // Store the primary value (u128).
+                                let prev_arg = ir_args.pop().unwrap();
+                                self.current_mem = self
+                                    .builder
+                                    .store(
+                                        prev_arg,
+                                        slot.into(),
+                                        primary_bytes as u32,
+                                        self.current_mem.into(),
+                                        Origin::synthetic(),
+                                    )
+                                    .raw();
+                                // Store the overflow bool at offset primary_bytes.
+                                let flag_off = self.builder.iconst(
+                                    primary_bytes as i64,
+                                    64,
+                                    IntSignedness::DontCare,
+                                    Origin::synthetic(),
+                                );
+                                let flag_addr = self.builder.ptradd(
+                                    slot.into(),
+                                    flag_off.into(),
+                                    0,
+                                    Origin::synthetic(),
+                                );
+                                let one = self.builder.iconst(
+                                    1,
+                                    64,
+                                    IntSignedness::DontCare,
+                                    Origin::synthetic(),
+                                );
+                                let zero = self.builder.iconst(
+                                    0,
+                                    64,
+                                    IntSignedness::DontCare,
+                                    Origin::synthetic(),
+                                );
+                                let flag_int = self.builder.select(
+                                    overflow_flag.into(),
+                                    one.into(),
+                                    zero.into(),
+                                    Type::Int,
+                                    Some(Annotation::Int(IntAnnotation {
+                                        bit_width: 8,
+                                        signedness: IntSignedness::Unsigned,
+                                    })),
+                                    Origin::synthetic(),
+                                );
+                                self.current_mem = self
+                                    .builder
+                                    .store(
+                                        flag_int.into(),
+                                        flag_addr.into(),
+                                        1,
+                                        self.current_mem.into(),
+                                        Origin::synthetic(),
+                                    )
+                                    .raw();
+                                ir_args.push(slot.into());
                             } else {
                                 // Large primary (8 bytes): separate register arg.
                                 ir_args.push(overflow_flag.into());
@@ -1409,11 +1492,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let call_ret_ann = if matches!(call_ret_ty, Type::Int) {
             translate_annotation(dest_ty).or_else(|| {
                 // For structs ≤8 bytes, use annotation based on size.
-                // For structs 9-16 bytes, use 64-bit annotation since the
-                // call returns the first 8 bytes in RAX; the remaining bytes
-                // are captured from RDX via ABI metadata (see below).
+                // For Scalar > 8 bytes (e.g. (u128,)), use 128-bit
+                // annotation so legalization treats it as a wide return.
+                // For ScalarPair 9-16 bytes, use 64-bit annotation since
+                // the call returns the first 8 bytes in RAX; the
+                // remaining bytes are captured via ABI metadata.
                 dest_size.and_then(|sz| {
-                    if sz <= 8 {
+                    if sz <= 8 || (sz <= 16 && matches!(dest_repr, ReprKind::Scalar)) {
                         int_annotation_for_bytes(sz as u32)
                     } else if sz <= 16 {
                         int_annotation_for_bytes(8)
@@ -1506,8 +1591,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         } else if matches!(
             dest_ty.kind(),
             ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
-        ) {
-            // i128/u128 scalar return: the call result is annotated :s128.
+        ) || (dest_size.unwrap_or(0) > 8
+            && matches!(dest_repr, ReprKind::Scalar)
+            && !matches!(dest_repr, ReprKind::ScalarPair))
+        {
+            // i128/u128 scalar return (or transparent newtype like (u128,)):
+            // the call result is annotated :s128.
             // Emit a single store.16 and let legalization split the 128-bit
             // value into lo/hi halves with the correct RDX capture.
             // Do NOT manually create an RDX capture here — leg_call handles
