@@ -568,6 +568,99 @@ pub fn translate_function<'tcx>(
         }
     }
 
+    // Pre-assign reference holders: when `_5 = &mut _2` (or &, &raw)
+    // and `_2` is now a stack local, pre-assign `_5` to `_2`'s slot.
+    // MIR passes (e.g. CheckAlignment) can reorder basic blocks so the
+    // `_5 = &mut _2` definition may appear in a later-indexed block than
+    // a use like `(*_5) = ...`.  Since the flat LocalMap has no per-block
+    // scoping, pre-assigning the reference holder here ensures it is
+    // visible in all blocks regardless of index order.
+    {
+        // Collect which locals have their address taken (via &_X or
+        // &mut _X where _X has no projections).  These locals need
+        // to be backed by stack slots so the address is stable.
+        let mut addr_taken: std::collections::HashSet<mir::Local> =
+            std::collections::HashSet::new();
+        for bb_data in mir.basic_blocks.iter() {
+            for stmt in &bb_data.statements {
+                if let StatementKind::Assign(box (_, rvalue)) = &stmt.kind
+                    && let Rvalue::Ref(_, _, place) | Rvalue::RawPtr(_, place) = rvalue
+                    && place.projection.is_empty()
+                {
+                    addr_taken.insert(place.local);
+                }
+            }
+        }
+        for bb_data in mir.basic_blocks.iter() {
+            for stmt in &bb_data.statements {
+                if let StatementKind::Assign(box (dest, rvalue)) = &stmt.kind {
+                    let ref_place = match rvalue {
+                        Rvalue::Ref(_, _, place) | Rvalue::RawPtr(_, place) => Some(place),
+                        _ => None,
+                    };
+                    if let Some(place) = ref_place
+                        && place.projection.is_empty()
+                        && dest.projection.is_empty()
+                        && ctx.stack_locals.is_stack(place.local)
+                        && ctx.locals.get(dest.local).is_none()
+                        && let Some(slot) = ctx.locals.get(place.local)
+                    {
+                        // If this local's address is also taken (e.g.
+                        // `_5 = &mut _0` where `_0 = &raw const _4`,
+                        // then later `_7 = &mut _0`), we need to
+                        // store the value in a proper stack slot
+                        // so that the spill slot is initialized at
+                        // function entry rather than lazily in a
+                        // later block.
+                        if addr_taken.contains(&dest.local) {
+                            let dest_ty = ctx.monomorphize(mir.local_decls[dest.local].ty);
+                            let dest_sz = type_size(ctx.tcx, dest_ty).unwrap_or(8) as u32;
+                            let new_slot =
+                                ctx.builder.stack_slot(dest_sz.max(8), Origin::synthetic());
+                            ctx.current_mem = ctx
+                                .builder
+                                .store(
+                                    slot.into(),
+                                    new_slot.into(),
+                                    8,
+                                    ctx.current_mem.into(),
+                                    Origin::synthetic(),
+                                )
+                                .raw();
+                            ctx.locals.set(dest.local, new_slot);
+                            ctx.stack_locals.mark(dest.local);
+                        } else {
+                            ctx.locals.set(dest.local, slot);
+                        }
+                    }
+                }
+            }
+        }
+        // Second pass: handle `_X = &(mut) (*_Y)` where _Y was
+        // pre-assigned above (it points to a stack local). Since
+        // `*_Y` dereferences to the same stack slot, _X gets the
+        // same address.
+        for bb_data in mir.basic_blocks.iter() {
+            for stmt in &bb_data.statements {
+                if let StatementKind::Assign(box (dest, rvalue)) = &stmt.kind {
+                    let ref_place = match rvalue {
+                        Rvalue::Ref(_, _, place) | Rvalue::RawPtr(_, place) => Some(place),
+                        _ => None,
+                    };
+                    if let Some(place) = ref_place
+                        && place.projection.len() == 1
+                        && matches!(place.projection[0], mir::PlaceElem::Deref)
+                        && dest.projection.is_empty()
+                        && ctx.locals.get(dest.local).is_none()
+                        && let Some(slot) = ctx.locals.get(place.local)
+                    {
+                        ctx.locals.set(dest.local, slot);
+                    }
+                }
+            }
+        }
+    }
+
     // Pre-allocate a stack slot for the return place (_0) when it is a
     // multi-word type (9-16 bytes, e.g. &str, &[T]).
     {
