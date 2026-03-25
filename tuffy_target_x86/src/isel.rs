@@ -3433,7 +3433,14 @@ fn select_select(
 fn select_sext(ctx: &mut IselCtx, vref: ValueRef, val: &Operand, func: &Function) -> Option<()> {
     let src = ctx.ensure_in_reg(val.value)?;
     let dst = ctx.alloc.alloc();
-    let src_ann = get_int_annotation(func, val.value);
+    // Prefer operand's use-site annotation over the def-site annotation.
+    let src_ann = val
+        .annotation
+        .and_then(|a| match a {
+            Annotation::Int(ia) => Some(ia),
+            _ => None,
+        })
+        .or_else(|| get_int_annotation(func, val.value));
     match src_ann.map(|a| a.bit_width) {
         Some(8) => {
             ctx.out.push(MInst::MovsxB { dst, src });
@@ -3498,7 +3505,14 @@ fn select_sext(ctx: &mut IselCtx, vref: ValueRef, val: &Operand, func: &Function
 fn select_zext(ctx: &mut IselCtx, vref: ValueRef, val: &Operand, func: &Function) -> Option<()> {
     let src = ctx.ensure_in_reg(val.value)?;
     let dst = ctx.alloc.alloc();
-    let src_ann = get_int_annotation(func, val.value);
+    // Prefer operand's use-site annotation over the def-site annotation.
+    let src_ann = val
+        .annotation
+        .and_then(|a| match a {
+            Annotation::Int(ia) => Some(ia),
+            _ => None,
+        })
+        .or_else(|| get_int_annotation(func, val.value));
     match src_ann.map(|a| a.bit_width) {
         Some(8) => {
             ctx.out.push(MInst::MovzxB { dst, src });
