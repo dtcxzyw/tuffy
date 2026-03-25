@@ -4,9 +4,10 @@ use num_bigint::BigInt;
 use rustc_middle::mir;
 use rustc_middle::ty::{self, Instance, TyCtxt};
 use tuffy_ir::builder::Builder;
-use tuffy_ir::instruction::Origin;
+use tuffy_ir::instruction::{Operand, Origin};
 use tuffy_ir::module::SymbolTable;
-use tuffy_ir::types::{FloatType, IntSignedness, Type};
+use tuffy_ir::typed::IntOperand;
+use tuffy_ir::types::{Annotation, FloatType, IntAnnotation, IntSignedness, Type};
 use tuffy_ir::value::ValueRef;
 
 pub(super) fn translate_int_to_int_cast(
@@ -22,6 +23,22 @@ pub(super) fn translate_int_to_int_cast(
         return Some(val);
     }
 
+    // Build an annotated operand that carries the correct source bit width.
+    // The IR value may have a wider definition-site annotation (e.g. a u8
+    // value stored in a 64-bit register), so we must explicitly annotate the
+    // operand so that sext/zext use the correct source width.
+    let src_signedness = if is_signed_int(src_ty) {
+        IntSignedness::Signed
+    } else {
+        IntSignedness::Unsigned
+    };
+    let src_ann = Annotation::Int(IntAnnotation {
+        bit_width: src_bits,
+        signedness: src_signedness,
+    });
+    let annotated_op =
+        |v: ValueRef| -> IntOperand { IntOperand::from(Operand::annotated(v, src_ann)) };
+
     if dst_bits > src_bits {
         // Widening cast. For sub-64-bit sources targeting 128 bits, first
         // extend to 64 bits so that leg_sext_128 / leg_zext_128 see a full
@@ -30,31 +47,60 @@ pub(super) fn translate_int_to_int_cast(
         if src_bits < 64 && dst_bits > 64 {
             // Intermediate extension to 64 bits.
             if is_signed_int(src_ty) {
-                v = builder.sext(v.into(), 64, Origin::synthetic()).raw();
+                v = builder.sext(annotated_op(v), 64, Origin::synthetic()).raw();
             } else {
-                v = builder.zext(v.into(), 64, Origin::synthetic()).raw();
+                v = builder.zext(annotated_op(v), 64, Origin::synthetic()).raw();
             }
-        }
-        if is_signed_int(src_ty) {
-            Some(builder.sext(v.into(), dst_bits, Origin::synthetic()).raw())
+            // After extending to 64 bits, the next sext/zext uses the 64-bit value.
+            if is_signed_int(src_ty) {
+                Some(builder.sext(v.into(), dst_bits, Origin::synthetic()).raw())
+            } else {
+                Some(builder.zext(v.into(), dst_bits, Origin::synthetic()).raw())
+            }
+        } else if is_signed_int(src_ty) {
+            Some(
+                builder
+                    .sext(annotated_op(v), dst_bits, Origin::synthetic())
+                    .raw(),
+            )
         } else {
-            Some(builder.zext(v.into(), dst_bits, Origin::synthetic()).raw())
+            Some(
+                builder
+                    .zext(annotated_op(v), dst_bits, Origin::synthetic())
+                    .raw(),
+            )
         }
     } else {
-        // Narrowing: use sext/zext with dst_bits
-        if is_signed_int(target_ty) {
-            Some(
-                builder
-                    .sext(val.into(), dst_bits, Origin::synthetic())
-                    .raw(),
-            )
+        // Narrowing: mask the value to the target width via AND.
+        // We cannot use zext/sext here because the isel interprets those as
+        // "extend from source_width" and ignores the target when it is smaller.
+        let dst_signedness = if is_signed_int(target_ty) {
+            IntSignedness::Signed
         } else {
-            Some(
-                builder
-                    .zext(val.into(), dst_bits, Origin::synthetic())
-                    .raw(),
+            IntSignedness::Unsigned
+        };
+        let dst_ann = IntAnnotation {
+            bit_width: dst_bits,
+            signedness: dst_signedness,
+        };
+        let mask = if dst_bits >= 64 {
+            u64::MAX
+        } else {
+            (1u64 << dst_bits) - 1
+        };
+        let mask_val = builder
+            .iconst(
+                mask as i64,
+                64,
+                IntSignedness::Unsigned,
+                Origin::synthetic(),
             )
-        }
+            .raw();
+        Some(
+            builder
+                .and(val.into(), mask_val.into(), dst_ann, Origin::synthetic())
+                .raw(),
+        )
     }
 }
 

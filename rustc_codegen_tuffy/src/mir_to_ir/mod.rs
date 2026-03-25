@@ -362,10 +362,10 @@ pub fn translate_function<'tcx>(
 
         // Locals assigned via projections (e.g. `_0.0 = ...`) need stack
         // slots unconditionally — partial field writes require addressable memory.
-        for bb_data in mir.basic_blocks.iter() {
-            for stmt in &bb_data.statements {
-                if let StatementKind::Assign(box (place, _)) = &stmt.kind
-                    && !place.projection.is_empty()
+        // Helper: promote a projected place's base local to stack.
+        let promote_projected_place =
+            |ctx: &mut TranslationCtx<'_, 'tcx>, place: &mir::Place<'tcx>| {
+                if !place.projection.is_empty()
                     // A leading Deref means we write *through* the local (e.g.
                     // `(*_0).1 = ...`).  The local itself is a pointer — it must
                     // NOT be turned into a stack slot; doing so would create a
@@ -383,6 +383,19 @@ pub fn translate_function<'tcx>(
                         ctx.promote_local_to_stack(local, size);
                     }
                 }
+            };
+        for bb_data in mir.basic_blocks.iter() {
+            for stmt in &bb_data.statements {
+                if let StatementKind::Assign(box (place, _)) = &stmt.kind {
+                    promote_projected_place(&mut ctx, place);
+                }
+            }
+            // Also check Call terminators — they can assign to projected
+            // destinations like `(_5.0: u64) = bswap(...)`.
+            if let Some(terminator) = &bb_data.terminator
+                && let TerminatorKind::Call { destination, .. } = &terminator.kind
+            {
+                promote_projected_place(&mut ctx, destination);
             }
         }
 
@@ -409,7 +422,15 @@ pub fn translate_function<'tcx>(
         for (bb, bb_data) in mir.basic_blocks.iter_enumerated() {
             let mut used_locals = Vec::new();
             for stmt in &bb_data.statements {
-                if let StatementKind::Assign(box (_, rvalue)) = &stmt.kind {
+                if let StatementKind::Assign(box (place, rvalue)) = &stmt.kind {
+                    // When the LHS has a leading Deref (e.g. `(*_7) = ...`),
+                    // the base local is read to obtain the pointer address.
+                    // It must be promoted if defined in a later block.
+                    if !place.projection.is_empty()
+                        && matches!(place.projection.first(), Some(mir::PlaceElem::Deref))
+                    {
+                        used_locals.push(place.local);
+                    }
                     match rvalue {
                         Rvalue::Use(op) | Rvalue::UnaryOp(_, op) | Rvalue::Cast(_, op, _) => {
                             used_locals.extend(collect_used_locals(op));
@@ -486,9 +507,6 @@ pub fn translate_function<'tcx>(
                         _ => None,
                     };
                     if let Some(local) = referenced_local {
-                        if local.as_usize() == 0 {
-                            continue;
-                        }
                         if ctx.stack_locals.is_stack(local) {
                             continue;
                         }
