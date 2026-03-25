@@ -1821,16 +1821,17 @@ impl<'a> Parser<'a> {
                 if self.current == Token::Arrow {
                     self.advance();
                     let (ret_ty, ret_ann) = self.parse_type_with_annotation()?;
-                    // Non-void call: primary is mem, secondary is ret_ty
-                    // For multi-result calls with the `-> ret_type` suffix displayed:
-                    // the display format puts the result annotation in the `-> type:ann` suffix,
-                    // not on the primary result binding.
+                    // Non-void call: primary is mem, secondary is ret_ty.
+                    // The display format puts the return annotation in the
+                    // `-> type:ann` suffix. Fall back to the multi-result
+                    // binding annotation for compatibility with older dumps.
+                    let effective_ann = ret_ann.or_else(|| multi.as_ref().and_then(|(_, _, a)| *a));
                     Ok((
                         Op::Call(callee.into(), args, mem.into()),
                         primary_ty.clone(),
                         *primary_ann,
                         Some(ret_ty),
-                        ret_ann,
+                        effective_ann,
                     ))
                 } else {
                     // Void call: only mem result

@@ -620,7 +620,9 @@ fn fmt_inst(
         Op::Call(callee, args, mem) => {
             if let Some(sec_ty) = &inst.secondary_ty {
                 // Non-void call: multi-result (mem, data)
-                let ret_suffix = match result_ann {
+                // Use the secondary result annotation for the `-> type:ann` suffix,
+                // since the secondary result carries the return value annotation.
+                let ret_suffix = match &inst.secondary_result_annotation {
                     Some(a) => format!(" -> {}{}", fmt_type(sec_ty), fmt_annotation(a)),
                     None => format!(" -> {}", fmt_type(sec_ty)),
                 };
