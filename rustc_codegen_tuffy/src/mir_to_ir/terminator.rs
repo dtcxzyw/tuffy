@@ -195,7 +195,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let val = self.locals.values[ret_local.as_usize()];
                     if let Some(v) = val {
                         // Coerce to match the declared return type.
-                        let ret_ir_ty = translate_ty(self.tcx, ret_mir_ty);
+                        // Fall back to Type::Int for small aggregates (e.g.
+                        // [i8; 1]) that translate_ty maps to None — this
+                        // matches the function-signature logic in mod.rs.
+                        let ret_ir_ty = translate_ty(self.tcx, ret_mir_ty).or(
+                            if ret_size > 0 && ret_size <= 8 {
+                                Some(Type::Int)
+                            } else {
+                                None
+                            },
+                        );
                         let coerced = match (ret_ir_ty, self.builder.value_type(v).cloned()) {
                             (Some(Type::Int), Some(Type::Ptr(_)))
                                 if self.builder.is_memory_address(v) =>
