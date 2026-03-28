@@ -8,13 +8,16 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @neg_i128(%a: int:s128) -> int:s128 {
+// CHECK: func @neg_i128(int:s128) -> int:s128 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:s128 = param %a
-// CHECK:     v2: int:i64 = iconst 0
-// CHECK:     v3: int:i128 = sub v2, v1
-// CHECK:     v4: int:s128 = sext v3, 128
-// CHECK:     ret v4, v0
+// CHECK:     v1: int:s128 = param 0
+// CHECK:     v2: ptr = stack_slot 16
+// CHECK:     v3: int:i64 = iconst 0
+// CHECK:     v4: int:i128 = sub v3, v1
+// CHECK:     v5: int:s128 = sext v4, 128
+// CHECK:     v6: mem = store.16 v5, v2, v0
+// CHECK:     v7: int:s128 = load.16 v2, v6
+// CHECK:     ret v7, v6
 // CHECK: }
 // CHECK:
 // CHECK: fn neg_i32(_1: i32) -> i32 {
@@ -26,9 +29,9 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @neg_i32(%a: int:s32) -> int:s32 {
+// CHECK: func @neg_i32(int:s32) -> int:s32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:s32 = param %a
+// CHECK:     v1: int:s32 = param 0
 // CHECK:     v2: int:i64 = iconst 0
 // CHECK:     v3: int:i32 = sub v2, v1
 // CHECK:     v4: int:s32 = sext v3, 32
@@ -44,9 +47,9 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @not_bool(%a: bool) -> bool {
+// CHECK: func @not_bool(bool) -> bool {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: bool = param %a
+// CHECK:     v1: bool = param 0
 // CHECK:     v2: int:u64 = iconst 1
 // CHECK:     v3: int:u64 = iconst 0
 // CHECK:     v4: int:u64 = select v1, v2, v3
@@ -66,13 +69,16 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @not_i128(%a: int:s128) -> int:s128 {
+// CHECK: func @not_i128(int:s128) -> int:s128 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:s128 = param %a
-// CHECK:     v2: int:i64 = iconst -1
-// CHECK:     v3: int:i128 = xor v1, v2
-// CHECK:     v4: int:s128 = sext v3, 128
-// CHECK:     ret v4, v0
+// CHECK:     v1: int:s128 = param 0
+// CHECK:     v2: ptr = stack_slot 16
+// CHECK:     v3: int:i128 = iconst -1
+// CHECK:     v4: int:i128 = xor v1, v3
+// CHECK:     v5: int:s128 = sext v4, 128
+// CHECK:     v6: mem = store.16 v5, v2, v0
+// CHECK:     v7: int:s128 = load.16 v2, v6
+// CHECK:     ret v7, v6
 // CHECK: }
 // CHECK:
 // CHECK: fn not_u128(_1: u128) -> u128 {
@@ -84,13 +90,16 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @not_u128(%a: int:u128) -> int:u128 {
+// CHECK: func @not_u128(int:u128) -> int:u128 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:u128 = param %a
-// CHECK:     v2: int:i64 = iconst -1
-// CHECK:     v3: int:i128 = xor v1, v2
-// CHECK:     v4: int:u128 = zext v3, 128
-// CHECK:     ret v4, v0
+// CHECK:     v1: int:u128 = param 0
+// CHECK:     v2: ptr = stack_slot 16
+// CHECK:     v3: int:i128 = iconst -1
+// CHECK:     v4: int:i128 = xor v1, v3
+// CHECK:     v5: int:u128 = zext v4, 128
+// CHECK:     v6: mem = store.16 v5, v2, v0
+// CHECK:     v7: int:u128 = load.16 v2, v6
+// CHECK:     ret v7, v6
 // CHECK: }
 // CHECK:
 // CHECK: fn not_u32(_1: u32) -> u32 {
@@ -102,10 +111,10 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @not_u32(%a: int:u32) -> int:u32 {
+// CHECK: func @not_u32(int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:u32 = param %a
-// CHECK:     v2: int:i64 = iconst -1
+// CHECK:     v1: int:u32 = param 0
+// CHECK:     v2: int:i32 = iconst -1
 // CHECK:     v3: int:i32 = xor v1, v2
 // CHECK:     v4: int:u32 = zext v3, 32
 // CHECK:     ret v4, v0

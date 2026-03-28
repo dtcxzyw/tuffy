@@ -25,11 +25,11 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @div_i32(%a: int:s32, %b: int:s32) -> int:s32 {
+// CHECK: func @div_i32(int:s32, int:s32) -> int:s32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:s32 = param %a
-// CHECK:     v2: int:s32 = param %b
-// CHECK:     v3: int:i64 = iconst 0
+// CHECK:     v1: int:s32 = param 0
+// CHECK:     v2: int:s32 = param 1
+// CHECK:     v3: int:i32 = iconst 0
 // CHECK:     v4: bool = icmp.eq v2, v3:s32
 // CHECK:     v5: int:u64 = iconst 1
 // CHECK:     v6: int:u64 = iconst 0
@@ -39,9 +39,9 @@
 // CHECK:     brif v9, bb1(v0), bb3(v0)
 // CHECK:
 // CHECK:   bb1(v11: mem):
-// CHECK:     v12: int:i64 = iconst -1
+// CHECK:     v12: int:i32 = iconst -1
 // CHECK:     v13: bool = icmp.eq v2, v12:s32
-// CHECK:     v14: int:i64 = iconst -2147483648
+// CHECK:     v14: int:i32 = iconst -2147483648
 // CHECK:     v15: bool = icmp.eq v1, v14:s32
 // CHECK:     v16: int:u64 = iconst 1
 // CHECK:     v17: int:u64 = iconst 0
@@ -56,7 +56,7 @@
 // CHECK:     brif v25, bb2(v11), bb4(v11)
 // CHECK:
 // CHECK:   bb2(v27: mem):
-// CHECK:     v28: int:i64 = div v1, v2
+// CHECK:     v28: int:s32 = div v1, v2
 // CHECK:     ret v28, v27
 // CHECK:
 // CHECK:   bb3(v30: mem):
@@ -82,11 +82,11 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @div_u32(%a: int:u32, %b: int:u32) -> int:u32 {
+// CHECK: func @div_u32(int:u32, int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:u32 = param %a
-// CHECK:     v2: int:u32 = param %b
-// CHECK:     v3: int:i64 = iconst 0
+// CHECK:     v1: int:u32 = param 0
+// CHECK:     v2: int:u32 = param 1
+// CHECK:     v3: int:i32 = iconst 0
 // CHECK:     v4: bool = icmp.eq v2, v3:u32
 // CHECK:     v5: int:u64 = iconst 1
 // CHECK:     v6: int:u64 = iconst 0
@@ -96,7 +96,7 @@
 // CHECK:     brif v9, bb1(v0), bb2(v0)
 // CHECK:
 // CHECK:   bb1(v11: mem):
-// CHECK:     v12: int:i64 = div v1, v2
+// CHECK:     v12: int:u32 = div v1, v2
 // CHECK:     ret v12, v11
 // CHECK:
 // CHECK:   bb2(v14: mem):
@@ -129,11 +129,11 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @rem_i32(%a: int:s32, %b: int:s32) -> int:s32 {
+// CHECK: func @rem_i32(int:s32, int:s32) -> int:s32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:s32 = param %a
-// CHECK:     v2: int:s32 = param %b
-// CHECK:     v3: int:i64 = iconst 0
+// CHECK:     v1: int:s32 = param 0
+// CHECK:     v2: int:s32 = param 1
+// CHECK:     v3: int:i32 = iconst 0
 // CHECK:     v4: bool = icmp.eq v2, v3:s32
 // CHECK:     v5: int:u64 = iconst 1
 // CHECK:     v6: int:u64 = iconst 0
@@ -143,9 +143,9 @@
 // CHECK:     brif v9, bb1(v0), bb3(v0)
 // CHECK:
 // CHECK:   bb1(v11: mem):
-// CHECK:     v12: int:i64 = iconst -1
+// CHECK:     v12: int:i32 = iconst -1
 // CHECK:     v13: bool = icmp.eq v2, v12:s32
-// CHECK:     v14: int:i64 = iconst -2147483648
+// CHECK:     v14: int:i32 = iconst -2147483648
 // CHECK:     v15: bool = icmp.eq v1, v14:s32
 // CHECK:     v16: int:u64 = iconst 1
 // CHECK:     v17: int:u64 = iconst 0
@@ -160,7 +160,7 @@
 // CHECK:     brif v25, bb2(v11), bb4(v11)
 // CHECK:
 // CHECK:   bb2(v27: mem):
-// CHECK:     v28: int:i64 = rem v1, v2
+// CHECK:     v28: int:s32 = rem v1, v2
 // CHECK:     ret v28, v27
 // CHECK:
 // CHECK:   bb3(v30: mem):
@@ -186,11 +186,11 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @rem_u32(%a: int:u32, %b: int:u32) -> int:u32 {
+// CHECK: func @rem_u32(int:u32, int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:u32 = param %a
-// CHECK:     v2: int:u32 = param %b
-// CHECK:     v3: int:i64 = iconst 0
+// CHECK:     v1: int:u32 = param 0
+// CHECK:     v2: int:u32 = param 1
+// CHECK:     v3: int:i32 = iconst 0
 // CHECK:     v4: bool = icmp.eq v2, v3:u32
 // CHECK:     v5: int:u64 = iconst 1
 // CHECK:     v6: int:u64 = iconst 0
@@ -200,7 +200,7 @@
 // CHECK:     brif v9, bb1(v0), bb2(v0)
 // CHECK:
 // CHECK:   bb1(v11: mem):
-// CHECK:     v12: int:i64 = rem v1, v2
+// CHECK:     v12: int:u32 = rem v1, v2
 // CHECK:     ret v12, v11
 // CHECK:
 // CHECK:   bb2(v14: mem):

@@ -9,10 +9,10 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @eq_i32(%a: int:s32, %b: int:s32) -> bool {
+// CHECK: func @eq_i32(int:s32, int:s32) -> bool {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:s32 = param %a
-// CHECK:     v2: int:s32 = param %b
+// CHECK:     v1: int:s32 = param 0
+// CHECK:     v2: int:s32 = param 1
 // CHECK:     v3: bool = icmp.eq v1, v2
 // CHECK:     ret v3, v0
 // CHECK: }
@@ -27,10 +27,10 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @ge_i32(%a: int:s32, %b: int:s32) -> bool {
+// CHECK: func @ge_i32(int:s32, int:s32) -> bool {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:s32 = param %a
-// CHECK:     v2: int:s32 = param %b
+// CHECK:     v1: int:s32 = param 0
+// CHECK:     v2: int:s32 = param 1
 // CHECK:     v3: bool = icmp.ge v1, v2
 // CHECK:     ret v3, v0
 // CHECK: }
@@ -45,10 +45,10 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @gt_i32(%a: int:s32, %b: int:s32) -> bool {
+// CHECK: func @gt_i32(int:s32, int:s32) -> bool {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:s32 = param %a
-// CHECK:     v2: int:s32 = param %b
+// CHECK:     v1: int:s32 = param 0
+// CHECK:     v2: int:s32 = param 1
 // CHECK:     v3: bool = icmp.gt v1, v2
 // CHECK:     ret v3, v0
 // CHECK: }
@@ -63,10 +63,10 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @le_i32(%a: int:s32, %b: int:s32) -> bool {
+// CHECK: func @le_i32(int:s32, int:s32) -> bool {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:s32 = param %a
-// CHECK:     v2: int:s32 = param %b
+// CHECK:     v1: int:s32 = param 0
+// CHECK:     v2: int:s32 = param 1
 // CHECK:     v3: bool = icmp.le v1, v2
 // CHECK:     ret v3, v0
 // CHECK: }
@@ -81,10 +81,10 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @lt_i32(%a: int:s32, %b: int:s32) -> bool {
+// CHECK: func @lt_i32(int:s32, int:s32) -> bool {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:s32 = param %a
-// CHECK:     v2: int:s32 = param %b
+// CHECK:     v1: int:s32 = param 0
+// CHECK:     v2: int:s32 = param 1
 // CHECK:     v3: bool = icmp.lt v1, v2
 // CHECK:     ret v3, v0
 // CHECK: }
@@ -99,10 +99,10 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @ne_i32(%a: int:s32, %b: int:s32) -> bool {
+// CHECK: func @ne_i32(int:s32, int:s32) -> bool {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:s32 = param %a
-// CHECK:     v2: int:s32 = param %b
+// CHECK:     v1: int:s32 = param 0
+// CHECK:     v2: int:s32 = param 1
 // CHECK:     v3: bool = icmp.ne v1, v2
 // CHECK:     ret v3, v0
 // CHECK: }

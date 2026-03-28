@@ -8,9 +8,9 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @consume_tuple() -> int:s32 {
+// CHECK: func @consume_tuple(int:i32) -> int:s32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:i64 = iconst 0
+// CHECK:     v1: int:i32 = param 0
 // CHECK:     v2: ptr = stack_slot 4
 // CHECK:     v3: mem = store.4 v1, v2, v0
 // CHECK:     v4: int:i32 = load.4 v2, v3
@@ -32,7 +32,7 @@
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:i64 = iconst 42
 // CHECK:     v2: ptr = symbol_addr @consume_tuple
-// CHECK:     v3: mem, v4: int:s32 = call v2(v1), v0 -> int
+// CHECK:     v3: mem, v4: int:s32 = call v2(v1), v0 -> int:s32
 // CHECK:     br bb1(v3)
 // CHECK:
 // CHECK:   bb1(v6: mem):

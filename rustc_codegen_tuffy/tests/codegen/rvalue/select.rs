@@ -23,18 +23,18 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @select_i64(%cond: bool, %a: int:s64, %b: int:s64) -> int:s64 {
+// CHECK: func @select_i64(bool, int:s64, int:s64) -> int:s64 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: bool = param %cond
-// CHECK:     v2: int:s64 = param %a
-// CHECK:     v3: int:s64 = param %b
+// CHECK:     v1: bool = param 0
+// CHECK:     v2: int:s64 = param 1
+// CHECK:     v3: int:s64 = param 2
 // CHECK:     v4: ptr = stack_slot 8
 // CHECK:     v5: int:u64 = iconst 1
 // CHECK:     v6: int:u64 = iconst 0
 // CHECK:     v7: int:u64 = select v1, v5, v6
 // CHECK:     v8: int:i64 = iconst 255
 // CHECK:     v9: int:u64 = and v7, v8
-// CHECK:     v10: int:i64 = iconst 0
+// CHECK:     v10: int:i8 = iconst 0
 // CHECK:     v11: bool = icmp.eq v9, v10
 // CHECK:     brif v11, bb2(v0), bb1(v0)
 // CHECK:
@@ -75,18 +75,18 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @select_u32(%cond: bool, %a: int:u32, %b: int:u32) -> int:u32 {
+// CHECK: func @select_u32(bool, int:u32, int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: bool = param %cond
-// CHECK:     v2: int:u32 = param %a
-// CHECK:     v3: int:u32 = param %b
+// CHECK:     v1: bool = param 0
+// CHECK:     v2: int:u32 = param 1
+// CHECK:     v3: int:u32 = param 2
 // CHECK:     v4: ptr = stack_slot 4
 // CHECK:     v5: int:u64 = iconst 1
 // CHECK:     v6: int:u64 = iconst 0
 // CHECK:     v7: int:u64 = select v1, v5, v6
 // CHECK:     v8: int:i64 = iconst 255
 // CHECK:     v9: int:u64 = and v7, v8
-// CHECK:     v10: int:i64 = iconst 0
+// CHECK:     v10: int:i8 = iconst 0
 // CHECK:     v11: bool = icmp.eq v9, v10
 // CHECK:     brif v11, bb2(v0), bb1(v0)
 // CHECK:

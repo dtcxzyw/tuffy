@@ -13,9 +13,9 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @bitreverse_u32(%x: int:u32) -> int:u32 {
+// CHECK: func @bitreverse_u32(int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:u32 = param %x
+// CHECK:     v1: int:u32 = param 0
 // CHECK:     v2: int:u32 = bit_reverse.32 v1
 // CHECK:     br bb1(v0)
 // CHECK:
@@ -37,9 +37,9 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @bswap_u32(%x: int:u32) -> int:u32 {
+// CHECK: func @bswap_u32(int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:u32 = param %x
+// CHECK:     v1: int:u32 = param 0
 // CHECK:     v2: int:u32 = bswap.4 v1
 // CHECK:     br bb1(v0)
 // CHECK:
@@ -61,9 +61,9 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @ctlz_u32(%x: int:u32) -> int:u32 {
+// CHECK: func @ctlz_u32(int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:u32 = param %x
+// CHECK:     v1: int:u32 = param 0
 // CHECK:     v2: int:u32 = count_leading_zeros.32 v1
 // CHECK:     br bb1(v0)
 // CHECK:
@@ -85,9 +85,9 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @ctpop_u32(%x: int:u32) -> int:u32 {
+// CHECK: func @ctpop_u32(int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:u32 = param %x
+// CHECK:     v1: int:u32 = param 0
 // CHECK:     v2: int:u64 = count_ones v1
 // CHECK:     br bb1(v0)
 // CHECK:
@@ -109,9 +109,9 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @cttz_u32(%x: int:u32) -> int:u32 {
+// CHECK: func @cttz_u32(int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:u32 = param %x
+// CHECK:     v1: int:u32 = param 0
 // CHECK:     v2: int:u64 = count_trailing_zeros v1
 // CHECK:     br bb1(v0)
 // CHECK:

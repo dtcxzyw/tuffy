@@ -15,10 +15,7 @@
 // CHECK:     v3: int:u64 = zext v1, 64
 // CHECK:     v4: int:u128 = zext v3, 128
 // CHECK:     v5: mem = store.16 v4, v2, v0
-// CHECK:     v6: int:i64 = load.8 v2, v5
-// CHECK:     v7: int:i64 = iconst 8
-// CHECK:     v8: ptr = ptradd v2, v7
-// CHECK:     v9: int:i64 = load.8 v8, v5
+// CHECK:     v6: int:s128 = load.16 v2, v5
 // CHECK:     ret v6, v5
 // CHECK: }
 // CHECK:

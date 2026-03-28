@@ -12,10 +12,10 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @arith_offset_u32(%ptr: ptr, %offset: int:s64) -> ptr {
+// CHECK: func @arith_offset_u32(ptr, int:s64) -> ptr {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: ptr = param %ptr
-// CHECK:     v2: int:s64 = param %offset
+// CHECK:     v1: ptr = param 0
+// CHECK:     v2: int:s64 = param 1
 // CHECK:     v3: int:i64 = iconst 4
 // CHECK:     v4: int:u64 = mul v2, v3
 // CHECK:     v5: ptr = ptradd v1, v4
@@ -38,10 +38,10 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @ptr_offset_from_u32(%a: ptr, %b: ptr) -> int:u64 {
+// CHECK: func @ptr_offset_from_u32(ptr, ptr) -> int:u64 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: ptr = param %a
-// CHECK:     v2: ptr = param %b
+// CHECK:     v1: ptr = param 0
+// CHECK:     v2: ptr = param 1
 // CHECK:     v3: int:s64 = ptrdiff v1, v2
 // CHECK:     v4: int:i64 = iconst 4
 // CHECK:     v5: int:u64 = div v3, v4

@@ -14,10 +14,10 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @ptr_offset_array(%ptr: ptr, %count: int:s64) -> ptr {
+// CHECK: func @ptr_offset_array(ptr, int:s64) -> ptr {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: ptr = param %ptr
-// CHECK:     v2: int:s64 = param %count
+// CHECK:     v1: ptr = param 0
+// CHECK:     v2: int:s64 = param 1
 // CHECK:     v3: int:i64 = iconst 16
 // CHECK:     v4: int:u64 = mul v2, v3
 // CHECK:     v5: ptr = ptradd v1, v4
@@ -42,10 +42,10 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @ptr_offset_u64(%ptr: ptr, %count: int:s64) -> ptr {
+// CHECK: func @ptr_offset_u64(ptr, int:s64) -> ptr {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: ptr = param %ptr
-// CHECK:     v2: int:s64 = param %count
+// CHECK:     v1: ptr = param 0
+// CHECK:     v2: int:s64 = param 1
 // CHECK:     v3: int:i64 = iconst 8
 // CHECK:     v4: int:u64 = mul v2, v3
 // CHECK:     v5: ptr = ptradd v1, v4
@@ -70,10 +70,10 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @ptr_wrapping_offset(%ptr: ptr, %count: int:s64) -> ptr {
+// CHECK: func @ptr_wrapping_offset(ptr, int:s64) -> ptr {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: ptr = param %ptr
-// CHECK:     v2: int:s64 = param %count
+// CHECK:     v1: ptr = param 0
+// CHECK:     v2: int:s64 = param 1
 // CHECK:     v3: int:i64 = iconst 4
 // CHECK:     v4: int:u64 = mul v2, v3
 // CHECK:     v5: ptr = ptradd v1, v4

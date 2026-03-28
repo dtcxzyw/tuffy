@@ -11,10 +11,10 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @wrapping_add_u32(%a: int:u32, %b: int:u32) -> int:u32 {
+// CHECK: func @wrapping_add_u32(int:u32, int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:u32 = param %a
-// CHECK:     v2: int:u32 = param %b
+// CHECK:     v1: int:u32 = param 0
+// CHECK:     v2: int:u32 = param 1
 // CHECK:     v3: int:i32 = add v1, v2
 // CHECK:     v4: int:u32 = zext v3, 32
 // CHECK:     ret v4, v0
@@ -32,10 +32,10 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @wrapping_mul_u32(%a: int:u32, %b: int:u32) -> int:u32 {
+// CHECK: func @wrapping_mul_u32(int:u32, int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:u32 = param %a
-// CHECK:     v2: int:u32 = param %b
+// CHECK:     v1: int:u32 = param 0
+// CHECK:     v2: int:u32 = param 1
 // CHECK:     v3: int:i32 = mul v1, v2
 // CHECK:     v4: int:u32 = zext v3, 32
 // CHECK:     ret v4, v0
@@ -53,10 +53,10 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @wrapping_sub_u32(%a: int:u32, %b: int:u32) -> int:u32 {
+// CHECK: func @wrapping_sub_u32(int:u32, int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:u32 = param %a
-// CHECK:     v2: int:u32 = param %b
+// CHECK:     v1: int:u32 = param 0
+// CHECK:     v2: int:u32 = param 1
 // CHECK:     v3: int:i32 = sub v1, v2
 // CHECK:     v4: int:u32 = zext v3, 32
 // CHECK:     ret v4, v0

@@ -8,9 +8,9 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @not_bool(%a: bool) -> bool {
+// CHECK: func @not_bool(bool) -> bool {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: bool = param %a
+// CHECK:     v1: bool = param 0
 // CHECK:     v2: int:u64 = iconst 1
 // CHECK:     v3: int:u64 = iconst 0
 // CHECK:     v4: int:u64 = select v1, v2, v3
@@ -30,10 +30,10 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @not_u32(%a: int:u32) -> int:u32 {
+// CHECK: func @not_u32(int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:u32 = param %a
-// CHECK:     v2: int:i64 = iconst -1
+// CHECK:     v1: int:u32 = param 0
+// CHECK:     v2: int:i32 = iconst -1
 // CHECK:     v3: int:i32 = xor v1, v2
 // CHECK:     v4: int:u32 = zext v3, 32
 // CHECK:     ret v4, v0

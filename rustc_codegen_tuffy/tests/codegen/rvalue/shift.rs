@@ -9,10 +9,10 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @shl_i32(%a: int:s32, %b: int:u32) -> int:s32 {
+// CHECK: func @shl_i32(int:s32, int:u32) -> int:s32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:s32 = param %a
-// CHECK:     v2: int:u32 = param %b
+// CHECK:     v1: int:s32 = param 0
+// CHECK:     v2: int:u32 = param 1
 // CHECK:     v3: int:i64 = iconst 31
 // CHECK:     v4: int:i64 = and v2, v3
 // CHECK:     v5: int:s32 = shl v1, v4
@@ -29,10 +29,10 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @shr_i32(%a: int:s32, %b: int:u32) -> int:s32 {
+// CHECK: func @shr_i32(int:s32, int:u32) -> int:s32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:s32 = param %a
-// CHECK:     v2: int:u32 = param %b
+// CHECK:     v1: int:s32 = param 0
+// CHECK:     v2: int:u32 = param 1
 // CHECK:     v3: int:i64 = iconst 31
 // CHECK:     v4: int:i64 = and v2, v3
 // CHECK:     v5: int:s32 = shr v1, v4
@@ -49,10 +49,10 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @shr_u32(%a: int:u32, %b: int:u32) -> int:u32 {
+// CHECK: func @shr_u32(int:u32, int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:u32 = param %a
-// CHECK:     v2: int:u32 = param %b
+// CHECK:     v1: int:u32 = param 0
+// CHECK:     v2: int:u32 = param 1
 // CHECK:     v3: int:i64 = iconst 31
 // CHECK:     v4: int:i64 = and v2, v3
 // CHECK:     v5: int:u32 = shr v1, v4

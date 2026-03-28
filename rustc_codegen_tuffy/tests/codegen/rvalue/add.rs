@@ -9,10 +9,10 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @add(%a: int:s32, %b: int:s32) -> int:s32 {
+// CHECK: func @add(int:s32, int:s32) -> int:s32 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:s32 = param %a
-// CHECK:     v2: int:s32 = param %b
+// CHECK:     v1: int:s32 = param 0
+// CHECK:     v2: int:s32 = param 1
 // CHECK:     v3: int:i32 = add v1, v2
 // CHECK:     v4: int:s32 = sext v3, 32
 // CHECK:     ret v4, v0
@@ -28,13 +28,16 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @add128(%a: int:u128, %b: int:u128) -> int:u128 {
+// CHECK: func @add128(int:u128, int:u128) -> int:u128 {
 // CHECK:   bb0(v0: mem):
-// CHECK:     v1: int:u128 = param %a
-// CHECK:     v2: int:u128 = param %b
-// CHECK:     v3: int:i128 = add v1, v2
-// CHECK:     v4: int:u128 = zext v3, 128
-// CHECK:     ret v4, v0
+// CHECK:     v1: int:u128 = param 0
+// CHECK:     v2: int:u128 = param 1
+// CHECK:     v3: ptr = stack_slot 16
+// CHECK:     v4: int:i128 = add v1, v2
+// CHECK:     v5: int:u128 = zext v4, 128
+// CHECK:     v6: mem = store.16 v5, v3, v0
+// CHECK:     v7: int:u128 = load.16 v3, v6
+// CHECK:     ret v7, v6
 // CHECK: }
 // CHECK:
 
