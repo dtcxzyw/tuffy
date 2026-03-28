@@ -992,6 +992,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         ty::Float(ty::FloatTy::F16) => Some(Type::Float(FloatType::F16)),
                         ty::Float(ty::FloatTy::F32) => Some(Type::Float(FloatType::F32)),
                         ty::Float(ty::FloatTy::F64) => Some(Type::Float(FloatType::F64)),
+                        ty::Float(ty::FloatTy::F128) => Some(Type::Float(FloatType::F128)),
                         _ => None,
                     }
                 };

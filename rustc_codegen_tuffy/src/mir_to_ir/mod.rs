@@ -219,7 +219,9 @@ pub fn translate_function<'tcx>(
         if is_fat_ptr(tcx, ty) {
             let (meta_ty, meta_ann) = match ty.kind() {
                 ty::TyKind::Ref(_, pointee, _) | ty::TyKind::RawPtr(pointee, _) => {
-                    match pointee.kind() {
+                    let tail =
+                        tcx.struct_tail_for_codegen(*pointee, ty::TypingEnv::fully_monomorphized());
+                    match tail.kind() {
                         ty::TyKind::Dynamic(..) => (Type::Ptr(0), None),
                         _ => (Type::Int, default_int_annotation()),
                     }

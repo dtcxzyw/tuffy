@@ -449,7 +449,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // Determine metadata type: Int for slices/str, Ptr for trait objects
                 let (meta_ty, meta_ann) = match ty.kind() {
                     ty::TyKind::Ref(_, pointee, _) | ty::TyKind::RawPtr(pointee, _) => {
-                        match pointee.kind() {
+                        let tail = self.tcx.struct_tail_for_codegen(
+                            *pointee,
+                            ty::TypingEnv::fully_monomorphized(),
+                        );
+                        match tail.kind() {
                             ty::TyKind::Dynamic(..) => (Type::Ptr(0), None),
                             _ => (Type::Int, int_annotation_for_bytes(8)),
                         }

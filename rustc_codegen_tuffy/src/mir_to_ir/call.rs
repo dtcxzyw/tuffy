@@ -937,12 +937,18 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         };
                         if fsz <= 8 {
                             let fty = translate_ty(self.tcx, ft).unwrap_or(Type::Int);
+                            let ann = if matches!(fty, Type::Int) {
+                                translate_annotation(ft)
+                                    .or_else(|| int_annotation_for_bytes(fsz as u32))
+                            } else {
+                                None
+                            };
                             let val = self.builder.load(
                                 addr.into(),
                                 fsz as u32,
                                 fty,
                                 self.current_mem.into(),
-                                None,
+                                ann,
                                 Origin::synthetic(),
                             );
                             ir_args.push(val.into());

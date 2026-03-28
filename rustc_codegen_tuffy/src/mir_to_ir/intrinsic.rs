@@ -773,7 +773,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     vec![a.into(), b.into(), sz.into()],
                     Type::Int,
                     current_mem.into(),
-                    None,
+                    int_annotation_for_bytes(4),
                     Origin::synthetic(),
                 );
                 // raw_eq returns bool (0 or 1): true when memcmp returns 0.
@@ -901,8 +901,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     return None;
                 }
                 let ptr = ir_args[0];
-                let expected = ir_args[1];
-                let new_val = ir_args[2];
+                let expected = self.coerce_to_int(ir_args[1]);
+                let new_val = self.coerce_to_int(ir_args[2]);
                 let ordering = parse_atomic_ordering(name);
 
                 let (new_mem, actual_old) = self.builder.atomic_cmpxchg(
