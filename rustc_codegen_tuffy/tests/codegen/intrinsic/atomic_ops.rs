@@ -157,12 +157,12 @@
 // CHECK: }
 // CHECK: data @.Lstr.0 = "there is no such thing as an acquire-release load"
 // CHECK: data @.Lstr.1 = "there is no such thing as an acquire-release load"
-// CHECK: data @.Lloc_file.2 = "/usr/local/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/panic.rs"
-// CHECK: data @.Lloc.3 = "\0\0\0\0\0\0\0\0l\0\0\0\0\0\0\0>\0\0\0\t\0\0\0" relocs [0: @.Lloc_file.2]
+// CHECK: data @.Lloc_file.2 = "$SYSROOT/library/core/src/panic.rs"
+// CHECK: data @.Lloc.3 = "..." relocs [0: @.Lloc_file.2]
 // CHECK: data @.Lstr.4 = "there is no such thing as a release load"
 // CHECK: data @.Lstr.5 = "there is no such thing as a release load"
-// CHECK: data @.Lloc_file.6 = "/usr/local/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/panic.rs"
-// CHECK: data @.Lloc.7 = "\0\0\0\0\0\0\0\0l\0\0\0\0\0\0\0>\0\0\0\t\0\0\0" relocs [0: @.Lloc_file.6]
+// CHECK: data @.Lloc_file.6 = "$SYSROOT/library/core/src/panic.rs"
+// CHECK: data @.Lloc.7 = "..." relocs [0: @.Lloc_file.6]
 // CHECK: func @_RINvNtNtCsa3SJzwB9S2T_4core4sync6atomic11atomic_loadmECsh6zX7Z7540N_10atomic_ops(ptr, int:i8) -> int:u32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
@@ -439,12 +439,12 @@
 // CHECK: }
 // CHECK: data @.Lstr.8 = "there is no such thing as an acquire-release store"
 // CHECK: data @.Lstr.9 = "there is no such thing as an acquire-release store"
-// CHECK: data @.Lloc_file.10 = "/usr/local/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/panic.rs"
-// CHECK: data @.Lloc.11 = "\0\0\0\0\0\0\0\0l\0\0\0\0\0\0\0>\0\0\0\t\0\0\0" relocs [0: @.Lloc_file.10]
+// CHECK: data @.Lloc_file.10 = "$SYSROOT/library/core/src/panic.rs"
+// CHECK: data @.Lloc.11 = "..." relocs [0: @.Lloc_file.10]
 // CHECK: data @.Lstr.12 = "there is no such thing as an acquire store"
 // CHECK: data @.Lstr.13 = "there is no such thing as an acquire store"
-// CHECK: data @.Lloc_file.14 = "/usr/local/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/panic.rs"
-// CHECK: data @.Lloc.15 = "\0\0\0\0\0\0\0\0l\0\0\0\0\0\0\0>\0\0\0\t\0\0\0" relocs [0: @.Lloc_file.14]
+// CHECK: data @.Lloc_file.14 = "$SYSROOT/library/core/src/panic.rs"
+// CHECK: data @.Lloc.15 = "..." relocs [0: @.Lloc_file.14]
 // CHECK: func @_RINvNtNtCsa3SJzwB9S2T_4core4sync6atomic12atomic_storemECsh6zX7Z7540N_10atomic_ops(ptr, int:u32, int:i8) {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
@@ -829,12 +829,12 @@
 // CHECK: }
 // CHECK: data @.Lstr.16 = "there is no such thing as a release failure ordering"
 // CHECK: data @.Lstr.17 = "there is no such thing as a release failure ordering"
-// CHECK: data @.Lloc_file.18 = "/usr/local/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/panic.rs"
-// CHECK: data @.Lloc.19 = "\0\0\0\0\0\0\0\0l\0\0\0\0\0\0\0>\0\0\0\t\0\0\0" relocs [0: @.Lloc_file.18]
+// CHECK: data @.Lloc_file.18 = "$SYSROOT/library/core/src/panic.rs"
+// CHECK: data @.Lloc.19 = "..." relocs [0: @.Lloc_file.18]
 // CHECK: data @.Lstr.20 = "there is no such thing as an acquire-release failure ordering"
 // CHECK: data @.Lstr.21 = "there is no such thing as an acquire-release failure ordering"
-// CHECK: data @.Lloc_file.22 = "/usr/local/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/panic.rs"
-// CHECK: data @.Lloc.23 = "\0\0\0\0\0\0\0\0l\0\0\0\0\0\0\0>\0\0\0\t\0\0\0" relocs [0: @.Lloc_file.22]
+// CHECK: data @.Lloc_file.22 = "$SYSROOT/library/core/src/panic.rs"
+// CHECK: data @.Lloc.23 = "..." relocs [0: @.Lloc_file.22]
 // CHECK: func @_RINvNtNtCsa3SJzwB9S2T_4core4sync6atomic23atomic_compare_exchangemECsh6zX7Z7540N_10atomic_ops(ptr, ptr, int:u32, int:u32, int:i8, int:i8) -> ptr {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0

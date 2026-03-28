@@ -381,8 +381,8 @@
 // CHECK: }
 // CHECK: data @.Lstr.0 = "is_aligned_to: align is not a power-of-two"
 // CHECK: data @.Lstr.1 = "is_aligned_to: align is not a power-of-two"
-// CHECK: data @.Lloc_file.2 = "/usr/local/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/panic.rs"
-// CHECK: data @.Lloc.3 = "\0\0\0\0\0\0\0\0l\0\0\0\0\0\0\0>\0\0\0\t\0\0\0" relocs [0: @.Lloc_file.2]
+// CHECK: data @.Lloc_file.2 = "$SYSROOT/library/core/src/panic.rs"
+// CHECK: data @.Lloc.3 = "..." relocs [0: @.Lloc_file.2]
 // CHECK: func @_RNvMNtNtCsa3SJzwB9S2T_4core3ptr9const_ptrPu13is_aligned_toCse33uD6zc4Cp_6memops(ptr, int:u64) -> bool {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
@@ -604,8 +604,8 @@
 // CHECK: }
 // CHECK: data @.Lstr.4 = "unsafe precondition(s) violated: ptr::write_bytes requires that the destination pointer is aligned and non-null\n\nThis indicates a bug in the program. This Undefined Behavior check is optional, and cannot be relied on for safety."
 // CHECK: data @.Lstr.5 = "unsafe precondition(s) violated: ptr::write_bytes requires that the destination pointer is aligned and non-null\n\nThis indicates a bug in the program. This Undefined Behavior check is optional, and cannot be relied on for safety."
-// CHECK: data @.Lloc_file.6 = "/usr/local/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ub_checks.rs"
-// CHECK: data @.Lloc.7 = "\0\0\0\0\0\0\0\0p\0\0\0\0\0\0\0I\0\0\0\x15\0\0\0" relocs [0: @.Lloc_file.6]
+// CHECK: data @.Lloc_file.6 = "$SYSROOT/library/core/src/ub_checks.rs"
+// CHECK: data @.Lloc.7 = "..." relocs [0: @.Lloc_file.6]
 // CHECK: func @_RNvNvNtCsa3SJzwB9S2T_4core3ptr11write_bytes18precondition_checkCse33uD6zc4Cp_6memops(ptr, int:u64, bool) {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
@@ -970,8 +970,8 @@
 // CHECK: }
 // CHECK: data @.Lstr.8 = "unsafe precondition(s) violated: ptr::copy_nonoverlapping requires that both pointer arguments are aligned and non-null and the specified memory ranges do not overlap\n\nThis indicates a bug in the program. This Undefined Behavior check is optional, and cannot be relied on for safety."
 // CHECK: data @.Lstr.9 = "unsafe precondition(s) violated: ptr::copy_nonoverlapping requires that both pointer arguments are aligned and non-null and the specified memory ranges do not overlap\n\nThis indicates a bug in the program. This Undefined Behavior check is optional, and cannot be relied on for safety."
-// CHECK: data @.Lloc_file.10 = "/usr/local/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ub_checks.rs"
-// CHECK: data @.Lloc.11 = "\0\0\0\0\0\0\0\0p\0\0\0\0\0\0\0I\0\0\0\x15\0\0\0" relocs [0: @.Lloc_file.10]
+// CHECK: data @.Lloc_file.10 = "$SYSROOT/library/core/src/ub_checks.rs"
+// CHECK: data @.Lloc.11 = "..." relocs [0: @.Lloc_file.10]
 // CHECK: func @_RNvNvNtCsa3SJzwB9S2T_4core3ptr19copy_nonoverlapping18precondition_checkCse33uD6zc4Cp_6memops(ptr, ptr, int:u64, int:u64, int:u64) {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
@@ -1390,8 +1390,8 @@
 // CHECK: }
 // CHECK: data @.Lstr.12 = "unsafe precondition(s) violated: ptr::copy requires that both pointer arguments are aligned and non-null\n\nThis indicates a bug in the program. This Undefined Behavior check is optional, and cannot be relied on for safety."
 // CHECK: data @.Lstr.13 = "unsafe precondition(s) violated: ptr::copy requires that both pointer arguments are aligned and non-null\n\nThis indicates a bug in the program. This Undefined Behavior check is optional, and cannot be relied on for safety."
-// CHECK: data @.Lloc_file.14 = "/usr/local/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ub_checks.rs"
-// CHECK: data @.Lloc.15 = "\0\0\0\0\0\0\0\0p\0\0\0\0\0\0\0I\0\0\0\x15\0\0\0" relocs [0: @.Lloc_file.14]
+// CHECK: data @.Lloc_file.14 = "$SYSROOT/library/core/src/ub_checks.rs"
+// CHECK: data @.Lloc.15 = "..." relocs [0: @.Lloc_file.14]
 // CHECK: func @_RNvNvNtCsa3SJzwB9S2T_4core3ptr4copy18precondition_checkCse33uD6zc4Cp_6memops(ptr, ptr, int:u64, bool) {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
