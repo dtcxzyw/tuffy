@@ -58,8 +58,14 @@ fi
 
 # Generate CHECK lines from IR output (preserving empty lines)
 # Filter out panic messages - stop at "thread 'rustc' panicked"
+# Normalize environment-specific paths before generating CHECK lines.
+source "$CRATE_ROOT/tests/normalize-ir.sh"
+
+ir_normalized=$(mktemp)
 check_lines=$(mktemp)
-trap "rm -f $ir_output $check_lines" EXIT
+trap "rm -f $ir_output $ir_normalized $check_lines" EXIT
+
+normalize_ir < "$ir_output" > "$ir_normalized"
 
 while IFS= read -r line; do
     # Stop if we hit a panic message
@@ -73,11 +79,11 @@ while IFS= read -r line; do
     else
         echo "// CHECK: $line" | sed 's/[[:space:]]*$//'
     fi
-done < "$ir_output" > "$check_lines"
+done < "$ir_normalized" > "$check_lines"
 
 # Create updated test file
 updated_file=$(mktemp)
-trap "rm -f $ir_output $check_lines $updated_file" EXIT
+trap "rm -f $ir_output $ir_normalized $check_lines $updated_file" EXIT
 
 # Copy only leading comment lines (compile-flags, etc.), skip CHECK lines
 awk '/^\/\/ CHECK:/ {next} /^\/\// {print; next} {exit}' "$TEST_FILE" > "$updated_file"

@@ -22,6 +22,9 @@ fi
 
 CODEGEN_DIR="$CRATE_ROOT/tests/codegen"
 OUT_DIR="/tmp/tuffy_codegen_test"
+
+# Source the IR normalizer (replaces sysroot paths, masks binary loc data).
+source "$CRATE_ROOT/tests/normalize-ir.sh"
 rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
 trap "rm -rf $OUT_DIR" EXIT
@@ -72,9 +75,9 @@ run_codegen_test() {
     local ir_clean="$OUT_DIR/$name.ir.clean"
     printf "%s\n" "${check_lines[@]}" > "$expected"
 
-    # Strip trailing whitespace from both files before comparison
-    sed 's/[[:space:]]*$//' "$expected" > "$expected_clean"
-    sed 's/[[:space:]]*$//' "$ir_output" > "$ir_clean"
+    # Strip trailing whitespace and normalize IR from both files before comparison
+    sed 's/[[:space:]]*$//' "$expected" | normalize_ir > "$expected_clean"
+    sed 's/[[:space:]]*$//' "$ir_output" | normalize_ir > "$ir_clean"
 
     if ! diff -u "$expected_clean" "$ir_clean" > /dev/null; then
         echo "FAIL (output mismatch)"
