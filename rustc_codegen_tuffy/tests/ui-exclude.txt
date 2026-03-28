@@ -381,3 +381,6 @@ simd/dont-invalid-bitcast-masks.rs
 traits/ice-with-dyn-pointee.rs
 type/pattern_types/bad_const_generics_args_on_const_param.rs
 unpretty/box.rs
+# Frontend errors: not tuffy codegen bugs
+delegation/explicit-paths-pass.rs
+traits/const-traits/const-closure-issue-125866-pass.rs
