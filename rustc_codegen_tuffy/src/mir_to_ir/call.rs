@@ -2,7 +2,7 @@
 
 use rustc_middle::mir::{self, BasicBlock, Operand, Place};
 use rustc_middle::ty::{self, Instance, TyCtxt, TypeVisitableExt};
-use rustc_span::source_map::Spanned;
+use rustc_span::Spanned;
 
 use tuffy_ir::instruction::{Operand as IrOperand, Origin};
 use tuffy_ir::types::{Annotation, IntAnnotation, IntSignedness, Type};

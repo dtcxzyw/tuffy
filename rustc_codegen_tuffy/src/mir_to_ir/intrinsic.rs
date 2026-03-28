@@ -582,8 +582,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 true
             }
 
-            // minnumf32/minnumf64/maxnumf32/maxnumf64: IEEE 754 minNum/maxNum.
-            "minnumf32" | "minnumf64" => {
+            // Float min/max intrinsics.
+            // minnumf32/minnumf64: legacy IEEE 754-2008 minNum.
+            // minimumf32/minimumf64: IEEE 754-2019 minimum.
+            // minimum_number_nsz_f32/f64: minimumNumber with no-signed-zero.
+            "minnumf32"
+            | "minnumf64"
+            | "minimumf32"
+            | "minimumf64"
+            | "minimum_number_nsz_f32"
+            | "minimum_number_nsz_f64" => {
                 let a = ir_args[0];
                 let b = ir_args[1];
                 let ty = self
@@ -597,7 +605,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 self.locals.set(destination_local, result.raw());
                 true
             }
-            "maxnumf32" | "maxnumf64" => {
+            // maxnumf32/maxnumf64: legacy IEEE 754-2008 maxNum.
+            // maximumf32/maximumf64: IEEE 754-2019 maximum.
+            // maximum_number_nsz_f32/f64: maximumNumber with no-signed-zero.
+            "maxnumf32"
+            | "maxnumf64"
+            | "maximumf32"
+            | "maximumf64"
+            | "maximum_number_nsz_f32"
+            | "maximum_number_nsz_f64" => {
                 let a = ir_args[0];
                 let b = ir_args[1];
                 let ty = self

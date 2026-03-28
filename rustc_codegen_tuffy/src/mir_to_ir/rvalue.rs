@@ -2451,6 +2451,37 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 return Some(loaded);
                             }
                         }
+                        // Transmute from a Float register value to an Int type:
+                        // reinterpret via a temporary stack slot.
+                        if matches!(kind, CastKind::Transmute)
+                            && matches!(self.builder.value_type(val), Some(Type::Float(_)))
+                            && matches!(translate_ty(self.tcx, target_ty_mono), Some(Type::Int))
+                        {
+                            let size = type_size(self.tcx, target_ty_mono).unwrap_or(0) as u32;
+                            if size > 0 && size <= 8 {
+                                let slot = self.builder.stack_slot(size, Origin::synthetic());
+                                self.current_mem = self
+                                    .builder
+                                    .store(
+                                        val.into(),
+                                        slot.into(),
+                                        size,
+                                        self.current_mem.into(),
+                                        Origin::synthetic(),
+                                    )
+                                    .raw();
+                                let ann = int_annotation_for_bytes(size);
+                                let loaded = self.builder.load(
+                                    slot.into(),
+                                    size,
+                                    Type::Int,
+                                    self.current_mem.into(),
+                                    ann,
+                                    Origin::synthetic(),
+                                );
+                                return Some(loaded);
+                            }
+                        }
                         // Transmute / PtrToPtr from a pointer-typed source
                         // to a non-pointer target
                         if matches!(self.builder.value_type(val), Some(Type::Ptr(_)))
