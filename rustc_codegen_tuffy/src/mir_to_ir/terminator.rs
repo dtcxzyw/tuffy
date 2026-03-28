@@ -243,6 +243,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     Origin::synthetic(),
                                 )
                             }
+                            (Some(Type::Int), Some(Type::Float(_))) => {
+                                // Float returned as integer bits (e.g. to_le_bytes).
+                                let sz = ret_size.min(8) as u32;
+                                self.builder.bitcast(
+                                    v.into(),
+                                    Type::Int,
+                                    int_annotation_for_bytes(sz),
+                                    Origin::synthetic(),
+                                )
+                            }
                             (Some(Type::Int), _) => self.coerce_to_int(v),
                             (Some(Type::Ptr(_)), _) => self.coerce_to_ptr(v),
                             (Some(Type::Bool), Some(Type::Int)) => {
