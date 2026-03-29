@@ -459,3 +459,400 @@ pub enum Op {
     /// Trap: unconditionally abort execution (e.g., failed assertion).
     Trap,
 }
+
+impl Op {
+    /// Call `f` for every `ValueRef` used by this instruction.
+    pub fn for_each_value_ref(&self, f: &mut impl FnMut(ValueRef)) {
+        use Op::*;
+        match self {
+            // No operands
+            Param(_) | Const(_) | BConst(_) | FConst(_) | StackSlot(_) | SymbolAddr(_)
+            | Unreachable | Trap => {}
+
+            // One typed operand
+            CountOnes(a)
+            | CountLeadingZeros(a, _)
+            | CountTrailingZeros(a)
+            | Bswap(a, _)
+            | BitReverse(a, _)
+            | Split(a, _)
+            | Sext(a, _)
+            | Zext(a, _)
+            | IntToPtr(a)
+            | SiToFp(a, _)
+            | UiToFp(a, _) => f(a.0.value),
+
+            FpToSi(a) | FpToUi(a) | FpConvert(a) | FNeg(a) | FAbs(a) => f(a.0.value),
+
+            PtrToInt(a) | PtrToAddr(a) => f(a.0.value),
+
+            Bitcast(a) | ExtractValue(a, _) => f(a.value),
+
+            // Two typed operands (int)
+            Add(a, b)
+            | Sub(a, b)
+            | Mul(a, b)
+            | Div(a, b)
+            | Rem(a, b)
+            | And(a, b)
+            | Or(a, b)
+            | Xor(a, b)
+            | Shl(a, b)
+            | Shr(a, b)
+            | Min(a, b)
+            | Max(a, b)
+            | Clmul(a, b)
+            | Merge(a, b, _)
+            | RotateLeft(a, b, _)
+            | RotateRight(a, b, _)
+            | SaturatingAdd(a, b, _)
+            | SaturatingSub(a, b, _)
+            | SignedSaturatingAdd(a, b, _)
+            | SignedSaturatingSub(a, b, _)
+            | SAddWithOverflow(a, b, _)
+            | UAddWithOverflow(a, b, _)
+            | SSubWithOverflow(a, b, _)
+            | USubWithOverflow(a, b, _)
+            | SMulWithOverflow(a, b, _)
+            | UMulWithOverflow(a, b, _) => {
+                f(a.0.value);
+                f(b.0.value);
+            }
+
+            // Two typed operands (bool)
+            BAnd(a, b) | BOr(a, b) | BXor(a, b) => {
+                f(a.0.value);
+                f(b.0.value);
+            }
+
+            // Comparison
+            ICmp(_, a, b) => {
+                f(a.0.value);
+                f(b.0.value);
+            }
+            FCmp(_, a, b) => {
+                f(a.0.value);
+                f(b.0.value);
+            }
+
+            // Float arithmetic
+            FAdd(a, b, _)
+            | FSub(a, b, _)
+            | FMul(a, b, _)
+            | FDiv(a, b, _)
+            | FRem(a, b, _)
+            | FMinNum(a, b)
+            | FMaxNum(a, b)
+            | CopySign(a, b) => {
+                f(a.0.value);
+                f(b.0.value);
+            }
+
+            // Pointer ops
+            PtrAdd(a, b) => {
+                f(a.0.value);
+                f(b.0.value);
+            }
+            PtrDiff(a, b) => {
+                f(a.0.value);
+                f(b.0.value);
+            }
+
+            // Select
+            Select(cond, t, e) => {
+                f(cond.0.value);
+                f(t.value);
+                f(e.value);
+            }
+
+            // Memory
+            Load(ptr, _, mem) => {
+                f(ptr.0.value);
+                f(mem.0.value);
+            }
+            Store(val, ptr, _, mem) => {
+                f(val.value);
+                f(ptr.0.value);
+                f(mem.0.value);
+            }
+            MemCopy(dst, src, cnt, mem) | MemMove(dst, src, cnt, mem) => {
+                f(dst.0.value);
+                f(src.0.value);
+                f(cnt.0.value);
+                f(mem.0.value);
+            }
+            MemSet(dst, val, cnt, mem) => {
+                f(dst.0.value);
+                f(val.value);
+                f(cnt.0.value);
+                f(mem.0.value);
+            }
+
+            // Atomic
+            LoadAtomic(ptr, _, mem) => {
+                f(ptr.0.value);
+                f(mem.0.value);
+            }
+            StoreAtomic(val, ptr, _, mem) => {
+                f(val.value);
+                f(ptr.0.value);
+                f(mem.0.value);
+            }
+            AtomicRmw(_, ptr, val, _, mem) => {
+                f(ptr.0.value);
+                f(val.value);
+                f(mem.0.value);
+            }
+            AtomicCmpXchg(ptr, expected, desired, _, _, mem) => {
+                f(ptr.0.value);
+                f(expected.value);
+                f(desired.value);
+                f(mem.0.value);
+            }
+            Fence(_, mem) => {
+                f(mem.0.value);
+            }
+
+            // Call
+            Call(func_ptr, args, mem) => {
+                f(func_ptr.0.value);
+                for a in args {
+                    f(a.value);
+                }
+                f(mem.0.value);
+            }
+
+            // Aggregates
+            InsertValue(agg, val, _) => {
+                f(agg.value);
+                f(val.value);
+            }
+
+            // Terminators
+            Ret(val, mem) => {
+                if let Some(v) = val {
+                    f(v.value);
+                }
+                f(mem.0.value);
+            }
+            Br(_, args) => {
+                for a in args {
+                    f(a.value);
+                }
+            }
+            BrIf(cond, _, then_args, _, else_args) => {
+                f(cond.0.value);
+                for a in then_args {
+                    f(a.value);
+                }
+                for a in else_args {
+                    f(a.value);
+                }
+            }
+            Continue(args) | RegionYield(args) => {
+                for a in args {
+                    f(a.value);
+                }
+            }
+        }
+    }
+
+    /// Collect all `ValueRef`s used by this instruction.
+    pub fn value_refs(&self) -> Vec<ValueRef> {
+        let mut refs = Vec::new();
+        self.for_each_value_ref(&mut |v| refs.push(v));
+        refs
+    }
+
+    /// Replace every occurrence of `old` with `new` in this Op's operands.
+    pub fn replace_value(&mut self, old: ValueRef, new: ValueRef) {
+        self.for_each_value_ref_mut(&mut |vr| {
+            if *vr == old {
+                *vr = new;
+            }
+        });
+    }
+
+    /// Call `f` for every `&mut ValueRef` used by this instruction.
+    pub fn for_each_value_ref_mut(&mut self, f: &mut impl FnMut(&mut ValueRef)) {
+        use Op::*;
+        match self {
+            Param(_) | Const(_) | BConst(_) | FConst(_) | StackSlot(_) | SymbolAddr(_)
+            | Unreachable | Trap => {}
+
+            CountOnes(a)
+            | CountLeadingZeros(a, _)
+            | CountTrailingZeros(a)
+            | Bswap(a, _)
+            | BitReverse(a, _)
+            | Split(a, _)
+            | Sext(a, _)
+            | Zext(a, _)
+            | IntToPtr(a)
+            | SiToFp(a, _)
+            | UiToFp(a, _) => f(&mut a.0.value),
+
+            FpToSi(a) | FpToUi(a) | FpConvert(a) | FNeg(a) | FAbs(a) => f(&mut a.0.value),
+
+            PtrToInt(a) | PtrToAddr(a) => f(&mut a.0.value),
+
+            Bitcast(a) | ExtractValue(a, _) => f(&mut a.value),
+
+            Add(a, b)
+            | Sub(a, b)
+            | Mul(a, b)
+            | Div(a, b)
+            | Rem(a, b)
+            | And(a, b)
+            | Or(a, b)
+            | Xor(a, b)
+            | Shl(a, b)
+            | Shr(a, b)
+            | Min(a, b)
+            | Max(a, b)
+            | Clmul(a, b)
+            | Merge(a, b, _)
+            | RotateLeft(a, b, _)
+            | RotateRight(a, b, _)
+            | SaturatingAdd(a, b, _)
+            | SaturatingSub(a, b, _)
+            | SignedSaturatingAdd(a, b, _)
+            | SignedSaturatingSub(a, b, _)
+            | SAddWithOverflow(a, b, _)
+            | UAddWithOverflow(a, b, _)
+            | SSubWithOverflow(a, b, _)
+            | USubWithOverflow(a, b, _)
+            | SMulWithOverflow(a, b, _)
+            | UMulWithOverflow(a, b, _) => {
+                f(&mut a.0.value);
+                f(&mut b.0.value);
+            }
+
+            BAnd(a, b) | BOr(a, b) | BXor(a, b) => {
+                f(&mut a.0.value);
+                f(&mut b.0.value);
+            }
+
+            ICmp(_, a, b) => {
+                f(&mut a.0.value);
+                f(&mut b.0.value);
+            }
+            FCmp(_, a, b) => {
+                f(&mut a.0.value);
+                f(&mut b.0.value);
+            }
+
+            FAdd(a, b, _)
+            | FSub(a, b, _)
+            | FMul(a, b, _)
+            | FDiv(a, b, _)
+            | FRem(a, b, _)
+            | FMinNum(a, b)
+            | FMaxNum(a, b)
+            | CopySign(a, b) => {
+                f(&mut a.0.value);
+                f(&mut b.0.value);
+            }
+
+            PtrAdd(a, b) => {
+                f(&mut a.0.value);
+                f(&mut b.0.value);
+            }
+            PtrDiff(a, b) => {
+                f(&mut a.0.value);
+                f(&mut b.0.value);
+            }
+
+            Select(cond, t, e) => {
+                f(&mut cond.0.value);
+                f(&mut t.value);
+                f(&mut e.value);
+            }
+
+            Load(ptr, _, mem) => {
+                f(&mut ptr.0.value);
+                f(&mut mem.0.value);
+            }
+            Store(val, ptr, _, mem) => {
+                f(&mut val.value);
+                f(&mut ptr.0.value);
+                f(&mut mem.0.value);
+            }
+            MemCopy(dst, src, cnt, mem) | MemMove(dst, src, cnt, mem) => {
+                f(&mut dst.0.value);
+                f(&mut src.0.value);
+                f(&mut cnt.0.value);
+                f(&mut mem.0.value);
+            }
+            MemSet(dst, val, cnt, mem) => {
+                f(&mut dst.0.value);
+                f(&mut val.value);
+                f(&mut cnt.0.value);
+                f(&mut mem.0.value);
+            }
+
+            LoadAtomic(ptr, _, mem) => {
+                f(&mut ptr.0.value);
+                f(&mut mem.0.value);
+            }
+            StoreAtomic(val, ptr, _, mem) => {
+                f(&mut val.value);
+                f(&mut ptr.0.value);
+                f(&mut mem.0.value);
+            }
+            AtomicRmw(_, ptr, val, _, mem) => {
+                f(&mut ptr.0.value);
+                f(&mut val.value);
+                f(&mut mem.0.value);
+            }
+            AtomicCmpXchg(ptr, expected, desired, _, _, mem) => {
+                f(&mut ptr.0.value);
+                f(&mut expected.value);
+                f(&mut desired.value);
+                f(&mut mem.0.value);
+            }
+            Fence(_, mem) => {
+                f(&mut mem.0.value);
+            }
+
+            Call(func_ptr, args, mem) => {
+                f(&mut func_ptr.0.value);
+                for a in args.iter_mut() {
+                    f(&mut a.value);
+                }
+                f(&mut mem.0.value);
+            }
+
+            InsertValue(agg, val, _) => {
+                f(&mut agg.value);
+                f(&mut val.value);
+            }
+
+            Ret(val, mem) => {
+                if let Some(v) = val {
+                    f(&mut v.value);
+                }
+                f(&mut mem.0.value);
+            }
+            Br(_, args) => {
+                for a in args.iter_mut() {
+                    f(&mut a.value);
+                }
+            }
+            BrIf(cond, _, then_args, _, else_args) => {
+                f(&mut cond.0.value);
+                for a in then_args.iter_mut() {
+                    f(&mut a.value);
+                }
+                for a in else_args.iter_mut() {
+                    f(&mut a.value);
+                }
+            }
+            Continue(args) | RegionYield(args) => {
+                for a in args.iter_mut() {
+                    f(&mut a.value);
+                }
+            }
+        }
+    }
+}

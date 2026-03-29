@@ -17,6 +17,10 @@ pub struct InstNode {
     pub next: Option<u32>,
     /// The basic block this instruction belongs to.
     pub parent_block: BlockRef,
+    /// Head of the use-list for the primary result of this instruction.
+    pub use_list_head: Option<u32>,
+    /// Head of the use-list for the secondary result (if any).
+    pub secondary_use_list_head: Option<u32>,
 }
 
 /// Arena for instructions with O(1) alloc/free and linked-list threading.
@@ -105,9 +109,79 @@ impl InstPool {
     pub fn iter_insts(&self) -> impl Iterator<Item = (u32, &Instruction)> {
         self.iter().map(|(i, node)| (i, &node.inst))
     }
+
+    /// Iterate all live `&mut InstNode` in allocation order.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut InstNode> {
+        self.nodes.iter_mut().filter_map(|slot| slot.as_mut())
+    }
 }
 
 impl Default for InstPool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ── Use-list pool ──
+
+/// A node in a def-use chain. Each node represents one use of a value by
+/// an instruction operand. Uses for the same value form a doubly-linked list.
+#[derive(Debug, Clone)]
+pub struct UseNode {
+    /// The instruction that contains this use.
+    pub user: u32,
+    /// Next use of the same value (`None` if tail).
+    pub next: Option<u32>,
+    /// Previous use of the same value (`None` if head).
+    pub prev: Option<u32>,
+}
+
+/// Pool-based arena for use-list nodes with free-list recycling.
+#[derive(Debug, Clone)]
+pub struct UsePool {
+    nodes: Vec<Option<UseNode>>,
+    free_list: Vec<u32>,
+}
+
+impl UsePool {
+    pub fn new() -> Self {
+        Self {
+            nodes: Vec::new(),
+            free_list: Vec::new(),
+        }
+    }
+
+    /// Allocate a new use node, returning its index.
+    pub fn alloc(&mut self, node: UseNode) -> u32 {
+        if let Some(idx) = self.free_list.pop() {
+            self.nodes[idx as usize] = Some(node);
+            idx
+        } else {
+            let idx = self.nodes.len() as u32;
+            self.nodes.push(Some(node));
+            idx
+        }
+    }
+
+    /// Remove a use node, returning it. Slot is recycled.
+    pub fn free(&mut self, index: u32) -> Option<UseNode> {
+        let node = self.nodes.get_mut(index as usize)?.take();
+        if node.is_some() {
+            self.free_list.push(index);
+        }
+        node
+    }
+
+    pub fn get(&self, index: u32) -> Option<&UseNode> {
+        self.nodes.get(index as usize)?.as_ref()
+    }
+
+    pub fn get_mut(&mut self, index: u32) -> Option<&mut UseNode> {
+        self.nodes.get_mut(index as usize)?.as_mut()
+    }
+}
+
+impl Default for UsePool {
     fn default() -> Self {
         Self::new()
     }

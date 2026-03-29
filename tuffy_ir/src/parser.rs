@@ -1089,6 +1089,7 @@ impl<'a> Parser<'a> {
                     func.block_args.push(BlockArg {
                         ty,
                         annotation: ann,
+                        use_list_head: None,
                     });
                     self.value_map.insert(vnum, vref);
                     arg_count += 1;

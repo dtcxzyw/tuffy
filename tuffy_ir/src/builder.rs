@@ -183,7 +183,11 @@ impl<'a> Builder<'a> {
         annotation: Option<Annotation>,
     ) -> ValueRef {
         let arg_idx = self.func.block_args.len() as u32;
-        self.func.block_args.push(BlockArg { ty, annotation });
+        self.func.block_args.push(BlockArg {
+            ty,
+            annotation,
+            use_list_head: None,
+        });
         self.func.blocks[block.index() as usize].arg_count += 1;
         ValueRef::block_arg(arg_idx)
     }

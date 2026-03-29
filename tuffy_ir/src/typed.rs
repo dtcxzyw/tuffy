@@ -33,25 +33,25 @@ pub struct ByteValue(ValueRef);
 // ── Operand Wrappers ──
 
 #[derive(Debug, Clone)]
-pub struct IntOperand(Operand);
+pub struct IntOperand(pub(crate) Operand);
 
 #[derive(Debug, Clone)]
-pub struct BoolOperand(Operand);
+pub struct BoolOperand(pub(crate) Operand);
 
 #[derive(Debug, Clone)]
-pub struct FloatOperand(Operand);
+pub struct FloatOperand(pub(crate) Operand);
 
 #[derive(Debug, Clone)]
-pub struct PtrOperand(Operand);
+pub struct PtrOperand(pub(crate) Operand);
 
 #[derive(Debug, Clone)]
-pub struct MemOperand(Operand);
+pub struct MemOperand(pub(crate) Operand);
 
 #[derive(Debug, Clone)]
-pub struct UnitOperand(Operand);
+pub struct UnitOperand(pub(crate) Operand);
 
 #[derive(Debug, Clone)]
-pub struct ByteOperand(Operand);
+pub struct ByteOperand(pub(crate) Operand);
 
 // ── Value Wrapper Implementations ──
 

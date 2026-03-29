@@ -2186,3 +2186,228 @@ fn test_typed_builder_api() {
     let result = crate::verifier::verify_module(&module);
     assert!(result.is_ok(), "expected no errors: {result}");
 }
+
+// ── Def-Use Chain Tests ──
+
+#[test]
+fn def_use_basic_uses_of() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("test");
+    let mut func = Function::new(
+        name,
+        vec![Type::Int, Type::Int],
+        vec![],
+        vec![],
+        Some(Type::Int),
+        None,
+    );
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+    let bb = builder.create_block();
+    builder.switch_to_block(bb);
+
+    let p0 = builder.param(0, Type::Int, None, Origin::synthetic());
+    let p1 = builder.param(1, Type::Int, None, Origin::synthetic());
+    // add uses p0 and p1
+    let _sum = builder.add(p0.into(), p1.into(), I64, Origin::synthetic());
+    // double uses p0 twice
+    let _double = builder.add(p0.into(), p0.into(), I64, Origin::synthetic());
+
+    builder.exit_region();
+
+    // p0 is used by sum (once) and double (twice) = 3 uses
+    assert_eq!(func.use_count(p0), 3, "p0 should have 3 uses");
+
+    // p1 is used only by sum = 1 use
+    assert_eq!(func.use_count(p1), 1, "p1 should have 1 use");
+
+    // double result is not used
+    assert_eq!(func.use_count(_double.raw()), 0);
+}
+
+#[test]
+fn def_use_block_arg_uses() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("test");
+    let mut func = Function::new(name, vec![Type::Int], vec![], vec![], Some(Type::Int), None);
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+    let bb = builder.create_block();
+    builder.switch_to_block(bb);
+
+    let block_arg = builder.add_block_arg(bb, Type::Int, Some(Annotation::Int(I64)));
+    let _sum = builder.add(block_arg.into(), block_arg.into(), I64, Origin::synthetic());
+
+    builder.exit_region();
+
+    // Block arg should have 2 uses
+    let count = func.use_count(block_arg);
+    assert_eq!(count, 2, "block arg should have 2 uses, got {count}");
+}
+
+#[test]
+fn def_use_remove_inst_unregisters() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("test");
+    let mut func = Function::new(
+        name,
+        vec![Type::Int, Type::Int],
+        vec![],
+        vec![],
+        Some(Type::Int),
+        None,
+    );
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+    let bb = builder.create_block();
+    builder.switch_to_block(bb);
+
+    let p0 = builder.param(0, Type::Int, None, Origin::synthetic());
+    let p1 = builder.param(1, Type::Int, None, Origin::synthetic());
+    let sum = builder.add(p0.into(), p1.into(), I64, Origin::synthetic());
+
+    builder.exit_region();
+
+    let sum_idx = sum.raw().index();
+
+    assert_eq!(func.use_count(p0), 1);
+    assert_eq!(func.use_count(p1), 1);
+
+    // Remove the add instruction
+    func.remove_inst(sum_idx);
+
+    assert_eq!(
+        func.use_count(p0),
+        0,
+        "p0 uses should be 0 after removing add"
+    );
+    assert_eq!(
+        func.use_count(p1),
+        0,
+        "p1 uses should be 0 after removing add"
+    );
+}
+
+#[test]
+fn def_use_replace_all_uses() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("test");
+    let mut func = Function::new(
+        name,
+        vec![Type::Int, Type::Int],
+        vec![],
+        vec![],
+        Some(Type::Int),
+        None,
+    );
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+    let bb = builder.create_block();
+    builder.switch_to_block(bb);
+
+    let p0 = builder.param(0, Type::Int, None, Origin::synthetic());
+    let p1 = builder.param(1, Type::Int, None, Origin::synthetic());
+    let add = builder.add(p0.into(), p0.into(), I64, Origin::synthetic());
+
+    builder.exit_region();
+
+    assert_eq!(func.use_count(p0), 2);
+    assert_eq!(func.use_count(p1), 0);
+
+    // Replace all uses of p0 with p1
+    func.replace_all_uses(p0, p1);
+
+    assert_eq!(func.use_count(p0), 0, "p0 should have 0 uses after RAUW");
+    assert_eq!(func.use_count(p1), 2, "p1 should have 2 uses after RAUW");
+
+    // Verify the instruction operands were actually updated
+    let inst = func.inst(add.raw().index());
+    match &inst.op {
+        Op::Add(a, b) => {
+            assert_eq!(a.0.value, p1);
+            assert_eq!(b.0.value, p1);
+        }
+        _ => panic!("expected Add"),
+    }
+}
+
+#[test]
+fn def_use_rebuild_use_lists() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("test");
+    let mut func = Function::new(
+        name,
+        vec![Type::Int, Type::Int],
+        vec![],
+        vec![],
+        Some(Type::Int),
+        None,
+    );
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+    let bb = builder.create_block();
+    builder.switch_to_block(bb);
+
+    let p0 = builder.param(0, Type::Int, None, Origin::synthetic());
+    let p1 = builder.param(1, Type::Int, None, Origin::synthetic());
+    let _sum = builder.add(p0.into(), p1.into(), I64, Origin::synthetic());
+
+    builder.exit_region();
+
+    assert_eq!(func.use_count(p0), 1);
+    assert_eq!(func.use_count(p1), 1);
+
+    // Rebuild from scratch — should produce same result
+    func.rebuild_use_lists();
+    assert_eq!(func.use_count(p0), 1, "p0 after rebuild");
+    assert_eq!(func.use_count(p1), 1, "p1 after rebuild");
+}
+
+#[test]
+fn def_use_insert_before_registers_uses() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("test");
+    let mut func = Function::new(name, vec![Type::Int], vec![], vec![], Some(Type::Int), None);
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+    let bb = builder.create_block();
+    builder.switch_to_block(bb);
+
+    let p0 = builder.param(0, Type::Int, None, Origin::synthetic());
+
+    builder.exit_region();
+
+    let p0_idx = p0.index();
+
+    // No uses of p0 yet (param has no operands)
+    assert_eq!(func.use_count(p0), 0);
+
+    // Insert an `add p0, p0` before the param
+    let add_inst = Instruction {
+        op: Op::Add(IntOperand::from(p0), IntOperand::from(p0)),
+        ty: Type::Int,
+        secondary_ty: None,
+        origin: Origin::synthetic(),
+        result_annotation: Some(Annotation::Int(I64)),
+        secondary_result_annotation: None,
+    };
+    let _new_idx = func.insert_inst_before(p0_idx, add_inst);
+
+    assert_eq!(
+        func.use_count(p0),
+        2,
+        "p0 should have 2 uses from inserted add"
+    );
+}
