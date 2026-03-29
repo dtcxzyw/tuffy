@@ -132,12 +132,13 @@ fn value_type(func: &Function, v: ValueRef) -> Option<&Type> {
     if v.is_block_arg() {
         func.block_args.get(v.index() as usize).map(|ba| &ba.ty)
     } else if v.is_secondary_result() {
-        func.instructions
-            .get(v.inst_index() as usize)?
+        func.inst_pool
+            .get(v.inst_index())?
+            .inst
             .secondary_ty
             .as_ref()
     } else {
-        func.instructions.get(v.index() as usize).map(|i| &i.ty)
+        func.inst_pool.get(v.index()).map(|n| &n.inst.ty)
     }
 }
 
@@ -145,9 +146,9 @@ fn value_annotation(func: &Function, v: ValueRef) -> Option<&Annotation> {
     if v.is_block_arg() || v.is_secondary_result() {
         None
     } else {
-        func.instructions
-            .get(v.index() as usize)
-            .and_then(|i| i.result_annotation.as_ref())
+        func.inst_pool
+            .get(v.index())
+            .and_then(|n| n.inst.result_annotation.as_ref())
     }
 }
 
@@ -200,7 +201,7 @@ fn has_wide_values<M: AbiMetadata>(
     }
 
     // Check for wide instructions
-    for inst in &func.instructions {
+    for (_, inst) in func.inst_pool.iter_insts() {
         if is_wide_width(type_width(&inst.ty), legality) {
             return true;
         }
@@ -270,8 +271,8 @@ fn has_wide_values<M: AbiMetadata>(
     }
 
     // Check for wide-return calls
-    for (i, _) in func.instructions.iter().enumerate() {
-        if metadata.is_wide_return_call(i as u32) {
+    for (i, _) in func.inst_pool.iter_insts() {
+        if metadata.is_wide_return_call(i) {
             return true;
         }
     }
@@ -287,7 +288,7 @@ fn has_128bit_values(func: &Function) -> bool {
     if func.ret_ty.as_ref().is_some_and(is_128_bit_int) {
         return true;
     }
-    for inst in &func.instructions {
+    for (_, inst) in func.inst_pool.iter_insts() {
         if is_128_bit_int(&inst.ty) {
             return true;
         }
@@ -448,8 +449,8 @@ fn collect_wide_values<M: AbiMetadata>(
     let mut wide = HashSet::new();
 
     // Mark instructions that produce wide results.
-    for (i, inst) in old.instructions.iter().enumerate() {
-        let vref = ValueRef::inst_result(i as u32);
+    for (i, inst) in old.inst_pool.iter_insts() {
+        let vref = ValueRef::inst_result(i);
         if is_wide_width(type_width(&inst.ty), legality)
             || is_128_bit_int_with_annotation(&inst.ty, &inst.result_annotation)
         {
@@ -457,8 +458,8 @@ fn collect_wide_values<M: AbiMetadata>(
             continue;
         }
         // Calls returning wide values are marked in ABI metadata
-        if meta.is_wide_return_call(i as u32) {
-            let sec = ValueRef::inst_secondary_result(i as u32);
+        if meta.is_wide_return_call(i) {
+            let sec = ValueRef::inst_secondary_result(i);
             wide.insert(sec.raw());
         }
         match &inst.op {
@@ -505,7 +506,7 @@ fn collect_wide_values<M: AbiMetadata>(
     }
 
     // Scan branches to find 128-bit block args.
-    for inst in &old.instructions {
+    for (_, inst) in old.inst_pool.iter_insts() {
         let check_args =
             |target: BlockRef, args: &[Operand], wide: &HashSet<u32>, out: &mut HashSet<u32>| {
                 let bb = old.block(target);
@@ -2438,16 +2439,16 @@ fn leg_zext_128<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, val: &
 /// If `vref` is the result of a `FpToUi` or `FpToSi` instruction in `old`,
 /// return the float type of the input operand.  Returns `None` otherwise.
 fn get_fp_to_int_float_type(vref: ValueRef, old: &Function) -> Option<FloatType> {
-    let fp_operand = match old.instructions.get(vref.index() as usize) {
-        Some(inst) => match &inst.op {
+    let fp_operand = match old.inst_pool.get(vref.index()) {
+        Some(node) => match &node.inst.op {
             Op::FpToUi(a) | Op::FpToSi(a) => a.clone().raw().value,
             _ => return None,
         },
         None => return None,
     };
-    old.instructions
-        .get(fp_operand.index() as usize)
-        .and_then(|i| match &i.ty {
+    old.inst_pool
+        .get(fp_operand.index())
+        .and_then(|n| match &n.inst.ty {
             Type::Float(ft) => Some(*ft),
             _ => None,
         })
@@ -2476,8 +2477,8 @@ fn leg_fp_to_int128<M: AbiMetadata + Clone>(
     symbols: &mut SymbolTable,
 ) {
     // Retrieve the float input to the FpToUi/FpToSi instruction.
-    let fp_input_vref = match old.instructions.get(zext_val.value.index() as usize) {
-        Some(inst) => match &inst.op {
+    let fp_input_vref = match old.inst_pool.get(zext_val.value.index()) {
+        Some(node) => match &node.inst.op {
             Op::FpToUi(a) | Op::FpToSi(a) => a.clone().raw().value,
             _ => {
                 // Not the expected pattern; fall back to simple extend.

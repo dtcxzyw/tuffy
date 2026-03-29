@@ -315,8 +315,8 @@ impl<'a> Interpreter<'a> {
         if src_vref.is_block_arg() {
             return None;
         }
-        let src_inst = func.instructions.get(src_vref.index() as usize)?;
-        let float_op = match &src_inst.op {
+        let src_inst = func.inst_pool.get(src_vref.index())?;
+        let float_op = match &src_inst.inst.op {
             Op::FpToSi(a) if is_signed => Some(a.clone().raw()),
             Op::FpToUi(a) if !is_signed => Some(a.clone().raw()),
             _ => return None,
@@ -355,11 +355,11 @@ impl<'a> Interpreter<'a> {
     /// (pre-legalization) may have cross-block references to stack slots
     /// defined in blocks that haven't been visited yet on the current path.
     fn preallocate_stack_slots(&mut self, frame: &mut CallFrame<'a>) {
-        for (idx, inst) in frame.func.instructions.iter().enumerate() {
+        for (idx, inst) in frame.func.inst_pool.iter_insts() {
             if let Op::StackSlot(bytes) = &inst.op {
                 let id = self.memory.allocate(*bytes as usize, "stack_slot");
                 frame.stack_allocs.push(id);
-                let vref = ValueRef::inst_result(idx as u32);
+                let vref = ValueRef::inst_result(idx);
                 frame.set_value(
                     vref,
                     Value::Ptr(Pointer {
@@ -638,10 +638,9 @@ impl<'a> Interpreter<'a> {
         depth: usize,
     ) -> Result<BlockResult, UbViolation> {
         let bb = frame.func.block(block_ref);
-        let inst_start = bb.inst_start;
-        let inst_count = bb.inst_count;
+        let mut current_inst = bb.first_inst;
 
-        for i in 0..inst_count {
+        while let Some(inst_idx) = current_inst {
             self.steps += 1;
             if self.steps > self.max_steps {
                 return Err(UbViolation {
@@ -650,7 +649,9 @@ impl<'a> Interpreter<'a> {
                 });
             }
 
-            let inst_idx = inst_start + i;
+            // Advance cursor before processing (so borrows don't conflict).
+            current_inst = frame.func.inst_pool.get(inst_idx).unwrap().next;
+
             let inst = frame.func.inst(inst_idx);
             let vref = ValueRef::inst_result(inst_idx);
 

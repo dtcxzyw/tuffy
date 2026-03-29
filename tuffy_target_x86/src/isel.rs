@@ -403,8 +403,8 @@ fn get_int_annotation(func: &Function, val: ValueRef) -> Option<IntAnnotation> {
     if val.is_block_arg() {
         None
     } else {
-        let inst = func.instructions.get(val.index() as usize)?;
-        match &inst.result_annotation {
+        let node = func.inst_pool.get(val.index())?;
+        match &node.inst.result_annotation {
             Some(Annotation::Int(ann)) => Some(*ann),
             _ => None,
         }
@@ -869,10 +869,11 @@ pub fn isel(
     call_has_ret2: &HashSet<u32>,
 ) -> Option<IselResult<VInst>> {
     let ba_cap = func.block_args.len();
+    let pool_cap = func.inst_pool.next_index() as usize;
     let mut ctx = IselCtx {
-        regs: VRegMap::new(func.instructions.len(), ba_cap),
-        cmps: CmpMap::new(func.instructions.len()),
-        stack: StackMap::new(func.instructions.len(), ba_cap),
+        regs: VRegMap::new(pool_cap, ba_cap),
+        cmps: CmpMap::new(pool_cap),
+        stack: StackMap::new(pool_cap, ba_cap),
         alloc: VRegAlloc::new(),
         next_label: func.blocks.len() as u32,
         out: Vec::new(),
@@ -912,9 +913,8 @@ pub fn isel(
                             if let CfgNode::Block(br2) = child2 {
                                 let bb2 = func.block(*br2);
                                 eprintln!(
-                                    "  block {} (inst_start={}, inst_count={}):",
+                                    "  block {} (inst_count={}):",
                                     br2.index(),
-                                    bb2.inst_start,
                                     bb2.inst_count
                                 );
                                 for (v2, i2) in func.block_insts_with_values(*br2) {
@@ -927,8 +927,8 @@ pub fn isel(
                                 }
                             }
                         }
-                        eprintln!("  Raw instruction array (first 60):");
-                        for (i, inst) in func.instructions.iter().enumerate().take(60) {
+                        eprintln!("  Raw instruction pool (first 60):");
+                        for (i, inst) in func.inst_pool.iter_insts().take(60) {
                             eprintln!("    [{}] {:?}", i, inst.op);
                         }
                     }

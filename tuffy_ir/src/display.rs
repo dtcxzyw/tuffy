@@ -266,12 +266,14 @@ fn assign_values(func: &Function, region: RegionRef, ctx: &mut DisplayCtx) {
                 for i in 0..bb.arg_count {
                     ctx.assign(ValueRef::block_arg(bb.arg_start + i));
                 }
-                for i in 0..bb.inst_count {
-                    let idx = bb.inst_start + i;
+                let mut cur = bb.first_inst;
+                while let Some(idx) = cur {
+                    let node = func.inst_pool.get(idx).unwrap();
                     ctx.assign(ValueRef::inst_result(idx));
-                    if func.inst(idx).secondary_ty.is_some() {
+                    if node.inst.secondary_ty.is_some() {
                         ctx.assign(ValueRef::inst_secondary_result(idx));
                     }
+                    cur = node.next;
                 }
             }
             CfgNode::Region(rref) => {
@@ -911,10 +913,12 @@ fn write_block(
 
     let bb = func.block(bref);
     let inst_pad = " ".repeat(indent + 2);
-    for i in 0..bb.inst_count {
-        let vref = ValueRef::inst_result(bb.inst_start + i);
-        let inst = func.inst(bb.inst_start + i);
-        writeln!(f, "{inst_pad}{}", fmt_inst(func, vref, inst, ctx))?;
+    let mut cur = bb.first_inst;
+    while let Some(idx) = cur {
+        let node = func.inst_pool.get(idx).unwrap();
+        let vref = ValueRef::inst_result(idx);
+        writeln!(f, "{inst_pad}{}", fmt_inst(func, vref, &node.inst, ctx))?;
+        cur = node.next;
     }
     Ok(())
 }

@@ -1107,13 +1107,13 @@ impl<'a> Parser<'a> {
 
         // Create the block
         let bref = BlockRef(func.blocks.len() as u32);
-        let inst_start = func.instructions.len() as u32;
 
         func.blocks.push(BasicBlock {
             parent_region: region,
             arg_start,
             arg_count,
-            inst_start,
+            first_inst: None,
+            last_inst: None,
             inst_count: 0,
         });
 
@@ -1137,10 +1137,6 @@ impl<'a> Parser<'a> {
                 }
             }
         }
-
-        // Update inst_count
-        let bb = &mut func.blocks[bref.index() as usize];
-        bb.inst_count = func.instructions.len() as u32 - bb.inst_start;
 
         Ok(bref)
     }
@@ -1231,16 +1227,17 @@ impl<'a> Parser<'a> {
         let (op, result_ty, result_ann, secondary_ty, secondary_ann) =
             self.parse_op_body(func, &opcode, &ty0, &ann0, &multi_result)?;
 
-        let inst_idx = func.instructions.len() as u32;
-        func.instructions.push(Instruction {
-            op,
-            ty: result_ty,
-            secondary_ty,
-            origin: Origin::synthetic(),
-            result_annotation: result_ann,
-            secondary_result_annotation: secondary_ann,
-        });
-        func.blocks[block.index() as usize].inst_count += 1;
+        let inst_idx = func.append_inst(
+            block,
+            Instruction {
+                op,
+                ty: result_ty,
+                secondary_ty,
+                origin: Origin::synthetic(),
+                result_annotation: result_ann,
+                secondary_result_annotation: secondary_ann,
+            },
+        );
 
         // Register value(s)
         let vref = ValueRef::inst_result(inst_idx);
@@ -1320,20 +1317,17 @@ impl<'a> Parser<'a> {
             _ => return Err(self.error(format!("unknown terminator: {}", opcode))),
         };
 
-        let inst_idx = func.instructions.len() as u32;
-        func.instructions.push(Instruction {
-            op,
-            ty,
-            secondary_ty: None,
-            origin: Origin::synthetic(),
-            result_annotation: None,
-            secondary_result_annotation: None,
-        });
-        func.blocks[block.index() as usize].inst_count += 1;
-
-        // Terminators produce no user-visible result, but still occupy an inst slot.
-        // No value mapping needed.
-        let _ = inst_idx;
+        func.append_inst(
+            block,
+            Instruction {
+                op,
+                ty,
+                secondary_ty: None,
+                origin: Origin::synthetic(),
+                result_annotation: None,
+                secondary_result_annotation: None,
+            },
+        );
 
         Ok(())
     }
@@ -2085,7 +2079,7 @@ func @add(%a: int:s32, %b: int:s32) -> int:s32 {
         assert_eq!(func.params.len(), 2);
         assert_eq!(func.ret_ty, Some(Type::Int));
         // 3 normal instructions + 1 terminator
-        assert_eq!(func.instructions.len(), 4);
+        assert_eq!(func.inst_pool.next_index() as usize, 4);
     }
 
     #[test]
@@ -2102,7 +2096,7 @@ func @add(%a: int:s32, %b: int:s32) -> int:s32 {
         // Verify the output can be re-parsed
         let module2 = parse(&output);
         assert_eq!(module2.functions.len(), 1);
-        assert_eq!(module2.functions[0].instructions.len(), 4);
+        assert_eq!(module2.functions[0].inst_pool.next_index() as usize, 4);
     }
 
     #[test]
@@ -2142,7 +2136,7 @@ func @consts() {
 "#;
         let module = parse(input);
         let func = &module.functions[0];
-        assert_eq!(func.instructions.len(), 5); // 4 + unreachable
+        assert_eq!(func.inst_pool.next_index() as usize, 5); // 4 + unreachable
     }
 
     #[test]
@@ -2158,7 +2152,7 @@ func @mem_test() {
 "#;
         let module = parse(input);
         let func = &module.functions[0];
-        assert_eq!(func.instructions.len(), 4); // stack_slot, load, store, ret
+        assert_eq!(func.inst_pool.next_index() as usize, 4); // stack_slot, load, store, ret
     }
 
     #[test]
@@ -2204,9 +2198,9 @@ func @caller() {
 "#;
         let module = parse(input);
         let func = &module.functions[0];
-        assert_eq!(func.instructions.len(), 3); // symbol_addr, call, ret
+        assert_eq!(func.inst_pool.next_index() as usize, 3); // symbol_addr, call, ret
         // call is multi-result
-        assert!(func.instructions[1].secondary_ty.is_some());
+        assert!(func.inst_pool.inst(1).secondary_ty.is_some());
     }
 
     #[test]
@@ -2222,7 +2216,7 @@ func @ext_test() {
 "#;
         let module = parse(input);
         let func = &module.functions[0];
-        assert_eq!(func.instructions.len(), 4);
+        assert_eq!(func.inst_pool.next_index() as usize, 4);
     }
 
     #[test]
@@ -2274,7 +2268,7 @@ func @select_test() {
 "#;
         let module = parse(input);
         let func = &module.functions[0];
-        assert_eq!(func.instructions.len(), 5);
+        assert_eq!(func.inst_pool.next_index() as usize, 5);
     }
 
     #[test]
@@ -2294,7 +2288,7 @@ func @fp_test() {
 "#;
         let module = parse(input);
         let func = &module.functions[0];
-        assert_eq!(func.instructions.len(), 8);
+        assert_eq!(func.inst_pool.next_index() as usize, 8);
     }
 
     #[test]
@@ -2327,6 +2321,6 @@ func @agg_test() {
 "#;
         let module = parse(input);
         let func = &module.functions[0];
-        assert_eq!(func.instructions.len(), 4);
+        assert_eq!(func.inst_pool.next_index() as usize, 4);
     }
 }

@@ -80,7 +80,8 @@ impl<'a> Builder<'a> {
             parent_region: region,
             arg_start: self.func.block_args.len() as u32,
             arg_count: 0,
-            inst_start: self.func.instructions.len() as u32,
+            first_inst: None,
+            last_inst: None,
             inst_count: 0,
         });
         let block_ref = BlockRef(idx);
@@ -107,12 +108,6 @@ impl<'a> Builder<'a> {
 
     /// Set the current block for subsequent instructions.
     pub fn switch_to_block(&mut self, block: BlockRef) {
-        // Update inst_start to current position in instruction arena.
-        // This ensures blocks created early but filled later get the right start.
-        let bb = &mut self.func.blocks[block.index() as usize];
-        if bb.inst_count == 0 {
-            bb.inst_start = self.func.instructions.len() as u32;
-        }
         self.current_block = Some(block);
     }
 
@@ -125,14 +120,12 @@ impl<'a> Builder<'a> {
                 .map(|ba| &ba.ty)
         } else if v.is_secondary_result() {
             self.func
-                .instructions
-                .get(v.inst_index() as usize)
+                .inst_pool
+                .get(v.inst_index())
+                .map(|n| &n.inst)
                 .and_then(|i| i.secondary_ty.as_ref())
         } else {
-            self.func
-                .instructions
-                .get(v.index() as usize)
-                .map(|i| &i.ty)
+            self.func.inst_pool.get(v.index()).map(|n| &n.inst.ty)
         }
     }
 
@@ -141,13 +134,15 @@ impl<'a> Builder<'a> {
             None
         } else if v.is_secondary_result() {
             self.func
-                .instructions
-                .get(v.inst_index() as usize)
+                .inst_pool
+                .get(v.inst_index())
+                .map(|n| &n.inst)
                 .and_then(|i| i.secondary_result_annotation.as_ref())
         } else {
             self.func
-                .instructions
-                .get(v.index() as usize)
+                .inst_pool
+                .get(v.index())
+                .map(|n| &n.inst)
                 .and_then(|i| i.result_annotation.as_ref())
         }
     }
@@ -157,8 +152,8 @@ impl<'a> Builder<'a> {
         if v.is_block_arg() || v.is_secondary_result() {
             return None;
         }
-        match self.func.instructions.get(v.index() as usize) {
-            Some(inst) => match &inst.op {
+        match self.func.inst_pool.get(v.index()) {
+            Some(node) => match &node.inst.op {
                 Op::StackSlot(bytes) => Some(*bytes),
                 _ => None,
             },
@@ -174,8 +169,8 @@ impl<'a> Builder<'a> {
             return false;
         }
         matches!(
-            self.func.instructions.get(v.index() as usize),
-            Some(inst) if matches!(inst.op, Op::StackSlot(_) | Op::SymbolAddr(_) | Op::PtrAdd(..))
+            self.func.inst_pool.get(v.index()),
+            Some(node) if matches!(node.inst.op, Op::StackSlot(_) | Op::SymbolAddr(_) | Op::PtrAdd(..))
 
         )
     }
@@ -203,18 +198,16 @@ impl<'a> Builder<'a> {
         origin: Origin,
         ann: Option<Annotation>,
     ) -> ValueRef {
-        let idx = self.func.instructions.len() as u32;
-        self.func.instructions.push(Instruction {
+        let block = self.current_block.expect("no current block");
+        let inst = Instruction {
             op,
             ty,
             secondary_ty,
             origin,
             result_annotation: ann,
             secondary_result_annotation: None,
-        });
-        if let Some(bb) = self.current_block {
-            self.func.blocks[bb.index() as usize].inst_count += 1;
-        }
+        };
+        let idx = self.func.append_inst(block, inst);
         ValueRef::inst_result(idx)
     }
 
@@ -227,18 +220,16 @@ impl<'a> Builder<'a> {
         ann: Option<Annotation>,
         secondary_ann: Option<Annotation>,
     ) -> ValueRef {
-        let idx = self.func.instructions.len() as u32;
-        self.func.instructions.push(Instruction {
+        let block = self.current_block.expect("no current block");
+        let inst = Instruction {
             op,
             ty,
             secondary_ty: Some(secondary_ty),
             origin,
             result_annotation: ann,
             secondary_result_annotation: secondary_ann,
-        });
-        if let Some(bb) = self.current_block {
-            self.func.blocks[bb.index() as usize].inst_count += 1;
-        }
+        };
+        let idx = self.func.append_inst(block, inst);
         ValueRef::inst_result(idx)
     }
 
@@ -1545,11 +1536,10 @@ impl<'a> Builder<'a> {
             return false;
         };
         let bb = &self.func.blocks[bb_ref.index() as usize];
-        if bb.inst_count == 0 {
+        let Some(last_idx) = bb.last_inst else {
             return false;
-        }
-        let last_idx = (bb.inst_start + bb.inst_count - 1) as usize;
-        let last_op = &self.func.instructions[last_idx].op;
+        };
+        let last_op = &self.func.inst_pool.inst(last_idx).op;
         matches!(
             last_op,
             Op::Ret(..)
