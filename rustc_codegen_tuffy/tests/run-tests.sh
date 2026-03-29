@@ -35,7 +35,7 @@ run_test() {
     echo -n "  $name ... "
 
     # Compile
-    if ! rustc +nightly -Z codegen-backend="$BACKEND" \
+    if ! rustc -Z codegen-backend="$BACKEND" \
         -o "$OUT_DIR/$name" "$src" 2>"$OUT_DIR/$name.compile.log"; then
         echo "FAIL (compile)"
         echo "    $(cat "$OUT_DIR/$name.compile.log")"

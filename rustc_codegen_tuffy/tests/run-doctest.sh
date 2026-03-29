@@ -191,7 +191,7 @@ for src in "$OUTDIR/src/"*.rs; do
 
     tmpdir="$OUTDIR/tmp/$name"
     mkdir -p "$tmpdir"
-    if rustc +nightly -Z codegen-backend="$BACKEND" \
+    if rustc -Z codegen-backend="$BACKEND" \
         --edition 2021 -o "$tmpdir/$name" "$src" \
         > "$log" 2>&1; then
         mv "$tmpdir/$name" "$bin"
