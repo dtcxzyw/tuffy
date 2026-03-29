@@ -10,7 +10,8 @@ normalize_ir() {
     sed \
         -e 's|/rustc/[0-9a-f]\{40\}/library/|\$SYSROOT/library/|g' \
         -e 's|/.*/lib/rustlib/src/rust/library/|\$SYSROOT/library/|g' \
-        -e 's|^\(data @\.Lloc\.[0-9]* = \)"[^"]*"\( relocs .*\)|\1"..."\2|'
+        -e 's|^\(data @\.Lloc\.[0-9]* = \)"[^"]*"\( relocs .*\)|\1"..."\2|' \
+        -e 's|C[a-zA-Z0-9]\{1,\}_\([0-9]\)|C\$HASH_\1|g'
 }
 
 # When executed directly, act as a filter.

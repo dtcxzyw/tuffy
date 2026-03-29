@@ -163,7 +163,7 @@
 // CHECK: data @.Lstr.5 = "there is no such thing as a release load"
 // CHECK: data @.Lloc_file.6 = "$SYSROOT/library/core/src/panic.rs"
 // CHECK: data @.Lloc.7 = "..." relocs [0: @.Lloc_file.6]
-// CHECK: func @_RINvNtNtCsa3SJzwB9S2T_4core4sync6atomic11atomic_loadmECsh6zX7Z7540N_10atomic_ops(ptr, int:i8) -> int:u32 {
+// CHECK: func @_RINvNtNtC$HASH_4core4sync6atomic11atomic_loadmEC$HASH_10atomic_ops(ptr, int:i8) -> int:u32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
 // CHECK:     v2: int:i8 = param 1
@@ -206,7 +206,7 @@
 // CHECK:     v37: ptr = ptradd v7, v36
 // CHECK:     v38: int:i64 = load.8 v37, v34
 // CHECK:     v39: ptr = symbol_addr @.Lloc.3
-// CHECK:     v40: ptr = symbol_addr @_RNvNtCsa3SJzwB9S2T_4core9panicking9panic_fmt
+// CHECK:     v40: ptr = symbol_addr @_RNvNtC$HASH_4core9panicking9panic_fmt
 // CHECK:     v41: mem = call v40(v35, v38, v39), v34
 // CHECK:     v42: int:i64 = iconst 0
 // CHECK:     unreachable
@@ -235,7 +235,7 @@
 // CHECK:     v65: ptr = ptradd v6, v64
 // CHECK:     v66: int:i64 = load.8 v65, v62
 // CHECK:     v67: ptr = symbol_addr @.Lloc.7
-// CHECK:     v68: ptr = symbol_addr @_RNvNtCsa3SJzwB9S2T_4core9panicking9panic_fmt
+// CHECK:     v68: ptr = symbol_addr @_RNvNtC$HASH_4core9panicking9panic_fmt
 // CHECK:     v69: mem = call v68(v63, v66, v67), v62
 // CHECK:     v70: int:i64 = iconst 0
 // CHECK:     unreachable
@@ -445,7 +445,7 @@
 // CHECK: data @.Lstr.13 = "there is no such thing as an acquire store"
 // CHECK: data @.Lloc_file.14 = "$SYSROOT/library/core/src/panic.rs"
 // CHECK: data @.Lloc.15 = "..." relocs [0: @.Lloc_file.14]
-// CHECK: func @_RINvNtNtCsa3SJzwB9S2T_4core4sync6atomic12atomic_storemECsh6zX7Z7540N_10atomic_ops(ptr, int:u32, int:i8) {
+// CHECK: func @_RINvNtNtC$HASH_4core4sync6atomic12atomic_storemEC$HASH_10atomic_ops(ptr, int:u32, int:i8) {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
 // CHECK:     v2: int:u32 = param 1
@@ -488,7 +488,7 @@
 // CHECK:     v37: ptr = ptradd v7, v36
 // CHECK:     v38: int:i64 = load.8 v37, v34
 // CHECK:     v39: ptr = symbol_addr @.Lloc.11
-// CHECK:     v40: ptr = symbol_addr @_RNvNtCsa3SJzwB9S2T_4core9panicking9panic_fmt
+// CHECK:     v40: ptr = symbol_addr @_RNvNtC$HASH_4core9panicking9panic_fmt
 // CHECK:     v41: mem = call v40(v35, v38, v39), v34
 // CHECK:     v42: int:i64 = iconst 0
 // CHECK:     unreachable
@@ -517,7 +517,7 @@
 // CHECK:     v65: ptr = ptradd v6, v64
 // CHECK:     v66: int:i64 = load.8 v65, v62
 // CHECK:     v67: ptr = symbol_addr @.Lloc.15
-// CHECK:     v68: ptr = symbol_addr @_RNvNtCsa3SJzwB9S2T_4core9panicking9panic_fmt
+// CHECK:     v68: ptr = symbol_addr @_RNvNtC$HASH_4core9panicking9panic_fmt
 // CHECK:     v69: mem = call v68(v63, v66, v67), v62
 // CHECK:     v70: int:i64 = iconst 0
 // CHECK:     unreachable
@@ -835,7 +835,7 @@
 // CHECK: data @.Lstr.21 = "there is no such thing as an acquire-release failure ordering"
 // CHECK: data @.Lloc_file.22 = "$SYSROOT/library/core/src/panic.rs"
 // CHECK: data @.Lloc.23 = "..." relocs [0: @.Lloc_file.22]
-// CHECK: func @_RINvNtNtCsa3SJzwB9S2T_4core4sync6atomic23atomic_compare_exchangemECsh6zX7Z7540N_10atomic_ops(ptr, ptr, int:u32, int:u32, int:i8, int:i8) -> ptr {
+// CHECK: func @_RINvNtNtC$HASH_4core4sync6atomic23atomic_compare_exchangemEC$HASH_10atomic_ops(ptr, ptr, int:u32, int:u32, int:i8, int:i8) -> ptr {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
 // CHECK:     v2: ptr = stack_slot 8
@@ -921,7 +921,7 @@
 // CHECK:     v74: ptr = ptradd v14, v73
 // CHECK:     v75: int:i64 = load.8 v74, v71
 // CHECK:     v76: ptr = symbol_addr @.Lloc.19
-// CHECK:     v77: ptr = symbol_addr @_RNvNtCsa3SJzwB9S2T_4core9panicking9panic_fmt
+// CHECK:     v77: ptr = symbol_addr @_RNvNtC$HASH_4core9panicking9panic_fmt
 // CHECK:     v78: mem = call v77(v72, v75, v76), v71
 // CHECK:     v79: int:i64 = iconst 0
 // CHECK:     unreachable
@@ -950,7 +950,7 @@
 // CHECK:     v102: ptr = ptradd v13, v101
 // CHECK:     v103: int:i64 = load.8 v102, v99
 // CHECK:     v104: ptr = symbol_addr @.Lloc.23
-// CHECK:     v105: ptr = symbol_addr @_RNvNtCsa3SJzwB9S2T_4core9panicking9panic_fmt
+// CHECK:     v105: ptr = symbol_addr @_RNvNtC$HASH_4core9panicking9panic_fmt
 // CHECK:     v106: mem = call v105(v100, v103, v104), v99
 // CHECK:     v107: int:i64 = iconst 0
 // CHECK:     unreachable
@@ -1205,7 +1205,7 @@
 // CHECK:     brif v337, bb10(v335), bb1(v335)
 // CHECK: }
 // CHECK:
-// CHECK: === ISel failure dump for _RINvNtNtCsa3SJzwB9S2T_4core4sync6atomic23atomic_compare_exchangemECsh6zX7Z7540N_10atomic_ops ===
+// CHECK: === ISel failure dump for _RINvNtNtC$HASH_4core4sync6atomic23atomic_compare_exchangemEC$HASH_10atomic_ops ===
 // CHECK:   block 0 (inst_start=0, inst_count=20):
 // CHECK:     vref=0 (index=0) op=Param(0)
 // CHECK:     vref=1 (index=1) op=StackSlot(8)
@@ -1592,7 +1592,7 @@
 // CHECK:     [58] BrIf(BoolOperand(Operand { value: ValueRef(57), annotation: None }), BlockRef(19), [Operand { value: ValueRef(2147483685), annotation: None }], BlockRef(1), [Operand { value: ValueRef(2147483685), annotation: None }])
 // CHECK:     [59] Load(PtrOperand(Operand { value: ValueRef(8), annotation: None }), 1, MemOperand(Operand { value: ValueRef(2147483652), annotation: None }))
 // CHECK: warning: isel failed on vref=ValueRef(144) op AtomicCmpXchg(PtrOperand(Operand { value: ValueRef(2), annotation: None }), Operand { value: ValueRef(3), annotation: None }, Operand { value: ValueRef(4), annotation: None }, SeqCst, SeqCst, MemOperand(Operand { value: ValueRef(2147483658), annotation: None }))
-// CHECK: warning: isel failed for _RINvNtNtCsa3SJzwB9S2T_4core4sync6atomic23atomic_compare_exchangemECsh6zX7Z7540N_10atomic_ops, emitting stub
+// CHECK: warning: isel failed for _RINvNtNtC$HASH_4core4sync6atomic23atomic_compare_exchangemEC$HASH_10atomic_ops, emitting stub
 // CHECK: fn atomic_compare_exchange(_1: &std::sync::atomic::Atomic<u32>, _2: u32, _3: u32) -> std::result::Result<u32, u32> {
 // CHECK:     debug ptr => _1;
 // CHECK:     debug expected => _2;
@@ -1631,7 +1631,7 @@
 // CHECK:     v8: ptr = load.8 v6, v7
 // CHECK:     v9: int:i64 = iconst 4
 // CHECK:     v10: int:i64 = iconst 4
-// CHECK:     v11: ptr = symbol_addr @_RINvNtNtCsa3SJzwB9S2T_4core4sync6atomic23atomic_compare_exchangemECsh6zX7Z7540N_10atomic_ops
+// CHECK:     v11: ptr = symbol_addr @_RINvNtNtC$HASH_4core4sync6atomic23atomic_compare_exchangemEC$HASH_10atomic_ops
 // CHECK:     v12: mem, v13: int:i64 = call v11(v1, v8, v4, v5, v9, v10), v7 -> int:i64
 // CHECK:     br bb1(v12)
 // CHECK:
@@ -1733,7 +1733,7 @@
 // CHECK:     v3: mem = store.8 v1, v2, v0
 // CHECK:     v4: ptr = load.8 v2, v3
 // CHECK:     v5: int:i64 = iconst 0
-// CHECK:     v6: ptr = symbol_addr @_RINvNtNtCsa3SJzwB9S2T_4core4sync6atomic11atomic_loadmECsh6zX7Z7540N_10atomic_ops
+// CHECK:     v6: ptr = symbol_addr @_RINvNtNtC$HASH_4core4sync6atomic11atomic_loadmEC$HASH_10atomic_ops
 // CHECK:     v7: mem, v8: int:u32 = call v6(v4, v5), v3 -> int:u32
 // CHECK:     br bb1(v7)
 // CHECK:
@@ -1775,7 +1775,7 @@
 // CHECK:     v4: mem = store.8 v1, v3, v0
 // CHECK:     v5: ptr = load.8 v3, v4
 // CHECK:     v6: int:i64 = iconst 1
-// CHECK:     v7: ptr = symbol_addr @_RINvNtNtCsa3SJzwB9S2T_4core4sync6atomic12atomic_storemECsh6zX7Z7540N_10atomic_ops
+// CHECK:     v7: ptr = symbol_addr @_RINvNtNtC$HASH_4core4sync6atomic12atomic_storemEC$HASH_10atomic_ops
 // CHECK:     v8: mem = call v7(v5, v2, v6), v4
 // CHECK:     v9: int:i64 = iconst 0
 // CHECK:     br bb1(v8)
