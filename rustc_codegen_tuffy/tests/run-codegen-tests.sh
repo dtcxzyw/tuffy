@@ -81,7 +81,9 @@ run_codegen_test() {
 
     if ! diff -u "$expected_clean" "$ir_clean" > /dev/null; then
         echo "FAIL (output mismatch)"
-        echo "    diff:"
+        echo "    normalized diff:"
+        diff -u "$expected_clean" "$ir_clean" | head -50
+        echo "    raw diff:"
         diff -u "$expected" "$ir_output" | head -30
         fail=$((fail + 1))
         return
