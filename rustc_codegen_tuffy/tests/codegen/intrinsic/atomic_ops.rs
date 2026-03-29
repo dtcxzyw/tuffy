@@ -1206,7 +1206,7 @@
 // CHECK: }
 // CHECK:
 // CHECK: === ISel failure dump for _RINvNtNtC$HASH_4core4sync6atomic23atomic_compare_exchangemEC$HASH_10atomic_ops ===
-// CHECK:   block 0 (inst_start=0, inst_count=20):
+// CHECK:   block 0 (inst_count=20):
 // CHECK:     vref=0 (index=0) op=Param(0)
 // CHECK:     vref=1 (index=1) op=StackSlot(8)
 // CHECK:     vref=2 (index=2) op=Param(1)
@@ -1227,39 +1227,39 @@
 // CHECK:     vref=17 (index=17) op=Const(0)
 // CHECK:     vref=18 (index=18) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(16), annotation: None }), IntOperand(Operand { value: ValueRef(17), annotation: None }))
 // CHECK:     vref=19 (index=19) op=BrIf(BoolOperand(Operand { value: ValueRef(18), annotation: None }), BlockRef(2), [Operand { value: ValueRef(10), annotation: None }], BlockRef(29), [Operand { value: ValueRef(10), annotation: None }])
-// CHECK:   block 1 (inst_start=32, inst_count=4):
+// CHECK:   block 1 (inst_count=4):
 // CHECK:     vref=32 (index=32) op=Load(PtrOperand(Operand { value: ValueRef(8), annotation: None }), 1, MemOperand(Operand { value: ValueRef(2147483649), annotation: None }))
 // CHECK:     vref=33 (index=33) op=Const(1)
 // CHECK:     vref=34 (index=34) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(32), annotation: None }), IntOperand(Operand { value: ValueRef(33), annotation: None }))
 // CHECK:     vref=35 (index=35) op=BrIf(BoolOperand(Operand { value: ValueRef(34), annotation: None }), BlockRef(8), [Operand { value: ValueRef(2147483649), annotation: None }], BlockRef(33), [Operand { value: ValueRef(2147483649), annotation: None }])
-// CHECK:   block 2 (inst_start=39, inst_count=4):
+// CHECK:   block 2 (inst_count=4):
 // CHECK:     vref=39 (index=39) op=Load(PtrOperand(Operand { value: ValueRef(8), annotation: None }), 1, MemOperand(Operand { value: ValueRef(2147483650), annotation: None }))
 // CHECK:     vref=40 (index=40) op=Const(0)
 // CHECK:     vref=41 (index=41) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(39), annotation: None }), IntOperand(Operand { value: ValueRef(40), annotation: None }))
 // CHECK:     vref=42 (index=42) op=BrIf(BoolOperand(Operand { value: ValueRef(41), annotation: None }), BlockRef(24), [Operand { value: ValueRef(2147483650), annotation: None }], BlockRef(34), [Operand { value: ValueRef(2147483650), annotation: None }])
-// CHECK:   block 3 (inst_start=49, inst_count=4):
+// CHECK:   block 3 (inst_count=4):
 // CHECK:     vref=49 (index=49) op=Load(PtrOperand(Operand { value: ValueRef(8), annotation: None }), 1, MemOperand(Operand { value: ValueRef(2147483651), annotation: None }))
 // CHECK:     vref=50 (index=50) op=Const(0)
 // CHECK:     vref=51 (index=51) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(49), annotation: None }), IntOperand(Operand { value: ValueRef(50), annotation: None }))
 // CHECK:     vref=52 (index=52) op=BrIf(BoolOperand(Operand { value: ValueRef(51), annotation: None }), BlockRef(21), [Operand { value: ValueRef(2147483651), annotation: None }], BlockRef(36), [Operand { value: ValueRef(2147483651), annotation: None }])
-// CHECK:   block 4 (inst_start=59, inst_count=4):
+// CHECK:   block 4 (inst_count=4):
 // CHECK:     vref=59 (index=59) op=Load(PtrOperand(Operand { value: ValueRef(8), annotation: None }), 1, MemOperand(Operand { value: ValueRef(2147483652), annotation: None }))
 // CHECK:     vref=60 (index=60) op=Const(0)
 // CHECK:     vref=61 (index=61) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(59), annotation: None }), IntOperand(Operand { value: ValueRef(60), annotation: None }))
 // CHECK:     vref=62 (index=62) op=BrIf(BoolOperand(Operand { value: ValueRef(61), annotation: None }), BlockRef(18), [Operand { value: ValueRef(2147483652), annotation: None }], BlockRef(38), [Operand { value: ValueRef(2147483652), annotation: None }])
-// CHECK:   block 5 (inst_start=69, inst_count=4):
+// CHECK:   block 5 (inst_count=4):
 // CHECK:     vref=69 (index=69) op=Load(PtrOperand(Operand { value: ValueRef(8), annotation: None }), 1, MemOperand(Operand { value: ValueRef(2147483653), annotation: None }))
 // CHECK:     vref=70 (index=70) op=Const(0)
 // CHECK:     vref=71 (index=71) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(69), annotation: None }), IntOperand(Operand { value: ValueRef(70), annotation: None }))
 // CHECK:     vref=72 (index=72) op=BrIf(BoolOperand(Operand { value: ValueRef(71), annotation: None }), BlockRef(15), [Operand { value: ValueRef(2147483653), annotation: None }], BlockRef(40), [Operand { value: ValueRef(2147483653), annotation: None }])
-// CHECK:   block 6 (inst_start=79, inst_count=4):
+// CHECK:   block 6 (inst_count=4):
 // CHECK:     vref=79 (index=79) op=Load(PtrOperand(Operand { value: ValueRef(8), annotation: None }), 1, MemOperand(Operand { value: ValueRef(2147483654), annotation: None }))
 // CHECK:     vref=80 (index=80) op=Const(0)
 // CHECK:     vref=81 (index=81) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(79), annotation: None }), IntOperand(Operand { value: ValueRef(80), annotation: None }))
 // CHECK:     vref=82 (index=82) op=BrIf(BoolOperand(Operand { value: ValueRef(81), annotation: None }), BlockRef(12), [Operand { value: ValueRef(2147483654), annotation: None }], BlockRef(42), [Operand { value: ValueRef(2147483654), annotation: None }])
-// CHECK:   block 7 (inst_start=89, inst_count=1):
+// CHECK:   block 7 (inst_count=1):
 // CHECK:     vref=89 (index=89) op=Unreachable
-// CHECK:   block 8 (inst_start=90, inst_count=27):
+// CHECK:   block 8 (inst_count=27):
 // CHECK:     vref=90 (index=90) op=SymbolAddr(SymbolId(8))
 // CHECK:     vref=91 (index=91) op=Const(52)
 // CHECK:     vref=92 (index=92) op=Store(Operand { value: ValueRef(90), annotation: None }, PtrOperand(Operand { value: ValueRef(14), annotation: None }), 8, MemOperand(Operand { value: ValueRef(2147483656), annotation: None }))
@@ -1287,7 +1287,7 @@
 // CHECK:     vref=114 (index=114) op=Call(PtrOperand(Operand { value: ValueRef(113), annotation: None }), [Operand { value: ValueRef(108), annotation: None }, Operand { value: ValueRef(111), annotation: None }, Operand { value: ValueRef(112), annotation: None }], MemOperand(Operand { value: ValueRef(107), annotation: None }))
 // CHECK:     vref=115 (index=115) op=Const(0)
 // CHECK:     vref=116 (index=116) op=Unreachable
-// CHECK:   block 9 (inst_start=117, inst_count=27):
+// CHECK:   block 9 (inst_count=27):
 // CHECK:     vref=117 (index=117) op=SymbolAddr(SymbolId(13))
 // CHECK:     vref=118 (index=118) op=Const(61)
 // CHECK:     vref=119 (index=119) op=Store(Operand { value: ValueRef(117), annotation: None }, PtrOperand(Operand { value: ValueRef(15), annotation: None }), 8, MemOperand(Operand { value: ValueRef(2147483657), annotation: None }))
@@ -1315,7 +1315,7 @@
 // CHECK:     vref=141 (index=141) op=Call(PtrOperand(Operand { value: ValueRef(140), annotation: None }), [Operand { value: ValueRef(135), annotation: None }, Operand { value: ValueRef(138), annotation: None }, Operand { value: ValueRef(139), annotation: None }], MemOperand(Operand { value: ValueRef(134), annotation: None }))
 // CHECK:     vref=142 (index=142) op=Const(0)
 // CHECK:     vref=143 (index=143) op=Unreachable
-// CHECK:   block 10 (inst_start=144, inst_count=7):
+// CHECK:   block 10 (inst_count=7):
 // CHECK:     vref=144 (index=144) op=AtomicCmpXchg(PtrOperand(Operand { value: ValueRef(2), annotation: None }), Operand { value: ValueRef(3), annotation: None }, Operand { value: ValueRef(4), annotation: None }, SeqCst, SeqCst, MemOperand(Operand { value: ValueRef(2147483658), annotation: None }))
 // CHECK:     vref=145 (index=145) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(1073741968), annotation: None }), IntOperand(Operand { value: ValueRef(3), annotation: None }))
 // CHECK:     vref=146 (index=146) op=Store(Operand { value: ValueRef(1073741968), annotation: None }, PtrOperand(Operand { value: ValueRef(11), annotation: None }), 4, MemOperand(Operand { value: ValueRef(144), annotation: None }))
@@ -1323,7 +1323,7 @@
 // CHECK:     vref=148 (index=148) op=PtrAdd(PtrOperand(Operand { value: ValueRef(11), annotation: None }), IntOperand(Operand { value: ValueRef(147), annotation: None }))
 // CHECK:     vref=149 (index=149) op=Store(Operand { value: ValueRef(145), annotation: None }, PtrOperand(Operand { value: ValueRef(148), annotation: None }), 1, MemOperand(Operand { value: ValueRef(146), annotation: None }))
 // CHECK:     vref=150 (index=150) op=Br(BlockRef(25), [Operand { value: ValueRef(149), annotation: None }])
-// CHECK:   block 11 (inst_start=151, inst_count=7):
+// CHECK:   block 11 (inst_count=7):
 // CHECK:     vref=151 (index=151) op=AtomicCmpXchg(PtrOperand(Operand { value: ValueRef(2), annotation: None }), Operand { value: ValueRef(3), annotation: None }, Operand { value: ValueRef(4), annotation: None }, SeqCst, SeqCst, MemOperand(Operand { value: ValueRef(2147483659), annotation: None }))
 // CHECK:     vref=152 (index=152) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(1073741975), annotation: None }), IntOperand(Operand { value: ValueRef(3), annotation: None }))
 // CHECK:     vref=153 (index=153) op=Store(Operand { value: ValueRef(1073741975), annotation: None }, PtrOperand(Operand { value: ValueRef(11), annotation: None }), 4, MemOperand(Operand { value: ValueRef(151), annotation: None }))
@@ -1331,7 +1331,7 @@
 // CHECK:     vref=155 (index=155) op=PtrAdd(PtrOperand(Operand { value: ValueRef(11), annotation: None }), IntOperand(Operand { value: ValueRef(154), annotation: None }))
 // CHECK:     vref=156 (index=156) op=Store(Operand { value: ValueRef(152), annotation: None }, PtrOperand(Operand { value: ValueRef(155), annotation: None }), 1, MemOperand(Operand { value: ValueRef(153), annotation: None }))
 // CHECK:     vref=157 (index=157) op=Br(BlockRef(25), [Operand { value: ValueRef(156), annotation: None }])
-// CHECK:   block 12 (inst_start=158, inst_count=7):
+// CHECK:   block 12 (inst_count=7):
 // CHECK:     vref=158 (index=158) op=AtomicCmpXchg(PtrOperand(Operand { value: ValueRef(2), annotation: None }), Operand { value: ValueRef(3), annotation: None }, Operand { value: ValueRef(4), annotation: None }, SeqCst, SeqCst, MemOperand(Operand { value: ValueRef(2147483660), annotation: None }))
 // CHECK:     vref=159 (index=159) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(1073741982), annotation: None }), IntOperand(Operand { value: ValueRef(3), annotation: None }))
 // CHECK:     vref=160 (index=160) op=Store(Operand { value: ValueRef(1073741982), annotation: None }, PtrOperand(Operand { value: ValueRef(11), annotation: None }), 4, MemOperand(Operand { value: ValueRef(158), annotation: None }))
@@ -1339,7 +1339,7 @@
 // CHECK:     vref=162 (index=162) op=PtrAdd(PtrOperand(Operand { value: ValueRef(11), annotation: None }), IntOperand(Operand { value: ValueRef(161), annotation: None }))
 // CHECK:     vref=163 (index=163) op=Store(Operand { value: ValueRef(159), annotation: None }, PtrOperand(Operand { value: ValueRef(162), annotation: None }), 1, MemOperand(Operand { value: ValueRef(160), annotation: None }))
 // CHECK:     vref=164 (index=164) op=Br(BlockRef(25), [Operand { value: ValueRef(163), annotation: None }])
-// CHECK:   block 13 (inst_start=165, inst_count=7):
+// CHECK:   block 13 (inst_count=7):
 // CHECK:     vref=165 (index=165) op=AtomicCmpXchg(PtrOperand(Operand { value: ValueRef(2), annotation: None }), Operand { value: ValueRef(3), annotation: None }, Operand { value: ValueRef(4), annotation: None }, SeqCst, SeqCst, MemOperand(Operand { value: ValueRef(2147483661), annotation: None }))
 // CHECK:     vref=166 (index=166) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(1073741989), annotation: None }), IntOperand(Operand { value: ValueRef(3), annotation: None }))
 // CHECK:     vref=167 (index=167) op=Store(Operand { value: ValueRef(1073741989), annotation: None }, PtrOperand(Operand { value: ValueRef(11), annotation: None }), 4, MemOperand(Operand { value: ValueRef(165), annotation: None }))
@@ -1347,7 +1347,7 @@
 // CHECK:     vref=169 (index=169) op=PtrAdd(PtrOperand(Operand { value: ValueRef(11), annotation: None }), IntOperand(Operand { value: ValueRef(168), annotation: None }))
 // CHECK:     vref=170 (index=170) op=Store(Operand { value: ValueRef(166), annotation: None }, PtrOperand(Operand { value: ValueRef(169), annotation: None }), 1, MemOperand(Operand { value: ValueRef(167), annotation: None }))
 // CHECK:     vref=171 (index=171) op=Br(BlockRef(25), [Operand { value: ValueRef(170), annotation: None }])
-// CHECK:   block 14 (inst_start=172, inst_count=7):
+// CHECK:   block 14 (inst_count=7):
 // CHECK:     vref=172 (index=172) op=AtomicCmpXchg(PtrOperand(Operand { value: ValueRef(2), annotation: None }), Operand { value: ValueRef(3), annotation: None }, Operand { value: ValueRef(4), annotation: None }, SeqCst, SeqCst, MemOperand(Operand { value: ValueRef(2147483662), annotation: None }))
 // CHECK:     vref=173 (index=173) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(1073741996), annotation: None }), IntOperand(Operand { value: ValueRef(3), annotation: None }))
 // CHECK:     vref=174 (index=174) op=Store(Operand { value: ValueRef(1073741996), annotation: None }, PtrOperand(Operand { value: ValueRef(11), annotation: None }), 4, MemOperand(Operand { value: ValueRef(172), annotation: None }))
@@ -1355,7 +1355,7 @@
 // CHECK:     vref=176 (index=176) op=PtrAdd(PtrOperand(Operand { value: ValueRef(11), annotation: None }), IntOperand(Operand { value: ValueRef(175), annotation: None }))
 // CHECK:     vref=177 (index=177) op=Store(Operand { value: ValueRef(173), annotation: None }, PtrOperand(Operand { value: ValueRef(176), annotation: None }), 1, MemOperand(Operand { value: ValueRef(174), annotation: None }))
 // CHECK:     vref=178 (index=178) op=Br(BlockRef(25), [Operand { value: ValueRef(177), annotation: None }])
-// CHECK:   block 15 (inst_start=179, inst_count=7):
+// CHECK:   block 15 (inst_count=7):
 // CHECK:     vref=179 (index=179) op=AtomicCmpXchg(PtrOperand(Operand { value: ValueRef(2), annotation: None }), Operand { value: ValueRef(3), annotation: None }, Operand { value: ValueRef(4), annotation: None }, SeqCst, SeqCst, MemOperand(Operand { value: ValueRef(2147483663), annotation: None }))
 // CHECK:     vref=180 (index=180) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(1073742003), annotation: None }), IntOperand(Operand { value: ValueRef(3), annotation: None }))
 // CHECK:     vref=181 (index=181) op=Store(Operand { value: ValueRef(1073742003), annotation: None }, PtrOperand(Operand { value: ValueRef(11), annotation: None }), 4, MemOperand(Operand { value: ValueRef(179), annotation: None }))
@@ -1363,7 +1363,7 @@
 // CHECK:     vref=183 (index=183) op=PtrAdd(PtrOperand(Operand { value: ValueRef(11), annotation: None }), IntOperand(Operand { value: ValueRef(182), annotation: None }))
 // CHECK:     vref=184 (index=184) op=Store(Operand { value: ValueRef(180), annotation: None }, PtrOperand(Operand { value: ValueRef(183), annotation: None }), 1, MemOperand(Operand { value: ValueRef(181), annotation: None }))
 // CHECK:     vref=185 (index=185) op=Br(BlockRef(25), [Operand { value: ValueRef(184), annotation: None }])
-// CHECK:   block 16 (inst_start=186, inst_count=7):
+// CHECK:   block 16 (inst_count=7):
 // CHECK:     vref=186 (index=186) op=AtomicCmpXchg(PtrOperand(Operand { value: ValueRef(2), annotation: None }), Operand { value: ValueRef(3), annotation: None }, Operand { value: ValueRef(4), annotation: None }, SeqCst, SeqCst, MemOperand(Operand { value: ValueRef(2147483664), annotation: None }))
 // CHECK:     vref=187 (index=187) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(1073742010), annotation: None }), IntOperand(Operand { value: ValueRef(3), annotation: None }))
 // CHECK:     vref=188 (index=188) op=Store(Operand { value: ValueRef(1073742010), annotation: None }, PtrOperand(Operand { value: ValueRef(11), annotation: None }), 4, MemOperand(Operand { value: ValueRef(186), annotation: None }))
@@ -1371,7 +1371,7 @@
 // CHECK:     vref=190 (index=190) op=PtrAdd(PtrOperand(Operand { value: ValueRef(11), annotation: None }), IntOperand(Operand { value: ValueRef(189), annotation: None }))
 // CHECK:     vref=191 (index=191) op=Store(Operand { value: ValueRef(187), annotation: None }, PtrOperand(Operand { value: ValueRef(190), annotation: None }), 1, MemOperand(Operand { value: ValueRef(188), annotation: None }))
 // CHECK:     vref=192 (index=192) op=Br(BlockRef(25), [Operand { value: ValueRef(191), annotation: None }])
-// CHECK:   block 17 (inst_start=193, inst_count=7):
+// CHECK:   block 17 (inst_count=7):
 // CHECK:     vref=193 (index=193) op=AtomicCmpXchg(PtrOperand(Operand { value: ValueRef(2), annotation: None }), Operand { value: ValueRef(3), annotation: None }, Operand { value: ValueRef(4), annotation: None }, SeqCst, SeqCst, MemOperand(Operand { value: ValueRef(2147483665), annotation: None }))
 // CHECK:     vref=194 (index=194) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(1073742017), annotation: None }), IntOperand(Operand { value: ValueRef(3), annotation: None }))
 // CHECK:     vref=195 (index=195) op=Store(Operand { value: ValueRef(1073742017), annotation: None }, PtrOperand(Operand { value: ValueRef(11), annotation: None }), 4, MemOperand(Operand { value: ValueRef(193), annotation: None }))
@@ -1379,7 +1379,7 @@
 // CHECK:     vref=197 (index=197) op=PtrAdd(PtrOperand(Operand { value: ValueRef(11), annotation: None }), IntOperand(Operand { value: ValueRef(196), annotation: None }))
 // CHECK:     vref=198 (index=198) op=Store(Operand { value: ValueRef(194), annotation: None }, PtrOperand(Operand { value: ValueRef(197), annotation: None }), 1, MemOperand(Operand { value: ValueRef(195), annotation: None }))
 // CHECK:     vref=199 (index=199) op=Br(BlockRef(25), [Operand { value: ValueRef(198), annotation: None }])
-// CHECK:   block 18 (inst_start=200, inst_count=7):
+// CHECK:   block 18 (inst_count=7):
 // CHECK:     vref=200 (index=200) op=AtomicCmpXchg(PtrOperand(Operand { value: ValueRef(2), annotation: None }), Operand { value: ValueRef(3), annotation: None }, Operand { value: ValueRef(4), annotation: None }, SeqCst, SeqCst, MemOperand(Operand { value: ValueRef(2147483666), annotation: None }))
 // CHECK:     vref=201 (index=201) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(1073742024), annotation: None }), IntOperand(Operand { value: ValueRef(3), annotation: None }))
 // CHECK:     vref=202 (index=202) op=Store(Operand { value: ValueRef(1073742024), annotation: None }, PtrOperand(Operand { value: ValueRef(11), annotation: None }), 4, MemOperand(Operand { value: ValueRef(200), annotation: None }))
@@ -1387,7 +1387,7 @@
 // CHECK:     vref=204 (index=204) op=PtrAdd(PtrOperand(Operand { value: ValueRef(11), annotation: None }), IntOperand(Operand { value: ValueRef(203), annotation: None }))
 // CHECK:     vref=205 (index=205) op=Store(Operand { value: ValueRef(201), annotation: None }, PtrOperand(Operand { value: ValueRef(204), annotation: None }), 1, MemOperand(Operand { value: ValueRef(202), annotation: None }))
 // CHECK:     vref=206 (index=206) op=Br(BlockRef(25), [Operand { value: ValueRef(205), annotation: None }])
-// CHECK:   block 19 (inst_start=207, inst_count=7):
+// CHECK:   block 19 (inst_count=7):
 // CHECK:     vref=207 (index=207) op=AtomicCmpXchg(PtrOperand(Operand { value: ValueRef(2), annotation: None }), Operand { value: ValueRef(3), annotation: None }, Operand { value: ValueRef(4), annotation: None }, SeqCst, SeqCst, MemOperand(Operand { value: ValueRef(2147483667), annotation: None }))
 // CHECK:     vref=208 (index=208) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(1073742031), annotation: None }), IntOperand(Operand { value: ValueRef(3), annotation: None }))
 // CHECK:     vref=209 (index=209) op=Store(Operand { value: ValueRef(1073742031), annotation: None }, PtrOperand(Operand { value: ValueRef(11), annotation: None }), 4, MemOperand(Operand { value: ValueRef(207), annotation: None }))
@@ -1395,7 +1395,7 @@
 // CHECK:     vref=211 (index=211) op=PtrAdd(PtrOperand(Operand { value: ValueRef(11), annotation: None }), IntOperand(Operand { value: ValueRef(210), annotation: None }))
 // CHECK:     vref=212 (index=212) op=Store(Operand { value: ValueRef(208), annotation: None }, PtrOperand(Operand { value: ValueRef(211), annotation: None }), 1, MemOperand(Operand { value: ValueRef(209), annotation: None }))
 // CHECK:     vref=213 (index=213) op=Br(BlockRef(25), [Operand { value: ValueRef(212), annotation: None }])
-// CHECK:   block 20 (inst_start=214, inst_count=7):
+// CHECK:   block 20 (inst_count=7):
 // CHECK:     vref=214 (index=214) op=AtomicCmpXchg(PtrOperand(Operand { value: ValueRef(2), annotation: None }), Operand { value: ValueRef(3), annotation: None }, Operand { value: ValueRef(4), annotation: None }, SeqCst, SeqCst, MemOperand(Operand { value: ValueRef(2147483668), annotation: None }))
 // CHECK:     vref=215 (index=215) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(1073742038), annotation: None }), IntOperand(Operand { value: ValueRef(3), annotation: None }))
 // CHECK:     vref=216 (index=216) op=Store(Operand { value: ValueRef(1073742038), annotation: None }, PtrOperand(Operand { value: ValueRef(11), annotation: None }), 4, MemOperand(Operand { value: ValueRef(214), annotation: None }))
@@ -1403,7 +1403,7 @@
 // CHECK:     vref=218 (index=218) op=PtrAdd(PtrOperand(Operand { value: ValueRef(11), annotation: None }), IntOperand(Operand { value: ValueRef(217), annotation: None }))
 // CHECK:     vref=219 (index=219) op=Store(Operand { value: ValueRef(215), annotation: None }, PtrOperand(Operand { value: ValueRef(218), annotation: None }), 1, MemOperand(Operand { value: ValueRef(216), annotation: None }))
 // CHECK:     vref=220 (index=220) op=Br(BlockRef(25), [Operand { value: ValueRef(219), annotation: None }])
-// CHECK:   block 21 (inst_start=221, inst_count=7):
+// CHECK:   block 21 (inst_count=7):
 // CHECK:     vref=221 (index=221) op=AtomicCmpXchg(PtrOperand(Operand { value: ValueRef(2), annotation: None }), Operand { value: ValueRef(3), annotation: None }, Operand { value: ValueRef(4), annotation: None }, SeqCst, SeqCst, MemOperand(Operand { value: ValueRef(2147483669), annotation: None }))
 // CHECK:     vref=222 (index=222) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(1073742045), annotation: None }), IntOperand(Operand { value: ValueRef(3), annotation: None }))
 // CHECK:     vref=223 (index=223) op=Store(Operand { value: ValueRef(1073742045), annotation: None }, PtrOperand(Operand { value: ValueRef(11), annotation: None }), 4, MemOperand(Operand { value: ValueRef(221), annotation: None }))
@@ -1411,7 +1411,7 @@
 // CHECK:     vref=225 (index=225) op=PtrAdd(PtrOperand(Operand { value: ValueRef(11), annotation: None }), IntOperand(Operand { value: ValueRef(224), annotation: None }))
 // CHECK:     vref=226 (index=226) op=Store(Operand { value: ValueRef(222), annotation: None }, PtrOperand(Operand { value: ValueRef(225), annotation: None }), 1, MemOperand(Operand { value: ValueRef(223), annotation: None }))
 // CHECK:     vref=227 (index=227) op=Br(BlockRef(25), [Operand { value: ValueRef(226), annotation: None }])
-// CHECK:   block 22 (inst_start=228, inst_count=7):
+// CHECK:   block 22 (inst_count=7):
 // CHECK:     vref=228 (index=228) op=AtomicCmpXchg(PtrOperand(Operand { value: ValueRef(2), annotation: None }), Operand { value: ValueRef(3), annotation: None }, Operand { value: ValueRef(4), annotation: None }, SeqCst, SeqCst, MemOperand(Operand { value: ValueRef(2147483670), annotation: None }))
 // CHECK:     vref=229 (index=229) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(1073742052), annotation: None }), IntOperand(Operand { value: ValueRef(3), annotation: None }))
 // CHECK:     vref=230 (index=230) op=Store(Operand { value: ValueRef(1073742052), annotation: None }, PtrOperand(Operand { value: ValueRef(11), annotation: None }), 4, MemOperand(Operand { value: ValueRef(228), annotation: None }))
@@ -1419,7 +1419,7 @@
 // CHECK:     vref=232 (index=232) op=PtrAdd(PtrOperand(Operand { value: ValueRef(11), annotation: None }), IntOperand(Operand { value: ValueRef(231), annotation: None }))
 // CHECK:     vref=233 (index=233) op=Store(Operand { value: ValueRef(229), annotation: None }, PtrOperand(Operand { value: ValueRef(232), annotation: None }), 1, MemOperand(Operand { value: ValueRef(230), annotation: None }))
 // CHECK:     vref=234 (index=234) op=Br(BlockRef(25), [Operand { value: ValueRef(233), annotation: None }])
-// CHECK:   block 23 (inst_start=235, inst_count=7):
+// CHECK:   block 23 (inst_count=7):
 // CHECK:     vref=235 (index=235) op=AtomicCmpXchg(PtrOperand(Operand { value: ValueRef(2), annotation: None }), Operand { value: ValueRef(3), annotation: None }, Operand { value: ValueRef(4), annotation: None }, SeqCst, SeqCst, MemOperand(Operand { value: ValueRef(2147483671), annotation: None }))
 // CHECK:     vref=236 (index=236) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(1073742059), annotation: None }), IntOperand(Operand { value: ValueRef(3), annotation: None }))
 // CHECK:     vref=237 (index=237) op=Store(Operand { value: ValueRef(1073742059), annotation: None }, PtrOperand(Operand { value: ValueRef(11), annotation: None }), 4, MemOperand(Operand { value: ValueRef(235), annotation: None }))
@@ -1427,7 +1427,7 @@
 // CHECK:     vref=239 (index=239) op=PtrAdd(PtrOperand(Operand { value: ValueRef(11), annotation: None }), IntOperand(Operand { value: ValueRef(238), annotation: None }))
 // CHECK:     vref=240 (index=240) op=Store(Operand { value: ValueRef(236), annotation: None }, PtrOperand(Operand { value: ValueRef(239), annotation: None }), 1, MemOperand(Operand { value: ValueRef(237), annotation: None }))
 // CHECK:     vref=241 (index=241) op=Br(BlockRef(25), [Operand { value: ValueRef(240), annotation: None }])
-// CHECK:   block 24 (inst_start=242, inst_count=7):
+// CHECK:   block 24 (inst_count=7):
 // CHECK:     vref=242 (index=242) op=AtomicCmpXchg(PtrOperand(Operand { value: ValueRef(2), annotation: None }), Operand { value: ValueRef(3), annotation: None }, Operand { value: ValueRef(4), annotation: None }, SeqCst, SeqCst, MemOperand(Operand { value: ValueRef(2147483672), annotation: None }))
 // CHECK:     vref=243 (index=243) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(1073742066), annotation: None }), IntOperand(Operand { value: ValueRef(3), annotation: None }))
 // CHECK:     vref=244 (index=244) op=Store(Operand { value: ValueRef(1073742066), annotation: None }, PtrOperand(Operand { value: ValueRef(11), annotation: None }), 4, MemOperand(Operand { value: ValueRef(242), annotation: None }))
@@ -1435,7 +1435,7 @@
 // CHECK:     vref=246 (index=246) op=PtrAdd(PtrOperand(Operand { value: ValueRef(11), annotation: None }), IntOperand(Operand { value: ValueRef(245), annotation: None }))
 // CHECK:     vref=247 (index=247) op=Store(Operand { value: ValueRef(243), annotation: None }, PtrOperand(Operand { value: ValueRef(246), annotation: None }), 1, MemOperand(Operand { value: ValueRef(244), annotation: None }))
 // CHECK:     vref=248 (index=248) op=Br(BlockRef(25), [Operand { value: ValueRef(247), annotation: None }])
-// CHECK:   block 25 (inst_start=249, inst_count=12):
+// CHECK:   block 25 (inst_count=12):
 // CHECK:     vref=249 (index=249) op=Load(PtrOperand(Operand { value: ValueRef(11), annotation: None }), 4, MemOperand(Operand { value: ValueRef(2147483673), annotation: None }))
 // CHECK:     vref=250 (index=250) op=Const(4)
 // CHECK:     vref=251 (index=251) op=PtrAdd(PtrOperand(Operand { value: ValueRef(11), annotation: None }), IntOperand(Operand { value: ValueRef(250), annotation: None }))
@@ -1448,7 +1448,7 @@
 // CHECK:     vref=258 (index=258) op=Const(0)
 // CHECK:     vref=259 (index=259) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(257), annotation: None }), IntOperand(Operand { value: ValueRef(258), annotation: None }))
 // CHECK:     vref=260 (index=260) op=BrIf(BoolOperand(Operand { value: ValueRef(259), annotation: None }), BlockRef(27), [Operand { value: ValueRef(2147483673), annotation: None }], BlockRef(26), [Operand { value: ValueRef(2147483673), annotation: None }])
-// CHECK:   block 26 (inst_start=261, inst_count=8):
+// CHECK:   block 26 (inst_count=8):
 // CHECK:     vref=261 (index=261) op=Const(0)
 // CHECK:     vref=262 (index=262) op=Store(Operand { value: ValueRef(261), annotation: None }, PtrOperand(Operand { value: ValueRef(1), annotation: None }), 8, MemOperand(Operand { value: ValueRef(2147483674), annotation: None }))
 // CHECK:     vref=263 (index=263) op=Const(4)
@@ -1457,7 +1457,7 @@
 // CHECK:     vref=266 (index=266) op=Const(0)
 // CHECK:     vref=267 (index=267) op=Store(Operand { value: ValueRef(266), annotation: None }, PtrOperand(Operand { value: ValueRef(1), annotation: None }), 4, MemOperand(Operand { value: ValueRef(265), annotation: None }))
 // CHECK:     vref=268 (index=268) op=Br(BlockRef(28), [Operand { value: ValueRef(267), annotation: None }])
-// CHECK:   block 27 (inst_start=269, inst_count=8):
+// CHECK:   block 27 (inst_count=8):
 // CHECK:     vref=269 (index=269) op=Const(0)
 // CHECK:     vref=270 (index=270) op=Store(Operand { value: ValueRef(269), annotation: None }, PtrOperand(Operand { value: ValueRef(1), annotation: None }), 8, MemOperand(Operand { value: ValueRef(2147483675), annotation: None }))
 // CHECK:     vref=271 (index=271) op=Const(4)
@@ -1466,71 +1466,71 @@
 // CHECK:     vref=274 (index=274) op=Const(1)
 // CHECK:     vref=275 (index=275) op=Store(Operand { value: ValueRef(274), annotation: None }, PtrOperand(Operand { value: ValueRef(1), annotation: None }), 4, MemOperand(Operand { value: ValueRef(273), annotation: None }))
 // CHECK:     vref=276 (index=276) op=Br(BlockRef(28), [Operand { value: ValueRef(275), annotation: None }])
-// CHECK:   block 28 (inst_start=277, inst_count=3):
+// CHECK:   block 28 (inst_count=3):
 // CHECK:     vref=277 (index=277) op=Const(8)
 // CHECK:     vref=278 (index=278) op=MemCopy(PtrOperand(Operand { value: ValueRef(0), annotation: Some(Align(8)) }), PtrOperand(Operand { value: ValueRef(1), annotation: Some(Align(8)) }), IntOperand(Operand { value: ValueRef(277), annotation: None }), MemOperand(Operand { value: ValueRef(2147483676), annotation: None }))
 // CHECK:     vref=279 (index=279) op=Ret(Some(Operand { value: ValueRef(0), annotation: None }), MemOperand(Operand { value: ValueRef(278), annotation: None }))
-// CHECK:   block 29 (inst_start=20, inst_count=3):
+// CHECK:   block 29 (inst_count=3):
 // CHECK:     vref=20 (index=20) op=Const(1)
 // CHECK:     vref=21 (index=21) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(16), annotation: None }), IntOperand(Operand { value: ValueRef(20), annotation: None }))
 // CHECK:     vref=22 (index=22) op=BrIf(BoolOperand(Operand { value: ValueRef(21), annotation: None }), BlockRef(4), [Operand { value: ValueRef(2147483677), annotation: None }], BlockRef(30), [Operand { value: ValueRef(2147483677), annotation: None }])
-// CHECK:   block 30 (inst_start=23, inst_count=3):
+// CHECK:   block 30 (inst_count=3):
 // CHECK:     vref=23 (index=23) op=Const(2)
 // CHECK:     vref=24 (index=24) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(16), annotation: None }), IntOperand(Operand { value: ValueRef(23), annotation: None }))
 // CHECK:     vref=25 (index=25) op=BrIf(BoolOperand(Operand { value: ValueRef(24), annotation: None }), BlockRef(3), [Operand { value: ValueRef(2147483678), annotation: None }], BlockRef(31), [Operand { value: ValueRef(2147483678), annotation: None }])
-// CHECK:   block 31 (inst_start=26, inst_count=3):
+// CHECK:   block 31 (inst_count=3):
 // CHECK:     vref=26 (index=26) op=Const(3)
 // CHECK:     vref=27 (index=27) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(16), annotation: None }), IntOperand(Operand { value: ValueRef(26), annotation: None }))
 // CHECK:     vref=28 (index=28) op=BrIf(BoolOperand(Operand { value: ValueRef(27), annotation: None }), BlockRef(5), [Operand { value: ValueRef(2147483679), annotation: None }], BlockRef(32), [Operand { value: ValueRef(2147483679), annotation: None }])
-// CHECK:   block 32 (inst_start=29, inst_count=3):
+// CHECK:   block 32 (inst_count=3):
 // CHECK:     vref=29 (index=29) op=Const(4)
 // CHECK:     vref=30 (index=30) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(16), annotation: None }), IntOperand(Operand { value: ValueRef(29), annotation: None }))
 // CHECK:     vref=31 (index=31) op=BrIf(BoolOperand(Operand { value: ValueRef(30), annotation: None }), BlockRef(6), [Operand { value: ValueRef(2147483680), annotation: None }], BlockRef(7), [Operand { value: ValueRef(2147483680), annotation: None }])
-// CHECK:   block 33 (inst_start=36, inst_count=3):
+// CHECK:   block 33 (inst_count=3):
 // CHECK:     vref=36 (index=36) op=Const(3)
 // CHECK:     vref=37 (index=37) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(32), annotation: None }), IntOperand(Operand { value: ValueRef(36), annotation: None }))
 // CHECK:     vref=38 (index=38) op=BrIf(BoolOperand(Operand { value: ValueRef(37), annotation: None }), BlockRef(9), [Operand { value: ValueRef(2147483681), annotation: None }], BlockRef(7), [Operand { value: ValueRef(2147483681), annotation: None }])
-// CHECK:   block 34 (inst_start=43, inst_count=3):
+// CHECK:   block 34 (inst_count=3):
 // CHECK:     vref=43 (index=43) op=Const(2)
 // CHECK:     vref=44 (index=44) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(39), annotation: None }), IntOperand(Operand { value: ValueRef(43), annotation: None }))
 // CHECK:     vref=45 (index=45) op=BrIf(BoolOperand(Operand { value: ValueRef(44), annotation: None }), BlockRef(23), [Operand { value: ValueRef(2147483682), annotation: None }], BlockRef(35), [Operand { value: ValueRef(2147483682), annotation: None }])
-// CHECK:   block 35 (inst_start=46, inst_count=3):
+// CHECK:   block 35 (inst_count=3):
 // CHECK:     vref=46 (index=46) op=Const(4)
 // CHECK:     vref=47 (index=47) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(39), annotation: None }), IntOperand(Operand { value: ValueRef(46), annotation: None }))
 // CHECK:     vref=48 (index=48) op=BrIf(BoolOperand(Operand { value: ValueRef(47), annotation: None }), BlockRef(22), [Operand { value: ValueRef(2147483683), annotation: None }], BlockRef(1), [Operand { value: ValueRef(2147483683), annotation: None }])
-// CHECK:   block 36 (inst_start=53, inst_count=3):
+// CHECK:   block 36 (inst_count=3):
 // CHECK:     vref=53 (index=53) op=Const(2)
 // CHECK:     vref=54 (index=54) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(49), annotation: None }), IntOperand(Operand { value: ValueRef(53), annotation: None }))
 // CHECK:     vref=55 (index=55) op=BrIf(BoolOperand(Operand { value: ValueRef(54), annotation: None }), BlockRef(20), [Operand { value: ValueRef(2147483684), annotation: None }], BlockRef(37), [Operand { value: ValueRef(2147483684), annotation: None }])
-// CHECK:   block 37 (inst_start=56, inst_count=3):
+// CHECK:   block 37 (inst_count=3):
 // CHECK:     vref=56 (index=56) op=Const(4)
 // CHECK:     vref=57 (index=57) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(49), annotation: None }), IntOperand(Operand { value: ValueRef(56), annotation: None }))
 // CHECK:     vref=58 (index=58) op=BrIf(BoolOperand(Operand { value: ValueRef(57), annotation: None }), BlockRef(19), [Operand { value: ValueRef(2147483685), annotation: None }], BlockRef(1), [Operand { value: ValueRef(2147483685), annotation: None }])
-// CHECK:   block 38 (inst_start=63, inst_count=3):
+// CHECK:   block 38 (inst_count=3):
 // CHECK:     vref=63 (index=63) op=Const(2)
 // CHECK:     vref=64 (index=64) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(59), annotation: None }), IntOperand(Operand { value: ValueRef(63), annotation: None }))
 // CHECK:     vref=65 (index=65) op=BrIf(BoolOperand(Operand { value: ValueRef(64), annotation: None }), BlockRef(17), [Operand { value: ValueRef(2147483686), annotation: None }], BlockRef(39), [Operand { value: ValueRef(2147483686), annotation: None }])
-// CHECK:   block 39 (inst_start=66, inst_count=3):
+// CHECK:   block 39 (inst_count=3):
 // CHECK:     vref=66 (index=66) op=Const(4)
 // CHECK:     vref=67 (index=67) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(59), annotation: None }), IntOperand(Operand { value: ValueRef(66), annotation: None }))
 // CHECK:     vref=68 (index=68) op=BrIf(BoolOperand(Operand { value: ValueRef(67), annotation: None }), BlockRef(16), [Operand { value: ValueRef(2147483687), annotation: None }], BlockRef(1), [Operand { value: ValueRef(2147483687), annotation: None }])
-// CHECK:   block 40 (inst_start=73, inst_count=3):
+// CHECK:   block 40 (inst_count=3):
 // CHECK:     vref=73 (index=73) op=Const(2)
 // CHECK:     vref=74 (index=74) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(69), annotation: None }), IntOperand(Operand { value: ValueRef(73), annotation: None }))
 // CHECK:     vref=75 (index=75) op=BrIf(BoolOperand(Operand { value: ValueRef(74), annotation: None }), BlockRef(14), [Operand { value: ValueRef(2147483688), annotation: None }], BlockRef(41), [Operand { value: ValueRef(2147483688), annotation: None }])
-// CHECK:   block 41 (inst_start=76, inst_count=3):
+// CHECK:   block 41 (inst_count=3):
 // CHECK:     vref=76 (index=76) op=Const(4)
 // CHECK:     vref=77 (index=77) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(69), annotation: None }), IntOperand(Operand { value: ValueRef(76), annotation: None }))
 // CHECK:     vref=78 (index=78) op=BrIf(BoolOperand(Operand { value: ValueRef(77), annotation: None }), BlockRef(13), [Operand { value: ValueRef(2147483689), annotation: None }], BlockRef(1), [Operand { value: ValueRef(2147483689), annotation: None }])
-// CHECK:   block 42 (inst_start=83, inst_count=3):
+// CHECK:   block 42 (inst_count=3):
 // CHECK:     vref=83 (index=83) op=Const(2)
 // CHECK:     vref=84 (index=84) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(79), annotation: None }), IntOperand(Operand { value: ValueRef(83), annotation: None }))
 // CHECK:     vref=85 (index=85) op=BrIf(BoolOperand(Operand { value: ValueRef(84), annotation: None }), BlockRef(11), [Operand { value: ValueRef(2147483690), annotation: None }], BlockRef(43), [Operand { value: ValueRef(2147483690), annotation: None }])
-// CHECK:   block 43 (inst_start=86, inst_count=3):
+// CHECK:   block 43 (inst_count=3):
 // CHECK:     vref=86 (index=86) op=Const(4)
 // CHECK:     vref=87 (index=87) op=ICmp(Eq, IntOperand(Operand { value: ValueRef(79), annotation: None }), IntOperand(Operand { value: ValueRef(86), annotation: None }))
 // CHECK:     vref=88 (index=88) op=BrIf(BoolOperand(Operand { value: ValueRef(87), annotation: None }), BlockRef(10), [Operand { value: ValueRef(2147483691), annotation: None }], BlockRef(1), [Operand { value: ValueRef(2147483691), annotation: None }])
-// CHECK:   Raw instruction array (first 60):
+// CHECK:   Raw instruction pool (first 60):
 // CHECK:     [0] Param(0)
 // CHECK:     [1] StackSlot(8)
 // CHECK:     [2] Param(1)
@@ -1681,7 +1681,7 @@
 // CHECK: }
 // CHECK:
 // CHECK: === ISel failure dump for atomic_fetch_add ===
-// CHECK:   block 0 (inst_start=0, inst_count=7):
+// CHECK:   block 0 (inst_count=7):
 // CHECK:     vref=0 (index=0) op=Param(0)
 // CHECK:     vref=1 (index=1) op=Param(1)
 // CHECK:     vref=2 (index=2) op=StackSlot(8)
@@ -1689,9 +1689,9 @@
 // CHECK:     vref=4 (index=4) op=Load(PtrOperand(Operand { value: ValueRef(2), annotation: None }), 8, MemOperand(Operand { value: ValueRef(3), annotation: None }))
 // CHECK:     vref=5 (index=5) op=AtomicRmw(Add, PtrOperand(Operand { value: ValueRef(4), annotation: None }), Operand { value: ValueRef(1), annotation: None }, SeqCst, MemOperand(Operand { value: ValueRef(3), annotation: None }))
 // CHECK:     vref=6 (index=6) op=Br(BlockRef(1), [Operand { value: ValueRef(5), annotation: None }])
-// CHECK:   block 1 (inst_start=7, inst_count=1):
+// CHECK:   block 1 (inst_count=1):
 // CHECK:     vref=7 (index=7) op=Ret(Some(Operand { value: ValueRef(1073741829), annotation: None }), MemOperand(Operand { value: ValueRef(2147483649), annotation: None }))
-// CHECK:   Raw instruction array (first 60):
+// CHECK:   Raw instruction pool (first 60):
 // CHECK:     [0] Param(0)
 // CHECK:     [1] Param(1)
 // CHECK:     [2] StackSlot(8)
@@ -1826,7 +1826,7 @@
 // CHECK: }
 // CHECK:
 // CHECK: === ISel failure dump for atomic_swap ===
-// CHECK:   block 0 (inst_start=0, inst_count=7):
+// CHECK:   block 0 (inst_count=7):
 // CHECK:     vref=0 (index=0) op=Param(0)
 // CHECK:     vref=1 (index=1) op=Param(1)
 // CHECK:     vref=2 (index=2) op=StackSlot(8)
@@ -1834,9 +1834,9 @@
 // CHECK:     vref=4 (index=4) op=Load(PtrOperand(Operand { value: ValueRef(2), annotation: None }), 8, MemOperand(Operand { value: ValueRef(3), annotation: None }))
 // CHECK:     vref=5 (index=5) op=AtomicRmw(Xchg, PtrOperand(Operand { value: ValueRef(4), annotation: None }), Operand { value: ValueRef(1), annotation: None }, SeqCst, MemOperand(Operand { value: ValueRef(3), annotation: None }))
 // CHECK:     vref=6 (index=6) op=Br(BlockRef(1), [Operand { value: ValueRef(5), annotation: None }])
-// CHECK:   block 1 (inst_start=7, inst_count=1):
+// CHECK:   block 1 (inst_count=1):
 // CHECK:     vref=7 (index=7) op=Ret(Some(Operand { value: ValueRef(1073741829), annotation: None }), MemOperand(Operand { value: ValueRef(2147483649), annotation: None }))
-// CHECK:   Raw instruction array (first 60):
+// CHECK:   Raw instruction pool (first 60):
 // CHECK:     [0] Param(0)
 // CHECK:     [1] Param(1)
 // CHECK:     [2] StackSlot(8)
