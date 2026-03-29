@@ -126,14 +126,11 @@ impl<'a> FuncVerifier<'a> {
                 .map(|ba| &ba.ty)
         } else if v.is_secondary_result() {
             self.func
-                .instructions
-                .get(v.inst_index() as usize)
-                .and_then(|i| i.secondary_ty.as_ref())
+                .inst_pool
+                .get(v.inst_index())
+                .and_then(|n| n.inst.secondary_ty.as_ref())
         } else {
-            self.func
-                .instructions
-                .get(v.index() as usize)
-                .map(|i| &i.ty)
+            self.func.inst_pool.get(v.index()).map(|n| &n.inst.ty)
         }
     }
 
@@ -141,7 +138,7 @@ impl<'a> FuncVerifier<'a> {
         if v.is_block_arg() {
             (v.index() as usize) < self.func.block_args.len()
         } else {
-            (v.index() as usize) < self.func.instructions.len()
+            self.func.inst_pool.get(v.index()).is_some()
         }
     }
 
@@ -1084,19 +1081,57 @@ impl FuncVerifier<'_> {
                 );
             }
 
-            // Instruction range must be in bounds.
-            let inst_end = bb.inst_start as usize + bb.inst_count as usize;
-            if inst_end > self.func.instructions.len() {
+            // Linked-list integrity: validate first/last pointers.
+            if bb.inst_count > 0 {
+                if let Some(first) = bb.first_inst {
+                    if self.func.inst_pool.get(first).is_none() {
+                        self.result.error(
+                            loc.clone(),
+                            format!("first_inst {} is not a live pool entry", first),
+                        );
+                        continue;
+                    }
+                    // first_inst.prev must be None
+                    if let Some(node) = self.func.inst_pool.get(first)
+                        && node.prev.is_some()
+                    {
+                        self.result.error(
+                            loc.clone(),
+                            format!("first_inst {} has non-None prev link", first),
+                        );
+                    }
+                } else {
+                    self.result
+                        .error(loc.clone(), "inst_count > 0 but first_inst is None");
+                    continue;
+                }
+                if let Some(last) = bb.last_inst {
+                    if self.func.inst_pool.get(last).is_none() {
+                        self.result.error(
+                            loc.clone(),
+                            format!("last_inst {} is not a live pool entry", last),
+                        );
+                        continue;
+                    }
+                    // last_inst.next must be None
+                    if let Some(node) = self.func.inst_pool.get(last)
+                        && node.next.is_some()
+                    {
+                        self.result.error(
+                            loc.clone(),
+                            format!("last_inst {} has non-None next link", last),
+                        );
+                    }
+                } else {
+                    self.result
+                        .error(loc.clone(), "inst_count > 0 but last_inst is None");
+                    continue;
+                }
+            } else if bb.first_inst.is_some() || bb.last_inst.is_some() {
                 self.result.error(
                     loc.clone(),
-                    format!(
-                        "instruction range [{}..{}) exceeds arena size {}",
-                        bb.inst_start,
-                        inst_end,
-                        self.func.instructions.len()
-                    ),
+                    "inst_count == 0 but first_inst/last_inst is Some",
                 );
-                continue;
             }
 
             // Block arg range must be in bounds.
@@ -1120,8 +1155,8 @@ impl FuncVerifier<'_> {
             }
 
             // Last instruction must be a terminator.
-            let last_idx = bb.inst_start + bb.inst_count - 1;
-            let last = &self.func.instructions[last_idx as usize];
+            let last_idx = bb.last_inst.unwrap();
+            let last = self.func.inst_pool.inst(last_idx);
             if !Self::is_terminator(&last.op) {
                 self.result.error(
                     loc.clone(),
@@ -1132,21 +1167,70 @@ impl FuncVerifier<'_> {
                 );
             }
 
-            // Non-last instructions must NOT be terminators.
-            for i in 0..bb.inst_count - 1 {
-                let idx = (bb.inst_start + i) as usize;
-                let inst = &self.func.instructions[idx];
-                if Self::is_terminator(&inst.op) {
-                    self.result
-                        .error(self.inst_loc(bi, i), "terminator in non-terminal position");
+            // Walk linked list: verify count, parent_block, and terminator placement.
+            let block_ref = BlockRef(bi);
+            let mut cur = bb.first_inst;
+            let mut walk_count: u32 = 0;
+            while let Some(idx) = cur {
+                let node = match self.func.inst_pool.get(idx) {
+                    Some(n) => n,
+                    None => {
+                        self.result.error(
+                            self.inst_loc(bi, walk_count),
+                            format!("linked-list node {} is not a live pool entry", idx),
+                        );
+                        break;
+                    }
+                };
+
+                // parent_block must match this block.
+                if node.parent_block != block_ref {
+                    self.result.error(
+                        self.inst_loc(bi, walk_count),
+                        format!(
+                            "inst {} parent_block is bb{}, expected bb{}",
+                            idx,
+                            node.parent_block.index(),
+                            bi
+                        ),
+                    );
+                }
+
+                let inst = &node.inst;
+
+                // Non-last instructions must NOT be terminators.
+                if node.next.is_some() && Self::is_terminator(&inst.op) {
+                    self.result.error(
+                        self.inst_loc(bi, walk_count),
+                        "terminator in non-terminal position",
+                    );
+                }
+
+                // Verify each instruction.
+                self.verify_instruction(inst, bi, walk_count);
+
+                cur = node.next;
+                walk_count += 1;
+
+                // Guard against infinite loops in a corrupted list.
+                if walk_count > bb.inst_count + 1 {
+                    self.result.error(
+                        loc.clone(),
+                        "linked-list walk exceeded inst_count (possible cycle)",
+                    );
+                    break;
                 }
             }
 
-            // Verify each instruction.
-            for i in 0..bb.inst_count {
-                let idx = (bb.inst_start + i) as usize;
-                let inst = &self.func.instructions[idx];
-                self.verify_instruction(inst, bi, i);
+            // Verify walked count matches declared count.
+            if walk_count != bb.inst_count {
+                self.result.error(
+                    loc.clone(),
+                    format!(
+                        "inst_count is {} but linked-list walk found {} instructions",
+                        bb.inst_count, walk_count
+                    ),
+                );
             }
         }
     }
