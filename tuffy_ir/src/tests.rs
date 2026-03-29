@@ -48,14 +48,14 @@ fn build_add_function() {
 
     builder.exit_region();
 
-    assert_eq!(func.instructions.len(), 4);
+    assert_eq!(func.inst_pool.next_index(), 4);
     assert_eq!(func.blocks.len(), 1);
-    assert_eq!(func.block_insts(entry).len(), 4);
+    assert_eq!(func.block(entry).inst_count, 4);
 
-    assert!(matches!(func.instructions[0].op, Op::Param(0)));
-    assert!(matches!(func.instructions[1].op, Op::Param(1)));
-    assert!(matches!(func.instructions[2].op, Op::Add(_, _)));
-    assert!(matches!(func.instructions[3].op, Op::Ret(Some(_), _)));
+    assert!(matches!(func.inst(0).op, Op::Param(0)));
+    assert!(matches!(func.inst(1).op, Op::Param(1)));
+    assert!(matches!(func.inst(2).op, Op::Add(_, _)));
+    assert!(matches!(func.inst(3).op, Op::Ret(Some(_), _)));
 }
 
 #[test]
@@ -87,7 +87,7 @@ fn build_with_annotations() {
 
     builder.exit_region();
 
-    assert_eq!(func.instructions.len(), 4);
+    assert_eq!(func.inst_pool.next_index(), 4);
 }
 
 #[test]
@@ -374,10 +374,10 @@ fn build_bitwise_ops() {
     builder.ret(Some(v_xor.into()), mem0.into(), Origin::synthetic());
     builder.exit_region();
 
-    assert_eq!(func.instructions.len(), 6);
-    assert!(matches!(func.instructions[2].op, Op::And(_, _)));
-    assert!(matches!(func.instructions[3].op, Op::Or(_, _)));
-    assert!(matches!(func.instructions[4].op, Op::Xor(_, _)));
+    assert_eq!(func.inst_pool.next_index(), 6);
+    assert!(matches!(func.inst(2).op, Op::And(_, _)));
+    assert!(matches!(func.inst(3).op, Op::Or(_, _)));
+    assert!(matches!(func.inst(4).op, Op::Xor(_, _)));
 }
 
 #[test]
@@ -505,9 +505,9 @@ fn build_ptradd() {
     builder.ret(Some(result.into()), mem0.into(), Origin::synthetic());
     builder.exit_region();
 
-    assert_eq!(func.instructions.len(), 4);
-    assert!(matches!(func.instructions[2].op, Op::PtrAdd(_, _)));
-    assert_eq!(func.instructions[2].ty, Type::Ptr(0));
+    assert_eq!(func.inst_pool.next_index(), 4);
+    assert!(matches!(func.inst(2).op, Op::PtrAdd(_, _)));
+    assert_eq!(func.inst(2).ty, Type::Ptr(0));
 }
 
 #[test]
@@ -622,15 +622,15 @@ fn build_float_binary_ops() {
     builder.ret(Some(v_abs.into()), mem0.into(), Origin::synthetic());
     builder.exit_region();
 
-    assert_eq!(func.instructions.len(), 10);
-    assert!(matches!(func.instructions[2].op, Op::FAdd(_, _, _)));
-    assert!(matches!(func.instructions[3].op, Op::FSub(_, _, _)));
-    assert!(matches!(func.instructions[4].op, Op::FMul(_, _, _)));
-    assert!(matches!(func.instructions[5].op, Op::FDiv(_, _, _)));
-    assert!(matches!(func.instructions[6].op, Op::CopySign(_, _)));
-    assert!(matches!(func.instructions[7].op, Op::FNeg(_)));
-    assert!(matches!(func.instructions[8].op, Op::FAbs(_)));
-    assert_eq!(func.instructions[2].ty, f32_ty);
+    assert_eq!(func.inst_pool.next_index(), 10);
+    assert!(matches!(func.inst(2).op, Op::FAdd(_, _, _)));
+    assert!(matches!(func.inst(3).op, Op::FSub(_, _, _)));
+    assert!(matches!(func.inst(4).op, Op::FMul(_, _, _)));
+    assert!(matches!(func.inst(5).op, Op::FDiv(_, _, _)));
+    assert!(matches!(func.inst(6).op, Op::CopySign(_, _)));
+    assert!(matches!(func.inst(7).op, Op::FNeg(_)));
+    assert!(matches!(func.inst(8).op, Op::FAbs(_)));
+    assert_eq!(func.inst(2).ty, f32_ty);
 }
 
 #[test]
@@ -729,7 +729,7 @@ fn display_f128_const() {
     builder.ret(Some(value.into()), mem0.into(), Origin::synthetic());
     builder.exit_region();
 
-    let Op::FConst(constant) = &func.instructions[0].op else {
+    let Op::FConst(constant) = &func.inst(0).op else {
         panic!("expected fconst instruction");
     };
     assert_eq!(constant.float_type(), FloatType::F128);
@@ -810,21 +810,15 @@ fn build_atomic_ops() {
     builder.ret(Some(v_cx.into()), mem5.into(), Origin::synthetic());
     builder.exit_region();
 
-    assert_eq!(func.instructions.len(), 8);
-    assert!(matches!(func.instructions[2].op, Op::LoadAtomic(_, _, _)));
+    assert_eq!(func.inst_pool.next_index(), 8);
+    assert!(matches!(func.inst(2).op, Op::LoadAtomic(_, _, _)));
+    assert!(matches!(func.inst(3).op, Op::StoreAtomic(_, _, _, _)));
+    assert!(matches!(func.inst(4).op, Op::AtomicRmw(_, _, _, _, _)));
     assert!(matches!(
-        func.instructions[3].op,
-        Op::StoreAtomic(_, _, _, _)
-    ));
-    assert!(matches!(
-        func.instructions[4].op,
-        Op::AtomicRmw(_, _, _, _, _)
-    ));
-    assert!(matches!(
-        func.instructions[5].op,
+        func.inst(5).op,
         Op::AtomicCmpXchg(_, _, _, _, _, _)
     ));
-    assert!(matches!(func.instructions[6].op, Op::Fence(_, _)));
+    assert!(matches!(func.inst(6).op, Op::Fence(_, _)));
 }
 
 #[test]
@@ -963,9 +957,9 @@ fn build_symbol_addr() {
     builder.ret(Some(result.into()), mem1.into(), Origin::synthetic());
     builder.exit_region();
 
-    assert_eq!(func.instructions.len(), 4);
-    assert!(matches!(func.instructions[1].op, Op::SymbolAddr(_)));
-    assert_eq!(func.instructions[1].ty, Type::Ptr(0));
+    assert_eq!(func.inst_pool.next_index(), 4);
+    assert!(matches!(func.inst(1).op, Op::SymbolAddr(_)));
+    assert_eq!(func.inst(1).ty, Type::Ptr(0));
 
     module.add_function(func);
     let output = format!("{module}");
@@ -1184,11 +1178,9 @@ fn verify_detects_wrong_arith_operand_type() {
     };
 
     // Manually insert invalid Add instruction with Bool operand before the ret
-    let ret_idx = func.blocks[bb.index() as usize].inst_start
-        + func.blocks[bb.index() as usize].inst_count
-        - 1;
-    func.instructions.insert(
-        ret_idx as usize,
+    let ret_idx = func.block(bb).last_inst.unwrap();
+    func.insert_inst_before(
+        ret_idx,
         Instruction {
             op: Op::Add(IntOperand::from(cmp.raw()), p1.into()),
             ty: i64_type,
@@ -1198,7 +1190,6 @@ fn verify_detects_wrong_arith_operand_type() {
             secondary_result_annotation: None,
         },
     );
-    func.blocks[bb.index() as usize].inst_count += 1;
 
     let result = verify_function(&func, &st);
     assert!(!result.is_ok(), "expected errors");
@@ -1394,10 +1385,10 @@ fn display_min_max() {
     builder.ret(Some(_sum.into()), mem0.into(), Origin::synthetic());
     builder.exit_region();
 
-    assert!(matches!(func.instructions[2].op, Op::Min(_, _)));
-    assert!(matches!(func.instructions[3].op, Op::Max(_, _)));
-    assert_eq!(func.instructions[2].ty, i64_type);
-    assert_eq!(func.instructions[3].ty, i64_type);
+    assert!(matches!(func.inst(2).op, Op::Min(_, _)));
+    assert!(matches!(func.inst(3).op, Op::Max(_, _)));
+    assert_eq!(func.inst(2).ty, i64_type);
+    assert_eq!(func.inst(3).ty, i64_type);
 
     let output = format!("{}", func.display(&st));
     assert_eq!(
@@ -1463,10 +1454,10 @@ fn memssa_store_load_threading() {
     b.exit_region();
 
     // Verify store result is Mem
-    assert_eq!(func.instructions[2].ty, Type::Mem);
+    assert_eq!(func.inst(2).ty, Type::Mem);
     // Verify load result is Int (not Mem — load is a MemoryUse)
-    assert_eq!(func.instructions[3].ty, i32_type);
-    assert_eq!(func.instructions[3].secondary_ty, None);
+    assert_eq!(func.inst(3).ty, i32_type);
+    assert_eq!(func.inst(3).secondary_ty, None);
 
     let result = verify_function(&func, &st);
     assert!(result.is_ok(), "expected no errors: {result}");
@@ -1509,7 +1500,7 @@ fn memssa_multi_result_load_atomic() {
     b.ret(Some(data.into()), mem1.into(), Origin::synthetic());
     b.exit_region();
 
-    let inst = &func.instructions[1];
+    let inst = &func.inst(1);
     assert_eq!(inst.ty, Type::Mem);
     assert_eq!(inst.secondary_ty, Some(i64_type));
     assert!(data.is_secondary_result());
@@ -1662,8 +1653,8 @@ fn build_merge() {
     b.ret(Some(merged.into()), mem0.into(), Origin::synthetic());
     b.exit_region();
 
-    assert!(matches!(func.instructions[2].op, Op::Merge(_, _, 64)));
-    assert_eq!(func.instructions[2].ty, i64_type);
+    assert!(matches!(func.inst(2).op, Op::Merge(_, _, 64)));
+    assert_eq!(func.inst(2).ty, i64_type);
 
     let output = format!("{}", func.display(&st));
     assert!(output.contains("merge.64 v1, v2"));
@@ -1700,7 +1691,7 @@ fn build_split() {
     b.ret(Some(hi.into()), mem0.into(), Origin::synthetic());
     b.exit_region();
 
-    let inst = &func.instructions[1];
+    let inst = &func.inst(1);
     assert_eq!(inst.ty, i128_type);
     assert_eq!(inst.secondary_ty, Some(i128_type));
 
@@ -1735,8 +1726,8 @@ fn build_clmul() {
     b.ret(Some(result.into()), mem0.into(), Origin::synthetic());
     b.exit_region();
 
-    assert!(matches!(func.instructions[2].op, Op::Clmul(_, _)));
-    assert_eq!(func.instructions[2].ty, i64_type);
+    assert!(matches!(func.inst(2).op, Op::Clmul(_, _)));
+    assert_eq!(func.inst(2).ty, i64_type);
 
     let output = format!("{}", func.display(&st));
     assert!(output.contains("clmul v1, v2"));
@@ -1791,9 +1782,9 @@ fn test_extractvalue_basic() {
     b.ret(Some(field0.into()), mem0.into(), Origin::synthetic());
     b.exit_region();
 
-    assert_eq!(func.instructions.len(), 3);
-    assert!(matches!(func.instructions[1].op, Op::ExtractValue(_, _)));
-    assert_eq!(func.instructions[1].ty, i64_type);
+    assert_eq!(func.inst_pool.next_index(), 3);
+    assert!(matches!(func.inst(1).op, Op::ExtractValue(_, _)));
+    assert_eq!(func.inst(1).ty, i64_type);
 
     let output = format!("{}", func.display(&st));
     assert!(output.contains("extractvalue"));
@@ -1827,9 +1818,9 @@ fn test_insertvalue_basic() {
     b.ret(Some(result.into()), mem0.into(), Origin::synthetic());
     b.exit_region();
 
-    assert_eq!(func.instructions.len(), 4);
-    assert!(matches!(func.instructions[2].op, Op::InsertValue(_, _, _)));
-    assert_eq!(func.instructions[2].ty, struct_ty);
+    assert_eq!(func.inst_pool.next_index(), 4);
+    assert!(matches!(func.inst(2).op, Op::InsertValue(_, _, _)));
+    assert_eq!(func.inst(2).ty, struct_ty);
 
     let output = format!("{}", func.display(&st));
     assert!(output.contains("insertvalue"));
@@ -1868,9 +1859,9 @@ fn test_extractvalue_array() {
     b.ret(Some(elem.into()), mem0.into(), Origin::synthetic());
     b.exit_region();
 
-    assert_eq!(func.instructions.len(), 3);
-    assert!(matches!(func.instructions[1].op, Op::ExtractValue(_, _)));
-    assert_eq!(func.instructions[1].ty, i64_type);
+    assert_eq!(func.inst_pool.next_index(), 3);
+    assert!(matches!(func.inst(1).op, Op::ExtractValue(_, _)));
+    assert_eq!(func.inst(1).ty, i64_type);
 }
 
 #[test]
@@ -1901,9 +1892,9 @@ fn test_insertvalue_array() {
     b.ret(Some(result.into()), mem0.into(), Origin::synthetic());
     b.exit_region();
 
-    assert_eq!(func.instructions.len(), 4);
-    assert!(matches!(func.instructions[2].op, Op::InsertValue(_, _, _)));
-    assert_eq!(func.instructions[2].ty, array_ty);
+    assert_eq!(func.inst_pool.next_index(), 4);
+    assert!(matches!(func.inst(2).op, Op::InsertValue(_, _, _)));
+    assert_eq!(func.inst(2).ty, array_ty);
 }
 
 #[test]
@@ -2014,8 +2005,8 @@ fn mem_copy_builder_and_display() {
     b.ret(None, mem1.into(), Origin::synthetic());
     b.exit_region();
 
-    assert!(matches!(func.instructions[3].op, Op::MemCopy(_, _, _, _)));
-    assert_eq!(func.instructions[3].ty, Type::Mem);
+    assert!(matches!(func.inst(3).op, Op::MemCopy(_, _, _, _)));
+    assert_eq!(func.inst(3).ty, Type::Mem);
 
     let output = format!("{}", func.display(&st));
     assert!(
@@ -2058,8 +2049,8 @@ fn mem_move_builder_and_display() {
     b.ret(None, mem1.into(), Origin::synthetic());
     b.exit_region();
 
-    assert!(matches!(func.instructions[3].op, Op::MemMove(_, _, _, _)));
-    assert_eq!(func.instructions[3].ty, Type::Mem);
+    assert!(matches!(func.inst(3).op, Op::MemMove(_, _, _, _)));
+    assert_eq!(func.inst(3).ty, Type::Mem);
 
     let output = format!("{}", func.display(&st));
     assert!(
@@ -2103,8 +2094,8 @@ fn mem_set_builder_and_display() {
     b.ret(None, mem1.into(), Origin::synthetic());
     b.exit_region();
 
-    assert!(matches!(func.instructions[3].op, Op::MemSet(_, _, _, _)));
-    assert_eq!(func.instructions[3].ty, Type::Mem);
+    assert!(matches!(func.inst(3).op, Op::MemSet(_, _, _, _)));
+    assert_eq!(func.inst(3).ty, Type::Mem);
 
     let output = format!("{}", func.display(&st));
     assert!(
