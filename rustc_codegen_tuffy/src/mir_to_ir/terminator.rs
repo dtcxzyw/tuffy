@@ -107,28 +107,19 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let ret_ty = self.monomorphize(self.mir.local_decls[ret_local].ty);
                     let size = type_size(self.tcx, ret_ty).unwrap_or(8);
                     let ret_repr = repr_kind(self.tcx, ret_ty);
-                    // ScalarPair (e.g. fat pointers) uses two-register ABI.
-                    // Wide scalars (i128/u128) are a single value that happens
-                    // to span > 8 bytes — load the full width, not two halves.
                     let is_scalar_pair = size > 8 && matches!(ret_repr, ReprKind::ScalarPair);
-                    let is_wide_scalar = size > 8 && matches!(ret_repr, ReprKind::Scalar);
 
-                    // Load the first word from the stack slot.
-                    // Use the actual type size (clamped to 8) so that sub-word
-                    // types (u8, u16, etc.) emit a correctly-sized load instead
-                    // of reading garbage bytes beyond the stored value.
-                    // For wide scalars (i128/u128), load the full width.
-                    let load_size = if is_wide_scalar {
-                        size as u32
-                    } else {
+                    // Load size: for Scalar returns load the full type width
+                    // (legalizer splits wide loads); for ScalarPair load only
+                    // the first register-sized word.
+                    let load_size = if is_scalar_pair {
                         size.min(8) as u32
+                    } else {
+                        size as u32
                     };
                     let load_ty = translate_ty(self.tcx, ret_mir_ty).unwrap_or(Type::Int);
-                    // For ScalarPair returns (e.g. fat pointers), use i64
-                    // annotation for the low-half load.
-                    // translate_annotation would give the full-width annotation
-                    // (u128) which misleads the legalizer into treating this
-                    // 8-byte load as a 128-bit value.
+                    // For ScalarPair returns (e.g. fat pointers), use a
+                    // register-width annotation for the low-half load.
                     let ann = if is_scalar_pair {
                         int_annotation_for_bytes(load_size)
                     } else {

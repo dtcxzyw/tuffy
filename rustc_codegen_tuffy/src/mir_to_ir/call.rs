@@ -1068,135 +1068,57 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 };
 
                 if !decomposed {
-                    // Annotate i128/u128 arguments so the legalization
-                    // pass knows to split them into (lo, hi) even when
-                    // the value fits in 64 bits (e.g. small constants).
-                    if matches!(
-                        arg_ty.kind(),
-                        ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
-                    ) {
-                        // If the value is a Ptr (address of the i128 in memory, from
-                        // translate_place_to_value for >8-byte scalars), load lo+hi
-                        // from the address instead of passing the pointer annotated
-                        // as 128-bit (which would pass the address value, not the data).
-                        if matches!(self.builder.value_type(v), Some(Type::Ptr(_))) {
-                            let w0 = self.builder.load(
-                                v.into(),
-                                8,
-                                Type::Int,
-                                self.current_mem.into(),
-                                int_annotation_for_bytes(8),
-                                Origin::synthetic(),
-                            );
-                            ir_args.push(w0.into());
-                            let off8 = self.builder.iconst(
-                                8,
-                                64,
-                                IntSignedness::DontCare,
-                                Origin::synthetic(),
-                            );
-                            let hi_addr =
-                                self.builder
-                                    .ptradd(v.into(), off8.into(), 0, Origin::synthetic());
-                            let w1 = self.builder.load(
-                                hi_addr.into(),
-                                8,
-                                Type::Int,
-                                self.current_mem.into(),
-                                int_annotation_for_bytes(8),
-                                Origin::synthetic(),
-                            );
-                            ir_args.push(w1.into());
-                        } else {
-                            let ann = translate_annotation(arg_ty).unwrap_or(Annotation::Int(
-                                IntAnnotation {
-                                    bit_width: 128,
-                                    signedness: IntSignedness::Unsigned,
-                                },
-                            ));
-                            ir_args.push(IrOperand::annotated(v, ann));
-                        }
-                    } else if arg_size == 16
-                        && matches!(repr_kind(self.tcx, arg_ty), ReprKind::Scalar)
+                    // Memory aggregate > 8 bytes: pass a pointer to a fresh copy.
+                    // Passing the original slot directly would let the callee overwrite
+                    // the caller's local (violating Rust pass-by-value semantics).
+                    let is_memory_indirect = arg_size > 8
+                        && matches!(repr_kind(self.tcx, arg_ty), ReprKind::Memory)
+                        && matches!(self.builder.value_type(v), Some(Type::Ptr(_)));
+                    if (arg_size > 16 || is_memory_indirect)
                         && matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
                     {
-                        // Newtype wrapper over u128/i128 (e.g. `(u128,)`) with
-                        // 16-byte Scalar representation. The value is a pointer to
-                        // its 16-byte storage; load lo+hi and pass as two registers.
-                        let w0 = self.builder.load(
-                            v.into(),
-                            8,
-                            Type::Int,
-                            self.current_mem.into(),
-                            int_annotation_for_bytes(8),
-                            Origin::synthetic(),
-                        );
-                        ir_args.push(w0.into());
-                        let off8 = self.builder.iconst(
-                            8,
+                        let align = type_align(self.tcx, arg_ty).unwrap_or(1) as u32;
+                        let tmp = self
+                            .builder
+                            .stack_slot(arg_size as u32, Origin::synthetic());
+                        let count = self.builder.iconst(
+                            arg_size as i64,
                             64,
                             IntSignedness::DontCare,
                             Origin::synthetic(),
                         );
-                        let hi_addr =
-                            self.builder
-                                .ptradd(v.into(), off8.into(), 0, Origin::synthetic());
-                        let w1 = self.builder.load(
-                            hi_addr.into(),
-                            8,
-                            Type::Int,
+                        let tmp_annotated = IrOperand::annotated(tmp, Annotation::Align(align));
+                        let v_annotated = IrOperand::annotated(v, Annotation::Align(align));
+                        let new_mem = self.builder.mem_copy(
+                            tmp_annotated.into(),
+                            v_annotated.into(),
+                            count.into(),
                             self.current_mem.into(),
-                            int_annotation_for_bytes(8),
                             Origin::synthetic(),
                         );
-                        ir_args.push(w1.into());
+                        self.current_mem = new_mem.raw();
+                        ir_args.push(tmp.into());
+                    } else if arg_size > 0
+                        && arg_size <= 8
+                        && matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
+                        && translate_ty(self.tcx, arg_ty).is_none()
+                    {
+                        // Small aggregate (1-8 bytes) in a stack slot:
+                        // load the value so it is passed by register.
+                        let loaded = self.builder.load(
+                            v.into(),
+                            arg_size as u32,
+                            Type::Int,
+                            self.current_mem.into(),
+                            int_annotation_for_bytes(arg_size as u32),
+                            Origin::synthetic(),
+                        );
+                        ir_args.push(loaded.into());
                     } else {
-                        // Memory aggregate > 8 bytes: pass a pointer to a fresh copy.
-                        // Passing the original slot directly would let the callee overwrite
-                        // the caller's local (violating Rust pass-by-value semantics).
-                        let is_memory_indirect = arg_size > 8
-                            && matches!(repr_kind(self.tcx, arg_ty), ReprKind::Memory)
-                            && matches!(self.builder.value_type(v), Some(Type::Ptr(_)));
-                        if (arg_size > 16 || is_memory_indirect)
-                            && matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
-                        {
-                            let align = type_align(self.tcx, arg_ty).unwrap_or(1) as u32;
-                            let tmp = self
-                                .builder
-                                .stack_slot(arg_size as u32, Origin::synthetic());
-                            let count = self.builder.iconst(
-                                arg_size as i64,
-                                64,
-                                IntSignedness::DontCare,
-                                Origin::synthetic(),
-                            );
-                            let tmp_annotated = IrOperand::annotated(tmp, Annotation::Align(align));
-                            let v_annotated = IrOperand::annotated(v, Annotation::Align(align));
-                            let new_mem = self.builder.mem_copy(
-                                tmp_annotated.into(),
-                                v_annotated.into(),
-                                count.into(),
-                                self.current_mem.into(),
-                                Origin::synthetic(),
-                            );
-                            self.current_mem = new_mem.raw();
-                            ir_args.push(tmp.into());
-                        } else if arg_size > 0
-                            && arg_size <= 8
-                            && matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
-                            && translate_ty(self.tcx, arg_ty).is_none()
-                        {
-                            // Small aggregate (1-8 bytes) in a stack slot:
-                            // load the value so it is passed by register.
-                            let loaded = self.builder.load(
-                                v.into(),
-                                arg_size as u32,
-                                Type::Int,
-                                self.current_mem.into(),
-                                int_annotation_for_bytes(arg_size as u32),
-                                Origin::synthetic(),
-                            );
-                            ir_args.push(loaded.into());
+                        // Push value with type annotation so the legalizer
+                        // can identify wide values (e.g. 128-bit integers).
+                        if let Some(ann) = translate_annotation(arg_ty) {
+                            ir_args.push(IrOperand::annotated(v, ann));
                         } else {
                             ir_args.push(v.into());
                         }
@@ -1594,43 +1516,33 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // slot as the destination local.
             self.locals.set(destination.local, slot);
             self.stack_locals.mark(destination.local);
-        } else if matches!(
-            dest_ty.kind(),
-            ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
-        ) || (dest_size.unwrap_or(0) > 8
-            && matches!(dest_repr, ReprKind::Scalar)
-            && !matches!(dest_repr, ReprKind::ScalarPair))
-        {
-            // i128/u128 scalar return (or transparent newtype like (u128,)):
-            // the call result is annotated :s128.
-            // Emit a single store.16 and let legalization split the 128-bit
+        } else if dest_size.unwrap_or(0) > 8 && matches!(dest_repr, ReprKind::Scalar) {
+            // Wide scalar return (e.g. i128, transparent newtype over i128):
+            // emit a single full-width store and let legalization split the
             // value into lo/hi halves with the correct RDX capture.
-            // Do NOT manually create an RDX capture here — leg_call handles
-            // wide returns by splitting the call and capturing RDX itself.
+            let size = dest_size.unwrap();
             let slot = if let Some(existing) = self.locals.get(destination.local) {
                 if self.stack_locals.is_stack(destination.local) {
                     existing
                 } else {
-                    self.builder.stack_slot(16, Origin::synthetic())
+                    self.builder.stack_slot(size as u32, Origin::synthetic())
                 }
             } else {
-                self.builder.stack_slot(16, Origin::synthetic())
+                self.builder.stack_slot(size as u32, Origin::synthetic())
             };
             self.current_mem = self
                 .builder
                 .store(
                     call_vref.into(),
                     slot.into(),
-                    16,
+                    size as u32,
                     self.current_mem.into(),
                     Origin::synthetic(),
                 )
                 .raw();
             self.locals.set(destination.local, slot);
             self.stack_locals.mark(destination.local);
-        } else if dest_size.unwrap_or(0) > 8
-            && matches!(dest_repr, ReprKind::ScalarPair | ReprKind::Scalar)
-        {
+        } else if dest_size.unwrap_or(0) > 8 && matches!(dest_repr, ReprKind::ScalarPair) {
             // Two-register return (ScalarPair, 16 bytes): RAX has the first
             // 8 bytes, RDX has the remaining bytes.  Capture both and store
             // to a stack slot.

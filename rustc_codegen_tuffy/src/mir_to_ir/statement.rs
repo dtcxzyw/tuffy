@@ -925,178 +925,34 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         .raw();
                                 }
                             } else if bytes > 8 {
-                                // Check if the rvalue's source type is also >8 bytes
-                                // (e.g. u128 * u128 produces a 128-bit value).
-                                // In that case, emit a full-width store so the
-                                // legalization pass can split it correctly.
-                                let rvalue_ty = rvalue.ty(&self.mir.local_decls, self.tcx);
-                                let rvalue_ty = self.monomorphize(rvalue_ty);
-                                let src_bytes = type_size(self.tcx, rvalue_ty).unwrap_or(8);
-                                // Check if the rvalue produces a true 128-bit IR value.
-                                // Constants like 42_i128 return iconst (8 bytes) from
-                                // translate_rvalue, so they need scalar extension.
-                                // Operations like i128 * i128 produce true 128-bit values.
-                                let val_is_wide = match rvalue {
-                                    Rvalue::BinaryOp(_, box (lhs, _)) => {
-                                        let lhs_ty = lhs.ty(&self.mir.local_decls, self.tcx);
-                                        let lhs_ty = self.monomorphize(lhs_ty);
-                                        matches!(
-                                            lhs_ty.kind(),
-                                            ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
-                                        )
-                                    }
-                                    Rvalue::UnaryOp(_, op) => {
-                                        let op_ty = op.ty(&self.mir.local_decls, self.tcx);
-                                        let op_ty = self.monomorphize(op_ty);
-                                        matches!(
-                                            op_ty.kind(),
-                                            ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
-                                        )
-                                    }
-                                    Rvalue::Use(Operand::Constant(c)) => {
-                                        let c_ty = self.monomorphize(c.ty());
-                                        if type_size(self.tcx, c_ty).unwrap_or(8) <= 8 {
-                                            false
-                                        } else {
-                                            // For 128-bit constants: use wide store only when
-                                            // the value doesn't fit in i64/u64. Small constants
-                                            // (e.g. 42_u128) use the scalar extension below.
-                                            let mono_c =
-                                                self.tcx.instantiate_and_normalize_erasing_regions(
-                                                    self.instance.args,
-                                                    ty::TypingEnv::fully_monomorphized(),
-                                                    ty::EarlyBinder::bind(c.const_),
-                                                );
-                                            let resolved = match mono_c {
-                                                mir::Const::Val(v, _) => Some(v),
-                                                _ => mono_c
-                                                    .eval(
-                                                        self.tcx,
-                                                        ty::TypingEnv::fully_monomorphized(),
-                                                        c.span,
-                                                    )
-                                                    .ok(),
-                                            };
-                                            let bits = resolved.and_then(|cv| {
-                                                if let mir::ConstValue::Scalar(
-                                                    mir::interpret::Scalar::Int(si),
-                                                ) = cv
-                                                {
-                                                    Some(si.to_bits(si.size()))
-                                                } else {
-                                                    None
-                                                }
-                                            });
-                                            bits.is_some_and(|bits| {
-                                                if matches!(c_ty.kind(), ty::Int(_)) {
-                                                    let signed = bits as i128;
-                                                    signed > i64::MAX as i128
-                                                        || signed < i64::MIN as i128
-                                                } else {
-                                                    bits > u64::MAX as u128
-                                                }
-                                            })
-                                        }
-                                    }
-                                    _ => src_bytes > 8,
-                                };
-                                if val_is_wide {
-                                    // For checked ops, store only the primary
-                                    // result width, not the full tuple size.
-                                    let wide_bytes = if let Rvalue::BinaryOp(
-                                        BinOp::AddWithOverflow
-                                        | BinOp::SubWithOverflow
-                                        | BinOp::MulWithOverflow,
-                                        box (lhs, _),
-                                    ) = rvalue
-                                    {
-                                        let lhs_ty = lhs.ty(&self.mir.local_decls, self.tcx);
-                                        let lhs_ty = self.monomorphize(lhs_ty);
-                                        type_size(self.tcx, lhs_ty).unwrap_or(16) as u32
-                                    } else {
-                                        bytes
-                                    };
-                                    self.current_mem = self
-                                        .builder
-                                        .store(
-                                            val.into(),
-                                            addr.into(),
-                                            wide_bytes,
-                                            self.current_mem.into(),
-                                            Origin::synthetic(),
-                                        )
-                                        .raw();
+                                // Wide value (e.g. i128 arithmetic result or
+                                // constant). Store full width — the legalizer
+                                // splits 128-bit stores into lo/hi halves.
+                                // For checked ops, store only the primary
+                                // result width, not the full tuple size.
+                                let store_bytes = if let Rvalue::BinaryOp(
+                                    BinOp::AddWithOverflow
+                                    | BinOp::SubWithOverflow
+                                    | BinOp::MulWithOverflow,
+                                    box (lhs, _),
+                                ) = rvalue
+                                {
+                                    let lhs_ty = lhs.ty(&self.mir.local_decls, self.tcx);
+                                    let lhs_ty = self.monomorphize(lhs_ty);
+                                    type_size(self.tcx, lhs_ty).unwrap_or(16) as u32
                                 } else {
-                                    // Scalar Int value being stored to a >8-byte
-                                    // projected field (e.g. u16 as u128 → _2.0).
-                                    // Store low word, then compute and store high word.
-                                    self.current_mem = self
-                                        .builder
-                                        .store(
-                                            val.into(),
-                                            addr.into(),
-                                            8,
-                                            self.current_mem.into(),
-                                            Origin::synthetic(),
-                                        )
-                                        .raw();
-                                    let src_is_signed = match rvalue {
-                                        Rvalue::Cast(CastKind::IntToInt, op, _) => {
-                                            let src_ty =
-                                                operand_ty_projected(op, self.mir, self.tcx)
-                                                    .map(|ty| self.monomorphize(ty))
-                                                    .unwrap_or(projected_ty);
-                                            is_signed_int(src_ty)
-                                        }
-                                        _ => {
-                                            matches!(projected_ty.kind(), ty::Int(ty::IntTy::I128))
-                                        }
-                                    };
-                                    let hi_word = if src_is_signed {
-                                        let c63 = self.builder.iconst(
-                                            63,
-                                            64,
-                                            IntSignedness::DontCare,
-                                            Origin::synthetic(),
-                                        );
-                                        let signed_op = val.into();
-                                        self.builder.shr(
-                                            signed_op,
-                                            c63.into(),
-                                            int_ann_for_bytes(8),
-                                            Origin::synthetic(),
-                                        )
-                                    } else {
-                                        self.builder.iconst(
-                                            0,
-                                            64,
-                                            IntSignedness::DontCare,
-                                            Origin::synthetic(),
-                                        )
-                                    };
-                                    let off8 = self.builder.iconst(
-                                        8,
-                                        64,
-                                        IntSignedness::DontCare,
-                                        Origin::synthetic(),
-                                    );
-                                    let hi_addr = self.builder.ptradd(
+                                    bytes
+                                };
+                                self.current_mem = self
+                                    .builder
+                                    .store(
+                                        val.into(),
                                         addr.into(),
-                                        off8.into(),
-                                        0,
+                                        store_bytes,
+                                        self.current_mem.into(),
                                         Origin::synthetic(),
-                                    );
-                                    self.current_mem = self
-                                        .builder
-                                        .store(
-                                            hi_word.into(),
-                                            hi_addr.into(),
-                                            8,
-                                            self.current_mem.into(),
-                                            Origin::synthetic(),
-                                        )
-                                        .raw();
-                                }
+                                    )
+                                    .raw();
                             } else if bytes > 0 {
                                 // For checked ops, only store primary result
                                 // bytes (not the full tuple including overflow

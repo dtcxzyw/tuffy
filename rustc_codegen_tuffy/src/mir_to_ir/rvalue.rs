@@ -382,6 +382,21 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             );
             return Some(data);
         }
+        // Wide integral scalars (e.g. i128): load as a full-width
+        // Type::Int value so downstream code sees a value, not an
+        // address.  The legalizer splits 128-bit values later.
+        if bytes > 8 && projected_ty.is_integral() {
+            let ann = translate_annotation(projected_ty);
+            let data = self.builder.load(
+                addr.into(),
+                bytes,
+                Type::Int,
+                self.current_mem.into(),
+                ann,
+                Origin::synthetic(),
+            );
+            return Some(data);
+        }
         // For other types > 8 bytes, return the address directly so the
         // caller (assignment handler) can do word-by-word copy.
         if bytes > 8 {
@@ -1067,8 +1082,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     );
                 }
 
-                // Detect 128-bit integer operands early so we can load from
-                // stack slot pointers before coercing to int.
+                // Resolve projected MIR types for accurate annotations.
                 let lhs_mir_ty = operand_ty_projected(lhs, self.mir, self.tcx)
                     .map(|ty| self.monomorphize(ty))
                     .unwrap_or(self.tcx.types.i32);
@@ -1083,42 +1097,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // through projections correctly.
                 let l_ann = translate_annotation(lhs_mir_ty).or(l_ann);
                 let r_ann = translate_annotation(rhs_mir_ty).or(r_ann);
-
-                // For large integral types (>8 bytes, e.g. u128/i128),
-                // translate_place_to_value returns a Ptr to the stack slot.
-                // Load the integer value before coercing.
-                let l_raw = if matches!(self.builder.value_type(l_raw), Some(Type::Ptr(_)))
-                    && lhs_mir_ty.is_integral()
-                    && let Some(lhs_size) = type_size(self.tcx, lhs_mir_ty)
-                    && lhs_size > 8
-                {
-                    self.builder.load(
-                        l_raw.into(),
-                        lhs_size as u32,
-                        Type::Int,
-                        self.current_mem.into(),
-                        translate_annotation(lhs_mir_ty),
-                        Origin::synthetic(),
-                    )
-                } else {
-                    l_raw
-                };
-                let r_raw = if matches!(self.builder.value_type(r_raw), Some(Type::Ptr(_)))
-                    && rhs_mir_ty.is_integral()
-                    && let Some(rhs_size) = type_size(self.tcx, rhs_mir_ty)
-                    && rhs_size > 8
-                {
-                    self.builder.load(
-                        r_raw.into(),
-                        rhs_size as u32,
-                        Type::Int,
-                        self.current_mem.into(),
-                        translate_annotation(rhs_mir_ty),
-                        Origin::synthetic(),
-                    )
-                } else {
-                    r_raw
-                };
 
                 // Coerce pointer operands to integers — needed for both
                 // arithmetic/bitwise ops and comparisons.
@@ -2715,66 +2693,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     if bytes == 0 {
                         continue;
                     }
-                    let mut val = self.translate_operand(op).unwrap_or_else(|| {
+                    let val = self.translate_operand(op).unwrap_or_else(|| {
                         self.builder
                             .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
                             .raw()
                     });
-
-                    // For large i128/u128 constants (>64 bits) in aggregates, iconst creates
-                    // a 64-bit value that gets incorrectly stored as 16 bytes. Emit as static
-                    // data and return a pointer so the word-by-word copy path handles it.
-                    let is_i128_const = bytes == 16
-                        && matches!(op, Operand::Constant(_))
-                        && matches!(self.builder.value_type(val), Some(Type::Int))
-                        && field_ty.is_some_and(|t| {
-                            matches!(
-                                t.kind(),
-                                ty::Int(ty::IntTy::I128) | ty::Uint(ty::UintTy::U128)
-                            )
-                        });
-                    if is_i128_const && let Operand::Constant(c) = op {
-                        let mono_const = self.tcx.instantiate_and_normalize_erasing_regions(
-                            self.instance.args,
-                            ty::TypingEnv::fully_monomorphized(),
-                            ty::EarlyBinder::bind(c.const_),
-                        );
-                        let const_val = match mono_const {
-                            mir::Const::Val(v, _) => Some(v),
-                            _ => {
-                                let typing_env = ty::TypingEnv::fully_monomorphized();
-                                mono_const.eval(self.tcx, typing_env, c.span).ok()
-                            }
-                        };
-                        if let Some(mir::ConstValue::Scalar(mir::interpret::Scalar::Int(int))) =
-                            const_val
-                        {
-                            let bits = int.to_bits(int.size());
-                            // Only emit as static data if value doesn't fit in 64 bits
-                            let is_signed = field_ty
-                                .is_some_and(|t| matches!(t.kind(), ty::Int(ty::IntTy::I128)));
-                            let needs_static = if is_signed {
-                                // Signed: check if sign-extended 64-bit value differs
-                                let as_i64 = bits as i64;
-                                let sign_ext = as_i64 as i128;
-                                sign_ext != bits as i128
-                            } else {
-                                // Unsigned: check if value > u64::MAX
-                                bits > u64::MAX as u128
-                            };
-                            if needs_static {
-                                let bytes_vec = bits.to_le_bytes().to_vec();
-                                let sym = format!(".Lconst.{}", {
-                                    let id = *self.data_counter;
-                                    *self.data_counter += 1;
-                                    id
-                                });
-                                let sym_id = self.symbols.intern(&sym);
-                                self.static_data.push((sym_id, bytes_vec, vec![]));
-                                val = self.builder.symbol_addr(sym_id, Origin::synthetic()).raw();
-                            }
-                        }
-                    }
 
                     let offset = if let Some(variant_idx) = enum_variant_idx {
                         variant_field_offset(self.tcx, agg_ty, variant_idx, i)
@@ -3098,28 +3021,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let neg_ann = op_ty
                     .and_then(translate_annotation)
                     .and_then(|a| IntAnn::from_annotation(&a));
-                // For large integral types (>8 bytes, e.g. i128) stored in memory,
-                // translate_place_to_value returns a Ptr to the stack slot.
-                // Load the value before negating.
-                let v = if matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
-                    && op_ty.is_some_and(|t| t.is_integral())
-                    && op_ty
-                        .and_then(|t| type_size(self.tcx, t))
-                        .is_some_and(|sz| sz > 8)
-                {
-                    let sz = op_ty.and_then(|t| type_size(self.tcx, t)).unwrap_or(16) as u32;
-                    self.builder.load(
-                        v.into(),
-                        sz,
-                        Type::Int,
-                        self.current_mem.into(),
-                        int_annotation_for_bytes(sz),
-                        Origin::synthetic(),
-                    )
-                } else {
-                    // Coerce Bool/Ptr to Int for integer negation.
-                    self.coerce_to_int(v)
-                };
+                // Coerce Bool/Ptr to Int for integer negation.
+                let v = self.coerce_to_int(v);
                 if !matches!(self.builder.value_type(v), Some(Type::Int)) {
                     return Some(
                         self.builder
@@ -3194,34 +3097,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let true_val = self.builder.bconst(true, Origin::synthetic());
                         self.builder
                             .bxor(v.into(), true_val.into(), Origin::synthetic())
-                            .raw()
-                    }
-                    Some(Type::Ptr(_))
-                        if mir_ty.is_some_and(|t| t.is_integral())
-                            && mir_ty
-                                .and_then(|t| type_size(self.tcx, t))
-                                .is_some_and(|sz| sz > 8) =>
-                    {
-                        // The operand is a >8-byte integer (e.g. u128) stored in memory;
-                        // translate_place_to_value returned a Ptr to the stack slot.
-                        // Load the value as a 16-byte Int before bitwise NOT.
-                        let sz = mir_ty.and_then(|t| type_size(self.tcx, t)).unwrap_or(16) as u32;
-                        let loaded = self.builder.load(
-                            v.into(),
-                            sz,
-                            Type::Int,
-                            self.current_mem.into(),
-                            int_annotation_for_bytes(sz),
-                            Origin::synthetic(),
-                        );
-                        let ones = self.builder.iconst(
-                            -1,
-                            bits,
-                            IntSignedness::DontCare,
-                            Origin::synthetic(),
-                        );
-                        self.builder
-                            .xor(loaded.into(), ones.into(), xor_ann, Origin::synthetic())
                             .raw()
                     }
                     _ => {

@@ -130,7 +130,7 @@ pub fn translate_function<'tcx>(
                     // use 64-bit annotation since the function returns the first
                     // 8 bytes in RAX; the remaining bytes are returned in RDX
                     // via ABI metadata (see terminator.rs).
-                    if matches!(ret_repr, ReprKind::ScalarPair | ReprKind::Scalar) && ret_size > 8 {
+                    if matches!(ret_repr, ReprKind::ScalarPair) && ret_size > 8 {
                         int_annotation_for_bytes(8)
                     } else {
                         int_annotation_for_bytes(ret_size as u32)
