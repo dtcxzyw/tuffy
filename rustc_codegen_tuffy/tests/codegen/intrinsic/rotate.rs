@@ -32,7 +32,7 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @_RINvNtCsa3SJzwB9S2T_4core10intrinsics11rotate_leftmECskItwTPjaitS_6rotate(int:u32, int:u32) -> int:u32 {
+// CHECK: func @_RINvNtC$HASH_4core10intrinsics11rotate_leftmEC$HASH_6rotate(int:u32, int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u32 = param 0
 // CHECK:     v2: int:u32 = param 1
@@ -100,7 +100,7 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @_RINvNtCsa3SJzwB9S2T_4core10intrinsics12rotate_rightmECskItwTPjaitS_6rotate(int:u32, int:u32) -> int:u32 {
+// CHECK: func @_RINvNtC$HASH_4core10intrinsics12rotate_rightmEC$HASH_6rotate(int:u32, int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u32 = param 0
 // CHECK:     v2: int:u32 = param 1
@@ -148,11 +148,11 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @_RINvNtCsa3SJzwB9S2T_4core10intrinsics14disjoint_bitormECskItwTPjaitS_6rotate(int:u32, int:u32) -> int:u32 {
+// CHECK: func @_RINvNtC$HASH_4core10intrinsics14disjoint_bitormEC$HASH_6rotate(int:u32, int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u32 = param 0
 // CHECK:     v2: int:u32 = param 1
-// CHECK:     v3: ptr = symbol_addr @_RNvXsd_NtNtCsa3SJzwB9S2T_4core10intrinsics8fallbackmNtB5_13DisjointBitOr14disjoint_bitorCskItwTPjaitS_6rotate
+// CHECK:     v3: ptr = symbol_addr @_RNvXsd_NtNtC$HASH_4core10intrinsics8fallbackmNtB5_13DisjointBitOr14disjoint_bitorC$HASH_6rotate
 // CHECK:     v4: mem, v5: int:u32 = call v3(v1, v2), v0 -> int:u32
 // CHECK:     br bb1(v4)
 // CHECK:
@@ -174,12 +174,12 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @_RINvNtCsa3SJzwB9S2T_4core10intrinsics20unchecked_funnel_shlmECskItwTPjaitS_6rotate(int:u32, int:u32, int:u32) -> int:u32 {
+// CHECK: func @_RINvNtC$HASH_4core10intrinsics20unchecked_funnel_shlmEC$HASH_6rotate(int:u32, int:u32, int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u32 = param 0
 // CHECK:     v2: int:u32 = param 1
 // CHECK:     v3: int:u32 = param 2
-// CHECK:     v4: ptr = symbol_addr @_RNvXsp_NtNtCsa3SJzwB9S2T_4core10intrinsics8fallbackmNtB5_11FunnelShift20unchecked_funnel_shlCskItwTPjaitS_6rotate
+// CHECK:     v4: ptr = symbol_addr @_RNvXsp_NtNtC$HASH_4core10intrinsics8fallbackmNtB5_11FunnelShift20unchecked_funnel_shlC$HASH_6rotate
 // CHECK:     v5: mem, v6: int:u32 = call v4(v1, v2, v3), v0 -> int:u32
 // CHECK:     br bb1(v5)
 // CHECK:
@@ -201,12 +201,12 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @_RINvNtCsa3SJzwB9S2T_4core10intrinsics20unchecked_funnel_shrmECskItwTPjaitS_6rotate(int:u32, int:u32, int:u32) -> int:u32 {
+// CHECK: func @_RINvNtC$HASH_4core10intrinsics20unchecked_funnel_shrmEC$HASH_6rotate(int:u32, int:u32, int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u32 = param 0
 // CHECK:     v2: int:u32 = param 1
 // CHECK:     v3: int:u32 = param 2
-// CHECK:     v4: ptr = symbol_addr @_RNvXsp_NtNtCsa3SJzwB9S2T_4core10intrinsics8fallbackmNtB5_11FunnelShift20unchecked_funnel_shrCskItwTPjaitS_6rotate
+// CHECK:     v4: ptr = symbol_addr @_RNvXsp_NtNtC$HASH_4core10intrinsics8fallbackmNtB5_11FunnelShift20unchecked_funnel_shrC$HASH_6rotate
 // CHECK:     v5: mem, v6: int:u32 = call v4(v1, v2, v3), v0 -> int:u32
 // CHECK:     br bb1(v5)
 // CHECK:
@@ -233,7 +233,7 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @_RNvXsd_NtNtCsa3SJzwB9S2T_4core10intrinsics8fallbackmNtB5_13DisjointBitOr14disjoint_bitorCskItwTPjaitS_6rotate(int:u32, int:u32) -> int:u32 {
+// CHECK: func @_RNvXsd_NtNtC$HASH_4core10intrinsics8fallbackmNtB5_13DisjointBitOr14disjoint_bitorC$HASH_6rotate(int:u32, int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u32 = param 0
 // CHECK:     v2: int:u32 = param 1
@@ -290,7 +290,7 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @_RNvXsp_NtNtCsa3SJzwB9S2T_4core10intrinsics8fallbackmNtB5_11FunnelShift20unchecked_funnel_shlCskItwTPjaitS_6rotate(int:u32, int:u32, int:u32) -> int:u32 {
+// CHECK: func @_RNvXsp_NtNtC$HASH_4core10intrinsics8fallbackmNtB5_11FunnelShift20unchecked_funnel_shlC$HASH_6rotate(int:u32, int:u32, int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u32 = param 0
 // CHECK:     v2: int:u32 = param 1
@@ -311,21 +311,22 @@
 // CHECK:   bb2(v15: mem):
 // CHECK:     v16: int:i64 = iconst 31
 // CHECK:     v17: int:i64 = and v3, v16
-// CHECK:     v18: int:u32 = shl v1, v17
-// CHECK:     v19: int:i32 = iconst 32
-// CHECK:     v20: int:i32 = sub v19:u32, v3
-// CHECK:     v21: int:u32 = zext v20, 32
-// CHECK:     v22: int:i64 = iconst 31
-// CHECK:     v23: int:i64 = and v21, v22
-// CHECK:     v24: int:u32 = shr v2, v23
+// CHECK:     v18: int:i32 = shl v1, v17
+// CHECK:     v19: int:u32 = zext v18, 32
+// CHECK:     v20: int:i32 = iconst 32
+// CHECK:     v21: int:i32 = sub v20:u32, v3
+// CHECK:     v22: int:u32 = zext v21, 32
+// CHECK:     v23: int:i64 = iconst 31
+// CHECK:     v24: int:i64 = and v22, v23
+// CHECK:     v25: int:u32 = shr v2, v24
 // CHECK:     br bb3(v15)
 // CHECK:
-// CHECK:   bb3(v26: mem):
-// CHECK:     br bb4(v26)
+// CHECK:   bb3(v27: mem):
+// CHECK:     br bb4(v27)
 // CHECK:
-// CHECK:   bb4(v28: mem):
-// CHECK:     v29: int:u32 = load.4 v4, v28
-// CHECK:     ret v29, v28
+// CHECK:   bb4(v29: mem):
+// CHECK:     v30: int:u32 = load.4 v4, v29
+// CHECK:     ret v30, v29
 // CHECK: }
 // CHECK:
 // CHECK: fn <u32 as core::intrinsics::fallback::FunnelShift>::unchecked_funnel_shr(_1: u32, _2: u32, _3: u32) -> u32 {
@@ -372,7 +373,7 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @_RNvXsp_NtNtCsa3SJzwB9S2T_4core10intrinsics8fallbackmNtB5_11FunnelShift20unchecked_funnel_shrCskItwTPjaitS_6rotate(int:u32, int:u32, int:u32) -> int:u32 {
+// CHECK: func @_RNvXsp_NtNtC$HASH_4core10intrinsics8fallbackmNtB5_11FunnelShift20unchecked_funnel_shrC$HASH_6rotate(int:u32, int:u32, int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u32 = param 0
 // CHECK:     v2: int:u32 = param 1
@@ -396,18 +397,19 @@
 // CHECK:     v18: int:u32 = zext v17, 32
 // CHECK:     v19: int:i64 = iconst 31
 // CHECK:     v20: int:i64 = and v18, v19
-// CHECK:     v21: int:u32 = shl v1, v20
-// CHECK:     v22: int:i64 = iconst 31
-// CHECK:     v23: int:i64 = and v3, v22
-// CHECK:     v24: int:u32 = shr v2, v23
+// CHECK:     v21: int:i32 = shl v1, v20
+// CHECK:     v22: int:u32 = zext v21, 32
+// CHECK:     v23: int:i64 = iconst 31
+// CHECK:     v24: int:i64 = and v3, v23
+// CHECK:     v25: int:u32 = shr v2, v24
 // CHECK:     br bb3(v15)
 // CHECK:
-// CHECK:   bb3(v26: mem):
-// CHECK:     br bb4(v26)
+// CHECK:   bb3(v27: mem):
+// CHECK:     br bb4(v27)
 // CHECK:
-// CHECK:   bb4(v28: mem):
-// CHECK:     v29: int:u32 = load.4 v4, v28
-// CHECK:     ret v29, v28
+// CHECK:   bb4(v29: mem):
+// CHECK:     v30: int:u32 = load.4 v4, v29
+// CHECK:     ret v30, v29
 // CHECK: }
 // CHECK:
 // CHECK: fn rotate_left_u32(_1: u32, _2: u32) -> u32 {

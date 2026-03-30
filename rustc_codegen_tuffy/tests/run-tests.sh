@@ -74,6 +74,7 @@ echo ""
 run_test "hello" "$FIXTURE_DIR/hello.rs" "Hello, world!"
 run_test "umul_overflow_64" "$FIXTURE_DIR/umul_overflow_64.rs" "ok"
 run_test "smul_overflow_128" "$FIXTURE_DIR/smul_overflow_128.rs" "ok"
+run_test "shl_truncation" "$FIXTURE_DIR/shl_truncation.rs" "ok"
 
 echo ""
 echo "=== Results: $pass passed, $fail failed ==="

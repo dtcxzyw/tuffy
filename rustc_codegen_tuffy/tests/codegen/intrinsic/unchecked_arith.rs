@@ -51,8 +51,9 @@
 // CHECK:     v2: int:u32 = param 1
 // CHECK:     v3: int:i64 = iconst 31
 // CHECK:     v4: int:i64 = and v2, v3
-// CHECK:     v5: int:u32 = shl v1, v4
-// CHECK:     ret v5, v0
+// CHECK:     v5: int:i32 = shl v1, v4
+// CHECK:     v6: int:u32 = zext v5, 32
+// CHECK:     ret v6, v0
 // CHECK: }
 // CHECK:
 // CHECK: fn unchecked_shr_u32(_1: u32, _2: u32) -> u32 {

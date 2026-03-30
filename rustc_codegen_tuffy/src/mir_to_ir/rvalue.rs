@@ -1515,6 +1515,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         }
                     }
                     BinOp::Shl | BinOp::ShlUnchecked => {
+                        let bits = self.extract_result_bits(res_ann);
                         let shift_val = r_op.value;
                         let lhs_bits = type_size(self.tcx, lhs_mir_ty).unwrap_or(8) as i64 * 8;
                         let mask_val = self.builder.iconst(
@@ -1536,28 +1537,19 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             value: masked.raw(),
                             annotation: None,
                         };
-                        let int_ann = res_ann
-                            .map(|ia| match ia {
-                                IntAnn::Signed(n) => IntAnnotation {
-                                    bit_width: n,
-                                    signedness: IntSignedness::Signed,
-                                },
-                                IntAnn::Unsigned(n) => IntAnnotation {
-                                    bit_width: n,
-                                    signedness: IntSignedness::Unsigned,
-                                },
-                                IntAnn::DontCare(n) => IntAnnotation {
-                                    bit_width: n,
+                        let shifted = self
+                            .builder
+                            .shl(
+                                l_op.into(),
+                                masked_op.into(),
+                                IntAnnotation {
+                                    bit_width: bits,
                                     signedness: IntSignedness::DontCare,
                                 },
-                            })
-                            .unwrap_or(IntAnnotation {
-                                bit_width: 64,
-                                signedness: IntSignedness::DontCare,
-                            });
-                        self.builder
-                            .shl(l_op.into(), masked_op.into(), int_ann, Origin::synthetic())
-                            .raw()
+                                Origin::synthetic(),
+                            )
+                            .raw();
+                        self.apply_int_extension(shifted, res_ann, bits)
                     }
                     BinOp::BitOr => {
                         let bits = self.extract_result_bits(res_ann);

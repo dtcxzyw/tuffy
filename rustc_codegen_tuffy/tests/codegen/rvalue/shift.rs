@@ -15,8 +15,9 @@
 // CHECK:     v2: int:u32 = param 1
 // CHECK:     v3: int:i64 = iconst 31
 // CHECK:     v4: int:i64 = and v2, v3
-// CHECK:     v5: int:s32 = shl v1, v4
-// CHECK:     ret v5, v0
+// CHECK:     v5: int:i32 = shl v1, v4
+// CHECK:     v6: int:s32 = sext v5, 32
+// CHECK:     ret v6, v0
 // CHECK: }
 // CHECK:
 // CHECK: fn shr_i32(_1: i32, _2: u32) -> i32 {
