@@ -72,6 +72,7 @@ echo "Backend: $BACKEND"
 echo ""
 
 run_test "hello" "$FIXTURE_DIR/hello.rs" "Hello, world!"
+run_test "umul_overflow_64" "$FIXTURE_DIR/umul_overflow_64.rs" "ok"
 
 echo ""
 echo "=== Results: $pass passed, $fail failed ==="
