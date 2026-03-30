@@ -1834,6 +1834,73 @@ fn leg_mul<M>(
 }
 
 // ---------------------------------------------------------------------------
+// Widening 64×64→128 multiply and arithmetic helpers
+// ---------------------------------------------------------------------------
+
+/// Compute the full 128-bit unsigned product of two 64-bit values using the
+/// schoolbook 32-bit quarter method.  Returns `(lo_64, hi_64)`.
+fn widening_mul_u64(b: &mut Builder, x: ValueRef, y: ValueRef) -> (ValueRef, ValueRef) {
+    let c32 = b.iconst(32i64, 64, IntSignedness::Unsigned, o());
+    let mask32 = b.iconst(0xFFFF_FFFFi64, 64, IntSignedness::Unsigned, o());
+
+    let x0 = b.and(x.into(), mask32.into(), I64, o());
+    let x1 = b.shr(x.into(), c32.into(), UNSIGNED_64_INT, o());
+    let y0 = b.and(y.into(), mask32.into(), I64, o());
+    let y1 = b.shr(y.into(), c32.into(), UNSIGNED_64_INT, o());
+
+    let p0 = b.mul(x0.into(), y0.into(), I64, o());
+    let p1 = b.mul(x0.into(), y1.into(), I64, o());
+    let p2 = b.mul(x1.into(), y0.into(), I64, o());
+    let p3 = b.mul(x1.into(), y1.into(), I64, o());
+
+    let p0_hi = b.shr(p0.into(), c32.into(), UNSIGNED_64_INT, o());
+    let mid1 = b.add(p0_hi.into(), p1.into(), I64, o());
+    let cmp = b.icmp(ICmpOp::Lt, mid1.into(), p1.into(), o());
+    let c1 = bool_to_u64(b, cmp);
+    let mid = b.add(mid1.into(), p2.into(), I64, o());
+    let cmp = b.icmp(ICmpOp::Lt, mid.into(), p2.into(), o());
+    let c2 = bool_to_u64(b, cmp);
+    let total_carry = b.add(c1.into(), c2.into(), I64, o());
+
+    let mid_shifted = b.shl(mid.into(), c32.into(), UNSIGNED_64_INT, o());
+    let p0_lo = b.and(p0.into(), mask32.into(), I64, o());
+    let lo = b.or(mid_shifted.into(), p0_lo.into(), I64, o());
+
+    let mid_hi = b.shr(mid.into(), c32.into(), UNSIGNED_64_INT, o());
+    let carry_shifted = b.shl(total_carry.into(), c32.into(), UNSIGNED_64_INT, o());
+    let hi = b.add(mid_hi.into(), carry_shifted.into(), I64, o());
+    let hi = b.add(hi.into(), p3.into(), I64, o());
+
+    (lo.raw(), hi.raw())
+}
+
+/// Convert a boolean value to a u64 integer (0 or 1).
+fn bool_to_u64(b: &mut Builder, val: tuffy_ir::typed::BoolValue) -> ValueRef {
+    let one = b.iconst(1, 64, IntSignedness::Unsigned, o());
+    let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
+    b.select(
+        val.into(),
+        one.into(),
+        zero.into(),
+        Type::Int,
+        Some(Annotation::Int(I64)),
+        o(),
+    )
+}
+
+/// Add three u64 values, returning `(sum, carry)` where carry fits in 2 bits.
+fn add3_u64(b: &mut Builder, x: ValueRef, y: ValueRef, z: ValueRef) -> (ValueRef, ValueRef) {
+    let t1 = b.add(x.into(), y.into(), I64, o());
+    let cmp = b.icmp(ICmpOp::Lt, t1.into(), y.into(), o());
+    let c1 = bool_to_u64(b, cmp);
+    let sum = b.add(t1.into(), z.into(), I64, o());
+    let cmp = b.icmp(ICmpOp::Lt, sum.into(), z.into(), o());
+    let c2 = bool_to_u64(b, cmp);
+    let carry = b.add(c1.into(), c2.into(), I64, o());
+    (sum.raw(), carry.raw())
+}
+
+// ---------------------------------------------------------------------------
 // 128-bit add/sub with overflow detection
 // ---------------------------------------------------------------------------
 
@@ -2088,13 +2155,106 @@ fn leg_smul_with_overflow_128<M>(
     a: &Operand,
     op_b: &Operand,
 ) {
-    // Reuse leg_mul for the result; overflow is hard to detect exactly,
-    // so we conservatively always return no-overflow (false).
-    // This is incorrect for values that actually overflow, but is acceptable
-    // for now since 128-bit mul overflow is rare in practice.
-    leg_mul(old, s, b, old_vref, a, op_b);
+    // Compute the full 256-bit unsigned product, then adjust the high 128
+    // bits for signed semantics and check whether they match the sign
+    // extension of the low 128-bit result.
+    let (a_lo, a_hi) = wide_pair(s, old, b, a);
+    let (b_lo, b_hi) = wide_pair(s, old, b, op_b);
+
+    // Four widening 64×64→128 partial products.
+    let (ll_lo, ll_hi) = widening_mul_u64(b, a_lo, b_lo);
+    let (lh_lo, lh_hi) = widening_mul_u64(b, a_lo, b_hi);
+    let (hl_lo, hl_hi) = widening_mul_u64(b, a_hi, b_lo);
+    let (hh_lo, hh_hi) = widening_mul_u64(b, a_hi, b_hi);
+
+    // Combine into four 64-bit words of the 256-bit result:
+    //   w0 = ll_lo
+    //   w1 = ll_hi + lh_lo + hl_lo  (carry → c1)
+    //   w2 = lh_hi + hl_hi + hh_lo + c1  (carry → c2)
+    //   w3 = hh_hi + c2
+    let (w1, c1) = add3_u64(b, ll_hi, lh_lo, hl_lo);
+    let (w2_pre, c2_pre) = add3_u64(b, lh_hi, hl_hi, hh_lo);
+    let w2_sum = b.add(w2_pre.into(), c1.into(), I64, o());
+    let cmp = b.icmp(ICmpOp::Lt, w2_sum.into(), w2_pre.into(), o());
+    let w2_carry = bool_to_u64(b, cmp);
+    let c2 = b.add(c2_pre.into(), w2_carry.into(), I64, o());
+    let w3 = b.add(hh_hi.into(), c2.into(), I64, o());
+
+    // Low 128 bits of the product.
+    let prod_lo = ll_lo;
+    let prod_hi = w1;
+
+    // Adjust unsigned high 128 bits → signed high 128 bits:
+    //   signed_hi = unsigned_hi − (a<0 ? b : 0) − (b<0 ? a : 0)
+    let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
+    let c63 = b.iconst(63, 64, IntSignedness::Unsigned, o());
+
+    let a_sign = b.shr(Operand::new(a_hi).into(), c63.into(), UNSIGNED_64_INT, o());
+    let a_neg = b.icmp(ICmpOp::Ne, a_sign.into(), zero.into(), o());
+
+    let b_sign = b.shr(Operand::new(b_hi).into(), c63.into(), UNSIGNED_64_INT, o());
+    let b_neg = b.icmp(ICmpOp::Ne, b_sign.into(), zero.into(), o());
+
+    let ann64 = Some(Annotation::Int(I64));
+    let z = Operand::new(zero.raw());
+
+    let sub_b_lo = b.select(
+        a_neg.into(),
+        Operand::new(b_lo),
+        z.clone(),
+        Type::Int,
+        ann64,
+        o(),
+    );
+    let sub_b_hi = b.select(
+        a_neg.into(),
+        Operand::new(b_hi),
+        z.clone(),
+        Type::Int,
+        ann64,
+        o(),
+    );
+    let sub_a_lo = b.select(
+        b_neg.into(),
+        Operand::new(a_lo),
+        z.clone(),
+        Type::Int,
+        ann64,
+        o(),
+    );
+    let sub_a_hi = b.select(b_neg.into(), Operand::new(a_hi), z, Type::Int, ann64, o());
+
+    // 128-bit sub: (w2_sum, w3) − (sub_b_lo, sub_b_hi)
+    let t_lo = b.sub(w2_sum.into(), sub_b_lo.into(), I64, o());
+    let cmp = b.icmp(ICmpOp::Lt, w2_sum.into(), sub_b_lo.into(), o());
+    let borrow1 = bool_to_u64(b, cmp);
+    let t_hi = b.sub(w3.into(), sub_b_hi.into(), I64, o());
+    let t_hi = b.sub(t_hi.into(), borrow1.into(), I64, o());
+
+    // 128-bit sub: − (sub_a_lo, sub_a_hi)
+    let s_lo = b.sub(t_lo.into(), sub_a_lo.into(), I64, o());
+    let cmp = b.icmp(ICmpOp::Lt, t_lo.into(), sub_a_lo.into(), o());
+    let borrow2 = bool_to_u64(b, cmp);
+    let s_hi = b.sub(t_hi.into(), sub_a_hi.into(), I64, o());
+    let s_hi = b.sub(s_hi.into(), borrow2.into(), I64, o());
+
+    // Overflow iff (s_lo, s_hi) ≠ sign-extension of bit 127.
+    let sign_ext = b.shr(prod_hi.into(), c63.into(), SIGNED_64_INT, o());
+    let ne_lo = b.icmp(ICmpOp::Ne, s_lo.into(), sign_ext.into(), o());
+    let ne_hi = b.icmp(ICmpOp::Ne, s_hi.into(), sign_ext.into(), o());
+    let ne_lo_int = bool_to_u64(b, ne_lo);
+    let ne_hi_int = bool_to_u64(b, ne_hi);
+    let overflow_int = b.or(
+        Operand::new(ne_lo_int).into(),
+        Operand::new(ne_hi_int).into(),
+        I64,
+        o(),
+    );
+    let zero_cmp = b.iconst(0, 64, IntSignedness::DontCare, o());
+    let overflow = b.icmp(ICmpOp::Ne, overflow_int.into(), zero_cmp.into(), o());
+
+    s.vmap.set(old_vref, Mapped::Pair(prod_lo, prod_hi));
     let old_sec = ValueRef::inst_secondary_result(old_vref.index());
-    let overflow = b.bconst(false, o());
     s.vmap.set(old_sec, Mapped::One(overflow.into()));
 }
 
@@ -2106,9 +2266,44 @@ fn leg_umul_with_overflow_128<M>(
     a: &Operand,
     op_b: &Operand,
 ) {
-    leg_mul(old, s, b, old_vref, a, op_b);
+    // Compute the full 256-bit unsigned product.  Overflow iff the high
+    // 128 bits are non-zero.
+    let (a_lo, a_hi) = wide_pair(s, old, b, a);
+    let (b_lo, b_hi) = wide_pair(s, old, b, op_b);
+
+    let (ll_lo, ll_hi) = widening_mul_u64(b, a_lo, b_lo);
+    let (lh_lo, lh_hi) = widening_mul_u64(b, a_lo, b_hi);
+    let (hl_lo, hl_hi) = widening_mul_u64(b, a_hi, b_lo);
+    let (hh_lo, hh_hi) = widening_mul_u64(b, a_hi, b_hi);
+
+    let (w1, c1) = add3_u64(b, ll_hi, lh_lo, hl_lo);
+    let (w2_pre, c2_pre) = add3_u64(b, lh_hi, hl_hi, hh_lo);
+    let w2 = b.add(w2_pre.into(), c1.into(), I64, o());
+    let cmp = b.icmp(ICmpOp::Lt, w2.into(), w2_pre.into(), o());
+    let w2_carry = bool_to_u64(b, cmp);
+    let c2 = b.add(c2_pre.into(), w2_carry.into(), I64, o());
+    let w3 = b.add(hh_hi.into(), c2.into(), I64, o());
+
+    let prod_lo = ll_lo;
+    let prod_hi = w1;
+
+    // Unsigned overflow: high 128 bits non-zero.
+    let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
+    let ne_lo = b.icmp(ICmpOp::Ne, w2.into(), zero.into(), o());
+    let ne_hi = b.icmp(ICmpOp::Ne, w3.into(), zero.into(), o());
+    let ne_lo_int = bool_to_u64(b, ne_lo);
+    let ne_hi_int = bool_to_u64(b, ne_hi);
+    let overflow_int = b.or(
+        Operand::new(ne_lo_int).into(),
+        Operand::new(ne_hi_int).into(),
+        I64,
+        o(),
+    );
+    let zero_cmp = b.iconst(0, 64, IntSignedness::DontCare, o());
+    let overflow = b.icmp(ICmpOp::Ne, overflow_int.into(), zero_cmp.into(), o());
+
+    s.vmap.set(old_vref, Mapped::Pair(prod_lo, prod_hi));
     let old_sec = ValueRef::inst_secondary_result(old_vref.index());
-    let overflow = b.bconst(false, o());
     s.vmap.set(old_sec, Mapped::One(overflow.into()));
 }
 
