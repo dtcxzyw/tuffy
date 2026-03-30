@@ -355,6 +355,17 @@ fn rewrite_inst(inst: &VInst, assignments: &[PReg]) -> PInst {
             signed: *signed,
             rem: *rem,
         },
+        MInst::UMulOverflow {
+            dst,
+            overflow,
+            lhs,
+            rhs,
+        } => MInst::UMulOverflow {
+            dst: r(dst),
+            overflow: r(overflow),
+            lhs: r(lhs),
+            rhs: r(rhs),
+        },
         MInst::Popcnt { size, dst, src } => MInst::Popcnt {
             size: *size,
             dst: r(dst),

@@ -147,6 +147,19 @@ impl RegAllocInst for VInst {
                 ops.push(use_op(*lhs));
                 ops.push(use_op(*rhs));
             }
+            // UMulOverflow pseudo-instruction: lhs and rhs are inputs,
+            // dst and overflow are outputs.
+            MInst::UMulOverflow {
+                dst,
+                overflow,
+                lhs,
+                rhs,
+            } => {
+                ops.push(def_op(*dst));
+                ops.push(def_op(*overflow));
+                ops.push(use_op(*lhs));
+                ops.push(use_op(*rhs));
+            }
             MInst::FpBinOp { dst, lhs, rhs, .. } => {
                 ops.push(def_op(*dst));
                 ops.push(use_op(*lhs));
@@ -250,6 +263,12 @@ impl RegAllocInst for VInst {
             }
             // DivRem internally uses RAX, RCX, RDX.
             MInst::DivRem { .. } => {
+                clobbers.push(PReg(0)); // Rax
+                clobbers.push(PReg(1)); // Rcx
+                clobbers.push(PReg(2)); // Rdx
+            }
+            // UMulOverflow internally uses RAX, RCX, RDX.
+            MInst::UMulOverflow { .. } => {
                 clobbers.push(PReg(0)); // Rax
                 clobbers.push(PReg(1)); // Rcx
                 clobbers.push(PReg(2)); // Rdx

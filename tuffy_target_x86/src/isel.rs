@@ -2930,24 +2930,26 @@ fn select_inst(
             let r = ctx.ensure_in_reg(rhs.clone().raw().value)?;
             let result = ctx.alloc.alloc();
             let overflow = ctx.alloc.alloc();
-            ctx.out.push(MInst::MovRR {
-                size: OpSize::S64,
-                dst: result,
-                src: l,
-            });
-            ctx.out.push(MInst::ImulRR {
-                size: OpSize::S64,
-                dst: result,
-                src: r,
-            });
             if *bits == 64 {
-                // 64-bit unsigned mul overflow not detectable with IMUL — conservatively report 0.
-                ctx.out.push(MInst::MovRI {
-                    size: OpSize::S32,
-                    dst: overflow,
-                    imm: 0,
+                // Use one-operand MUL (RDX:RAX = RAX * src) for proper
+                // unsigned overflow detection: overflow iff RDX != 0.
+                ctx.out.push(MInst::UMulOverflow {
+                    dst: result,
+                    overflow,
+                    lhs: l,
+                    rhs: r,
                 });
             } else {
+                ctx.out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst: result,
+                    src: l,
+                });
+                ctx.out.push(MInst::ImulRR {
+                    size: OpSize::S64,
+                    dst: result,
+                    src: r,
+                });
                 let tmp = ctx.alloc.alloc();
                 ctx.out.push(MInst::MovRR {
                     size: OpSize::S64,

@@ -989,6 +989,14 @@ fn encode_inst(inst: &PInst, ctx: &mut EncodeContext) {
         } => {
             encode_divrem(ctx, *dst, *lhs, *rhs, *signed, *rem);
         }
+        MInst::UMulOverflow {
+            dst,
+            overflow,
+            lhs,
+            rhs,
+        } => {
+            encode_umul_overflow(ctx, *dst, *overflow, *lhs, *rhs);
+        }
         MInst::FpBinOp {
             op,
             dst,
@@ -1104,6 +1112,47 @@ fn encode_divrem(ctx: &mut EncodeContext, dst: Gpr, lhs: Gpr, rhs: Gpr, signed: 
     // Step 4: Move result to dst.
     let result_reg = if rem { Gpr::Rdx } else { Gpr::Rax };
     ctx.emit_mov64(dst, result_reg);
+}
+
+/// UMulOverflow pseudo-instruction expansion.
+///
+/// Emits: mov rax,lhs; mul rhs → RDX:RAX; test rdx,rdx; setne overflow;
+///        movzx overflow; mov dst,rax.
+///
+/// Uses the one-operand MUL r64 which computes the full 128-bit unsigned
+/// product in RDX:RAX.  Overflow is detected when RDX (the high 64 bits)
+/// is non-zero.
+fn encode_umul_overflow(ctx: &mut EncodeContext, dst: Gpr, overflow: Gpr, lhs: Gpr, rhs: Gpr) {
+    // Step 1: Get lhs into RAX and rhs into RCX (scratch) without clobbering.
+    // We reuse RCX as the scratch for rhs, same pattern as DivRem.
+    if rhs == Gpr::Rax && lhs == Gpr::Rcx {
+        // Both swapped — use xchg.
+        ctx.emit(Instruction::with2(Code::Xchg_rm64_r64, Register::RCX, Register::RAX).unwrap());
+    } else if rhs == Gpr::Rax {
+        ctx.emit_mov64(Gpr::Rcx, Gpr::Rax);
+        ctx.emit_mov64(Gpr::Rax, lhs);
+    } else {
+        ctx.emit_mov64(Gpr::Rax, lhs);
+        ctx.emit_mov64(Gpr::Rcx, rhs);
+    }
+
+    // Step 2: mul rcx — RDX:RAX = RAX * RCX (unsigned)
+    ctx.emit(Instruction::with1(Code::Mul_rm64, Register::RCX).unwrap());
+
+    // Step 3: Check overflow (RDX != 0).
+    ctx.emit(Instruction::with2(Code::Test_rm64_r64, Register::RDX, Register::RDX).unwrap());
+    ctx.emit(Instruction::with1(Code::Setne_rm8, gpr_to_iced(overflow, OpSize::S8)).unwrap());
+    ctx.emit(
+        Instruction::with2(
+            Code::Movzx_r64_rm8,
+            gpr64(overflow),
+            gpr_to_iced(overflow, OpSize::S8),
+        )
+        .unwrap(),
+    );
+
+    // Step 4: Move low result to dst.
+    ctx.emit_mov64(dst, Gpr::Rax);
 }
 
 /// FpBinOp pseudo-instruction: SSE2 binary operation with direct XMM operations.

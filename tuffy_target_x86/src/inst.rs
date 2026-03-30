@@ -213,6 +213,14 @@ pub enum MInst<R: RegType> {
         signed: bool,
         rem: bool,
     },
+    /// Pseudo-instruction: 64-bit unsigned multiply with overflow detection.
+    ///
+    /// Expanded by the encoder into: mov rax,lhs; mul rhs → RDX:RAX;
+    /// test rdx,rdx; setne overflow_dst; movzx overflow_dst; mov dst,rax.
+    ///
+    /// Uses the one-operand MUL which produces a 128-bit result in RDX:RAX.
+    /// Overflow is detected when RDX != 0.
+    UMulOverflow { dst: R, overflow: R, lhs: R, rhs: R },
     /// popcnt r32/r64, r32/r64 (population count)
     Popcnt { size: OpSize, dst: R, src: R },
     /// lzcnt r32/r64, r32/r64 (count leading zeros)
