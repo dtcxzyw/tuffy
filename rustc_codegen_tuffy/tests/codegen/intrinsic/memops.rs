@@ -53,7 +53,7 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @_RINvNtCsa3SJzwB9S2T_4core3ptr11write_byteshECse33uD6zc4Cp_6memops(ptr, int:u8, int:u64) {
+// CHECK: func @_RINvNtC$HASH_4core3ptr11write_byteshEC$HASH_6memops(ptr, int:u8, int:u64) {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
 // CHECK:     v2: int:u8 = param 1
@@ -140,7 +140,7 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @_RINvNtCsa3SJzwB9S2T_4core3ptr19copy_nonoverlappinghECse33uD6zc4Cp_6memops(ptr, ptr, int:u64) {
+// CHECK: func @_RINvNtC$HASH_4core3ptr19copy_nonoverlappinghEC$HASH_6memops(ptr, ptr, int:u64) {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
 // CHECK:     v2: ptr = param 1
@@ -220,7 +220,7 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @_RINvNtCsa3SJzwB9S2T_4core3ptr4copyhECse33uD6zc4Cp_6memops(ptr, ptr, int:u64) {
+// CHECK: func @_RINvNtC$HASH_4core3ptr4copyhEC$HASH_6memops(ptr, ptr, int:u64) {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
 // CHECK:     v2: ptr = param 1
@@ -383,7 +383,7 @@
 // CHECK: data @.Lstr.1 = "is_aligned_to: align is not a power-of-two"
 // CHECK: data @.Lloc_file.2 = "$SYSROOT/library/core/src/panic.rs"
 // CHECK: data @.Lloc.3 = "..." relocs [0: @.Lloc_file.2]
-// CHECK: func @_RNvMNtNtCsa3SJzwB9S2T_4core3ptr9const_ptrPu13is_aligned_toCse33uD6zc4Cp_6memops(ptr, int:u64) -> bool {
+// CHECK: func @_RNvMNtNtC$HASH_4core3ptr9const_ptrPu13is_aligned_toC$HASH_6memops(ptr, int:u64) -> bool {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
 // CHECK:     v2: int:u64 = param 1
@@ -427,7 +427,7 @@
 // CHECK:     v38: ptr = ptradd v3, v37
 // CHECK:     v39: int:i64 = load.8 v38, v35
 // CHECK:     v40: ptr = symbol_addr @.Lloc.3
-// CHECK:     v41: ptr = symbol_addr @_RNvNtCsa3SJzwB9S2T_4core9panicking9panic_fmt
+// CHECK:     v41: ptr = symbol_addr @_RNvNtC$HASH_4core9panicking9panic_fmt
 // CHECK:     v42: mem = call v41(v36, v39, v40), v35
 // CHECK:     v43: int:i64 = iconst 0
 // CHECK:     unreachable
@@ -447,7 +447,7 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @_RNvNtCsa3SJzwB9S2T_4core10intrinsics9cold_pathCse33uD6zc4Cp_6memops() {
+// CHECK: func @_RNvNtC$HASH_4core10intrinsics9cold_pathC$HASH_6memops() {
 // CHECK:   bb0(v0: mem):
 // CHECK:     ret v0
 // CHECK: }
@@ -606,14 +606,14 @@
 // CHECK: data @.Lstr.5 = "unsafe precondition(s) violated: ptr::write_bytes requires that the destination pointer is aligned and non-null\n\nThis indicates a bug in the program. This Undefined Behavior check is optional, and cannot be relied on for safety."
 // CHECK: data @.Lloc_file.6 = "$SYSROOT/library/core/src/ub_checks.rs"
 // CHECK: data @.Lloc.7 = "..." relocs [0: @.Lloc_file.6]
-// CHECK: func @_RNvNvNtCsa3SJzwB9S2T_4core3ptr11write_bytes18precondition_checkCse33uD6zc4Cp_6memops(ptr, int:u64, bool) {
+// CHECK: func @_RNvNvNtC$HASH_4core3ptr11write_bytes18precondition_checkC$HASH_6memops(ptr, int:u64, bool) {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
 // CHECK:     v2: int:u64 = param 1
 // CHECK:     v3: bool = param 2
 // CHECK:     v4: ptr = stack_slot 16
 // CHECK:     v5: ptr = stack_slot 16
-// CHECK:     v6: ptr = symbol_addr @_RNvMNtNtCsa3SJzwB9S2T_4core3ptr9const_ptrPu13is_aligned_toCse33uD6zc4Cp_6memops
+// CHECK:     v6: ptr = symbol_addr @_RNvMNtNtC$HASH_4core3ptr9const_ptrPu13is_aligned_toC$HASH_6memops
 // CHECK:     v7: mem, v8: bool = call v6(v1, v2), v0 -> bool
 // CHECK:     br bb7(v7)
 // CHECK:
@@ -645,7 +645,7 @@
 // CHECK:     v34: int:i64 = load.8 v33, v30
 // CHECK:     v35: bool = bconst false
 // CHECK:     v36: ptr = symbol_addr @.Lloc.7
-// CHECK:     v37: ptr = symbol_addr @_RNvNtCsa3SJzwB9S2T_4core9panicking18panic_nounwind_fmt
+// CHECK:     v37: ptr = symbol_addr @_RNvNtC$HASH_4core9panicking18panic_nounwind_fmt
 // CHECK:     v38: mem = call v37(v31, v34, v35, v36), v30
 // CHECK:     v39: int:i64 = iconst 0
 // CHECK:     unreachable
@@ -972,7 +972,7 @@
 // CHECK: data @.Lstr.9 = "unsafe precondition(s) violated: ptr::copy_nonoverlapping requires that both pointer arguments are aligned and non-null and the specified memory ranges do not overlap\n\nThis indicates a bug in the program. This Undefined Behavior check is optional, and cannot be relied on for safety."
 // CHECK: data @.Lloc_file.10 = "$SYSROOT/library/core/src/ub_checks.rs"
 // CHECK: data @.Lloc.11 = "..." relocs [0: @.Lloc_file.10]
-// CHECK: func @_RNvNvNtCsa3SJzwB9S2T_4core3ptr19copy_nonoverlapping18precondition_checkCse33uD6zc4Cp_6memops(ptr, ptr, int:u64, int:u64, int:u64) {
+// CHECK: func @_RNvNvNtC$HASH_4core3ptr19copy_nonoverlapping18precondition_checkC$HASH_6memops(ptr, ptr, int:u64, int:u64, int:u64) {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
 // CHECK:     v2: ptr = param 1
@@ -999,17 +999,17 @@
 // CHECK:
 // CHECK:   bb3(v21: mem):
 // CHECK:     v22: bool = load.1 v6, v21
-// CHECK:     v23: ptr = symbol_addr @_RNvMNtNtCsa3SJzwB9S2T_4core3ptr9const_ptrPu13is_aligned_toCse33uD6zc4Cp_6memops
+// CHECK:     v23: ptr = symbol_addr @_RNvMNtNtC$HASH_4core3ptr9const_ptrPu13is_aligned_toC$HASH_6memops
 // CHECK:     v24: mem, v25: bool = call v23(v1, v4), v21 -> bool
 // CHECK:     br bb15(v24)
 // CHECK:
 // CHECK:   bb4(v27: mem):
-// CHECK:     v28: ptr = symbol_addr @_RNvMNtNtCsa3SJzwB9S2T_4core3ptr9const_ptrPu13is_aligned_toCse33uD6zc4Cp_6memops
+// CHECK:     v28: ptr = symbol_addr @_RNvMNtNtC$HASH_4core3ptr9const_ptrPu13is_aligned_toC$HASH_6memops
 // CHECK:     v29: mem, v30: bool = call v28(v2, v4), v27 -> bool
 // CHECK:     br bb20(v29)
 // CHECK:
 // CHECK:   bb5(v32: mem):
-// CHECK:     v33: ptr = symbol_addr @_RNvNvNtCsa3SJzwB9S2T_4core9ub_checks23maybe_is_nonoverlapping7runtimeCse33uD6zc4Cp_6memops
+// CHECK:     v33: ptr = symbol_addr @_RNvNvNtC$HASH_4core9ub_checks23maybe_is_nonoverlapping7runtimeC$HASH_6memops
 // CHECK:     v34: mem, v35: bool = call v33(v1, v2, v3, v5), v32 -> bool
 // CHECK:     br bb21(v34)
 // CHECK:
@@ -1047,7 +1047,7 @@
 // CHECK:     v65: int:i64 = load.8 v64, v61
 // CHECK:     v66: bool = bconst false
 // CHECK:     v67: ptr = symbol_addr @.Lloc.11
-// CHECK:     v68: ptr = symbol_addr @_RNvNtCsa3SJzwB9S2T_4core9panicking18panic_nounwind_fmt
+// CHECK:     v68: ptr = symbol_addr @_RNvNtC$HASH_4core9panicking18panic_nounwind_fmt
 // CHECK:     v69: mem = call v68(v62, v65, v66, v67), v61
 // CHECK:     v70: int:i64 = iconst 0
 // CHECK:     unreachable
@@ -1392,7 +1392,7 @@
 // CHECK: data @.Lstr.13 = "unsafe precondition(s) violated: ptr::copy requires that both pointer arguments are aligned and non-null\n\nThis indicates a bug in the program. This Undefined Behavior check is optional, and cannot be relied on for safety."
 // CHECK: data @.Lloc_file.14 = "$SYSROOT/library/core/src/ub_checks.rs"
 // CHECK: data @.Lloc.15 = "..." relocs [0: @.Lloc_file.14]
-// CHECK: func @_RNvNvNtCsa3SJzwB9S2T_4core3ptr4copy18precondition_checkCse33uD6zc4Cp_6memops(ptr, ptr, int:u64, bool) {
+// CHECK: func @_RNvNvNtC$HASH_4core3ptr4copy18precondition_checkC$HASH_6memops(ptr, ptr, int:u64, bool) {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
 // CHECK:     v2: ptr = param 1
@@ -1403,7 +1403,7 @@
 // CHECK:     v7: ptr = stack_slot 1
 // CHECK:     v8: ptr = stack_slot 16
 // CHECK:     v9: ptr = stack_slot 16
-// CHECK:     v10: ptr = symbol_addr @_RNvMNtNtCsa3SJzwB9S2T_4core3ptr9const_ptrPu13is_aligned_toCse33uD6zc4Cp_6memops
+// CHECK:     v10: ptr = symbol_addr @_RNvMNtNtC$HASH_4core3ptr9const_ptrPu13is_aligned_toC$HASH_6memops
 // CHECK:     v11: mem, v12: bool = call v10(v1, v3), v0 -> bool
 // CHECK:     br bb9(v11)
 // CHECK:
@@ -1441,7 +1441,7 @@
 // CHECK:     v42: int:i64 = load.8 v41, v38
 // CHECK:     v43: bool = bconst false
 // CHECK:     v44: ptr = symbol_addr @.Lloc.15
-// CHECK:     v45: ptr = symbol_addr @_RNvNtCsa3SJzwB9S2T_4core9panicking18panic_nounwind_fmt
+// CHECK:     v45: ptr = symbol_addr @_RNvNtC$HASH_4core9panicking18panic_nounwind_fmt
 // CHECK:     v46: mem = call v45(v39, v42, v43, v44), v38
 // CHECK:     v47: int:i64 = iconst 0
 // CHECK:     unreachable
@@ -1463,7 +1463,7 @@
 // CHECK:     v61: mem = store.8 v2, v5, v60
 // CHECK:     v62: mem = store.8 v3, v6, v61
 // CHECK:     v63: ptr = load.8 v5, v62
-// CHECK:     v64: ptr = symbol_addr @_RNvMNtNtCsa3SJzwB9S2T_4core3ptr9const_ptrPu13is_aligned_toCse33uD6zc4Cp_6memops
+// CHECK:     v64: ptr = symbol_addr @_RNvMNtNtC$HASH_4core3ptr9const_ptrPu13is_aligned_toC$HASH_6memops
 // CHECK:     v65: mem, v66: bool = call v64(v63, v3), v62 -> bool
 // CHECK:     v67: mem = store.1 v66, v7, v65
 // CHECK:     br bb13(v67)
@@ -1529,7 +1529,7 @@
 // CHECK:     v121: mem = store.8 v2, v5, v120
 // CHECK:     v122: mem = store.8 v3, v6, v121
 // CHECK:     v123: ptr = load.8 v5, v122
-// CHECK:     v124: ptr = symbol_addr @_RNvMNtNtCsa3SJzwB9S2T_4core3ptr9const_ptrPu13is_aligned_toCse33uD6zc4Cp_6memops
+// CHECK:     v124: ptr = symbol_addr @_RNvMNtNtC$HASH_4core3ptr9const_ptrPu13is_aligned_toC$HASH_6memops
 // CHECK:     v125: mem, v126: bool = call v124(v123, v3), v122 -> bool
 // CHECK:     v127: mem = store.1 v126, v7, v125
 // CHECK:     br bb15(v127)
@@ -1704,7 +1704,7 @@
 // CHECK:     0x30 │ 66 6c 6f 77 73 20 61 20 75 73 69 7a 65          │ flows a usize
 // CHECK: }
 // CHECK: data @.Lstr.16 = "is_nonoverlapping: `size_of::<T>() * count` overflows a usize"
-// CHECK: func @_RNvNvNtCsa3SJzwB9S2T_4core9ub_checks23maybe_is_nonoverlapping7runtimeCse33uD6zc4Cp_6memops(ptr, ptr, int:u64, int:u64) -> bool {
+// CHECK: func @_RNvNvNtC$HASH_4core9ub_checks23maybe_is_nonoverlapping7runtimeC$HASH_6memops(ptr, ptr, int:u64, int:u64) -> bool {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
 // CHECK:     v2: ptr = param 1
@@ -1730,7 +1730,7 @@
 // CHECK:   bb2(v21: mem):
 // CHECK:     v22: ptr = symbol_addr @.Lstr.16
 // CHECK:     v23: int:i64 = iconst 61
-// CHECK:     v24: ptr = symbol_addr @_RNvNtCsa3SJzwB9S2T_4core9panicking14panic_nounwind
+// CHECK:     v24: ptr = symbol_addr @_RNvNtC$HASH_4core9panicking14panic_nounwind
 // CHECK:     v25: mem = call v24(v22, v23), v21
 // CHECK:     v26: int:i64 = iconst 0
 // CHECK:     unreachable
@@ -1796,8 +1796,8 @@
 // CHECK:     v1: ptr = param 0
 // CHECK:     v2: ptr = param 1
 // CHECK:     v3: int:i64 = iconst 16
-// CHECK:     v4: ptr = symbol_addr @_RINvNtCsa3SJzwB9S2T_4core3ptr4copyhECse33uD6zc4Cp_6memops
-// CHECK:     v5: mem = call v4(v2, v1, v3), v0
+// CHECK:     v4: ptr = symbol_addr @_RINvNtC$HASH_4core3ptr4copyhEC$HASH_6memops
+// CHECK:     v5: mem = call v4(v2, v1, v3:u64), v0
 // CHECK:     v6: int:i64 = iconst 0
 // CHECK:     br bb1(v5)
 // CHECK:
@@ -1824,8 +1824,8 @@
 // CHECK:     v1: ptr = param 0
 // CHECK:     v2: ptr = param 1
 // CHECK:     v3: int:i64 = iconst 16
-// CHECK:     v4: ptr = symbol_addr @_RINvNtCsa3SJzwB9S2T_4core3ptr19copy_nonoverlappinghECse33uD6zc4Cp_6memops
-// CHECK:     v5: mem = call v4(v2, v1, v3), v0
+// CHECK:     v4: ptr = symbol_addr @_RINvNtC$HASH_4core3ptr19copy_nonoverlappinghEC$HASH_6memops
+// CHECK:     v5: mem = call v4(v2, v1, v3:u64), v0
 // CHECK:     v6: int:i64 = iconst 0
 // CHECK:     br bb1(v5)
 // CHECK:
@@ -1851,8 +1851,8 @@
 // CHECK:     v1: ptr = param 0
 // CHECK:     v2: int:i8 = iconst 66
 // CHECK:     v3: int:i64 = iconst 8
-// CHECK:     v4: ptr = symbol_addr @_RINvNtCsa3SJzwB9S2T_4core3ptr11write_byteshECse33uD6zc4Cp_6memops
-// CHECK:     v5: mem = call v4(v1, v2, v3), v0
+// CHECK:     v4: ptr = symbol_addr @_RINvNtC$HASH_4core3ptr11write_byteshEC$HASH_6memops
+// CHECK:     v5: mem = call v4(v1, v2:u8, v3:u64), v0
 // CHECK:     v6: int:i64 = iconst 0
 // CHECK:     br bb1(v5)
 // CHECK:

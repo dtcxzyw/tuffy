@@ -1114,6 +1114,26 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             Origin::synthetic(),
                         );
                         ir_args.push(loaded.into());
+                    } else if arg_size > 8
+                        && arg_size <= 16
+                        && matches!(repr_kind(self.tcx, arg_ty), ReprKind::Scalar)
+                        && matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
+                    {
+                        // Wide scalar in a stack slot (e.g. u128, or a
+                        // newtype wrapper like (u128,)): load the full
+                        // width so it is passed by value.  The legalizer
+                        // splits the wide value into register pairs.
+                        let ann = translate_annotation(arg_ty)
+                            .or_else(|| int_annotation_for_bytes(arg_size as u32));
+                        let loaded = self.builder.load(
+                            v.into(),
+                            arg_size as u32,
+                            Type::Int,
+                            self.current_mem.into(),
+                            ann,
+                            Origin::synthetic(),
+                        );
+                        ir_args.push(loaded.into());
                     } else {
                         // Push value with type annotation so the legalizer
                         // can identify wide values (e.g. 128-bit integers).
