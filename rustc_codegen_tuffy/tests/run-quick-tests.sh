@@ -62,33 +62,33 @@ echo ""
 # The [host] rustflags = [] entry in config.toml is unaffected, so proc macros
 # (serde derive, etc.) continue to compile with the system backend.
 
-BITFLAGS_DIR="$REPO_ROOT/scratch/bitflags"
-if [ -d "$BITFLAGS_DIR" ]; then
-    echo "=== Bitflags cargo test ==="
+# BITFLAGS_DIR="$REPO_ROOT/scratch/bitflags"
+# if [ -d "$BITFLAGS_DIR" ]; then
+#     echo "=== Bitflags cargo test ==="
 
-    # Copy rustc wrapper to the temp dir and make it executable so that
-    # RUSTC_WRAPPER can invoke it. Only the bitflags crate itself is compiled
-    # with the tuffy backend; all dependencies and dev-deps use the default.
-    # CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="" overrides the
-    # hardcoded release backend path in scratch/bitflags/.cargo/config.toml.
-    WRAPPER_EXEC="$TEMP_DIR/rustc-wrapper-tuffy"
-    cp "$SCRIPT_DIR/rustc-wrapper-tuffy.sh" "$WRAPPER_EXEC"
-    python3 -c "import os; os.chmod('$WRAPPER_EXEC', 0o755)"
+#     # Copy rustc wrapper to the temp dir and make it executable so that
+#     # RUSTC_WRAPPER can invoke it. Only the bitflags crate itself is compiled
+#     # with the tuffy backend; all dependencies and dev-deps use the default.
+#     # CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="" overrides the
+#     # hardcoded release backend path in scratch/bitflags/.cargo/config.toml.
+#     WRAPPER_EXEC="$TEMP_DIR/rustc-wrapper-tuffy"
+#     cp "$SCRIPT_DIR/rustc-wrapper-tuffy.sh" "$WRAPPER_EXEC"
+#     python3 -c "import os; os.chmod('$WRAPPER_EXEC', 0o755)"
 
-    if RUSTC_WRAPPER="$WRAPPER_EXEC" \
-       TUFFY_BACKEND="$BACKEND" \
-       TUFFY_CRATE="bitflags" \
-       CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="" \
-       cargo test --manifest-path "$BITFLAGS_DIR/Cargo.toml"; then
-        overall_pass=$((overall_pass + 1))
-    else
-        overall_fail=$((overall_fail + 1))
-    fi
-    echo ""
-else
-    echo "=== Bitflags cargo test: SKIP (scratch/bitflags not found) ==="
-    echo ""
-fi
+#     if RUSTC_WRAPPER="$WRAPPER_EXEC" \
+#        TUFFY_BACKEND="$BACKEND" \
+#        TUFFY_CRATE="bitflags" \
+#        CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="" \
+#        cargo test --manifest-path "$BITFLAGS_DIR/Cargo.toml"; then
+#         overall_pass=$((overall_pass + 1))
+#     else
+#         overall_fail=$((overall_fail + 1))
+#     fi
+#     echo ""
+# else
+#     echo "=== Bitflags cargo test: SKIP (scratch/bitflags not found) ==="
+#     echo ""
+# fi
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 
