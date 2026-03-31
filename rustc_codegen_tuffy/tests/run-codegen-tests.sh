@@ -21,7 +21,7 @@ else
 fi
 
 CODEGEN_DIR="$CRATE_ROOT/tests/codegen"
-OUT_DIR="/tmp/tuffy_codegen_test"
+OUT_DIR="${OUT_DIR:-/tmp/tuffy_codegen_test}"
 
 # Source the IR normalizer (replaces sysroot paths, masks binary loc data).
 source "$CRATE_ROOT/tests/normalize-ir.sh"

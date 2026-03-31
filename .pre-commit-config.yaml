@@ -17,15 +17,27 @@ repos:
     - id: check-yaml
 - repo: local
   hooks:
+    - id: cargo-check
+      name: cargo check
+      entry: cargo check --all-targets --all-features
+      language: system
+      types: [rust]
+      pass_filenames: false
+    - id: cargo-check-codegen
+      name: cargo check (rustc_codegen_tuffy)
+      entry: cargo check --manifest-path rustc_codegen_tuffy/Cargo.toml --all-targets --all-features
+      language: system
+      types: [rust]
+      pass_filenames: false
     - id: cargo-fmt
       name: cargo fmt
-      entry: cargo fmt -- --check
+      entry: "bash -c 'cargo fmt && git add -u && cargo fmt -- --check'"
       language: system
       types: [rust]
       pass_filenames: false
     - id: cargo-clippy
       name: cargo clippy
-      entry: cargo clippy --all-targets --all-features -- -D warnings
+      entry: "bash -c 'cargo clippy --fix --allow-dirty --allow-staged --all-targets --all-features 2>&1 || true; git add -u; cargo clippy --all-targets --all-features -- -D warnings'"
       language: system
       types: [rust]
       pass_filenames: false
@@ -36,13 +48,13 @@ repos:
       pass_filenames: false
     - id: cargo-fmt-codegen
       name: cargo fmt (rustc_codegen_tuffy)
-      entry: cargo fmt --manifest-path rustc_codegen_tuffy/Cargo.toml -- --check
+      entry: "bash -c 'cargo fmt --manifest-path rustc_codegen_tuffy/Cargo.toml && git add -u && cargo fmt --manifest-path rustc_codegen_tuffy/Cargo.toml -- --check'"
       language: system
       types: [rust]
       pass_filenames: false
     - id: cargo-clippy-codegen
       name: cargo clippy (rustc_codegen_tuffy)
-      entry: cargo clippy --manifest-path rustc_codegen_tuffy/Cargo.toml --all-targets --all-features -- -D warnings
+      entry: "bash -c 'cargo clippy --fix --allow-dirty --allow-staged --manifest-path rustc_codegen_tuffy/Cargo.toml --all-targets --all-features 2>&1 || true; git add -u; cargo clippy --manifest-path rustc_codegen_tuffy/Cargo.toml --all-targets --all-features -- -D warnings'"
       language: system
       types: [rust]
       pass_filenames: false
@@ -50,4 +62,10 @@ repos:
       name: cargo deny (rustc_codegen_tuffy)
       entry: cargo deny --manifest-path rustc_codegen_tuffy/Cargo.toml check
       language: system
+      pass_filenames: false
+    - id: rustc-codegen-tuffy-tests
+      name: rustc_codegen_tuffy quick tests
+      entry: bash rustc_codegen_tuffy/tests/run-quick-tests.sh
+      language: system
+      types: [rust]
       pass_filenames: false

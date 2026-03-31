@@ -21,7 +21,7 @@ else
 fi
 
 FIXTURE_DIR="$CRATE_ROOT/tests/fixtures"
-OUT_DIR="/tmp/tuffy_hello_test"
+OUT_DIR="${OUT_DIR:-/tmp/tuffy_hello_test}"
 mkdir -p "$OUT_DIR"
 
 pass=0
