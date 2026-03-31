@@ -1,0 +1,15 @@
+digraph RegionInferenceContext {
+    r0[label="SCC(0) = {\'?1}"][shape="box"];
+    r1[label="SCC(1) = {\'?3/U1 (ex<\'_>)}"][shape="box"];
+    r2[label="SCC(2) = {\'?2/U1 (for<\'_>)}"][shape="box"];
+    r3[label="SCC(3) = {\'?5/U2 (ex<\'_>)}"][shape="box"];
+    r4[label="SCC(4) = {\'?4/U2 (for<\'_>)}"][shape="box"];
+    r5[label="SCC(5) = {\'?0 (\'static)}"][shape="box"];
+    r2 -> r1[label=""];
+    r4 -> r3[label=""];
+    r5 -> r0[label=""];
+    r5 -> r2[label=""];
+    r5 -> r1[label=""];
+    r5 -> r4[label=""];
+    r5 -> r3[label=""];
+}

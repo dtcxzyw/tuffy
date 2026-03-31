@@ -1,0 +1,24 @@
+digraph RegionInferenceContext {
+    r0[label="\'?0 (\'static)"][shape="box"];
+    r1[label="\'?1"][shape="box"];
+    r2[label="\'?2"][shape="box"];
+    r3[label="\'?3"][shape="box"];
+    r4[label="\'?4 (ex<\'_>)"][shape="box"];
+    r5[label="\'?5 (ex<\'_>)"][shape="box"];
+    r6[label="\'?6 (ex<\'_>)"][shape="box"];
+    r7[label="\'?7 (ex<\'_>)"][shape="box"];
+    r8[label="\'?8 (ex<\'_>)"][shape="box"];
+    r9[label="\'?9 (ex<\'_>)"][shape="box"];
+    r10[label="\'?10 (ex<\'_>)"][shape="box"];
+    r11[label="\'?11 (ex<\'_>)"][shape="box"];
+    r0 -> r8[label="bb0[2]"];
+    r8 -> r4[label="bb0[3]"];
+    r4 -> r7[label="bb0[3]"];
+    r6 -> r9[label="bb0[5]"];
+    r7 -> r10[label="bb0[6]"];
+    r9 -> r11[label="bb0[6]"];
+    r2 -> r5[label="All(...)"];
+    r5 -> r2[label="All(...)"];
+    r1 -> r6[label="All(...)"];
+    r6 -> r1[label="All(...)"];
+}

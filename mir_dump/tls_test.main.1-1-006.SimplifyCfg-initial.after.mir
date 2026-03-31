@@ -1,0 +1,33 @@
+// MIR for `main` after SimplifyCfg-initial
+
+fn main() -> () {
+    let mut _0: ();
+    let _1: ();
+    let mut _2: &std::thread::LocalKey<std::cell::Cell<u32>>;
+    let _3: std::thread::LocalKey<std::cell::Cell<u32>>;
+    let mut _4: {closure@/tmp/tls_test.rs:1:95: 1:98};
+
+    bb0: {
+        StorageLive(_1);
+        StorageLive(_2);
+        StorageLive(_3);
+        _3 = const main::X;
+        _2 = &_3;
+        StorageLive(_4);
+        _4 = {closure@/tmp/tls_test.rs:1:95: 1:98};
+        _1 = LocalKey::<Cell<u32>>::with::<{closure@/tmp/tls_test.rs:1:95: 1:98}, ()>(move _2, move _4) -> [return: bb1, unwind: bb2];
+    }
+
+    bb1: {
+        StorageDead(_4);
+        StorageDead(_2);
+        StorageDead(_3);
+        StorageDead(_1);
+        _0 = const ();
+        return;
+    }
+
+    bb2 (cleanup): {
+        resume;
+    }
+}

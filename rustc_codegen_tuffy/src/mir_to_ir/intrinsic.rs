@@ -814,35 +814,75 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     bit_width: 64,
                     signedness: IntSignedness::Unsigned,
                 };
-                let byte_val = ir_args[0];
+                let elem_val = ir_args[0];
                 let simd_bytes = self.simd_size_from_substs(substs).unwrap_or(16);
 
-                // Mask to 8 bits in case the value is sign-extended to 64-bit.
-                let mask_ff = self
-                    .builder
-                    .iconst(0xFFi64, 64, IntSignedness::Unsigned, o!());
-                let masked = self
-                    .builder
-                    .and(byte_val.into(), mask_ff.into(), u64_int, o!());
-                let rep = self.builder.iconst(
-                    0x0101_0101_0101_0101u64 as i64,
-                    64,
-                    IntSignedness::Unsigned,
-                    o!(),
-                );
-                let splat_word = self.builder.mul(masked.into(), rep.into(), u64_int, o!());
+                // Determine per-element store size from the IR value type.
+                let elem_size: u32 = match self.builder.value_type(elem_val) {
+                    Some(Type::Float(FloatType::F32)) => 4,
+                    Some(Type::Float(FloatType::F64)) => 8,
+                    Some(Type::Float(FloatType::F16 | FloatType::BF16)) => 2,
+                    Some(Type::Float(FloatType::F128)) => 16,
+                    _ => 1, // integer — use byte-splat
+                };
 
-                if simd_bytes <= 8 {
-                    self.locals.set(destination_local, splat_word.raw());
+                if elem_size == 1 {
+                    // Byte-splat: mask to 8 bits, then broadcast via multiply.
+                    let mask_ff = self
+                        .builder
+                        .iconst(0xFFi64, 64, IntSignedness::Unsigned, o!());
+                    let masked = self
+                        .builder
+                        .and(elem_val.into(), mask_ff.into(), u64_int, o!());
+                    let rep = self.builder.iconst(
+                        0x0101_0101_0101_0101u64 as i64,
+                        64,
+                        IntSignedness::Unsigned,
+                        o!(),
+                    );
+                    let splat_word = self.builder.mul(masked.into(), rep.into(), u64_int, o!());
+
+                    if simd_bytes <= 8 {
+                        self.locals.set(destination_local, splat_word.raw());
+                    } else {
+                        let slot = self.builder.stack_slot(simd_bytes, o!());
+                        let n_words = simd_bytes.div_ceil(8);
+                        for w in 0..n_words {
+                            let dst: ValueRef = if w == 0 {
+                                slot
+                            } else {
+                                let off = self.builder.iconst(
+                                    w as i64 * 8,
+                                    64,
+                                    IntSignedness::Unsigned,
+                                    o!(),
+                                );
+                                self.builder.ptradd(slot.into(), off.into(), 0, o!()).raw()
+                            };
+                            self.current_mem = self
+                                .builder
+                                .store(
+                                    splat_word.raw().into(),
+                                    dst.into(),
+                                    8,
+                                    self.current_mem.into(),
+                                    o!(),
+                                )
+                                .raw();
+                        }
+                        self.locals.set(destination_local, slot);
+                    }
                 } else {
+                    // Non-byte element (f32, f64, etc.): store element at each
+                    // lane position.
                     let slot = self.builder.stack_slot(simd_bytes, o!());
-                    let n_words = simd_bytes.div_ceil(8);
-                    for w in 0..n_words {
-                        let dst: ValueRef = if w == 0 {
+                    let n_lanes = simd_bytes / elem_size;
+                    for i in 0..n_lanes {
+                        let dst: ValueRef = if i == 0 {
                             slot
                         } else {
                             let off = self.builder.iconst(
-                                w as i64 * 8,
+                                (i * elem_size) as i64,
                                 64,
                                 IntSignedness::Unsigned,
                                 o!(),
@@ -852,9 +892,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         self.current_mem = self
                             .builder
                             .store(
-                                splat_word.raw().into(),
+                                elem_val.into(),
                                 dst.into(),
-                                8,
+                                elem_size,
                                 self.current_mem.into(),
                                 o!(),
                             )

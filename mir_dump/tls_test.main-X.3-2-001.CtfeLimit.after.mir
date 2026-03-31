@@ -1,0 +1,14 @@
+// MIR for `main::X` after CtfeLimit
+
+const X: LocalKey<Cell<u32>> = {
+    let mut _0: std::thread::LocalKey<std::cell::Cell<u32>>;
+
+    bb0: {
+        ConstEvalCounter;
+        _0 = LocalKey::<Cell<u32>>::new(const main::X::{constant#0}) -> [return: bb1, unwind continue];
+    }
+
+    bb1: {
+        return;
+    }
+}

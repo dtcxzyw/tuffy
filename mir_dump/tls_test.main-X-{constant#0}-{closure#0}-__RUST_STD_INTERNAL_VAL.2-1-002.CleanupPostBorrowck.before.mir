@@ -1,0 +1,20 @@
+// MIR for `main::X::{constant#0}::{closure#0}::__RUST_STD_INTERNAL_VAL` before CleanupPostBorrowck
+
+| User Type Annotations
+| 0: user_ty: Canonical { value: TypeOf(DefId(1:13492 ~ std[abfe]::sys::thread_local::native::lazy::{impl#2}::new), UserArgs { args: [^c_0, ^c_1], user_self_ty: Some(UserSelfTy { impl_def_id: DefId(1:13489 ~ std[abfe]::sys::thread_local::native::lazy::{impl#2}), self_ty: std::thread::local_impl::LazyStorage<^c_2, ^c_3> }) }), max_universe: U0, var_kinds: [Ty { ui: U0, sub_root: 0 }, Ty { ui: U0, sub_root: 1 }, Ty { ui: U0, sub_root: 2 }, Ty { ui: U0, sub_root: 3 }] }, span: /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:96:31: 96:75, inferred_ty: fn() -> std::thread::local_impl::LazyStorage<std::cell::Cell<u32>, ()> {std::thread::local_impl::LazyStorage::<std::cell::Cell<u32>, ()>::new}
+|
+static X::{constant#0}::{closure#0}::__RUST_STD_INTERNAL_VAL: std::thread::local_impl::LazyStorage<Cell<u32>, ()> = {
+    let mut _0: std::thread::local_impl::LazyStorage<std::cell::Cell<u32>, ()>;
+
+    bb0: {
+        _0 = std::thread::local_impl::LazyStorage::<Cell<u32>, ()>::new() -> [return: bb1, unwind: bb2];
+    }
+
+    bb1: {
+        return;
+    }
+
+    bb2 (cleanup): {
+        resume;
+    }
+}

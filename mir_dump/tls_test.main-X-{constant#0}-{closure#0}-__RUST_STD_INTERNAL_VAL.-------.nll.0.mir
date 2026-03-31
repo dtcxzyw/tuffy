@@ -1,0 +1,36 @@
+// MIR for `main::X::{constant#0}::{closure#0}::__RUST_STD_INTERNAL_VAL` 0 nll
+
+| Free Region Mapping
+| '?0 | Global | ['?0, '?1]
+| '?1 | Local | ['?1]
+|
+| Inferred Region Values
+| '?0 | U0 | {bb0[0], bb1[0], bb2[0], '?0, '?1}
+| '?1 | U0 | {bb0[0], bb1[0], bb2[0], '?1}
+|
+| Inference Constraints
+| '?0 live at {bb0[0], bb1[0], bb2[0]}
+| '?1 live at {bb0[0], bb1[0], bb2[0]}
+|
+| User Type Annotations
+| 0: user_ty: Canonical { value: TypeOf(DefId(1:13492 ~ std[abfe]::sys::thread_local::native::lazy::{impl#2}::new), UserArgs { args: [^c_0, ^c_1], user_self_ty: Some(UserSelfTy { impl_def_id: DefId(1:13489 ~ std[abfe]::sys::thread_local::native::lazy::{impl#2}), self_ty: std::thread::local_impl::LazyStorage<^c_2, ^c_3> }) }), max_universe: U0, var_kinds: [Ty { ui: U0, sub_root: 0 }, Ty { ui: U0, sub_root: 1 }, Ty { ui: U0, sub_root: 2 }, Ty { ui: U0, sub_root: 3 }] }, span: /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:96:31: 96:75, inferred_ty: fn() -> std::thread::local_impl::LazyStorage<std::cell::Cell<u32>, ()> {std::thread::local_impl::LazyStorage::<std::cell::Cell<u32>, ()>::new}
+|
+static X::{constant#0}::{closure#0}::__RUST_STD_INTERNAL_VAL: std::thread::local_impl::LazyStorage<Cell<u32>, ()> = {
+    let mut _0: std::thread::local_impl::LazyStorage<std::cell::Cell<u32>, ()>; // return place in scope 0 at /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:95:57: 95:104
+
+    bb0: {
+        _0 = std::thread::local_impl::LazyStorage::<Cell<u32>, ()>::new() -> [return: bb1, unwind: bb2]; // scope 0 at /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:96:31: 96:77
+                                         // mir::ConstOperand
+                                         // + span: /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:96:31: 96:75
+                                         // + user_ty: UserType(0)
+                                         // + const_: Const { ty: fn() -> std::thread::local_impl::LazyStorage<Cell<u32>, ()> {std::thread::local_impl::LazyStorage::<Cell<u32>, ()>::new}, val: Value(std::thread::local_impl::LazyStorage::<Cell<u32>, ()>::new) }
+    }
+
+    bb1: {
+        return;                          // scope 0 at /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:95:25: 96:78
+    }
+
+    bb2 (cleanup): {
+        resume;                          // scope 0 at /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:95:25: 96:78
+    }
+}

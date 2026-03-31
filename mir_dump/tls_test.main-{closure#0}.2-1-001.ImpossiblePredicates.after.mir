@@ -1,0 +1,110 @@
+// MIR for `main::{closure#0}` after ImpossiblePredicates
+
+| User Type Annotations
+| 0: user_ty: Canonical { value: TypeOf(DefId(2:12564 ~ core[7534]::fmt::rt::{impl#0}::new_display), UserArgs { args: ['^c_0, ^c_1], user_self_ty: Some(UserSelfTy { impl_def_id: DefId(2:12563 ~ core[7534]::fmt::rt::{impl#0}), self_ty: core::fmt::rt::Argument<'^c_2> }) }), max_universe: U0, var_kinds: [Region(U0), Ty { ui: U0, sub_root: 1 }, Region(U0)] }, span: /tmp/tls_test.rs:1:122: 1:124, inferred_ty: for<'a> fn(&'a u32) -> core::fmt::rt::Argument<'a> {core::fmt::rt::Argument::<'_>::new_display::<u32>}
+| 1: user_ty: Canonical { value: TypeOf(DefId(2:12665 ~ core[7534]::fmt::{impl#4}::new), UserArgs { args: ['^c_0, ^c_BoundConst { var: 1, .. }, ^c_BoundConst { var: 2, .. }], user_self_ty: Some(UserSelfTy { impl_def_id: DefId(2:12663 ~ core[7534]::fmt::{impl#4}), self_ty: std::fmt::Arguments<'^c_3> }) }), max_universe: U0, var_kinds: [Region(U0), Const(U0), Const(U0), Region(U0)] }, span: /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/macros.rs:143:28: 143:61, inferred_ty: unsafe fn(&[u8; 4], &[core::fmt::rt::Argument<'_>; 1]) -> std::fmt::Arguments<'_> {std::fmt::Arguments::<'_>::new::<4, 1>}
+|
+fn main::{closure#0}(_1: {closure@/tmp/tls_test.rs:1:95: 1:98}, _2: &Cell<u32>) -> () {
+    debug x => _2;
+    let mut _0: ();
+    let _3: ();
+    let mut _4: &std::cell::Cell<u32>;
+    let _5: ();
+    let _6: ();
+    let mut _7: std::fmt::Arguments<'_>;
+    let _8: (&u32,);
+    let mut _9: &u32;
+    let _10: u32;
+    let mut _11: &std::cell::Cell<u32>;
+    let mut _13: core::fmt::rt::Argument<'_>;
+    let mut _14: &u32;
+    let mut _15: &[u8; 4];
+    let _16: &[u8; 4];
+    let mut _17: &[core::fmt::rt::Argument<'_>; 1];
+    let _18: &[core::fmt::rt::Argument<'_>; 1];
+    scope 1 {
+        debug args => _8;
+        let _12: [core::fmt::rt::Argument<'_>; 1];
+        scope 2 {
+            debug args => _12;
+        }
+    }
+
+    bb0: {
+        StorageLive(_3);
+        StorageLive(_4);
+        _4 = &(*_2);
+        _3 = Cell::<u32>::set(move _4, const 42_u32) -> [return: bb1, unwind: bb6];
+    }
+
+    bb1: {
+        StorageDead(_4);
+        StorageDead(_3);
+        StorageLive(_5);
+        StorageLive(_6);
+        StorageLive(_7);
+        StorageLive(_8);
+        StorageLive(_9);
+        StorageLive(_10);
+        StorageLive(_11);
+        _11 = &(*_2);
+        _10 = Cell::<u32>::get(move _11) -> [return: bb2, unwind: bb6];
+    }
+
+    bb2: {
+        StorageDead(_11);
+        _9 = &_10;
+        _8 = (move _9,);
+        StorageDead(_9);
+        FakeRead(ForLet(None), _8);
+        StorageLive(_12);
+        StorageLive(_13);
+        StorageLive(_14);
+        _14 = &(*(_8.0: &u32));
+        _13 = core::fmt::rt::Argument::<'_>::new_display::<u32>(move _14) -> [return: bb3, unwind: bb6];
+    }
+
+    bb3: {
+        StorageDead(_14);
+        _12 = [move _13];
+        StorageDead(_13);
+        FakeRead(ForLet(None), _12);
+        StorageLive(_15);
+        StorageLive(_16);
+        _16 = const b"\xc0\x01\n\x00";
+        _15 = &(*_16);
+        StorageLive(_17);
+        StorageLive(_18);
+        _18 = &_12;
+        _17 = &(*_18);
+        _7 = Arguments::<'_>::new::<4, 1>(move _15, move _17) -> [return: bb4, unwind: bb6];
+    }
+
+    bb4: {
+        StorageDead(_18);
+        StorageDead(_17);
+        StorageDead(_16);
+        StorageDead(_15);
+        _6 = std::io::_print(move _7) -> [return: bb5, unwind: bb6];
+    }
+
+    bb5: {
+        StorageDead(_7);
+        StorageDead(_12);
+        StorageDead(_10);
+        StorageDead(_8);
+        StorageDead(_6);
+        _5 = const ();
+        StorageDead(_5);
+        _0 = const ();
+        return;
+    }
+
+    bb6 (cleanup): {
+        resume;
+    }
+}
+
+alloc30 (size: 4, align: 1) {
+    c0 01 0a 00                                     │ ....
+}

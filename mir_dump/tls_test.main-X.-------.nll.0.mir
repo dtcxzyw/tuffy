@@ -1,0 +1,39 @@
+// MIR for `main::X` 0 nll
+
+| Free Region Mapping
+| '?0 | Global | ['?0, '?1]
+| '?1 | Local | ['?1]
+|
+| Inferred Region Values
+| '?0 | U0 | {bb0[0], bb1[0], bb2[0], '?0, '?1}
+| '?1 | U0 | {bb0[0], bb1[0], bb2[0], '?1}
+|
+| Inference Constraints
+| '?0 live at {bb0[0], bb1[0], bb2[0]}
+| '?1 live at {bb0[0], bb1[0], bb2[0]}
+|
+| User Type Annotations
+| 0: user_ty: Canonical { value: TypeOf(DefId(1:445 ~ std[abfe]::thread::local::{impl#4}::new), UserArgs { args: [^c_0], user_self_ty: Some(UserSelfTy { impl_def_id: DefId(1:443 ~ std[abfe]::thread::local::{impl#4}), self_ty: std::thread::LocalKey<^c_1> }) }), max_universe: U0, var_kinds: [Ty { ui: U0, sub_root: 0 }, Ty { ui: U0, sub_root: 1 }] }, span: /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:90:13: 90:42, inferred_ty: unsafe fn(for<'a> fn(std::option::Option<&'a mut std::option::Option<std::cell::Cell<u32>>>) -> *const std::cell::Cell<u32>) -> std::thread::LocalKey<std::cell::Cell<u32>> {std::thread::LocalKey::<std::cell::Cell<u32>>::new}
+|
+const X: LocalKey<Cell<u32>> = {
+    let mut _0: std::thread::LocalKey<std::cell::Cell<u32>>; // return place in scope 0 at /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:292:44: 292:72
+
+    bb0: {
+        _0 = LocalKey::<Cell<u32>>::new(const main::X::{constant#0}) -> [return: bb1, unwind: bb2]; // scope 0 at /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:90:13: 108:15
+                                         // mir::ConstOperand
+                                         // + span: /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:90:13: 90:42
+                                         // + user_ty: UserType(0)
+                                         // + const_: Const { ty: unsafe fn(for<'a> fn(Option<&'a mut Option<Cell<u32>>>) -> *const Cell<u32>) -> LocalKey<Cell<u32>> {LocalKey::<Cell<u32>>::new}, val: Value(LocalKey::<Cell<u32>>::new) }
+                                         // mir::ConstOperand
+                                         // + span: /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:90:43: 108:14
+                                         // + const_: Const { ty: for<'a> fn(Option<&'a mut Option<Cell<u32>>>) -> *const Cell<u32>, val: Unevaluated(X::{constant#0}, [Binder { value: fn(std::option::Option<&'^0.Named(DefId(1:14277 ~ std[abfe]::thread::local::{impl#4}::new::'_)) mut std::option::Option<std::cell::Cell<u32>>>) -> *const std::cell::Cell<u32>, bound_vars: [Region(BrNamed(DefId(1:14277 ~ std[abfe]::thread::local::{impl#4}::new::'_)))] }], None) }
+    }
+
+    bb1: {
+        return;                          // scope 0 at /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:292:26: 293:95
+    }
+
+    bb2 (cleanup): {
+        resume;                          // scope 0 at /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:292:26: 293:95
+    }
+}

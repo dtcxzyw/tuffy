@@ -1,0 +1,81 @@
+// MIR for `main::X::{constant#0}::{closure#0}` 0 nll
+
+| Free Region Mapping
+| '?0 | Global | ['?0, '?3, '?1, '?2]
+| '?1 | Local | ['?3, '?1]
+| '?2 | Local | ['?3, '?2]
+| '?3 | Local | ['?3]
+|
+| Inferred Region Values
+| '?0 | U0 | {bb0[0..=6], bb1[0..=3], bb2[0], '?0, '?1, '?2, '?3}
+| '?1 | U0 | {bb0[0..=6], bb1[0..=3], bb2[0], '?1}
+| '?2 | U0 | {bb0[0..=6], bb1[0..=3], bb2[0], '?2}
+| '?3 | U0 | {bb0[0..=6], bb1[0..=3], bb2[0], '?3}
+| '?4 | U0 | {bb0[3..=6]}
+| '?5 | U0 | {bb0[0..=6], bb1[0..=3], bb2[0], '?2}
+| '?6 | U0 | {bb0[0..=6], bb1[0..=3], bb2[0], '?1}
+| '?7 | U0 | {bb0[4..=6]}
+| '?8 | U0 | {bb0[3..=6]}
+| '?9 | U0 | {bb0[6]}
+| '?10 | U0 | {bb0[6]}
+| '?11 | U0 | {bb0[6]}
+|
+| Inference Constraints
+| '?0 live at {bb0[0..=6], bb1[0..=3], bb2[0]}
+| '?1 live at {bb0[0..=6], bb1[0..=3], bb2[0]}
+| '?2 live at {bb0[0..=6], bb1[0..=3], bb2[0]}
+| '?3 live at {bb0[0..=6], bb1[0..=3], bb2[0]}
+| '?4 live at {bb0[3]}
+| '?7 live at {bb0[4..=6]}
+| '?8 live at {bb0[3]}
+| '?9 live at {bb0[6]}
+| '?10 live at {bb0[6]}
+| '?11 live at {bb0[6]}
+| '?0: '?8 due to Boring at Single(bb0[2]) (/usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:97:25: 97:48 (#9)
+| '?1: '?6 due to BoringNoLocation at All(/usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:92:22: 92:46) (/usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:92:22: 92:46 (#9)
+| '?2: '?5 due to BoringNoLocation at All(/usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:92:21: 98:22) (/usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:92:21: 98:22 (#9)
+| '?4: '?7 due to Boring at Single(bb0[3]) (/usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:97:25: 97:48 (#9)
+| '?5: '?2 due to BoringNoLocation at All(/usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:92:21: 98:22) (/usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:92:21: 98:22 (#9)
+| '?6: '?1 due to BoringNoLocation at All(/usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:92:22: 92:46) (/usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:92:22: 92:46 (#9)
+| '?6: '?9 due to Boring at Single(bb0[5]) (/usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:97:61: 97:85 (#9)
+| '?7: '?10 due to CallArgument(Some(FnDef(DefId(1:13493 ~ std[abfe]::sys::thread_local::native::lazy::{impl#2}::get_or_init), [std::cell::Cell<u32>, (), FnDef(DefId(0:7 ~ tls_test[1491]::main::X::__rust_std_internal_init_fn), [])]))) at Single(bb0[6]) (/usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:97:25: 97:115 (#9)
+| '?8: '?4 due to Boring at Single(bb0[3]) (/usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:97:25: 97:48 (#9)
+| '?9: '?11 due to CallArgument(Some(FnDef(DefId(1:13493 ~ std[abfe]::sys::thread_local::native::lazy::{impl#2}::get_or_init), [std::cell::Cell<u32>, (), FnDef(DefId(0:7 ~ tls_test[1491]::main::X::__rust_std_internal_init_fn), [])]))) at Single(bb0[6]) (/usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:97:25: 97:115 (#9)
+|
+| Borrows
+| bw0: issued at bb0[3] in '?4
+|
+fn X::{constant#0}::{closure#0}(_1: &{closure@/usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:92:21: 92:47}, _2: Option<&mut Option<Cell<u32>>>) -> *const Cell<u32> {
+    debug __rust_std_internal_init => _2; // in scope 0 at /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:92:22: 92:46
+    let mut _0: *const std::cell::Cell<u32>; // return place in scope 0 at /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:92:47: 92:47
+    let mut _3: &std::thread::local_impl::LazyStorage<std::cell::Cell<u32>, ()>; // in scope 0 at /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:97:25: 97:48
+    let _4: &std::thread::local_impl::LazyStorage<std::cell::Cell<u32>, ()>; // in scope 0 at /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:97:25: 97:48
+    let mut _5: std::option::Option<&mut std::option::Option<std::cell::Cell<u32>>>; // in scope 0 at /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:97:61: 97:85
+
+    bb0: {
+        StorageLive(_3);                 // scope 0 at /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:97:25: 97:48
+        StorageLive(_4);                 // scope 0 at /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:97:25: 97:48
+        _4 = &/*tls*/ X::{constant#0}::{closure#0}::__RUST_STD_INTERNAL_VAL; // scope 0 at /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:97:25: 97:48
+        _3 = &(*_4);                     // scope 0 at /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:97:25: 97:48
+        StorageLive(_5);                 // scope 0 at /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:97:61: 97:85
+        _5 = move _2;                    // scope 0 at /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:97:61: 97:85
+        _0 = std::thread::local_impl::LazyStorage::<Cell<u32>, ()>::get_or_init::<fn() -> Cell<u32> {__rust_std_internal_init_fn}>(move _3, move _5, __rust_std_internal_init_fn) -> [return: bb1, unwind: bb2]; // scope 0 at /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:97:25: 97:115
+                                         // mir::ConstOperand
+                                         // + span: /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:97:49: 97:60
+                                         // + const_: Const { ty: for<'a, 'b> unsafe fn(&'a std::thread::local_impl::LazyStorage<Cell<u32>, ()>, Option<&'b mut Option<Cell<u32>>>, fn() -> Cell<u32> {__rust_std_internal_init_fn}) -> *const Cell<u32> {std::thread::local_impl::LazyStorage::<Cell<u32>, ()>::get_or_init::<fn() -> Cell<u32> {__rust_std_internal_init_fn}>}, val: Value(std::thread::local_impl::LazyStorage::<Cell<u32>, ()>::get_or_init::<fn() -> Cell<u32> {__rust_std_internal_init_fn}>) }
+                                         // mir::ConstOperand
+                                         // + span: /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:97:87: 97:114
+                                         // + const_: Const { ty: fn() -> Cell<u32> {__rust_std_internal_init_fn}, val: Value(__rust_std_internal_init_fn) }
+    }
+
+    bb1: {
+        StorageDead(_5);                 // scope 0 at /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:97:114: 97:115
+        StorageDead(_4);                 // scope 0 at /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:97:114: 97:115
+        StorageDead(_3);                 // scope 0 at /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:97:114: 97:115
+        return;                          // scope 0 at /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:98:22: 98:22
+    }
+
+    bb2 (cleanup): {
+        resume;                          // scope 0 at /usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:92:21: 98:22
+    }
+}

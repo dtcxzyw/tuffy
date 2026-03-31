@@ -1,0 +1,22 @@
+// MIR for `main` before RemoveUnneededDrops
+
+fn main() -> () {
+    let mut _0: ();
+    let _1: ();
+    let mut _2: &std::thread::LocalKey<std::cell::Cell<u32>>;
+    let _3: std::thread::LocalKey<std::cell::Cell<u32>>;
+    let mut _4: {closure@/tmp/tls_test.rs:1:95: 1:98};
+    let mut _5: &std::thread::LocalKey<std::cell::Cell<u32>>;
+
+    bb0: {
+        _5 = const main::promoted[0];
+        _2 = copy _5;
+        nop;
+        _1 = LocalKey::<Cell<u32>>::with::<{closure@/tmp/tls_test.rs:1:95: 1:98}, ()>(move _2, const ZeroSized: {closure@/tmp/tls_test.rs:1:95: 1:98}) -> [return: bb1, unwind continue];
+    }
+
+    bb1: {
+        nop;
+        return;
+    }
+}

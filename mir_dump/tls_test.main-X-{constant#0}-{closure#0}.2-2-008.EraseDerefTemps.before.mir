@@ -1,0 +1,26 @@
+// MIR for `main::X::{constant#0}::{closure#0}` before EraseDerefTemps
+
+fn X::{constant#0}::{closure#0}(_1: &{closure@/usr/local/rustup/toolchains/nightly-2026-03-28-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/thread_local/native/mod.rs:92:21: 92:47}, _2: Option<&mut Option<Cell<u32>>>) -> *const Cell<u32> {
+    debug __rust_std_internal_init => _2;
+    let mut _0: *const std::cell::Cell<u32>;
+    let mut _3: &std::thread::local_impl::LazyStorage<std::cell::Cell<u32>, ()>;
+    let _4: &std::thread::local_impl::LazyStorage<std::cell::Cell<u32>, ()>;
+    let mut _5: std::option::Option<&mut std::option::Option<std::cell::Cell<u32>>>;
+
+    bb0: {
+        StorageLive(_3);
+        StorageLive(_4);
+        _4 = &/*tls*/ X::{constant#0}::{closure#0}::__RUST_STD_INTERNAL_VAL;
+        _3 = &(*_4);
+        StorageLive(_5);
+        _5 = move _2;
+        _0 = std::thread::local_impl::LazyStorage::<Cell<u32>, ()>::get_or_init::<fn() -> Cell<u32> {__rust_std_internal_init_fn}>(move _3, move _5, __rust_std_internal_init_fn) -> [return: bb1, unwind continue];
+    }
+
+    bb1: {
+        StorageDead(_5);
+        StorageDead(_4);
+        StorageDead(_3);
+        return;
+    }
+}

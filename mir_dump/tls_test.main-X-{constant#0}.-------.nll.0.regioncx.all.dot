@@ -1,0 +1,10 @@
+digraph RegionInferenceContext {
+    r0[label="\'?0 (\'static)"][shape="box"];
+    r1[label="\'?1"][shape="box"];
+    r2[label="\'?2/U1 (for<\'_>)"][shape="box"];
+    r3[label="\'?3/U1 (ex<\'_>)"][shape="box"];
+    r4[label="\'?4/U2 (for<\'_>)"][shape="box"];
+    r5[label="\'?5/U2 (ex<\'_>)"][shape="box"];
+    r2 -> r3[label="bb2[2]"];
+    r4 -> r5[label="bb3[2]"];
+}
