@@ -1256,83 +1256,86 @@
 // CHECK:     br bb28(v316)
 // CHECK:
 // CHECK:   bb28(v318: mem):
-// CHECK:     v319: int:i64 = load.8 v11, v318
+// CHECK:     v319: int:i32 = load.4 v11, v318
+// CHECK:     v320: int:i64 = iconst 4
+// CHECK:     v321: ptr = ptradd v11, v320
+// CHECK:     v322: int:i32 = load.4 v321, v318
 // CHECK:     ret v319, v318
 // CHECK:
-// CHECK:   bb29(v321: mem):
-// CHECK:     v322: int:i64 = iconst 1
-// CHECK:     v323: bool = icmp.eq v16, v322
-// CHECK:     brif v323, bb4(v321), bb30(v321)
+// CHECK:   bb29(v324: mem):
+// CHECK:     v325: int:i64 = iconst 1
+// CHECK:     v326: bool = icmp.eq v16, v325
+// CHECK:     brif v326, bb4(v324), bb30(v324)
 // CHECK:
-// CHECK:   bb30(v325: mem):
-// CHECK:     v326: int:i64 = iconst 2
-// CHECK:     v327: bool = icmp.eq v16, v326
-// CHECK:     brif v327, bb3(v325), bb31(v325)
+// CHECK:   bb30(v328: mem):
+// CHECK:     v329: int:i64 = iconst 2
+// CHECK:     v330: bool = icmp.eq v16, v329
+// CHECK:     brif v330, bb3(v328), bb31(v328)
 // CHECK:
-// CHECK:   bb31(v329: mem):
-// CHECK:     v330: int:i64 = iconst 3
-// CHECK:     v331: bool = icmp.eq v16, v330
-// CHECK:     brif v331, bb5(v329), bb32(v329)
+// CHECK:   bb31(v332: mem):
+// CHECK:     v333: int:i64 = iconst 3
+// CHECK:     v334: bool = icmp.eq v16, v333
+// CHECK:     brif v334, bb5(v332), bb32(v332)
 // CHECK:
-// CHECK:   bb32(v333: mem):
-// CHECK:     v334: int:i64 = iconst 4
-// CHECK:     v335: bool = icmp.eq v16, v334
-// CHECK:     brif v335, bb6(v333), bb7(v333)
+// CHECK:   bb32(v336: mem):
+// CHECK:     v337: int:i64 = iconst 4
+// CHECK:     v338: bool = icmp.eq v16, v337
+// CHECK:     brif v338, bb6(v336), bb7(v336)
 // CHECK:
-// CHECK:   bb33(v337: mem):
-// CHECK:     v338: int:i64 = iconst 3
-// CHECK:     v339: bool = icmp.eq v21, v338
-// CHECK:     brif v339, bb9(v337), bb7(v337)
+// CHECK:   bb33(v340: mem):
+// CHECK:     v341: int:i64 = iconst 3
+// CHECK:     v342: bool = icmp.eq v21, v341
+// CHECK:     brif v342, bb9(v340), bb7(v340)
 // CHECK:
-// CHECK:   bb34(v341: mem):
-// CHECK:     v342: int:i64 = iconst 2
-// CHECK:     v343: bool = icmp.eq v26, v342
-// CHECK:     brif v343, bb23(v341), bb35(v341)
+// CHECK:   bb34(v344: mem):
+// CHECK:     v345: int:i64 = iconst 2
+// CHECK:     v346: bool = icmp.eq v26, v345
+// CHECK:     brif v346, bb23(v344), bb35(v344)
 // CHECK:
-// CHECK:   bb35(v345: mem):
-// CHECK:     v346: int:i64 = iconst 4
-// CHECK:     v347: bool = icmp.eq v26, v346
-// CHECK:     brif v347, bb22(v345), bb1(v345)
+// CHECK:   bb35(v348: mem):
+// CHECK:     v349: int:i64 = iconst 4
+// CHECK:     v350: bool = icmp.eq v26, v349
+// CHECK:     brif v350, bb22(v348), bb1(v348)
 // CHECK:
-// CHECK:   bb36(v349: mem):
-// CHECK:     v350: int:i64 = iconst 2
-// CHECK:     v351: bool = icmp.eq v31, v350
-// CHECK:     brif v351, bb20(v349), bb37(v349)
+// CHECK:   bb36(v352: mem):
+// CHECK:     v353: int:i64 = iconst 2
+// CHECK:     v354: bool = icmp.eq v31, v353
+// CHECK:     brif v354, bb20(v352), bb37(v352)
 // CHECK:
-// CHECK:   bb37(v353: mem):
-// CHECK:     v354: int:i64 = iconst 4
-// CHECK:     v355: bool = icmp.eq v31, v354
-// CHECK:     brif v355, bb19(v353), bb1(v353)
+// CHECK:   bb37(v356: mem):
+// CHECK:     v357: int:i64 = iconst 4
+// CHECK:     v358: bool = icmp.eq v31, v357
+// CHECK:     brif v358, bb19(v356), bb1(v356)
 // CHECK:
-// CHECK:   bb38(v357: mem):
-// CHECK:     v358: int:i64 = iconst 2
-// CHECK:     v359: bool = icmp.eq v36, v358
-// CHECK:     brif v359, bb17(v357), bb39(v357)
+// CHECK:   bb38(v360: mem):
+// CHECK:     v361: int:i64 = iconst 2
+// CHECK:     v362: bool = icmp.eq v36, v361
+// CHECK:     brif v362, bb17(v360), bb39(v360)
 // CHECK:
-// CHECK:   bb39(v361: mem):
-// CHECK:     v362: int:i64 = iconst 4
-// CHECK:     v363: bool = icmp.eq v36, v362
-// CHECK:     brif v363, bb16(v361), bb1(v361)
+// CHECK:   bb39(v364: mem):
+// CHECK:     v365: int:i64 = iconst 4
+// CHECK:     v366: bool = icmp.eq v36, v365
+// CHECK:     brif v366, bb16(v364), bb1(v364)
 // CHECK:
-// CHECK:   bb40(v365: mem):
-// CHECK:     v366: int:i64 = iconst 2
-// CHECK:     v367: bool = icmp.eq v41, v366
-// CHECK:     brif v367, bb14(v365), bb41(v365)
+// CHECK:   bb40(v368: mem):
+// CHECK:     v369: int:i64 = iconst 2
+// CHECK:     v370: bool = icmp.eq v41, v369
+// CHECK:     brif v370, bb14(v368), bb41(v368)
 // CHECK:
-// CHECK:   bb41(v369: mem):
-// CHECK:     v370: int:i64 = iconst 4
-// CHECK:     v371: bool = icmp.eq v41, v370
-// CHECK:     brif v371, bb13(v369), bb1(v369)
+// CHECK:   bb41(v372: mem):
+// CHECK:     v373: int:i64 = iconst 4
+// CHECK:     v374: bool = icmp.eq v41, v373
+// CHECK:     brif v374, bb13(v372), bb1(v372)
 // CHECK:
-// CHECK:   bb42(v373: mem):
-// CHECK:     v374: int:i64 = iconst 2
-// CHECK:     v375: bool = icmp.eq v46, v374
-// CHECK:     brif v375, bb11(v373), bb43(v373)
+// CHECK:   bb42(v376: mem):
+// CHECK:     v377: int:i64 = iconst 2
+// CHECK:     v378: bool = icmp.eq v46, v377
+// CHECK:     brif v378, bb11(v376), bb43(v376)
 // CHECK:
-// CHECK:   bb43(v377: mem):
-// CHECK:     v378: int:i64 = iconst 4
-// CHECK:     v379: bool = icmp.eq v46, v378
-// CHECK:     brif v379, bb10(v377), bb1(v377)
+// CHECK:   bb43(v380: mem):
+// CHECK:     v381: int:i64 = iconst 4
+// CHECK:     v382: bool = icmp.eq v46, v381
+// CHECK:     brif v382, bb10(v380), bb1(v380)
 // CHECK: }
 // CHECK:
 // CHECK: fn atomic_compare_exchange(_1: &std::sync::atomic::Atomic<u32>, _2: u32, _3: u32) -> std::result::Result<u32, u32> {
@@ -1372,11 +1375,21 @@
 // CHECK:     v7: int:i64 = iconst 4
 // CHECK:     v8: int:i64 = iconst 4
 // CHECK:     v9: ptr = symbol_addr @_RINvNtNtC$HASH_4core4sync6atomic23atomic_compare_exchangemEC$HASH_10atomic_ops
-// CHECK:     v10: mem, v11: int:i64 = call v9(v6, v2, v3, v7, v8), v5 -> int:i64
-// CHECK:     br bb1(v10)
+// CHECK:     v10: mem, v11: int:i32 = call v9(v6, v2, v3, v7, v8), v5 -> int:i32
+// CHECK:     v12: ptr = stack_slot 8
+// CHECK:     v13: mem = store.4 v11, v12, v10
+// CHECK:     v14: int:i64 = iconst 0
+// CHECK:     v15: int:i64 = iconst 4
+// CHECK:     v16: ptr = ptradd v12, v15
+// CHECK:     v17: mem = store.4 v14, v16, v13
+// CHECK:     br bb1(v17)
 // CHECK:
-// CHECK:   bb1(v13: mem):
-// CHECK:     ret v11, v13
+// CHECK:   bb1(v19: mem):
+// CHECK:     v20: int:i32 = load.4 v12, v19
+// CHECK:     v21: int:i64 = iconst 4
+// CHECK:     v22: ptr = ptradd v12, v21
+// CHECK:     v23: int:i32 = load.4 v22, v19
+// CHECK:     ret v20, v19
 // CHECK: }
 // CHECK:
 // CHECK: fn atomic_fetch_add(_1: &std::sync::atomic::Atomic<u32>, _2: u32) -> u32 {

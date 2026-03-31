@@ -257,6 +257,23 @@ pub(super) fn type_size<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> Option<u64
     Some(mono_layout_of(tcx, ty)?.size.bytes())
 }
 
+/// For a ScalarPair type, return `(first_scalar_bytes, second_scalar_bytes, second_offset)`.
+/// Returns `None` if `ty` is not a ScalarPair.
+pub(super) fn scalar_pair_info<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    ty: ty::Ty<'tcx>,
+) -> Option<(u64, u64, u64)> {
+    let layout = mono_layout_of(tcx, ty)?;
+    if let BackendRepr::ScalarPair(a, b) = layout.backend_repr {
+        let a_size = a.size(&tcx).bytes();
+        let b_size = b.size(&tcx).bytes();
+        let b_offset = a_size.max(b.align(&tcx).abi.bytes());
+        Some((a_size, b_size, b_offset))
+    } else {
+        None
+    }
+}
+
 /// Query the alignment of type `ty` in bytes.
 #[allow(dead_code)]
 pub(super) fn type_align<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> Option<u64> {

@@ -104,13 +104,18 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let ret_ty = self.monomorphize(self.mir.local_decls[ret_local].ty);
                     let size = type_size(self.tcx, ret_ty).unwrap_or(8);
                     let ret_repr = repr_kind(self.tcx, ret_ty);
-                    let is_scalar_pair = size > 8 && matches!(ret_repr, ReprKind::ScalarPair);
+                    let is_scalar_pair = matches!(ret_repr, ReprKind::ScalarPair);
 
                     // Load size: for Scalar returns load the full type width
                     // (legalizer splits wide loads); for ScalarPair load only
-                    // the first register-sized word.
-                    let load_size = if is_scalar_pair {
-                        size.min(8) as u32
+                    // the first scalar.
+                    let sp_info = if is_scalar_pair {
+                        scalar_pair_info(self.tcx, ret_ty)
+                    } else {
+                        None
+                    };
+                    let load_size = if let Some((a_sz, _, _)) = sp_info {
+                        a_sz as u32
                     } else {
                         size as u32
                     };
@@ -150,23 +155,28 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     };
 
                     if is_scalar_pair {
-                        // Two-register return (ScalarPair): load second word
+                        // Two-register return (ScalarPair): load second scalar
                         // and mark it for RDX via ABI metadata.
-                        let off8 = self.builder.iconst(
-                            8,
+                        let (_, b_sz, b_off) =
+                            sp_info.unwrap_or((size.min(8), size.saturating_sub(8), 8));
+                        let off_val = self.builder.iconst(
+                            b_off as i64,
                             64,
                             IntSignedness::DontCare,
                             Origin::synthetic(),
                         );
-                        let hi_addr =
-                            self.builder
-                                .ptradd(slot.into(), off8.into(), 0, Origin::synthetic());
+                        let hi_addr = self.builder.ptradd(
+                            slot.into(),
+                            off_val.into(),
+                            0,
+                            Origin::synthetic(),
+                        );
                         let word1 = self.builder.load(
                             hi_addr.into(),
-                            8,
+                            b_sz as u32,
                             Type::Int,
                             self.current_mem.into(),
-                            int_annotation_for_bytes(8),
+                            int_annotation_for_bytes(b_sz as u32),
                             Origin::synthetic(),
                         );
                         let ret_inst = self.builder.ret(

@@ -3338,6 +3338,7 @@ fn select_call(
         }
     });
     let return_is_float = return_float_type.is_some();
+    let return_is_bool = matches!(func.inst(call_idx).secondary_ty, Some(Type::Bool));
 
     let ret_vreg = if abi.has_primary_return && !is_sret {
         if return_is_float {
@@ -3413,11 +3414,17 @@ fn select_call(
         }
         (Some(rax), None) => {
             let dst = ctx.alloc.alloc();
-            ctx.out.push(MInst::MovRR {
-                size: OpSize::S64,
-                dst,
-                src: rax,
-            });
+            if return_is_bool {
+                // Bool returns only define al; zero-extend to clear
+                // upper bits that the callee may leave as garbage.
+                ctx.out.push(MInst::MovzxB { dst, src: rax });
+            } else {
+                ctx.out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst,
+                    src: rax,
+                });
+            }
             let secondary = ValueRef::inst_secondary_result(vref.index());
             ctx.regs.assign(secondary, dst);
         }

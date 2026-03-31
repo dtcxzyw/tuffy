@@ -719,12 +719,16 @@ impl Backend for X86Backend {
 
         // 5. Encode to machine code
         let enc = encode_function(&final_insts);
+        let total_frame = isel_result.isel_frame_size + (alloc_result.spill_slots as i32) * 8;
+        let has_frame_pointer =
+            total_frame > 0 || isel_result.has_calls || !alloc_result.used_callee_saved.is_empty();
         Some(CompiledFunction {
             name: isel_result.name,
             code: enc.code,
             relocations: enc.relocations,
             weak: false,
             local: false,
+            has_frame_pointer,
         })
     }
 
@@ -751,6 +755,7 @@ impl Backend for X86Backend {
                 relocations,
                 weak: false,
                 local: false,
+                has_frame_pointer: false,
             });
         }
         funcs.push(CompiledFunction {
@@ -759,6 +764,7 @@ impl Backend for X86Backend {
             relocations: vec![],
             weak: false,
             local: false,
+            has_frame_pointer: false,
         });
         funcs
     }
@@ -804,6 +810,7 @@ impl Backend for X86Backend {
                 relocations: main_relocs,
                 weak: false,
                 local: false,
+                has_frame_pointer: false,
             },
             CompiledFunction {
                 name: start_sym.to_string(),
@@ -811,6 +818,7 @@ impl Backend for X86Backend {
                 relocations: vec![],
                 weak: false,
                 local: false,
+                has_frame_pointer: true,
             },
         ]
     }

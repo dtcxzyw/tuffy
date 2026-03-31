@@ -14,6 +14,10 @@ pub struct CompiledFunction {
     /// file-local and won't conflict with identically-named symbols
     /// in other object files.
     pub local: bool,
+    /// If true, the function uses a standard frame pointer prologue
+    /// (push rbp; mov rbp, rsp). Used to generate correct .eh_frame
+    /// unwind information.
+    pub has_frame_pointer: bool,
 }
 
 /// A static data blob to be placed in a data section.

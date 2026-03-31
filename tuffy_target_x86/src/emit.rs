@@ -19,6 +19,7 @@ pub fn emit_elf(name: &str, code: &[u8], relocations: &[Relocation]) -> Vec<u8> 
         relocations: relocations.to_vec(),
         weak: false,
         local: false,
+        has_frame_pointer: false,
     }])
 }
 
@@ -210,7 +211,214 @@ pub fn emit_elf_with_data(functions: &[CompiledFunction], statics: &[StaticData]
         }
     }
 
+    // Generate .eh_frame unwind information so that libunwind can traverse
+    // tuffy-compiled frames (required for panic unwinding / catch_unwind).
+    emit_eh_frame(&mut obj, functions, &sym_map);
+
     let mut buf = Vec::new();
     obj.emit(&mut buf).expect("failed to emit ELF object");
     buf
+}
+
+// ── .eh_frame generation ─────────────────────────────────────────────────────
+
+/// DWARF register numbers for x86-64.
+const DW_REG_RBP: u8 = 6;
+const DW_REG_RSP: u8 = 7;
+const DW_REG_RA: u8 = 16; // return address (rip)
+
+/// Pointer size for x86-64.
+const PTR_SIZE: usize = 8;
+
+/// Encode a DWARF unsigned LEB128 value.
+fn uleb128(buf: &mut Vec<u8>, mut val: u64) {
+    loop {
+        let byte = (val & 0x7f) as u8;
+        val >>= 7;
+        if val == 0 {
+            buf.push(byte);
+            return;
+        }
+        buf.push(byte | 0x80);
+    }
+}
+
+/// Encode a DWARF signed LEB128 value.
+fn sleb128(buf: &mut Vec<u8>, mut val: i64) {
+    loop {
+        let byte = (val & 0x7f) as u8;
+        val >>= 7;
+        let done = (val == 0 && byte & 0x40 == 0) || (val == -1 && byte & 0x40 != 0);
+        if done {
+            buf.push(byte);
+            return;
+        }
+        buf.push(byte | 0x80);
+    }
+}
+
+/// Pad `buf` with DW_CFA_nop (0x00) so its length is a multiple of `align`.
+fn pad_to(buf: &mut Vec<u8>, start: usize, align: usize) {
+    let len = buf.len() - start;
+    let padded = (len + align - 1) & !(align - 1);
+    buf.resize(start + padded, 0x00);
+}
+
+/// Build the CIE (Common Information Entry) for x86-64.
+/// Returns the byte offset within `eh` where the CIE length field starts.
+fn emit_cie(eh: &mut Vec<u8>) -> usize {
+    let cie_start = eh.len();
+    eh.extend_from_slice(&[0; 4]); // placeholder for length
+
+    let content_start = eh.len();
+    eh.extend_from_slice(&0u32.to_ne_bytes()); // CIE id = 0
+    eh.push(1); // version
+    eh.extend_from_slice(b"zR\0"); // augmentation: sized + FDE encoding
+    uleb128(eh, 1); // code alignment factor
+    sleb128(eh, -8); // data alignment factor
+    uleb128(eh, DW_REG_RA as u64); // return address register
+
+    // Augmentation data
+    uleb128(eh, 1); // augmentation data length
+    eh.push(0x1b); // FDE pointer encoding: DW_EH_PE_pcrel | DW_EH_PE_sdata4
+
+    // Initial instructions: CFA = RSP + 8, RA at CFA - 8
+    eh.push(0x0c); // DW_CFA_def_cfa
+    uleb128(eh, DW_REG_RSP as u64);
+    uleb128(eh, 8);
+    eh.push(0x80 | DW_REG_RA); // DW_CFA_offset(RA, 1) → RA at CFA - 8
+    uleb128(eh, 1); // factored offset: 1 * 8 = 8
+
+    pad_to(eh, content_start, PTR_SIZE);
+
+    // Patch length field
+    let content_len = (eh.len() - content_start) as u32;
+    eh[cie_start..cie_start + 4].copy_from_slice(&content_len.to_ne_bytes());
+
+    cie_start
+}
+
+/// Build an FDE for one function and append it to `eh`.
+/// Returns `(fde_start, initial_location_offset)` — the byte offset in `eh`
+/// where the FDE starts, and the offset of the `initial_location` field that
+/// needs a relocation.
+fn emit_fde(
+    eh: &mut Vec<u8>,
+    cie_start: usize,
+    code_len: u32,
+    has_frame_pointer: bool,
+) -> (usize, usize) {
+    let fde_start = eh.len();
+    eh.extend_from_slice(&[0; 4]); // placeholder for length
+
+    let content_start = eh.len();
+
+    // CIE pointer: offset from *this field* back to the CIE start.
+    let cie_ptr = (content_start - cie_start) as u32;
+    eh.extend_from_slice(&cie_ptr.to_ne_bytes());
+
+    // initial_location (pc-relative, patched by relocation)
+    let initial_loc_offset = eh.len();
+    eh.extend_from_slice(&0i32.to_ne_bytes());
+
+    // address_range
+    eh.extend_from_slice(&code_len.to_ne_bytes());
+
+    // Augmentation data (empty for "zR")
+    uleb128(eh, 0);
+
+    if has_frame_pointer {
+        // After push rbp (+1 byte):
+        //   CFA = RSP + 16, RBP saved at CFA - 16
+        eh.push(0x40 | 1); // DW_CFA_advance_loc(1)
+        eh.push(0x0e); // DW_CFA_def_cfa_offset
+        uleb128(eh, 16);
+        eh.push(0x80 | DW_REG_RBP); // DW_CFA_offset(RBP, 2) → RBP at CFA - 16
+        uleb128(eh, 2);
+
+        // After mov rbp, rsp (+3 bytes, total offset 4):
+        //   CFA = RBP + 16
+        eh.push(0x40 | 3); // DW_CFA_advance_loc(3)
+        eh.push(0x0d); // DW_CFA_def_cfa_register
+        uleb128(eh, DW_REG_RBP as u64);
+    }
+
+    pad_to(eh, content_start, PTR_SIZE);
+
+    // Patch length field
+    let content_len = (eh.len() - content_start) as u32;
+    eh[fde_start..fde_start + 4].copy_from_slice(&content_len.to_ne_bytes());
+
+    (fde_start, initial_loc_offset)
+}
+
+/// Generate the complete .eh_frame section and add it to the object file.
+fn emit_eh_frame(
+    obj: &mut Object,
+    functions: &[CompiledFunction],
+    sym_map: &HashMap<String, SymbolId>,
+) {
+    if functions.is_empty() {
+        return;
+    }
+
+    let mut eh = Vec::new();
+
+    // Emit CIE
+    let cie_start = emit_cie(&mut eh);
+
+    // Collect FDE relocation info
+    struct FdeReloc {
+        offset_in_section: usize,
+        symbol: SymbolId,
+    }
+    let mut fde_relocs = Vec::new();
+
+    // Emit FDE for each function
+    for func in functions {
+        let (_, initial_loc_offset) = emit_fde(
+            &mut eh,
+            cie_start,
+            func.code.len() as u32,
+            func.has_frame_pointer,
+        );
+
+        // The initial_location field needs a R_X86_64_PC32 relocation
+        // pointing to the function's start in .text.
+        if let Some(&sym_id) = sym_map.get(&func.name) {
+            fde_relocs.push(FdeReloc {
+                offset_in_section: initial_loc_offset,
+                symbol: sym_id,
+            });
+        }
+    }
+
+    // Terminator: zero-length entry
+    eh.extend_from_slice(&0u32.to_ne_bytes());
+
+    // Add .eh_frame section
+    let eh_section_id = obj.add_section(
+        vec![],
+        b".eh_frame".to_vec(),
+        object::SectionKind::ReadOnlyData,
+    );
+    obj.set_section_data(eh_section_id, eh, PTR_SIZE as u64);
+
+    // Add relocations for FDE initial_location fields
+    for reloc in fde_relocs {
+        obj.add_relocation(
+            eh_section_id,
+            ObjRelocation {
+                offset: reloc.offset_in_section as u64,
+                symbol: reloc.symbol,
+                addend: 0,
+                flags: RelocationFlags::Generic {
+                    kind: RelocationKind::Relative,
+                    encoding: RelocationEncoding::Generic,
+                    size: 32,
+                },
+            },
+        )
+        .expect("failed to add .eh_frame relocation");
+    }
 }

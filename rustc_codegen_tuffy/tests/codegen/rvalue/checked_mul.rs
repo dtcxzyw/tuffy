@@ -39,7 +39,7 @@
 // CHECK:     v11: int:i64 = load.8 v3, v10
 // CHECK:     v12: int:i64 = iconst 8
 // CHECK:     v13: ptr = ptradd v3, v12
-// CHECK:     v14: int:i64 = load.8 v13, v10
+// CHECK:     v14: int:i8 = load.1 v13, v10
 // CHECK:     ret v11, v10
 // CHECK: }
 // CHECK:
@@ -70,7 +70,7 @@
 // CHECK:     v10: int:i64 = load.8 v3, v9
 // CHECK:     v11: int:i64 = iconst 8
 // CHECK:     v12: ptr = ptradd v3, v11
-// CHECK:     v13: int:i64 = load.8 v12, v9
+// CHECK:     v13: int:i8 = load.1 v12, v9
 // CHECK:     ret v10, v9
 // CHECK: }
 // CHECK:

@@ -1524,13 +1524,22 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // For structs ≤8 bytes, use annotation based on size.
                 // For Scalar > 8 bytes (e.g. (u128,)), use 128-bit
                 // annotation so legalization treats it as a wide return.
-                // For ScalarPair 9-16 bytes, use 64-bit annotation since
-                // the call returns the first 8 bytes in RAX; the
-                // remaining bytes are captured via ABI metadata.
+                // For ScalarPair, use only the first scalar's byte width
+                // as the call annotation — the second scalar is captured
+                // from RDX via ABI metadata.
                 dest_size.and_then(|sz| {
-                    if sz <= 8 || (sz <= 16 && matches!(dest_repr, ReprKind::Scalar)) {
+                    if matches!(dest_repr, ReprKind::ScalarPair) {
+                        // ScalarPair: annotation covers only the first
+                        // scalar (returned in RAX); second goes in RDX.
+                        let first_sz = scalar_pair_info(self.tcx, dest_ty)
+                            .map(|(a, _, _)| a as u32)
+                            .unwrap_or(sz.min(8) as u32);
+                        int_annotation_for_bytes(first_sz)
+                    } else if sz <= 8 || (sz <= 16 && matches!(dest_repr, ReprKind::Scalar)) {
                         int_annotation_for_bytes(sz as u32)
                     } else if sz <= 16 {
+                        // Memory aggregate 9-16 bytes: use 64-bit annotation
+                        // since only the first 8 bytes are in RAX.
                         int_annotation_for_bytes(8)
                     } else {
                         None
@@ -1644,11 +1653,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 .raw();
             self.locals.set(destination.local, slot);
             self.stack_locals.mark(destination.local);
-        } else if dest_size.unwrap_or(0) > 8 && matches!(dest_repr, ReprKind::ScalarPair) {
-            // Two-register return (ScalarPair, 16 bytes): RAX has the first
-            // 8 bytes, RDX has the remaining bytes.  Capture both and store
-            // to a stack slot.
+        } else if matches!(dest_repr, ReprKind::ScalarPair) {
+            // Two-register return (ScalarPair): first scalar in RAX,
+            // second scalar in RDX.  Works for any size (e.g. 2-byte
+            // Result<u8, E> up to 16-byte fat pointers).
             let size = dest_size.unwrap();
+            let (a_size, b_size, b_offset) = scalar_pair_info(self.tcx, dest_ty).unwrap_or((
+                size.min(8),
+                size.saturating_sub(8),
+                8,
+            ));
             let slot = if let Some(existing) = self.locals.get(destination.local) {
                 if self.stack_locals.is_stack(destination.local) {
                     existing
@@ -1658,13 +1672,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             } else {
                 self.builder.stack_slot(size as u32, Origin::synthetic())
             };
-            // Store RAX (primary return) at offset 0.
+            // Store RAX (primary return / first scalar) at offset 0.
             self.current_mem = self
                 .builder
                 .store(
                     call_vref.into(),
                     slot.into(),
-                    8,
+                    a_size as u32,
                     self.current_mem.into(),
                     Origin::synthetic(),
                 )
@@ -1678,19 +1692,22 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
             self.abi_metadata
                 .mark_secondary_return_capture(rdx_capture.index(), call_idx);
-            // Store RDX (secondary return) at offset 8.
-            let off8 = self
-                .builder
-                .iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
+            // Store RDX (secondary return / second scalar) at the correct offset.
+            let off_val = self.builder.iconst(
+                b_offset as i64,
+                64,
+                IntSignedness::DontCare,
+                Origin::synthetic(),
+            );
             let hi_addr = self
                 .builder
-                .ptradd(slot.into(), off8.into(), 0, Origin::synthetic());
+                .ptradd(slot.into(), off_val.into(), 0, Origin::synthetic());
             self.current_mem = self
                 .builder
                 .store(
                     rdx_capture.into(),
                     hi_addr.into(),
-                    8,
+                    b_size as u32,
                     self.current_mem.into(),
                     Origin::synthetic(),
                 )

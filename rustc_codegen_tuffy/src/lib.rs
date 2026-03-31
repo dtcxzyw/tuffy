@@ -236,6 +236,7 @@ impl CodegenBackend for TuffyCodegenBackend {
                                             | Linkage::WeakAny
                                     ),
                                     local: false,
+                                    has_frame_pointer: false,
                                 });
                             }
                         }
@@ -268,6 +269,7 @@ impl CodegenBackend for TuffyCodegenBackend {
                                     | Linkage::WeakAny
                             ),
                             local: false,
+                            has_frame_pointer: false,
                         });
                     }
                 }
@@ -407,6 +409,7 @@ impl CodegenBackend for TuffyCodegenBackend {
                             relocations: vec![],
                             weak: true,
                             local: false,
+                            has_frame_pointer: false,
                         });
                         continue;
                     }
@@ -472,6 +475,7 @@ impl CodegenBackend for TuffyCodegenBackend {
                         relocations: vec![],
                         weak: true,
                         local: false,
+                        has_frame_pointer: false,
                     });
                 }
             }
