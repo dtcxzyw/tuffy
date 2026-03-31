@@ -378,6 +378,8 @@ pub enum Op {
     /// Load the address of a symbol (function or static data).
     /// The SymbolId indexes into the module's symbol table.
     SymbolAddr(SymbolId),
+    /// Load the thread-local address of a `#[thread_local]` static.
+    TlsSymbolAddr(SymbolId),
 
     // -- Call --
     /// Call function with arguments. Third is mem token input.
@@ -467,7 +469,7 @@ impl Op {
         match self {
             // No operands
             Param(_) | Const(_) | BConst(_) | FConst(_) | StackSlot(_) | SymbolAddr(_)
-            | Unreachable | Trap => {}
+            | TlsSymbolAddr(_) | Unreachable | Trap => {}
 
             // One typed operand
             CountOnes(a)
@@ -678,7 +680,7 @@ impl Op {
         use Op::*;
         match self {
             Param(_) | Const(_) | BConst(_) | FConst(_) | StackSlot(_) | SymbolAddr(_)
-            | Unreachable | Trap => {}
+            | TlsSymbolAddr(_) | Unreachable | Trap => {}
 
             CountOnes(a)
             | CountLeadingZeros(a, _)

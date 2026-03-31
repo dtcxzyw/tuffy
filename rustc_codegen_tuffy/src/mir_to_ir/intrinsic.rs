@@ -4,6 +4,7 @@ use rustc_middle::mir::{self, Operand};
 use rustc_middle::ty;
 
 use tuffy_ir::instruction::{AtomicRmwOp, ICmpOp, Operand as IrOperand, Origin};
+use tuffy_ir::typed::IntOperand;
 use tuffy_ir::types::{Annotation, FloatType, IntAnnotation, IntSignedness, MemoryOrdering, Type};
 use tuffy_ir::value::ValueRef;
 
@@ -628,9 +629,609 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 true
             }
 
+            // ── SIMD platform intrinsics ──────────────────────────────────
+            // Lower simd_* intrinsics to scalar IR.  We handle variable-width
+            // SIMD types by normalizing all args to stack pointers.
+            n if n.starts_with("simd_") && ir_args.is_empty() => {
+                eprintln!(
+                    "WARNING: simd intrinsic {n} has 0 ir_args in {:?}",
+                    self.instance,
+                );
+                false
+            }
+
+            "simd_bitmask" => {
+                macro_rules! o {
+                    () => {
+                        Origin::synthetic()
+                    };
+                }
+                let u64_int = IntAnnotation {
+                    bit_width: 64,
+                    signedness: IntSignedness::Unsigned,
+                };
+                let u64_opt = Some(Annotation::Int(u64_int));
+                let simd_bytes = self.simd_size_from_substs(substs).unwrap_or(16);
+                let src = self.ensure_simd_on_stack(ir_args[0], simd_bytes);
+
+                let n_words = simd_bytes.div_ceil(8);
+                let mask_c = self.builder.iconst(
+                    0x8080_8080_8080_8080u64 as i64,
+                    64,
+                    IntSignedness::Unsigned,
+                    o!(),
+                );
+                let magic = self.builder.iconst(
+                    0x0002_0408_1020_4081u64 as i64,
+                    64,
+                    IntSignedness::Unsigned,
+                    o!(),
+                );
+                let sh56 = self
+                    .builder
+                    .iconst(56i64, 64, IntSignedness::Unsigned, o!());
+
+                let mut result = self
+                    .builder
+                    .iconst(0i64, 64, IntSignedness::Unsigned, o!())
+                    .raw();
+                for w in 0..n_words {
+                    let word_ptr: ValueRef = if w == 0 {
+                        src
+                    } else {
+                        let off =
+                            self.builder
+                                .iconst(w as i64 * 8, 64, IntSignedness::Unsigned, o!());
+                        self.builder.ptradd(src.into(), off.into(), 0, o!()).raw()
+                    };
+                    let word = self.builder.load(
+                        word_ptr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        u64_opt,
+                        o!(),
+                    );
+                    let masked = self.builder.and(word.into(), mask_c.into(), u64_int, o!());
+                    let prod = self.builder.mul(masked.into(), magic.into(), u64_int, o!());
+                    let bits = self.builder.shr(prod.into(), sh56.into(), u64_int, o!());
+                    if w == 0 {
+                        result = bits.raw();
+                    } else {
+                        let shift =
+                            self.builder
+                                .iconst(w as i64 * 8, 64, IntSignedness::Unsigned, o!());
+                        let shifted = self.builder.shl(bits.into(), shift.into(), u64_int, o!());
+                        result = self
+                            .builder
+                            .or(result.into(), shifted.into(), u64_int, o!())
+                            .raw();
+                    }
+                }
+                self.locals.set(destination_local, result);
+                true
+            }
+
+            "simd_eq" | "simd_ne" | "simd_gt" | "simd_lt" | "simd_ge" | "simd_le" => {
+                let cmp_op = match name {
+                    "simd_eq" => ICmpOp::Eq,
+                    "simd_ne" => ICmpOp::Ne,
+                    "simd_gt" => ICmpOp::Gt,
+                    "simd_lt" => ICmpOp::Lt,
+                    "simd_ge" => ICmpOp::Ge,
+                    _ => ICmpOp::Le,
+                };
+                let simd_bytes = self.simd_size_from_substs(substs).unwrap_or(16);
+                self.emit_simd_cmp_byte(ir_args, destination_local, cmp_op, simd_bytes);
+                true
+            }
+
+            "simd_or" | "simd_and" | "simd_xor" => {
+                let simd_bytes = self.simd_size_from_substs(substs).unwrap_or(16);
+                self.emit_simd_binop_qword(ir_args, destination_local, name, simd_bytes);
+                true
+            }
+
+            "simd_add" => {
+                let simd_bytes = self.simd_size_from_substs(substs).unwrap_or(16);
+                self.emit_simd_add(ir_args, destination_local, simd_bytes);
+                true
+            }
+
+            "simd_reduce_or" => {
+                macro_rules! o {
+                    () => {
+                        Origin::synthetic()
+                    };
+                }
+                let u64_int = IntAnnotation {
+                    bit_width: 64,
+                    signedness: IntSignedness::Unsigned,
+                };
+                let u64_opt = Some(Annotation::Int(u64_int));
+                let simd_bytes = self.simd_size_from_substs(substs).unwrap_or(16);
+                let src = self.ensure_simd_on_stack(ir_args[0], simd_bytes);
+
+                let n_words = simd_bytes.div_ceil(8);
+                let first = self.builder.load(
+                    src.into(),
+                    8,
+                    Type::Int,
+                    self.current_mem.into(),
+                    u64_opt,
+                    o!(),
+                );
+                let mut acc: ValueRef = first;
+                for w in 1..n_words {
+                    let off = self
+                        .builder
+                        .iconst(w as i64 * 8, 64, IntSignedness::Unsigned, o!());
+                    let ptr = self.builder.ptradd(src.into(), off.into(), 0, o!());
+                    let word = self.builder.load(
+                        ptr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        u64_opt,
+                        o!(),
+                    );
+                    acc = self
+                        .builder
+                        .or(acc.into(), word.into(), u64_int, o!())
+                        .raw();
+                }
+                let sh32 = self
+                    .builder
+                    .iconst(32i64, 64, IntSignedness::Unsigned, o!());
+                let f1 = self.builder.shr(acc.into(), sh32.into(), u64_int, o!());
+                let acc2 = self.builder.or(acc.into(), f1.into(), u64_int, o!());
+                let sh16 = self
+                    .builder
+                    .iconst(16i64, 64, IntSignedness::Unsigned, o!());
+                let f2 = self.builder.shr(acc2.into(), sh16.into(), u64_int, o!());
+                let acc3 = self.builder.or(acc2.into(), f2.into(), u64_int, o!());
+                let sh8 = self.builder.iconst(8i64, 64, IntSignedness::Unsigned, o!());
+                let f3 = self.builder.shr(acc3.into(), sh8.into(), u64_int, o!());
+                let result = self.builder.or(acc3.into(), f3.into(), u64_int, o!());
+                let mask_ff = self
+                    .builder
+                    .iconst(0xFFi64, 64, IntSignedness::Unsigned, o!());
+                let byte_result = self
+                    .builder
+                    .and(result.into(), mask_ff.into(), u64_int, o!());
+
+                self.locals.set(destination_local, byte_result.raw());
+                true
+            }
+
+            "simd_splat" => {
+                macro_rules! o {
+                    () => {
+                        Origin::synthetic()
+                    };
+                }
+                let u64_int = IntAnnotation {
+                    bit_width: 64,
+                    signedness: IntSignedness::Unsigned,
+                };
+                let byte_val = ir_args[0];
+                let simd_bytes = self.simd_size_from_substs(substs).unwrap_or(16);
+
+                // Mask to 8 bits in case the value is sign-extended to 64-bit.
+                let mask_ff = self
+                    .builder
+                    .iconst(0xFFi64, 64, IntSignedness::Unsigned, o!());
+                let masked = self
+                    .builder
+                    .and(byte_val.into(), mask_ff.into(), u64_int, o!());
+                let rep = self.builder.iconst(
+                    0x0101_0101_0101_0101u64 as i64,
+                    64,
+                    IntSignedness::Unsigned,
+                    o!(),
+                );
+                let splat_word = self.builder.mul(masked.into(), rep.into(), u64_int, o!());
+
+                if simd_bytes <= 8 {
+                    self.locals.set(destination_local, splat_word.raw());
+                } else {
+                    let slot = self.builder.stack_slot(simd_bytes, o!());
+                    let n_words = simd_bytes.div_ceil(8);
+                    for w in 0..n_words {
+                        let dst: ValueRef = if w == 0 {
+                            slot
+                        } else {
+                            let off = self.builder.iconst(
+                                w as i64 * 8,
+                                64,
+                                IntSignedness::Unsigned,
+                                o!(),
+                            );
+                            self.builder.ptradd(slot.into(), off.into(), 0, o!()).raw()
+                        };
+                        self.current_mem = self
+                            .builder
+                            .store(
+                                splat_word.raw().into(),
+                                dst.into(),
+                                8,
+                                self.current_mem.into(),
+                                o!(),
+                            )
+                            .raw();
+                    }
+                    self.locals.set(destination_local, slot);
+                }
+                true
+            }
+
             // Not handled here — fall through to translate_memory_intrinsic.
-            _ => false,
+            other => {
+                if other.starts_with("simd_") {
+                    eprintln!(
+                        "WARNING: unhandled simd intrinsic: {other} in {:?}",
+                        self.instance
+                    );
+                }
+                false
+            }
         }
+    }
+
+    // ── SIMD helper methods ──────────────────────────────────────────
+
+    /// Get the SIMD type size in bytes from the first generic arg.
+    fn simd_size_from_substs(&self, substs: &'tcx ty::List<ty::GenericArg<'tcx>>) -> Option<u32> {
+        substs
+            .first()
+            .and_then(|a| a.as_type())
+            .and_then(|t| type_size(self.tcx, t))
+            .map(|sz| sz as u32)
+    }
+
+    /// Ensure a SIMD value is on the stack.  If the value is already
+    /// a Ptr (16-byte SIMD), return it.  If it's an Int (≤8 byte SIMD),
+    /// spill to a temporary stack slot.
+    fn ensure_simd_on_stack(&mut self, val: ValueRef, size: u32) -> ValueRef {
+        macro_rules! o {
+            () => {
+                Origin::synthetic()
+            };
+        }
+        if matches!(self.builder.value_type(val), Some(Type::Ptr(_))) {
+            val
+        } else {
+            let store_size = if size <= 8 { 8 } else { size };
+            let slot = self.builder.stack_slot(store_size, o!());
+            self.current_mem = self
+                .builder
+                .store(
+                    val.into(),
+                    slot.into(),
+                    store_size.min(8),
+                    self.current_mem.into(),
+                    o!(),
+                )
+                .raw();
+            slot
+        }
+    }
+
+    /// Load the result from a stack slot as Int if the SIMD type fits in
+    /// a register (≤8 bytes), otherwise leave as a stack pointer.
+    fn simd_result_from_stack(&mut self, slot: ValueRef, size: u32) -> ValueRef {
+        macro_rules! o {
+            () => {
+                Origin::synthetic()
+            };
+        }
+        if size <= 8 {
+            let u64_opt = Some(Annotation::Int(IntAnnotation {
+                bit_width: 64,
+                signedness: IntSignedness::Unsigned,
+            }));
+            self.builder.load(
+                slot.into(),
+                8,
+                Type::Int,
+                self.current_mem.into(),
+                u64_opt,
+                o!(),
+            )
+        } else {
+            slot
+        }
+    }
+
+    /// Emit a per-byte comparison of two SIMD vectors.
+    fn emit_simd_cmp_byte(
+        &mut self,
+        ir_args: &[ValueRef],
+        destination_local: mir::Local,
+        op: ICmpOp,
+        simd_bytes: u32,
+    ) {
+        let a_ptr = self.ensure_simd_on_stack(ir_args[0], simd_bytes);
+        let b_ptr = self.ensure_simd_on_stack(ir_args[1], simd_bytes);
+        let s8_int = IntAnnotation {
+            bit_width: 8,
+            signedness: IntSignedness::Signed,
+        };
+        let s8_opt = Some(Annotation::Int(s8_int));
+        let s8_annotation = Annotation::Int(s8_int);
+        macro_rules! o {
+            () => {
+                Origin::synthetic()
+            };
+        }
+
+        let slot = self.builder.stack_slot(simd_bytes.max(8), o!());
+
+        for i in 0..simd_bytes {
+            let a_addr: ValueRef = if i == 0 {
+                a_ptr
+            } else {
+                let off = self
+                    .builder
+                    .iconst(i as i64, 64, IntSignedness::Unsigned, o!());
+                self.builder.ptradd(a_ptr.into(), off.into(), 0, o!()).raw()
+            };
+            let b_addr: ValueRef = if i == 0 {
+                b_ptr
+            } else {
+                let off = self
+                    .builder
+                    .iconst(i as i64, 64, IntSignedness::Unsigned, o!());
+                self.builder.ptradd(b_ptr.into(), off.into(), 0, o!()).raw()
+            };
+            let a_byte = self.builder.load(
+                a_addr.into(),
+                1,
+                Type::Int,
+                self.current_mem.into(),
+                s8_opt,
+                o!(),
+            );
+            let b_byte = self.builder.load(
+                b_addr.into(),
+                1,
+                Type::Int,
+                self.current_mem.into(),
+                s8_opt,
+                o!(),
+            );
+            let a_op = IntOperand::from(IrOperand::annotated(a_byte, s8_annotation));
+            let b_op = IntOperand::from(IrOperand::annotated(b_byte, s8_annotation));
+            let cmp = self.builder.icmp(op, a_op, b_op, o!());
+            let ff = self.builder.iconst(-1i64, 8, IntSignedness::Signed, o!());
+            let zero_byte = self.builder.iconst(0i64, 8, IntSignedness::Signed, o!());
+            let res_byte = self.builder.select(
+                cmp.into(),
+                ff.raw().into(),
+                zero_byte.raw().into(),
+                Type::Int,
+                s8_opt,
+                o!(),
+            );
+
+            let dst_addr: ValueRef = if i == 0 {
+                slot
+            } else {
+                let off = self
+                    .builder
+                    .iconst(i as i64, 64, IntSignedness::Unsigned, o!());
+                self.builder.ptradd(slot.into(), off.into(), 0, o!()).raw()
+            };
+            self.current_mem = self
+                .builder
+                .store(
+                    res_byte.into(),
+                    dst_addr.into(),
+                    1,
+                    self.current_mem.into(),
+                    o!(),
+                )
+                .raw();
+        }
+
+        let result = self.simd_result_from_stack(slot, simd_bytes);
+        self.locals.set(destination_local, result);
+    }
+
+    /// Emit a qword-level bitwise operation on two SIMD vectors.
+    fn emit_simd_binop_qword(
+        &mut self,
+        ir_args: &[ValueRef],
+        destination_local: mir::Local,
+        op: &str,
+        simd_bytes: u32,
+    ) {
+        let a_ptr = self.ensure_simd_on_stack(ir_args[0], simd_bytes);
+        let b_ptr = self.ensure_simd_on_stack(ir_args[1], simd_bytes);
+        let u64_int = IntAnnotation {
+            bit_width: 64,
+            signedness: IntSignedness::Unsigned,
+        };
+        let u64_opt = Some(Annotation::Int(u64_int));
+        macro_rules! o {
+            () => {
+                Origin::synthetic()
+            };
+        }
+
+        let slot = self.builder.stack_slot(simd_bytes.max(8), o!());
+        let n_words = simd_bytes.div_ceil(8);
+
+        for half in 0..n_words {
+            let offset_val = half as i64 * 8;
+            let a_addr: ValueRef = if half == 0 {
+                a_ptr
+            } else {
+                let off = self
+                    .builder
+                    .iconst(offset_val, 64, IntSignedness::Unsigned, o!());
+                self.builder.ptradd(a_ptr.into(), off.into(), 0, o!()).raw()
+            };
+            let b_addr: ValueRef = if half == 0 {
+                b_ptr
+            } else {
+                let off = self
+                    .builder
+                    .iconst(offset_val, 64, IntSignedness::Unsigned, o!());
+                self.builder.ptradd(b_ptr.into(), off.into(), 0, o!()).raw()
+            };
+            let a_val = self.builder.load(
+                a_addr.into(),
+                8,
+                Type::Int,
+                self.current_mem.into(),
+                u64_opt,
+                o!(),
+            );
+            let b_val = self.builder.load(
+                b_addr.into(),
+                8,
+                Type::Int,
+                self.current_mem.into(),
+                u64_opt,
+                o!(),
+            );
+
+            let result = match op {
+                "simd_or" => self.builder.or(a_val.into(), b_val.into(), u64_int, o!()),
+                "simd_and" => self.builder.and(a_val.into(), b_val.into(), u64_int, o!()),
+                "simd_xor" => self.builder.xor(a_val.into(), b_val.into(), u64_int, o!()),
+                _ => unreachable!(),
+            };
+
+            let dst_addr: ValueRef = if half == 0 {
+                slot
+            } else {
+                let off = self
+                    .builder
+                    .iconst(offset_val, 64, IntSignedness::Unsigned, o!());
+                self.builder.ptradd(slot.into(), off.into(), 0, o!()).raw()
+            };
+            self.current_mem = self
+                .builder
+                .store(
+                    result.raw().into(),
+                    dst_addr.into(),
+                    8,
+                    self.current_mem.into(),
+                    o!(),
+                )
+                .raw();
+        }
+
+        let result = self.simd_result_from_stack(slot, simd_bytes);
+        self.locals.set(destination_local, result);
+    }
+
+    /// Emit per-byte addition of two SIMD vectors using SWAR trick.
+    fn emit_simd_add(
+        &mut self,
+        ir_args: &[ValueRef],
+        destination_local: mir::Local,
+        simd_bytes: u32,
+    ) {
+        let a_ptr = self.ensure_simd_on_stack(ir_args[0], simd_bytes);
+        let b_ptr = self.ensure_simd_on_stack(ir_args[1], simd_bytes);
+        let u64_int = IntAnnotation {
+            bit_width: 64,
+            signedness: IntSignedness::Unsigned,
+        };
+        let u64_opt = Some(Annotation::Int(u64_int));
+        macro_rules! o {
+            () => {
+                Origin::synthetic()
+            };
+        }
+
+        let slot = self.builder.stack_slot(simd_bytes.max(8), o!());
+        let n_words = simd_bytes.div_ceil(8);
+        let mask_7f = self.builder.iconst(
+            0x7F7F_7F7F_7F7F_7F7Fu64 as i64,
+            64,
+            IntSignedness::Unsigned,
+            o!(),
+        );
+        let mask_80 = self.builder.iconst(
+            0x8080_8080_8080_8080u64 as i64,
+            64,
+            IntSignedness::Unsigned,
+            o!(),
+        );
+
+        for w in 0..n_words {
+            let offset_val = w as i64 * 8;
+            let a_addr: ValueRef = if w == 0 {
+                a_ptr
+            } else {
+                let off = self
+                    .builder
+                    .iconst(offset_val, 64, IntSignedness::Unsigned, o!());
+                self.builder.ptradd(a_ptr.into(), off.into(), 0, o!()).raw()
+            };
+            let b_addr: ValueRef = if w == 0 {
+                b_ptr
+            } else {
+                let off = self
+                    .builder
+                    .iconst(offset_val, 64, IntSignedness::Unsigned, o!());
+                self.builder.ptradd(b_ptr.into(), off.into(), 0, o!()).raw()
+            };
+            let a_val = self.builder.load(
+                a_addr.into(),
+                8,
+                Type::Int,
+                self.current_mem.into(),
+                u64_opt,
+                o!(),
+            );
+            let b_val = self.builder.load(
+                b_addr.into(),
+                8,
+                Type::Int,
+                self.current_mem.into(),
+                u64_opt,
+                o!(),
+            );
+
+            // SWAR per-byte add: ((a & 0x7F...) + (b & 0x7F...)) ^ ((a ^ b) & 0x80...)
+            let a_lo = self
+                .builder
+                .and(a_val.into(), mask_7f.into(), u64_int, o!());
+            let b_lo = self
+                .builder
+                .and(b_val.into(), mask_7f.into(), u64_int, o!());
+            let sum_lo = self.builder.add(a_lo.into(), b_lo.into(), u64_int, o!());
+            let axb = self.builder.xor(a_val.into(), b_val.into(), u64_int, o!());
+            let carry = self.builder.and(axb.into(), mask_80.into(), u64_int, o!());
+            let result = self.builder.xor(sum_lo.into(), carry.into(), u64_int, o!());
+
+            let dst_addr: ValueRef = if w == 0 {
+                slot
+            } else {
+                let off = self
+                    .builder
+                    .iconst(offset_val, 64, IntSignedness::Unsigned, o!());
+                self.builder.ptradd(slot.into(), off.into(), 0, o!()).raw()
+            };
+            self.current_mem = self
+                .builder
+                .store(
+                    result.raw().into(),
+                    dst_addr.into(),
+                    8,
+                    self.current_mem.into(),
+                    o!(),
+                )
+                .raw();
+        }
+
+        let result = self.simd_result_from_stack(slot, simd_bytes);
+        self.locals.set(destination_local, result);
     }
 
     /// Lower memory intrinsics to IR memory operations.

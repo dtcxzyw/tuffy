@@ -168,11 +168,42 @@ impl<'a> Builder<'a> {
         if v.is_block_arg() || v.is_secondary_result() {
             return false;
         }
-        matches!(
-            self.func.inst_pool.get(v.index()),
-            Some(node) if matches!(node.inst.op, Op::StackSlot(_) | Op::SymbolAddr(_) | Op::PtrAdd(..))
+        match self.func.inst_pool.get(v.index()) {
+            Some(node) => matches!(
+                &node.inst.op,
+                Op::StackSlot(_) | Op::SymbolAddr(_) | Op::TlsSymbolAddr(_) | Op::PtrAdd(..)
+            ),
+            None => false,
+        }
+    }
 
-        )
+    /// Returns true if `v` is a `SymbolAddr` instruction.
+    pub fn is_symbol_addr(&self, v: ValueRef) -> bool {
+        if v.is_block_arg() || v.is_secondary_result() {
+            return false;
+        }
+        match self.func.inst_pool.get(v.index()) {
+            Some(node) => matches!(&node.inst.op, Op::SymbolAddr(_) | Op::TlsSymbolAddr(_)),
+            None => false,
+        }
+    }
+
+    /// Like `is_memory_address` but only returns true when the address
+    /// is "local" — i.e. rooted at a `StackSlot` or `SymbolAddr`.
+    /// A `PtrAdd` whose base was loaded from memory (a remote struct
+    /// field pointer) is NOT considered local.
+    pub fn is_local_memory_address(&self, v: ValueRef) -> bool {
+        if v.is_block_arg() || v.is_secondary_result() {
+            return false;
+        }
+        match self.func.inst_pool.get(v.index()) {
+            Some(node) => match &node.inst.op {
+                Op::StackSlot(_) | Op::SymbolAddr(_) | Op::TlsSymbolAddr(_) => true,
+                Op::PtrAdd(base, _) => self.is_local_memory_address(base.0.value),
+                _ => false,
+            },
+            None => false,
+        }
     }
 
     /// Add a block argument and return its ValueRef.
@@ -1273,6 +1304,12 @@ impl<'a> Builder<'a> {
     /// Load the address of a symbol (function or static data).
     pub fn symbol_addr(&mut self, sym: SymbolId, origin: Origin) -> PtrValue {
         let v = self.push_inst(Op::SymbolAddr(sym), Type::Ptr(0), None, origin, None);
+        PtrValue::new(v, self.func)
+    }
+
+    /// Create a thread-local symbol address reference (for `#[thread_local]` statics).
+    pub fn tls_symbol_addr(&mut self, sym: SymbolId, origin: Origin) -> PtrValue {
+        let v = self.push_inst(Op::TlsSymbolAddr(sym), Type::Ptr(0), None, origin, None);
         PtrValue::new(v, self.func)
     }
 

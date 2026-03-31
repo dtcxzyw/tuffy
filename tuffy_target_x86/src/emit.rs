@@ -86,22 +86,29 @@ pub fn emit_elf_with_data(functions: &[CompiledFunction], statics: &[StaticData]
                     sym_map.insert(reloc.symbol.clone(), s);
                     s
                 };
-                let (reloc_kind, reloc_encoding, reloc_size, addend) = match reloc.kind {
-                    RelocKind::Abs64 => {
-                        (RelocationKind::Absolute, RelocationEncoding::Generic, 64, 0)
-                    }
-                    RelocKind::Call => (
-                        RelocationKind::PltRelative,
-                        RelocationEncoding::X86Branch,
-                        32,
-                        -4,
-                    ),
-                    RelocKind::PcRel => (
-                        RelocationKind::Relative,
-                        RelocationEncoding::Generic,
-                        32,
-                        -4,
-                    ),
+                let flags = match reloc.kind {
+                    RelocKind::Abs64 => RelocationFlags::Generic {
+                        kind: RelocationKind::Absolute,
+                        encoding: RelocationEncoding::Generic,
+                        size: 64,
+                    },
+                    RelocKind::Call => RelocationFlags::Generic {
+                        kind: RelocationKind::PltRelative,
+                        encoding: RelocationEncoding::X86Branch,
+                        size: 32,
+                    },
+                    RelocKind::PcRel => RelocationFlags::Generic {
+                        kind: RelocationKind::Relative,
+                        encoding: RelocationEncoding::Generic,
+                        size: 32,
+                    },
+                    RelocKind::TlsGotTpOff => RelocationFlags::Elf {
+                        r_type: object::elf::R_X86_64_GOTTPOFF,
+                    },
+                };
+                let addend = match reloc.kind {
+                    RelocKind::Abs64 => 0,
+                    _ => -4,
                 };
                 obj.add_relocation(
                     section,
@@ -109,11 +116,7 @@ pub fn emit_elf_with_data(functions: &[CompiledFunction], statics: &[StaticData]
                         offset: offset + reloc.offset as u64,
                         symbol: target_sid,
                         addend,
-                        flags: RelocationFlags::Generic {
-                            kind: reloc_kind,
-                            encoding: reloc_encoding,
-                            size: reloc_size,
-                        },
+                        flags,
                     },
                 )
                 .expect("failed to add static data relocation");
@@ -170,20 +173,29 @@ pub fn emit_elf_with_data(functions: &[CompiledFunction], statics: &[StaticData]
                 sid
             };
 
-            let (reloc_kind, reloc_encoding, reloc_size, addend) = match reloc.kind {
-                RelocKind::Call => (
-                    RelocationKind::PltRelative,
-                    RelocationEncoding::X86Branch,
-                    32,
-                    -4,
-                ),
-                RelocKind::PcRel => (
-                    RelocationKind::Relative,
-                    RelocationEncoding::Generic,
-                    32,
-                    -4,
-                ),
-                RelocKind::Abs64 => (RelocationKind::Absolute, RelocationEncoding::Generic, 64, 0),
+            let flags = match reloc.kind {
+                RelocKind::Call => RelocationFlags::Generic {
+                    kind: RelocationKind::PltRelative,
+                    encoding: RelocationEncoding::X86Branch,
+                    size: 32,
+                },
+                RelocKind::PcRel => RelocationFlags::Generic {
+                    kind: RelocationKind::Relative,
+                    encoding: RelocationEncoding::Generic,
+                    size: 32,
+                },
+                RelocKind::Abs64 => RelocationFlags::Generic {
+                    kind: RelocationKind::Absolute,
+                    encoding: RelocationEncoding::Generic,
+                    size: 64,
+                },
+                RelocKind::TlsGotTpOff => RelocationFlags::Elf {
+                    r_type: object::elf::R_X86_64_GOTTPOFF,
+                },
+            };
+            let addend = match reloc.kind {
+                RelocKind::Abs64 => 0,
+                _ => -4,
             };
             obj.add_relocation(
                 text,
@@ -191,11 +203,7 @@ pub fn emit_elf_with_data(functions: &[CompiledFunction], statics: &[StaticData]
                     offset: code_offset + reloc.offset as u64,
                     symbol: sym_id,
                     addend,
-                    flags: RelocationFlags::Generic {
-                        kind: reloc_kind,
-                        encoding: reloc_encoding,
-                        size: reloc_size,
-                    },
+                    flags,
                 },
             )
             .expect("failed to add relocation");

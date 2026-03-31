@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use iced_x86::{Code, Encoder, Instruction, MemoryOperand, Register};
 
-use crate::inst::{CondCode, FpBinOpKind, MInst, OpSize, PInst};
+use crate::inst::{AtomicRmwOpKind, CondCode, FpBinOpKind, MInst, OpSize, PInst};
 use crate::reg::Gpr;
 use tuffy_target::reloc::{EncodeResult, RelocKind, Relocation};
 
@@ -866,6 +866,28 @@ fn encode_inst(inst: &PInst, ctx: &mut EncodeContext) {
             });
         }
 
+        MInst::TlsLeaSymbol { dst, symbol } => {
+            // Initial Exec TLS access: load thread-local address.
+            // Step 1: mov dst, qword ptr fs:[0]
+            // Encoding: 64 48 8b 04 25 00 00 00 00
+            let dst_reg = gpr64(*dst);
+            let abs_mem = MemoryOperand::with_displ(0u64, 4);
+            let mut fs_mov = Instruction::with2(Code::Mov_r64_rm64, dst_reg, abs_mem).unwrap();
+            fs_mov.set_segment_prefix(Register::FS);
+            ctx.emit(fs_mov);
+
+            // Step 2: add dst, qword ptr [rip+symbol@GOTTPOFF]
+            let start2 = ctx.pos;
+            let rip_mem = MemoryOperand::with_base_displ(Register::RIP, 0);
+            ctx.emit(Instruction::with2(Code::Add_r64_rm64, dst_reg, rip_mem).unwrap());
+            let offsets = ctx.encoder.get_constant_offsets();
+            ctx.relocations.push(Relocation {
+                offset: start2 + offsets.displacement_offset(),
+                symbol: symbol.clone(),
+                kind: RelocKind::TlsGotTpOff,
+            });
+        }
+
         // --- Conditional ---
         MInst::CMOVcc { size, cc, dst, src } => {
             ctx.emit(
@@ -1034,6 +1056,24 @@ fn encode_inst(inst: &PInst, ctx: &mut EncodeContext) {
             double,
         } => {
             encode_fp_cmp(ctx, *dst, *lhs, *rhs, *tmp, *kind, *double);
+        }
+        MInst::AtomicRmw {
+            op,
+            size,
+            dst,
+            base,
+            val,
+        } => {
+            encode_atomic_rmw(ctx, *op, *size, *dst, *base, *val);
+        }
+        MInst::AtomicCmpXchg {
+            size,
+            dst,
+            base,
+            expected,
+            desired,
+        } => {
+            encode_atomic_cmpxchg(ctx, *size, *dst, *base, *expected, *desired);
         }
     }
 }
@@ -1422,4 +1462,210 @@ fn encode_fp_cmp(
         _ => unreachable!("invalid FCmpOp kind: {kind}"),
     }
     ctx.emit(Instruction::with2(Code::Movzx_r32_rm8, dst32, dst8).unwrap());
+}
+
+// ---------------------------------------------------------------------------
+// Atomic pseudo-instruction expansions
+// ---------------------------------------------------------------------------
+
+fn xadd_code(size: OpSize) -> Code {
+    match size {
+        OpSize::S64 => Code::Xadd_rm64_r64,
+        OpSize::S32 => Code::Xadd_rm32_r32,
+        OpSize::S16 => Code::Xadd_rm16_r16,
+        OpSize::S8 => Code::Xadd_rm8_r8,
+    }
+}
+
+fn xchg_code(size: OpSize) -> Code {
+    match size {
+        OpSize::S64 => Code::Xchg_rm64_r64,
+        OpSize::S32 => Code::Xchg_rm32_r32,
+        OpSize::S16 => Code::Xchg_rm16_r16,
+        OpSize::S8 => Code::Xchg_rm8_r8,
+    }
+}
+
+fn cmpxchg_code(size: OpSize) -> Code {
+    match size {
+        OpSize::S64 => Code::Cmpxchg_rm64_r64,
+        OpSize::S32 => Code::Cmpxchg_rm32_r32,
+        OpSize::S16 => Code::Cmpxchg_rm16_r16,
+        OpSize::S8 => Code::Cmpxchg_rm8_r8,
+    }
+}
+
+fn neg_code(size: OpSize) -> Code {
+    match size {
+        OpSize::S64 => Code::Neg_rm64,
+        OpSize::S32 => Code::Neg_rm32,
+        OpSize::S16 => Code::Neg_rm16,
+        OpSize::S8 => Code::Neg_rm8,
+    }
+}
+
+/// AtomicRmw pseudo-instruction expansion.
+///
+/// Emits the appropriate atomic instruction sequence depending on the operation:
+/// - Xchg: xchg [base], val (implicit lock prefix on memory operands)
+/// - Add:  lock xadd [base], val (returns old value)
+/// - Sub:  neg val; lock xadd [base], val (returns old value)
+/// - And/Or/Xor: cmpxchg loop
+fn encode_atomic_rmw(
+    ctx: &mut EncodeContext,
+    op: AtomicRmwOpKind,
+    size: OpSize,
+    dst: Gpr,
+    base: Gpr,
+    val: Gpr,
+) {
+    // Move base and val to scratch registers (RCX for base, RAX for val)
+    // to avoid clobbering input vregs.
+    let moved_base = Gpr::Rcx;
+    let moved_val = Gpr::Rax;
+
+    // Handle the case where base and val might be in swapped positions.
+    if base == Gpr::Rax && val == Gpr::Rcx {
+        ctx.emit(Instruction::with2(Code::Xchg_rm64_r64, Register::RCX, Register::RAX).unwrap());
+    } else if val == Gpr::Rcx {
+        // val is in RCX, move it to RAX first, then move base to RCX
+        ctx.emit_mov64(Gpr::Rax, val);
+        ctx.emit_mov64(Gpr::Rcx, base);
+    } else {
+        ctx.emit_mov64(Gpr::Rcx, base);
+        ctx.emit_mov64(Gpr::Rax, val);
+    }
+
+    let addr = MemoryOperand::with_base(gpr64(moved_base));
+
+    match op {
+        AtomicRmwOpKind::Xchg => {
+            // xchg [base], rax — implicit lock on memory operand, returns old value in rax
+            let inst =
+                Instruction::with2(xchg_code(size), addr, gpr_to_iced(moved_val, size)).unwrap();
+            ctx.emit(inst);
+        }
+        AtomicRmwOpKind::Add => {
+            // lock xadd [base], rax — old value returned in rax
+            let mut inst =
+                Instruction::with2(xadd_code(size), addr, gpr_to_iced(moved_val, size)).unwrap();
+            inst.set_has_lock_prefix(true);
+            ctx.emit(inst);
+        }
+        AtomicRmwOpKind::Sub => {
+            // neg rax; lock xadd [base], rax — old value returned in rax
+            ctx.emit(Instruction::with1(neg_code(size), gpr_to_iced(moved_val, size)).unwrap());
+            let mut inst =
+                Instruction::with2(xadd_code(size), addr, gpr_to_iced(moved_val, size)).unwrap();
+            inst.set_has_lock_prefix(true);
+            ctx.emit(inst);
+        }
+        AtomicRmwOpKind::And | AtomicRmwOpKind::Or | AtomicRmwOpKind::Xor => {
+            // Cmpxchg loop: RAX = old, RDX = new = old OP val
+            // We use RDX as the scratch for the computed new value.
+            //
+            //   mov rax, [rcx]     ; load current value
+            // loop:
+            //   mov rdx, rax       ; copy old to rdx
+            //   OP  rdx, <val>     ; compute new value (val was moved to a temporary)
+            //   lock cmpxchg [rcx], rdx  ; if [rcx]==rax, [rcx]=rdx; else rax=[rcx]
+            //   jne loop
+            //
+            // We store the original val in R11 (caller-saved scratch) since RAX is
+            // modified by cmpxchg on failure.
+
+            // Save val to R11 before the loop
+            ctx.emit(Instruction::with2(Code::Mov_rm64_r64, Register::R11, Register::RAX).unwrap());
+
+            // Load current value into RAX
+            let load_code = match size {
+                OpSize::S64 => Code::Mov_r64_rm64,
+                OpSize::S32 => Code::Mov_r32_rm32,
+                OpSize::S16 => Code::Mov_r16_rm16,
+                OpSize::S8 => Code::Mov_r8_rm8,
+            };
+            ctx.emit(Instruction::with2(load_code, gpr_to_iced(Gpr::Rax, size), addr).unwrap());
+
+            // Record loop start position for backward branch
+            let loop_start = ctx.pos;
+
+            // mov rdx, rax (copy current to compute new)
+            ctx.emit(
+                Instruction::with2(
+                    mov_rr_code(size),
+                    gpr_to_iced(Gpr::Rdx, size),
+                    gpr_to_iced(Gpr::Rax, size),
+                )
+                .unwrap(),
+            );
+
+            // Apply the operation: rdx = rdx OP r11
+            let op_code = match op {
+                AtomicRmwOpKind::And => and_code(size),
+                AtomicRmwOpKind::Or => or_code(size),
+                AtomicRmwOpKind::Xor => xor_code(size),
+                _ => unreachable!(),
+            };
+            ctx.emit(
+                Instruction::with2(
+                    op_code,
+                    gpr_to_iced(Gpr::Rdx, size),
+                    gpr_to_iced(Gpr::R11, size),
+                )
+                .unwrap(),
+            );
+
+            // lock cmpxchg [rcx], rdx
+            let mut cmpxchg =
+                Instruction::with2(cmpxchg_code(size), addr, gpr_to_iced(Gpr::Rdx, size)).unwrap();
+            cmpxchg.set_has_lock_prefix(true);
+            ctx.emit(cmpxchg);
+
+            // jne loop_start (if cmpxchg failed, RAX has new current value, retry)
+            ctx.emit(Instruction::with_branch(Code::Jne_rel32_64, loop_start as u64).unwrap());
+        }
+    }
+
+    // Move result from RAX to dst
+    ctx.emit_mov64(dst, Gpr::Rax);
+}
+
+/// AtomicCmpXchg pseudo-instruction expansion.
+///
+/// Emits: mov rax, expected; mov rcx, base; lock cmpxchg [rcx], desired_reg; mov dst, rax
+///
+/// The lock cmpxchg instruction compares [rcx] with RAX:
+/// - If equal: stores desired into [rcx], RAX unchanged
+/// - If not equal: loads [rcx] into RAX
+///
+/// Either way, RAX contains the old value.
+fn encode_atomic_cmpxchg(
+    ctx: &mut EncodeContext,
+    size: OpSize,
+    dst: Gpr,
+    base: Gpr,
+    expected: Gpr,
+    desired: Gpr,
+) {
+    // We need: RAX = expected, RCX = base, some reg = desired
+    // Use RDX as scratch for desired to avoid conflicts.
+
+    // Handle potential register conflicts carefully.
+    // Move desired to RDX first (it's the least likely to conflict).
+    if desired == Gpr::Rax && expected == Gpr::Rdx {
+        ctx.emit(Instruction::with2(Code::Xchg_rm64_r64, Register::RAX, Register::RDX).unwrap());
+    } else {
+        ctx.emit_mov64(Gpr::Rdx, desired);
+        ctx.emit_mov64(Gpr::Rax, expected);
+    }
+    ctx.emit_mov64(Gpr::Rcx, base);
+
+    let addr = MemoryOperand::with_base(gpr64(Gpr::Rcx));
+    let mut inst =
+        Instruction::with2(cmpxchg_code(size), addr, gpr_to_iced(Gpr::Rdx, size)).unwrap();
+    inst.set_has_lock_prefix(true);
+    ctx.emit(inst);
+
+    // Result (old value) is in RAX
+    ctx.emit_mov64(dst, Gpr::Rax);
 }

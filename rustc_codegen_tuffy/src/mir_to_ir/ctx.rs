@@ -219,16 +219,49 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let slot_size = (size as u32).max(1);
         let slot = self.builder.stack_slot(slot_size, Origin::synthetic());
         if let Some(old_val) = self.locals.get(local) {
-            self.current_mem = self
-                .builder
-                .store(
-                    old_val.into(),
-                    slot.into(),
-                    slot_size,
-                    self.current_mem.into(),
-                    Origin::synthetic(),
-                )
-                .raw();
+            let is_fat = self.fat_locals.get(local).is_some();
+            if is_fat && slot_size == 16 {
+                // Fat pointer: store data pointer (8 bytes) then metadata (8 bytes).
+                self.current_mem = self
+                    .builder
+                    .store(
+                        old_val.into(),
+                        slot.into(),
+                        8,
+                        self.current_mem.into(),
+                        Origin::synthetic(),
+                    )
+                    .raw();
+                if let Some(meta) = self.fat_locals.get(local) {
+                    let off8 =
+                        self.builder
+                            .iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
+                    let hi_addr =
+                        self.builder
+                            .ptradd(slot.into(), off8.into(), 0, Origin::synthetic());
+                    self.current_mem = self
+                        .builder
+                        .store(
+                            meta.into(),
+                            hi_addr.into(),
+                            8,
+                            self.current_mem.into(),
+                            Origin::synthetic(),
+                        )
+                        .raw();
+                }
+            } else {
+                self.current_mem = self
+                    .builder
+                    .store(
+                        old_val.into(),
+                        slot.into(),
+                        slot_size,
+                        self.current_mem.into(),
+                        Origin::synthetic(),
+                    )
+                    .raw();
+            }
         }
         self.locals.set(local, slot);
         self.stack_locals.mark(local);

@@ -157,6 +157,9 @@ pub enum MInst<R: RegType> {
     },
     /// lea reg, [rip+symbol] (RIP-relative address of named symbol)
     LeaSymbol { dst: R, symbol: String },
+    /// Load the address of a thread-local symbol using Initial Exec TLS model.
+    /// Emits: mov %fs:0, dst ; add symbol@GOTTPOFF(%rip), dst
+    TlsLeaSymbol { dst: R, symbol: String },
     /// or dst, src (dst |= src)
     OrRR { size: OpSize, dst: R, src: R },
     /// and dst, src (dst &= src)
@@ -286,6 +289,37 @@ pub enum MInst<R: RegType> {
         kind: u8,
         double: bool,
     },
+    /// Pseudo-instruction: atomic read-modify-write.
+    ///
+    /// Atomically reads [base], applies `op` with `val`, writes the result back.
+    /// Returns the **old** value in `dst`.
+    ///
+    /// Expanded by the encoder into:
+    /// - Xchg: `xchg [base], val` (implicit lock)
+    /// - Add:  `lock xadd [base], val`
+    /// - Sub:  `neg val; lock xadd [base], val`
+    /// - And/Or/Xor: cmpxchg loop
+    AtomicRmw {
+        op: AtomicRmwOpKind,
+        size: OpSize,
+        dst: R,
+        base: R,
+        val: R,
+    },
+    /// Pseudo-instruction: atomic compare-and-exchange.
+    ///
+    /// Atomically compares [base] with `expected`; if equal, stores `desired`.
+    /// Returns the **old** value in `dst`.
+    ///
+    /// Expanded by the encoder into:
+    /// `mov rax, expected; lock cmpxchg [base], desired; mov dst, rax`
+    AtomicCmpXchg {
+        size: OpSize,
+        dst: R,
+        base: R,
+        expected: R,
+        desired: R,
+    },
 }
 
 /// SSE2 floating-point binary operation kind.
@@ -297,4 +331,15 @@ pub enum FpBinOpKind {
     Div,
     Min,
     Max,
+}
+
+/// Atomic read-modify-write operation kind (x86 encoding).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AtomicRmwOpKind {
+    Xchg,
+    Add,
+    Sub,
+    And,
+    Or,
+    Xor,
 }

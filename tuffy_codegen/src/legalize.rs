@@ -1383,6 +1383,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
             )
             .raw(),
         Op::SymbolAddr(sym) => b.symbol_addr(*sym, o()).raw(),
+        Op::TlsSymbolAddr(sym) => b.tls_symbol_addr(*sym, o()).raw(),
         Op::Bitcast(a) => b.bitcast(remap_op(s, a), inst.ty.clone(), ann, o()),
         Op::Sext(a, bits) => b
             .sext(remap_op(s, &a.clone().raw()).into(), *bits, o())

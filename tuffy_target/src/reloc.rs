@@ -9,6 +9,8 @@ pub enum RelocKind {
     PcRel,
     /// Absolute 64-bit address (e.g., R_X86_64_64 on x86-64).
     Abs64,
+    /// Thread-local Initial Exec GOT offset (R_X86_64_GOTTPOFF on x86-64).
+    TlsGotTpOff,
 }
 
 /// A relocation for an external symbol reference (e.g., CALL or LEA).

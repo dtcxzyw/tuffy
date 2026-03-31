@@ -74,7 +74,6 @@ pub fn translate_function<'tcx>(
 
     let mir = tcx.instance_mir(instance.def);
     let name = tcx.symbol_name(instance).name.to_string();
-
     // Monomorphize a MIR type using the instance's substitutions.
     let monomorphize = |ty: ty::Ty<'tcx>| -> ty::Ty<'tcx> {
         tcx.instantiate_and_normalize_erasing_regions(
@@ -90,13 +89,13 @@ pub fn translate_function<'tcx>(
     let ret_mir_ty = monomorphize(mir.local_decls[mir::RETURN_PLACE].ty);
     let ret_size = type_size(tcx, ret_mir_ty).unwrap_or(0);
     let ret_repr = repr_kind(tcx, ret_mir_ty);
-    // In Rust ABI, Scalar and ScalarPair types ≤ 16 bytes are returned in
-    // registers.  For IR correctness (the interpreter cannot observe ABI
-    // metadata for two-register returns), ScalarPair always uses SRET.
+    // In Rust/SysV ABI, Scalar and ScalarPair types ≤ 16 bytes are returned
+    // in registers (RAX + RDX).  Only use SRET for types that exceed two
+    // INTEGER-class registers.
     let needs_sret = match ret_repr {
         ReprKind::Zst => false,
         ReprKind::Scalar => false,
-        ReprKind::ScalarPair => ret_size > 0,
+        ReprKind::ScalarPair => ret_size > 16,
         ReprKind::Memory => ret_size > 8,
     };
 
@@ -287,7 +286,12 @@ pub fn translate_function<'tcx>(
             .param(0, Type::Ptr(0), None, Origin::synthetic());
         ctx.sret_ptr = Some(sret_param);
 
-        // Allocate a local stack slot for constructing the return value
+        // Allocate a local stack slot for constructing the return value.
+        // We deliberately do NOT reuse sret_param here: MIR blocks are
+        // translated in numeric order, so the return block may be
+        // translated before a call that writes to _0 via sret.  Using
+        // a separate local keeps the return memcopy correct regardless
+        // of translation order.
         let ret_local = mir::Local::from_usize(0);
         let local_slot = ctx.builder.stack_slot(ret_size as u32, Origin::synthetic());
         ctx.locals.set(ret_local, local_slot);

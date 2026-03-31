@@ -21,14 +21,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             TerminatorKind::Return => {
                 // SRET: copy the constructed return value from local stack slot
                 // to the SRET pointer, then return the pointer.
-                // Exception: if local _0 IS the SRET pointer (because a call
-                // wrote directly to it), skip the copy.
                 if let Some(sret) = self.sret_ptr {
                     let ret_local = mir::Local::from_usize(0);
                     let local_slot = self.locals.get(ret_local).expect("sret local must be set");
 
-                    // If local _0 was updated to point to the SRET pointer
-                    // (by a call that wrote directly to it), skip the copy.
+                    // Safety check: if _0 already IS sret, skip the copy.
                     if local_slot == sret {
                         self.builder.ret(
                             Some(sret.into()),
@@ -119,9 +116,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     };
                     let load_ty = translate_ty(self.tcx, ret_mir_ty).unwrap_or(Type::Int);
                     // For ScalarPair returns (e.g. fat pointers), use a
-                    // register-width annotation for the low-half load.
+                    // register-width annotation for the low-half load — but
+                    // only when the type is Int (not Ptr).
                     let ann = if is_scalar_pair {
-                        int_annotation_for_bytes(load_size)
+                        if matches!(load_ty, Type::Ptr(_)) {
+                            None
+                        } else {
+                            int_annotation_for_bytes(load_size)
+                        }
                     } else {
                         translate_annotation(ret_mir_ty).or_else(|| {
                             if matches!(load_ty, Type::Int) {

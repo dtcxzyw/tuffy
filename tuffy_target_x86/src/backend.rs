@@ -264,6 +264,10 @@ fn rewrite_inst(inst: &VInst, assignments: &[PReg]) -> PInst {
             dst: r(dst),
             symbol: symbol.clone(),
         },
+        MInst::TlsLeaSymbol { dst, symbol } => MInst::TlsLeaSymbol {
+            dst: r(dst),
+            symbol: symbol.clone(),
+        },
         MInst::OrRR { size, dst, src } => MInst::OrRR {
             size: *size,
             dst: r(dst),
@@ -461,6 +465,32 @@ fn rewrite_inst(inst: &VInst, assignments: &[PReg]) -> PInst {
             tmp: r(tmp),
             kind: *kind,
             double: *double,
+        },
+        MInst::AtomicRmw {
+            op,
+            size,
+            dst,
+            base,
+            val,
+        } => MInst::AtomicRmw {
+            op: *op,
+            size: *size,
+            dst: r(dst),
+            base: r(base),
+            val: r(val),
+        },
+        MInst::AtomicCmpXchg {
+            size,
+            dst,
+            base,
+            expected,
+            desired,
+        } => MInst::AtomicCmpXchg {
+            size: *size,
+            dst: r(dst),
+            base: r(base),
+            expected: r(expected),
+            desired: r(desired),
         },
     }
 }

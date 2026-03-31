@@ -109,7 +109,7 @@ impl RegAllocInst for VInst {
                 ops.push(use_op(*base));
             }
             // lea dst, [rip+symbol]
-            MInst::LeaSymbol { dst, .. } => {
+            MInst::LeaSymbol { dst, .. } | MInst::TlsLeaSymbol { dst, .. } => {
                 ops.push(def_op(*dst));
             }
             // cmovcc dst, src — dst is read if condition false
@@ -172,6 +172,27 @@ impl RegAllocInst for VInst {
                 ops.push(use_op(*lhs));
                 ops.push(use_op(*rhs));
                 ops.push(def_op(*tmp));
+            }
+            // AtomicRmw pseudo-instruction: base and val are inputs, dst is output.
+            // RAX, RCX are clobbered internally by the expansion.
+            MInst::AtomicRmw { dst, base, val, .. } => {
+                ops.push(def_op(*dst));
+                ops.push(use_op(*base));
+                ops.push(use_op(*val));
+            }
+            // AtomicCmpXchg pseudo-instruction: base, expected, desired are inputs,
+            // dst is output. RAX, RCX are clobbered internally.
+            MInst::AtomicCmpXchg {
+                dst,
+                base,
+                expected,
+                desired,
+                ..
+            } => {
+                ops.push(def_op(*dst));
+                ops.push(use_op(*base));
+                ops.push(use_op(*expected));
+                ops.push(use_op(*desired));
             }
             MInst::CvtFpToInt { dst, src, .. }
             | MInst::CvtIntToFp { dst, src, .. }
@@ -269,6 +290,19 @@ impl RegAllocInst for VInst {
             }
             // UMulOverflow internally uses RAX, RCX, RDX.
             MInst::UMulOverflow { .. } => {
+                clobbers.push(PReg(0)); // Rax
+                clobbers.push(PReg(1)); // Rcx
+                clobbers.push(PReg(2)); // Rdx
+            }
+            // AtomicRmw internally uses RAX, RCX (and RDX, R11 for cmpxchg-loop variants).
+            MInst::AtomicRmw { .. } => {
+                clobbers.push(PReg(0)); // Rax
+                clobbers.push(PReg(1)); // Rcx
+                clobbers.push(PReg(2)); // Rdx
+                clobbers.push(PReg(11)); // R11
+            }
+            // AtomicCmpXchg internally uses RAX, RCX.
+            MInst::AtomicCmpXchg { .. } => {
                 clobbers.push(PReg(0)); // Rax
                 clobbers.push(PReg(1)); // Rcx
                 clobbers.push(PReg(2)); // Rdx

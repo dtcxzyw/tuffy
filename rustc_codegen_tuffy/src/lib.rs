@@ -30,7 +30,7 @@ use rustc_data_structures::fx::FxIndexMap;
 use rustc_middle::dep_graph::{WorkProduct, WorkProductId};
 use rustc_middle::mir::interpret::GlobalAlloc;
 use rustc_middle::mir::mono::MonoItem;
-use rustc_middle::ty::{Instance, TyCtxt};
+use rustc_middle::ty::{self, Instance, TyCtxt};
 use rustc_session::Session;
 use rustc_session::config::OutputFilenames;
 use rustc_span::Symbol;
@@ -96,13 +96,13 @@ impl CodegenBackend for TuffyCodegenBackend {
             None
         };
 
+        let mut data_counter: u64 = 0;
         for cgu in cgus {
             let cgu_name = cgu.name().to_string();
             let mono_items = cgu.items_in_deterministic_order(tcx);
 
             let mut compiled_funcs: Vec<CompiledFunction> = Vec::new();
             let mut all_static_data: Vec<StaticData> = Vec::new();
-            let mut data_counter: u64 = 0;
 
             for (mono_item, item_data) in &mono_items {
                 if let MonoItem::Fn(instance) = mono_item {
@@ -110,6 +110,16 @@ impl CodegenBackend for TuffyCodegenBackend {
                     // construction it requires. We emit a hand-crafted version
                     // in generate_entry_point instead.
                     if Some(instance.def_id()) == tcx.lang_items().start_fn() {
+                        continue;
+                    }
+                    // Skip non-local functions without MIR — they are already
+                    // compiled in their rlib. Emitting a stub here would
+                    // override the real implementation.
+                    if let ty::InstanceKind::Item(def_id) = instance.def
+                        && !def_id.is_local()
+                        && !tcx.is_mir_available(def_id)
+                        && !matches!(tcx.def_kind(def_id), rustc_hir::def::DefKind::Ctor(..))
+                    {
                         continue;
                     }
                     compiled_symbols.insert(tcx.symbol_name(*instance).name.to_string());
@@ -353,7 +363,7 @@ impl CodegenBackend for TuffyCodegenBackend {
         // items but referenced by direct calls during translation.
         let mut inline_funcs: Vec<CompiledFunction> = Vec::new();
         let mut inline_static_data: Vec<StaticData> = Vec::new();
-        let mut inline_data_counter: u64 = 0;
+        let mut inline_data_counter: u64 = data_counter; // continues from main loop
         loop {
             let batch: Vec<Instance<'tcx>> = pending_instances
                 .drain(..)
@@ -366,6 +376,16 @@ impl CodegenBackend for TuffyCodegenBackend {
                 break;
             }
             for inst in batch {
+                // Skip non-local functions without MIR — they already
+                // exist in the rlib. Emitting even a weak stub can
+                // confuse the linker when the rlib symbol is also weak.
+                if let ty::InstanceKind::Item(def_id) = inst.def
+                    && !def_id.is_local()
+                    && !tcx.is_mir_available(def_id)
+                    && !matches!(tcx.def_kind(def_id), rustc_hir::def::DefKind::Ctor(..))
+                {
+                    continue;
+                }
                 let mut result = match mir_to_ir::translate_function(
                     tcx,
                     inst,

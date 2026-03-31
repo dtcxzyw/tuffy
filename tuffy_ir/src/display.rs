@@ -619,6 +619,13 @@ fn fmt_inst(
             };
             format!("{v} = symbol_addr {name}")
         }
+        Op::TlsSymbolAddr(sym_id) => {
+            let name = match ctx.symbols {
+                Some(symbols) => format!("@{}", symbols.resolve(*sym_id)),
+                None => format!("${}", sym_id.0),
+            };
+            format!("{v} = tls_symbol_addr {name}")
+        }
         Op::Call(callee, args, mem) => {
             if let Some(sec_ty) = &inst.secondary_ty {
                 // Non-void call: multi-result (mem, data)

@@ -1261,6 +1261,11 @@ pub fn execute_instruction(
             Ok(ExecResult::Value(v))
         }
 
+        Op::TlsSymbolAddr(sym_id) => {
+            let v = resolve_symbol(*sym_id);
+            Ok(ExecResult::Value(v))
+        }
+
         // ── Call ──
         Op::Call(_, _, _) => {
             // Calls are handled specially by the interpreter (interp.rs).

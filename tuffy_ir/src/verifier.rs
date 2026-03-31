@@ -971,6 +971,13 @@ impl FuncVerifier<'_> {
                 );
             }
             Op::SymbolAddr(_) => {}
+            Op::TlsSymbolAddr(_) if !matches!(inst.ty, Type::Ptr(_)) => {
+                self.result.error(
+                    loc.clone(),
+                    format!("tls_symbol_addr result must be Ptr, got {:?}", inst.ty),
+                );
+            }
+            Op::TlsSymbolAddr(_) => {}
             Op::Call(callee, args, mem) => {
                 self.check_operand(&callee.clone().raw(), loc);
                 self.check_operands(args, loc);

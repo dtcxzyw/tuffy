@@ -296,12 +296,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             .raw();
                     }
                     cur_ty = if from_end {
-                        // Array: [T; N] -> [T; N - from - to]
-                        let n = match cur_ty.kind() {
-                            ty::Array(_, n) => n.try_to_target_usize(self.tcx).unwrap_or(0),
+                        match cur_ty.kind() {
+                            // Array: [T; N] -> [T; N - from - to]
+                            ty::Array(_, n) => {
+                                let n = n.try_to_target_usize(self.tcx).unwrap_or(0);
+                                ty::Ty::new_array(self.tcx, elem_ty, n - from - to)
+                            }
+                            // Slice: result is still a slice
+                            ty::Slice(_) => cur_ty,
                             _ => return None,
-                        };
-                        ty::Ty::new_array(self.tcx, elem_ty, n - from - to)
+                        }
                     } else {
                         // Slice: result is still a slice
                         cur_ty
@@ -691,10 +695,42 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // belongs to the struct itself (set by Aggregate), not to the
             // projected field — fall through to the projected-place path.
             Rvalue::Use(Operand::Copy(place) | Operand::Move(place)) => {
-                if place.projection.is_empty()
-                    && let Some(fat) = self.fat_locals.get(place.local)
-                {
-                    return Some(fat);
+                if place.projection.is_empty() {
+                    // For stack locals, always reload metadata from memory
+                    // (the stack slot at offset 8).  The cached fat_locals
+                    // value may be an SSA value defined in a non-dominating
+                    // block (e.g. a branch that adjusted the slice length),
+                    // which would be invalid on control-flow paths that
+                    // bypassed that block.
+                    if self.stack_locals.is_stack(place.local)
+                        && self.fat_locals.get(place.local).is_some()
+                        && let Some(slot) = self.locals.get(place.local)
+                    {
+                        let off8 = self.builder.iconst(
+                            8,
+                            64,
+                            IntSignedness::DontCare,
+                            Origin::synthetic(),
+                        );
+                        let meta_addr =
+                            self.builder
+                                .ptradd(slot.into(), off8.into(), 0, Origin::synthetic());
+                        let meta = self.builder.load(
+                            meta_addr.into(),
+                            8,
+                            Type::Int,
+                            self.current_mem.into(),
+                            Some(Annotation::Int(IntAnnotation {
+                                bit_width: 64,
+                                signedness: IntSignedness::DontCare,
+                            })),
+                            Origin::synthetic(),
+                        );
+                        return Some(meta);
+                    }
+                    if let Some(fat) = self.fat_locals.get(place.local) {
+                        return Some(fat);
+                    }
                 }
                 // Check if the place resolves to a fat pointer type via projections.
                 if !place.projection.is_empty() {
@@ -731,11 +767,97 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // type is itself a fat pointer.  Casts like *const [T] →
                 // *const T strip metadata and must NOT propagate.
                 let target_ty_mono = self.monomorphize(*target_ty);
-                if is_fat_ptr(self.tcx, target_ty_mono)
-                    && let Operand::Copy(place) | Operand::Move(place) = op
-                    && let Some(fat) = self.fat_locals.get(place.local)
-                {
-                    return Some(fat);
+                if is_fat_ptr(self.tcx, target_ty_mono) {
+                    // From a local with existing fat component.
+                    if let Operand::Copy(place) | Operand::Move(place) = op {
+                        if place.projection.is_empty()
+                            && let Some(fat) = self.fat_locals.get(place.local)
+                        {
+                            return Some(fat);
+                        }
+                        // Stack local: load metadata from offset 8.
+                        if place.projection.is_empty()
+                            && self.stack_locals.is_stack(place.local)
+                            && let Some(slot) = self.locals.get(place.local)
+                        {
+                            let off8 = self.builder.iconst(
+                                8,
+                                64,
+                                IntSignedness::DontCare,
+                                Origin::synthetic(),
+                            );
+                            let meta_addr = self.builder.ptradd(
+                                slot.into(),
+                                off8.into(),
+                                0,
+                                Origin::synthetic(),
+                            );
+                            let meta = self.builder.load(
+                                meta_addr.into(),
+                                8,
+                                Type::Int,
+                                self.current_mem.into(),
+                                int_annotation_for_bytes(8),
+                                Origin::synthetic(),
+                            );
+                            return Some(meta);
+                        }
+                    }
+                    // From a constant fat pointer (e.g. `const "hello" as &[u8]`).
+                    if let Operand::Constant(c) = op {
+                        let mono_const = self.tcx.instantiate_and_normalize_erasing_regions(
+                            self.instance.args,
+                            ty::TypingEnv::fully_monomorphized(),
+                            ty::EarlyBinder::bind(c.const_),
+                        );
+                        let const_ty = mono_const.ty();
+                        let resolved = match mono_const {
+                            mir::Const::Val(v, _) => Some(v),
+                            _ => {
+                                let typing_env = ty::TypingEnv::fully_monomorphized();
+                                mono_const.eval(self.tcx, typing_env, c.span).ok()
+                            }
+                        };
+                        if let Some(mir::ConstValue::Slice { meta, .. }) = resolved {
+                            return Some(
+                                self.builder
+                                    .iconst(
+                                        meta as i64,
+                                        64,
+                                        IntSignedness::DontCare,
+                                        Origin::synthetic(),
+                                    )
+                                    .raw(),
+                            );
+                        }
+                        if let Some(mir::ConstValue::Indirect { alloc_id, offset }) = resolved
+                            && is_fat_ptr(self.tcx, const_ty)
+                        {
+                            let alloc = self.tcx.global_alloc(alloc_id);
+                            if let rustc_middle::mir::interpret::GlobalAlloc::Memory(mem_alloc) =
+                                alloc
+                            {
+                                let inner = mem_alloc.inner();
+                                let byte_offset = offset.bytes() as usize + 8;
+                                let len_bytes = inner
+                                    .inspect_with_uninit_and_ptr_outside_interpreter(
+                                        byte_offset..byte_offset + 8,
+                                    );
+                                let len =
+                                    u64::from_le_bytes(len_bytes.try_into().unwrap_or([0u8; 8]));
+                                return Some(
+                                    self.builder
+                                        .iconst(
+                                            len as i64,
+                                            64,
+                                            IntSignedness::DontCare,
+                                            Origin::synthetic(),
+                                        )
+                                        .raw(),
+                                );
+                            }
+                        }
+                    }
                 }
                 // For Unsize coercions to trait objects, generate the vtable pointer.
                 if let CastKind::PointerCoercion(pc, _) = cast_kind {
@@ -915,8 +1037,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let typing_env = ty::TypingEnv::fully_monomorphized();
                 let tail = self.tcx.struct_tail_for_codegen(pointee_ty, typing_env);
                 if matches!(tail.kind(), ty::Slice(..) | ty::Str | ty::Dynamic(..)) {
-                    self.fat_locals
-                        .get(place.local)
+                    // Use find_fat_metadata_for_place which adjusts for
+                    // Subslice projections (new_len = old_len - from - to),
+                    // instead of raw fat_locals.get which returns the
+                    // unadjusted original length.
+                    self.find_fat_metadata_for_place(place)
                         .or_else(|| self.cast_fat_meta.get(place.local))
                 } else {
                     None
@@ -984,6 +1109,75 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 .raw(),
             IntAnn::DontCare(_) => unreachable!("DontCare annotation in apply_int_extension"),
         }
+    }
+
+    /// Extract fat pointer metadata (length for slices, vtable for dyn)
+    /// from the base local of a place.  Checks stack locals first (they
+    /// may have been updated by assignments), then falls back to fat_locals.
+    /// When the place has a Subslice projection, adjusts the metadata
+    /// by subtracting the `from` and `to` indices.
+    fn find_fat_metadata_for_place(&mut self, place: &Place<'tcx>) -> Option<ValueRef> {
+        let base_local = place.local;
+        let base_ty = self.monomorphize(self.mir.local_decls[base_local].ty);
+        if !is_fat_ptr(self.tcx, base_ty) {
+            return None;
+        }
+        // Prefer stack local (metadata may have been updated by assignment).
+        let meta = if self.stack_locals.is_stack(base_local) {
+            if let Some(slot) = self.locals.get(base_local) {
+                let off8 = self
+                    .builder
+                    .iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
+                let meta_addr =
+                    self.builder
+                        .ptradd(slot.into(), off8.into(), 0, Origin::synthetic());
+                let loaded = self.builder.load(
+                    meta_addr.into(),
+                    8,
+                    Type::Int,
+                    self.current_mem.into(),
+                    int_annotation_for_bytes(8),
+                    Origin::synthetic(),
+                );
+                Some(loaded)
+            } else {
+                self.fat_locals.get(base_local)
+            }
+        } else {
+            self.fat_locals.get(base_local)
+        };
+        let meta = meta?;
+        // If the place has a Subslice projection, adjust the metadata.
+        // For from_end=true (slices): new_len = old_len - from - to.
+        for proj in place.projection.iter() {
+            if let PlaceElem::Subslice {
+                from,
+                to,
+                from_end: true,
+            } = proj
+            {
+                let adjust = from + to;
+                if adjust > 0 {
+                    let adj_val = self.builder.iconst(
+                        adjust as i64,
+                        64,
+                        IntSignedness::Unsigned,
+                        Origin::synthetic(),
+                    );
+                    let new_meta = self.builder.sub(
+                        meta.into(),
+                        adj_val.into(),
+                        IntAnnotation {
+                            bit_width: 64,
+                            signedness: IntSignedness::Unsigned,
+                        },
+                        Origin::synthetic(),
+                    );
+                    return Some(new_meta.raw());
+                }
+            }
+        }
+        Some(meta)
     }
 
     pub(super) fn translate_rvalue(
@@ -2370,6 +2564,21 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             && src.projection.is_empty()
                             && self.stack_locals.is_stack(src.local)
                         {
+                            let src_ty = self.monomorphize(self.mir.local_decls[src.local].ty);
+                            // If the source local's MIR type is a pointer,
+                            // translate_operand already loaded the pointer
+                            // value from the stack slot.  Use ptrtoaddr to
+                            // convert the address to an integer instead of
+                            // dereferencing through it.
+                            if matches!(src_ty.kind(), ty::RawPtr(..) | ty::Ref(..) | ty::FnPtr(..))
+                                && target_ty_mono.is_integral()
+                            {
+                                return Some(
+                                    self.builder
+                                        .ptrtoaddr(val.into(), 64, Origin::synthetic())
+                                        .raw(),
+                                );
+                            }
                             let target_size = type_size(self.tcx, target_ty_mono).unwrap_or(0);
                             let target_ir_ty = translate_ty(self.tcx, target_ty_mono);
                             if target_size > 0
@@ -2454,21 +2663,33 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             }
                         }
                         // Transmute / PtrToPtr from a pointer-typed source
-                        // to a non-pointer target
+                        // to a non-pointer target (integer type only).
                         if matches!(self.builder.value_type(val), Some(Type::Ptr(_)))
-                            && !matches!(
-                                target_ty_mono.kind(),
-                                ty::RawPtr(..) | ty::Ref(..) | ty::FnPtr(..)
-                            )
+                            && target_ty_mono.is_integral()
                         {
                             let src_ty = operand_ty_projected(operand, self.mir, self.tcx)
                                 .map(|ty| self.monomorphize(ty));
                             if let Some(st) = src_ty
                                 && matches!(st.kind(), ty::RawPtr(..) | ty::Ref(..) | ty::FnPtr(..))
                             {
+                                // If val is still a memory address (e.g. fat
+                                // pointer in a stack slot), load the thin
+                                // pointer first.
+                                let ptr_val = if self.builder.is_memory_address(val) {
+                                    self.builder.load(
+                                        val.into(),
+                                        8,
+                                        Type::Ptr(0),
+                                        self.current_mem.into(),
+                                        None,
+                                        Origin::synthetic(),
+                                    )
+                                } else {
+                                    val
+                                };
                                 return Some(
                                     self.builder
-                                        .ptrtoaddr(val.into(), 64, Origin::synthetic())
+                                        .ptrtoaddr(ptr_val.into(), 64, Origin::synthetic())
                                         .raw(),
                                 );
                             }
@@ -2511,7 +2732,61 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             }
             Rvalue::Ref(_, _, place) | Rvalue::RawPtr(_, place) => {
                 if !place.projection.is_empty() {
-                    self.translate_place_to_addr(place).map(|(addr, _ty)| addr)
+                    let result = self.translate_place_to_addr(place).map(|(addr, _ty)| addr);
+                    // When taking a Ref/RawPtr of a dereferenced fat pointer
+                    // (e.g. `&raw const (*_3)` where `_3: &[u8]`), the result
+                    // is itself a fat pointer that must preserve the metadata
+                    // (length for slices, vtable for dyn).  translate_place_to_addr
+                    // only returns the data pointer; reconstruct the full fat
+                    // pointer in a 16-byte stack slot.
+                    if let Some(data_ptr) = result {
+                        let dest_ty = if dest_place.projection.is_empty() {
+                            self.monomorphize(self.mir.local_decls[dest_place.local].ty)
+                        } else {
+                            self.monomorphize(dest_place.ty(&self.mir.local_decls, self.tcx).ty)
+                        };
+                        if is_fat_ptr(self.tcx, dest_ty) {
+                            // Find the metadata from the source fat pointer.
+                            let meta = self.find_fat_metadata_for_place(place);
+                            if let Some(meta_val) = meta {
+                                let slot = self.builder.stack_slot(16, Origin::synthetic());
+                                self.current_mem = self
+                                    .builder
+                                    .store(
+                                        data_ptr.into(),
+                                        slot.into(),
+                                        8,
+                                        self.current_mem.into(),
+                                        Origin::synthetic(),
+                                    )
+                                    .raw();
+                                let off8 = self.builder.iconst(
+                                    8,
+                                    64,
+                                    IntSignedness::DontCare,
+                                    Origin::synthetic(),
+                                );
+                                let meta_addr = self.builder.ptradd(
+                                    slot.into(),
+                                    off8.into(),
+                                    0,
+                                    Origin::synthetic(),
+                                );
+                                self.current_mem = self
+                                    .builder
+                                    .store(
+                                        meta_val.into(),
+                                        meta_addr.into(),
+                                        8,
+                                        self.current_mem.into(),
+                                        Origin::synthetic(),
+                                    )
+                                    .raw();
+                                return Some(slot);
+                            }
+                        }
+                    }
+                    result
                 } else if self.stack_locals.is_stack(place.local) {
                     self.locals.get(place.local)
                 } else {
@@ -2901,6 +3176,35 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 Origin::synthetic(),
                             )
                             .raw();
+                    } else if is_ptr_val
+                        && bytes <= 8
+                        && self.builder.is_symbol_addr(val)
+                        && self.is_indirect_nonref_const(op)
+                    {
+                        // Constant data pointer (e.g. symbol_addr for an
+                        // Indirect const like `(TestFlags(0), true)`).
+                        // `translate_const` returns `symbol_addr` for Indirect
+                        // non-ref constants — the address of the data, not the
+                        // data itself.  We need to load the actual value before
+                        // storing it into the aggregate field.
+                        let loaded = self.builder.load(
+                            val.into(),
+                            bytes,
+                            Type::Int,
+                            self.current_mem.into(),
+                            int_annotation_for_bytes(bytes),
+                            Origin::synthetic(),
+                        );
+                        self.current_mem = self
+                            .builder
+                            .store(
+                                loaded.into(),
+                                dst_addr.into(),
+                                bytes,
+                                self.current_mem.into(),
+                                Origin::synthetic(),
+                            )
+                            .raw();
                     } else {
                         self.current_mem = self
                             .builder
@@ -2931,19 +3235,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 Operand::Copy(place) | Operand::Move(place),
             ) => {
                 // Extract metadata (e.g., slice length) from a fat pointer.
-                // 1. Non-stack local with fat component tracked in fat_locals.
-                if place.projection.is_empty()
-                    && let Some(len) = self.fat_locals.get(place.local)
-                {
-                    return Some(len);
-                }
-                // 1b. Cast-to-fat metadata (e.g. NonNull<[T]> as *const [T]).
-                if place.projection.is_empty()
-                    && let Some(len) = self.cast_fat_meta.get(place.local)
-                {
-                    return Some(len);
-                }
-                // 2. Stack local: load length from slot + 8.
+                // Stack locals first: metadata lives in the slot and may
+                // have been updated by assignments (e.g. _1 = copy _15
+                // where _15 is a subslice).  fat_locals would still hold
+                // the original stale value.
+                // 1. Stack local: load length from slot + 8.
                 if place.projection.is_empty()
                     && self.stack_locals.is_stack(place.local)
                     && let Some(slot) = self.locals.get(place.local)
@@ -2963,6 +3259,18 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         Origin::synthetic(),
                     );
                     return Some(data);
+                }
+                // 2. Non-stack local with fat component tracked in fat_locals.
+                if place.projection.is_empty()
+                    && let Some(len) = self.fat_locals.get(place.local)
+                {
+                    return Some(len);
+                }
+                // 2b. Cast-to-fat metadata (e.g. NonNull<[T]> as *const [T]).
+                if place.projection.is_empty()
+                    && let Some(len) = self.cast_fat_meta.get(place.local)
+                {
+                    return Some(len);
                 }
                 // 3. Projected place (e.g. _s.field): compute the fat
                 //    pointer's address and load length from offset +8.
@@ -3188,8 +3496,51 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 }
                 Some(slot)
             }
+            Rvalue::ThreadLocalRef(def_id) => {
+                let instance = Instance::mono(self.tcx, *def_id);
+                let sym_name = self.tcx.symbol_name(instance).name.to_string();
+                let sym_id = self.symbols.intern(&sym_name);
+                Some(
+                    self.builder
+                        .tls_symbol_addr(sym_id, Origin::synthetic())
+                        .raw(),
+                )
+            }
             _ => None,
         }
+    }
+
+    /// Returns true when `op` is a `Constant` whose resolved value is
+    /// `ConstValue::Indirect` and whose type is NOT a reference/pointer.
+    ///
+    /// In `translate_const`, `Indirect` non-ref constants produce a
+    /// `symbol_addr` pointing to the constant data rather than the data
+    /// itself.  Callers that need the *value* (like the Aggregate handler)
+    /// must load from this address first.
+    fn is_indirect_nonref_const(&self, op: &Operand<'tcx>) -> bool {
+        let Operand::Constant(c) = op else {
+            return false;
+        };
+        let mono_const = self.tcx.instantiate_and_normalize_erasing_regions(
+            self.instance.args,
+            ty::TypingEnv::fully_monomorphized(),
+            ty::EarlyBinder::bind(c.const_),
+        );
+        let const_ty = mono_const.ty();
+        if matches!(
+            const_ty.kind(),
+            ty::Ref(..) | ty::RawPtr(..) | ty::FnPtr(..)
+        ) {
+            return false;
+        }
+        let resolved = match mono_const {
+            mir::Const::Val(v, _) => Some(v),
+            _ => {
+                let typing_env = ty::TypingEnv::fully_monomorphized();
+                mono_const.eval(self.tcx, typing_env, c.span).ok()
+            }
+        };
+        matches!(resolved, Some(mir::ConstValue::Indirect { .. }))
     }
 
     pub(super) fn translate_operand(&mut self, operand: &Operand<'tcx>) -> Option<ValueRef> {

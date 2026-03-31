@@ -277,6 +277,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             intrinsic_args.push(fat_v);
                         }
                     }
+                } else if intrinsic_name.starts_with("simd_") {
+                    eprintln!(
+                        "WARNING: simd arg translate_operand returned None for {:?} in {:?}, arg_ty={:?}",
+                        &arg.node,
+                        self.instance,
+                        arg.node.ty(&self.mir.local_decls, self.tcx),
+                    );
                 }
             }
 
@@ -774,25 +781,25 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let dest_size = type_size(self.tcx, dest_ty);
         let dest_repr = repr_kind(self.tcx, dest_ty);
 
-        // In Rust ABI, Scalar and ScalarPair ≤ 16 bytes are returned in
-        // registers.  For IR correctness (the interpreter cannot observe ABI
-        // metadata for two-register returns), ScalarPair always uses SRET.
+        // In Rust/SysV ABI, Scalar and ScalarPair types ≤ 16 bytes are returned
+        // in registers (RAX + RDX).  Only use SRET for types that exceed two
+        // INTEGER-class registers.
         let needs_sret = match dest_repr {
             ReprKind::Zst => false,
             ReprKind::Scalar => false,
-            ReprKind::ScalarPair => dest_size.is_some_and(|sz| sz > 0),
+            ReprKind::ScalarPair => dest_size.is_some_and(|sz| sz > 16),
             ReprKind::Memory => dest_size.is_some_and(|sz| sz > 8),
         };
         let sret_slot = if needs_sret {
-            // If the destination is _0 and the function itself has an SRET
-            // pointer, reuse it so the callee writes directly into the
-            // caller's return buffer (avoids an extra copy).
+            // Always use the destination local's own stack slot (or a fresh
+            // one) as the call's sret buffer.  Do NOT pass self.sret_ptr
+            // directly: MIR blocks are translated in numeric order, so the
+            // return block (which copies from _0's local slot to sret) may
+            // have been translated before this call site, using the original
+            // local slot.  Passing sret_ptr here would write to sret but
+            // leave the local slot uninitialised — the return memcopy then
+            // overwrites sret with garbage.
             if destination.projection.is_empty()
-                && destination.local == mir::Local::from_usize(0)
-                && let Some(sret) = self.sret_ptr
-            {
-                Some(sret)
-            } else if destination.projection.is_empty()
                 && self.stack_locals.is_stack(destination.local)
                 && let Some(existing) = self.locals.get(destination.local)
             {
@@ -1032,12 +1039,83 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         }
                         _ => false,
                     };
+                // For fat pointer args from stack locals, translate_operand
+                // returns the data pointer (loaded from slot[0:8]), NOT
+                // the slot address.  Using that for struct decomposition
+                // would dereference THROUGH the data pointer.  Load both
+                // components from the stack slot instead.
+                // This also covers projected field accesses like (_1.0: &str)
+                // where _1 is a stack-local tuple.
+                let is_fat_stack_local = is_fat_ptr(self.tcx, arg_ty)
+                    && match &arg.node {
+                        Operand::Copy(p) | Operand::Move(p) => {
+                            // Either a direct stack local or a field projection
+                            // into a stack local — both cases store the fat ptr
+                            // in the stack slot and translate_operand returns
+                            // the loaded data pointer, not the slot address.
+                            self.stack_locals.is_stack(p.local)
+                        }
+                        _ => false,
+                    };
                 let is_struct_arg = arg_size > 8
                     && arg_size <= 16
                     && matches!(repr_kind(self.tcx, arg_ty), ReprKind::ScalarPair)
                     && !is_fat_value_not_slot
+                    && !is_fat_stack_local
                     && matches!(self.builder.value_type(v), Some(Type::Ptr(_)));
-                let decomposed = if is_struct_arg {
+                let decomposed = if is_fat_stack_local && arg_size > 8 && arg_size <= 16 {
+                    // Load both words from the stack slot (at the projected
+                    // field offset if applicable).
+                    let slot_base = match &arg.node {
+                        Operand::Copy(p) | Operand::Move(p) => {
+                            if p.projection.is_empty() {
+                                self.locals.get(p.local)
+                            } else {
+                                // For projected fields (e.g. _1.0), compute
+                                // the address of the fat pointer within the
+                                // parent struct's stack slot.
+                                self.translate_place_to_addr(p)
+                                    .map(|(a, _)| self.coerce_to_ptr(a))
+                            }
+                        }
+                        _ => None,
+                    };
+                    if let Some(slot_addr) = slot_base {
+                        let w0 = self.builder.load(
+                            slot_addr.into(),
+                            8,
+                            Type::Int,
+                            self.current_mem.into(),
+                            int_annotation_for_bytes(8),
+                            Origin::synthetic(),
+                        );
+                        ir_args.push(w0.into());
+                        let off8 = self.builder.iconst(
+                            8,
+                            64,
+                            IntSignedness::DontCare,
+                            Origin::synthetic(),
+                        );
+                        let hi_addr = self.builder.ptradd(
+                            slot_addr.into(),
+                            off8.into(),
+                            0,
+                            Origin::synthetic(),
+                        );
+                        let w1 = self.builder.load(
+                            hi_addr.into(),
+                            8,
+                            Type::Int,
+                            self.current_mem.into(),
+                            int_annotation_for_bytes(8),
+                            Origin::synthetic(),
+                        );
+                        ir_args.push(w1.into());
+                        true
+                    } else {
+                        false
+                    }
+                } else if is_struct_arg {
                     let w0 = self.builder.load(
                         v.into(),
                         8,
@@ -1101,10 +1179,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     } else if arg_size > 0
                         && arg_size <= 8
                         && matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
+                        && self.builder.is_local_memory_address(v)
                         && translate_ty(self.tcx, arg_ty).is_none()
                     {
                         // Small aggregate (1-8 bytes) in a stack slot:
                         // load the value so it is passed by register.
+                        // Only load when `v` is actually a stack slot /
+                        // memory address — NOT when it is a loaded pointer
+                        // value (e.g. NonNull<u8> transmuted from *mut u8).
                         let loaded = self.builder.load(
                             v.into(),
                             arg_size as u32,

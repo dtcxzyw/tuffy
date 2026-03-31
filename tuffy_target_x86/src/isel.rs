@@ -8,7 +8,7 @@ mod isel_gen;
 
 use std::collections::{HashMap, HashSet};
 
-use crate::inst::{CondCode, FpBinOpKind, MInst, OpSize, VInst};
+use crate::inst::{AtomicRmwOpKind, CondCode, FpBinOpKind, MInst, OpSize, VInst};
 use crate::reg::Gpr;
 use num_traits::ToPrimitive;
 use tuffy_ir::function::{CfgNode, Function};
@@ -31,6 +31,8 @@ struct IselCtx {
     /// `LeaSymbol` is only emitted when `ensure_in_reg` is called,
     /// avoiding dead code when the symbol is only used as a direct call callee.
     sym_addrs: HashMap<u32, String>,
+    /// Deferred TLS symbol addresses: value index → symbol name.
+    tls_sym_addrs: HashMap<u32, String>,
     /// Captured RDX vregs from calls with secondary returns.
     /// Maps call instruction index → unconstrained vreg holding the RDX value.
     rdx_captured: HashMap<u32, VReg>,
@@ -64,6 +66,11 @@ impl IselCtx {
             // blocks). Caching would emit the LEA only at the first use
             // site, leaving the vreg uninitialised on other paths.
             // Re-materialising a LEA at each use is cheap and correct.
+            return Some(dst);
+        }
+        if let Some(symbol) = self.tls_sym_addrs.get(&val.index()).cloned() {
+            let dst = self.alloc.alloc();
+            self.out.push(MInst::TlsLeaSymbol { dst, symbol });
             return Some(dst);
         }
         // Materialize a deferred icmp result into a register via SetCC + MovzxB.
@@ -878,6 +885,7 @@ pub fn isel(
         next_label: func.blocks.len() as u32,
         out: Vec::new(),
         sym_addrs: HashMap::new(),
+        tls_sym_addrs: HashMap::new(),
         rdx_captured: HashMap::new(),
     };
 
@@ -2052,9 +2060,52 @@ fn select_inst(
                 src,
             });
         }
-        Op::AtomicRmw(..) | Op::AtomicCmpXchg(..) => {
-            // Not yet implemented — graceful fallback.
-            return None;
+        Op::AtomicRmw(rmw_op, ptr, val, _ordering, _mem) => {
+            let base = ctx.ensure_in_reg(ptr.clone().raw().value)?;
+            let val_reg = ctx.ensure_in_reg(val.value)?;
+            let val_ann = get_int_annotation(func, val.value);
+            let size = match val_ann {
+                Some(ann) => bytes_to_opsize(ann.bit_width / 8),
+                None => OpSize::S64,
+            };
+            let op_kind = match rmw_op {
+                tuffy_ir::instruction::AtomicRmwOp::Xchg => AtomicRmwOpKind::Xchg,
+                tuffy_ir::instruction::AtomicRmwOp::Add => AtomicRmwOpKind::Add,
+                tuffy_ir::instruction::AtomicRmwOp::Sub => AtomicRmwOpKind::Sub,
+                tuffy_ir::instruction::AtomicRmwOp::And => AtomicRmwOpKind::And,
+                tuffy_ir::instruction::AtomicRmwOp::Or => AtomicRmwOpKind::Or,
+                tuffy_ir::instruction::AtomicRmwOp::Xor => AtomicRmwOpKind::Xor,
+            };
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::AtomicRmw {
+                op: op_kind,
+                size,
+                dst,
+                base,
+                val: val_reg,
+            });
+            let data_vref = ValueRef::inst_secondary_result(vref.index());
+            ctx.regs.assign(data_vref, dst);
+        }
+        Op::AtomicCmpXchg(ptr, expected, desired, _succ_ord, _fail_ord, _mem) => {
+            let base = ctx.ensure_in_reg(ptr.clone().raw().value)?;
+            let expected_reg = ctx.ensure_in_reg(expected.value)?;
+            let desired_reg = ctx.ensure_in_reg(desired.value)?;
+            let exp_ann = get_int_annotation(func, expected.value);
+            let size = match exp_ann {
+                Some(ann) => bytes_to_opsize(ann.bit_width / 8),
+                None => OpSize::S64,
+            };
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::AtomicCmpXchg {
+                size,
+                dst,
+                base,
+                expected: expected_reg,
+                desired: desired_reg,
+            });
+            let data_vref = ValueRef::inst_secondary_result(vref.index());
+            ctx.regs.assign(data_vref, dst);
         }
 
         Op::Bswap(val, byte_count) => {
@@ -2991,6 +3042,11 @@ fn select_inst(
             // This avoids dead code when the symbol is only used as a direct call callee
             // (select_call emits CallSym directly without needing the address in a register).
             ctx.sym_addrs
+                .insert(vref.index(), symbols.resolve(*sym_id).to_string());
+        }
+
+        Op::TlsSymbolAddr(sym_id) => {
+            ctx.tls_sym_addrs
                 .insert(vref.index(), symbols.resolve(*sym_id).to_string());
         }
 
