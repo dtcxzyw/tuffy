@@ -183,116 +183,116 @@
 // CHECK:     unreachable
 // CHECK:
 // CHECK:   bb2(v16: mem):
-// CHECK:     v17: ptr = symbol_addr @.Lstr.0
-// CHECK:     v18: int:i64 = iconst 49
-// CHECK:     v19: mem = store.8 v17, v8, v16
-// CHECK:     v20: int:i64 = iconst 8
-// CHECK:     v21: ptr = ptradd v8, v20
-// CHECK:     v22: mem = store.8 v18, v21, v19
+// CHECK:     v17: mem, v18: int:i64 = load.atomic.seqcst v1, v16
+// CHECK:     v19: mem = store.4 v18, v5, v17
+// CHECK:     br bb7(v19)
+// CHECK:
+// CHECK:   bb3(v21: mem):
+// CHECK:     v22: ptr = symbol_addr @.Lstr.0
 // CHECK:     v23: int:i64 = iconst 49
-// CHECK:     v24: int:i64 = iconst 8
-// CHECK:     v25: ptr = ptradd v8, v24
-// CHECK:     v26: mem = store.8 v23, v25, v22
-// CHECK:     v27: ptr = load.8 v8, v26
-// CHECK:     v28: int:i64 = iconst 8
-// CHECK:     v29: ptr = ptradd v8, v28
-// CHECK:     v30: int:i64 = load.8 v29, v26
-// CHECK:     v31: ptr = stack_slot 16
-// CHECK:     v32: mem = store.8 v27, v31, v26
+// CHECK:     v24: mem = store.8 v22, v8, v21
+// CHECK:     v25: int:i64 = iconst 8
+// CHECK:     v26: ptr = ptradd v8, v25
+// CHECK:     v27: mem = store.8 v23, v26, v24
+// CHECK:     v28: int:i64 = iconst 49
+// CHECK:     v29: int:i64 = iconst 8
+// CHECK:     v30: ptr = ptradd v8, v29
+// CHECK:     v31: mem = store.8 v28, v30, v27
+// CHECK:     v32: ptr = load.8 v8, v31
 // CHECK:     v33: int:i64 = iconst 8
-// CHECK:     v34: ptr = ptradd v31, v33
-// CHECK:     v35: mem = store.8 v30, v34, v32
-// CHECK:     v36: int:i64 = iconst 8
-// CHECK:     v37: ptr = ptradd v8, v36
-// CHECK:     v38: int:i64 = load.8 v37, v35
-// CHECK:     v39: int:i64 = iconst 8
-// CHECK:     v40: ptr = ptradd v31, v39
-// CHECK:     v41: mem = store.8 v38, v40, v35
-// CHECK:     v42: ptr = load.8 v31, v41
-// CHECK:     v43: ptr = symbol_addr @.Lstr.1
-// CHECK:     v44: int:i64 = iconst 49
-// CHECK:     v45: int:i32 = iconst 1
-// CHECK:     v46: int:i64 = iconst 63
-// CHECK:     v47: int:i64 = and v45, v46
-// CHECK:     v48: int:i64 = shl v44:u64, v47
-// CHECK:     v49: int:u64 = zext v48, 64
-// CHECK:     v50: int:i64 = iconst 1
-// CHECK:     v51: int:i64 = or v49, v50:u64
-// CHECK:     v52: int:u64 = zext v51, 64
-// CHECK:     v53: mem = store.8 v42, v7, v41
-// CHECK:     v54: int:i64 = iconst 8
-// CHECK:     v55: ptr = ptradd v7, v54
-// CHECK:     v56: mem = store.8 v52, v55, v53
-// CHECK:     v57: int:i64 = load.8 v7, v56
-// CHECK:     v58: int:i64 = iconst 8
-// CHECK:     v59: ptr = ptradd v7, v58
-// CHECK:     v60: int:i64 = load.8 v59, v56
-// CHECK:     v61: ptr = symbol_addr @.Lloc.3
-// CHECK:     v62: ptr = symbol_addr @_RNvNtC$HASH_4core9panicking9panic_fmt
-// CHECK:     v63: mem = call v62(v57, v60, v61), v56
-// CHECK:     v64: int:i64 = iconst 0
+// CHECK:     v34: ptr = ptradd v8, v33
+// CHECK:     v35: int:i64 = load.8 v34, v31
+// CHECK:     v36: ptr = stack_slot 16
+// CHECK:     v37: mem = store.8 v32, v36, v31
+// CHECK:     v38: int:i64 = iconst 8
+// CHECK:     v39: ptr = ptradd v36, v38
+// CHECK:     v40: mem = store.8 v35, v39, v37
+// CHECK:     v41: int:i64 = iconst 8
+// CHECK:     v42: ptr = ptradd v8, v41
+// CHECK:     v43: int:i64 = load.8 v42, v40
+// CHECK:     v44: int:i64 = iconst 8
+// CHECK:     v45: ptr = ptradd v36, v44
+// CHECK:     v46: mem = store.8 v43, v45, v40
+// CHECK:     v47: ptr = load.8 v36, v46
+// CHECK:     v48: ptr = symbol_addr @.Lstr.1
+// CHECK:     v49: int:i64 = iconst 49
+// CHECK:     v50: int:i32 = iconst 1
+// CHECK:     v51: int:i64 = iconst 63
+// CHECK:     v52: int:i64 = and v50, v51
+// CHECK:     v53: int:i64 = shl v49:u64, v52
+// CHECK:     v54: int:u64 = zext v53, 64
+// CHECK:     v55: int:i64 = iconst 1
+// CHECK:     v56: int:i64 = or v54, v55:u64
+// CHECK:     v57: int:u64 = zext v56, 64
+// CHECK:     v58: mem = store.8 v47, v7, v46
+// CHECK:     v59: int:i64 = iconst 8
+// CHECK:     v60: ptr = ptradd v7, v59
+// CHECK:     v61: mem = store.8 v57, v60, v58
+// CHECK:     v62: int:i64 = load.8 v7, v61
+// CHECK:     v63: int:i64 = iconst 8
+// CHECK:     v64: ptr = ptradd v7, v63
+// CHECK:     v65: int:i64 = load.8 v64, v61
+// CHECK:     v66: ptr = symbol_addr @.Lloc.3
+// CHECK:     v67: ptr = symbol_addr @_RNvNtC$HASH_4core9panicking9panic_fmt
+// CHECK:     v68: mem = call v67(v62, v65, v66), v61
+// CHECK:     v69: int:i64 = iconst 0
 // CHECK:     unreachable
 // CHECK:
-// CHECK:   bb3(v66: mem):
-// CHECK:     v67: ptr = symbol_addr @.Lstr.4
-// CHECK:     v68: int:i64 = iconst 40
-// CHECK:     v69: mem = store.8 v67, v9, v66
-// CHECK:     v70: int:i64 = iconst 8
-// CHECK:     v71: ptr = ptradd v9, v70
-// CHECK:     v72: mem = store.8 v68, v71, v69
-// CHECK:     v73: int:i64 = iconst 40
-// CHECK:     v74: int:i64 = iconst 8
-// CHECK:     v75: ptr = ptradd v9, v74
-// CHECK:     v76: mem = store.8 v73, v75, v72
-// CHECK:     v77: ptr = load.8 v9, v76
-// CHECK:     v78: int:i64 = iconst 8
-// CHECK:     v79: ptr = ptradd v9, v78
-// CHECK:     v80: int:i64 = load.8 v79, v76
-// CHECK:     v81: ptr = stack_slot 16
-// CHECK:     v82: mem = store.8 v77, v81, v76
-// CHECK:     v83: int:i64 = iconst 8
-// CHECK:     v84: ptr = ptradd v81, v83
-// CHECK:     v85: mem = store.8 v80, v84, v82
-// CHECK:     v86: int:i64 = iconst 8
-// CHECK:     v87: ptr = ptradd v9, v86
-// CHECK:     v88: int:i64 = load.8 v87, v85
-// CHECK:     v89: int:i64 = iconst 8
-// CHECK:     v90: ptr = ptradd v81, v89
-// CHECK:     v91: mem = store.8 v88, v90, v85
-// CHECK:     v92: ptr = load.8 v81, v91
-// CHECK:     v93: ptr = symbol_addr @.Lstr.5
-// CHECK:     v94: int:i64 = iconst 40
-// CHECK:     v95: int:i32 = iconst 1
-// CHECK:     v96: int:i64 = iconst 63
-// CHECK:     v97: int:i64 = and v95, v96
-// CHECK:     v98: int:i64 = shl v94:u64, v97
-// CHECK:     v99: int:u64 = zext v98, 64
-// CHECK:     v100: int:i64 = iconst 1
-// CHECK:     v101: int:i64 = or v99, v100:u64
-// CHECK:     v102: int:u64 = zext v101, 64
-// CHECK:     v103: mem = store.8 v92, v6, v91
-// CHECK:     v104: int:i64 = iconst 8
-// CHECK:     v105: ptr = ptradd v6, v104
-// CHECK:     v106: mem = store.8 v102, v105, v103
-// CHECK:     v107: int:i64 = load.8 v6, v106
-// CHECK:     v108: int:i64 = iconst 8
-// CHECK:     v109: ptr = ptradd v6, v108
-// CHECK:     v110: int:i64 = load.8 v109, v106
-// CHECK:     v111: ptr = symbol_addr @.Lloc.7
-// CHECK:     v112: ptr = symbol_addr @_RNvNtC$HASH_4core9panicking9panic_fmt
-// CHECK:     v113: mem = call v112(v107, v110, v111), v106
-// CHECK:     v114: int:i64 = iconst 0
+// CHECK:   bb4(v71: mem):
+// CHECK:     v72: mem, v73: int:i64 = load.atomic.seqcst v1, v71
+// CHECK:     v74: mem = store.4 v73, v5, v72
+// CHECK:     br bb7(v74)
+// CHECK:
+// CHECK:   bb5(v76: mem):
+// CHECK:     v77: ptr = symbol_addr @.Lstr.4
+// CHECK:     v78: int:i64 = iconst 40
+// CHECK:     v79: mem = store.8 v77, v9, v76
+// CHECK:     v80: int:i64 = iconst 8
+// CHECK:     v81: ptr = ptradd v9, v80
+// CHECK:     v82: mem = store.8 v78, v81, v79
+// CHECK:     v83: int:i64 = iconst 40
+// CHECK:     v84: int:i64 = iconst 8
+// CHECK:     v85: ptr = ptradd v9, v84
+// CHECK:     v86: mem = store.8 v83, v85, v82
+// CHECK:     v87: ptr = load.8 v9, v86
+// CHECK:     v88: int:i64 = iconst 8
+// CHECK:     v89: ptr = ptradd v9, v88
+// CHECK:     v90: int:i64 = load.8 v89, v86
+// CHECK:     v91: ptr = stack_slot 16
+// CHECK:     v92: mem = store.8 v87, v91, v86
+// CHECK:     v93: int:i64 = iconst 8
+// CHECK:     v94: ptr = ptradd v91, v93
+// CHECK:     v95: mem = store.8 v90, v94, v92
+// CHECK:     v96: int:i64 = iconst 8
+// CHECK:     v97: ptr = ptradd v9, v96
+// CHECK:     v98: int:i64 = load.8 v97, v95
+// CHECK:     v99: int:i64 = iconst 8
+// CHECK:     v100: ptr = ptradd v91, v99
+// CHECK:     v101: mem = store.8 v98, v100, v95
+// CHECK:     v102: ptr = load.8 v91, v101
+// CHECK:     v103: ptr = symbol_addr @.Lstr.5
+// CHECK:     v104: int:i64 = iconst 40
+// CHECK:     v105: int:i32 = iconst 1
+// CHECK:     v106: int:i64 = iconst 63
+// CHECK:     v107: int:i64 = and v105, v106
+// CHECK:     v108: int:i64 = shl v104:u64, v107
+// CHECK:     v109: int:u64 = zext v108, 64
+// CHECK:     v110: int:i64 = iconst 1
+// CHECK:     v111: int:i64 = or v109, v110:u64
+// CHECK:     v112: int:u64 = zext v111, 64
+// CHECK:     v113: mem = store.8 v102, v6, v101
+// CHECK:     v114: int:i64 = iconst 8
+// CHECK:     v115: ptr = ptradd v6, v114
+// CHECK:     v116: mem = store.8 v112, v115, v113
+// CHECK:     v117: int:i64 = load.8 v6, v116
+// CHECK:     v118: int:i64 = iconst 8
+// CHECK:     v119: ptr = ptradd v6, v118
+// CHECK:     v120: int:i64 = load.8 v119, v116
+// CHECK:     v121: ptr = symbol_addr @.Lloc.7
+// CHECK:     v122: ptr = symbol_addr @_RNvNtC$HASH_4core9panicking9panic_fmt
+// CHECK:     v123: mem = call v122(v117, v120, v121), v116
+// CHECK:     v124: int:i64 = iconst 0
 // CHECK:     unreachable
-// CHECK:
-// CHECK:   bb4(v116: mem):
-// CHECK:     v117: mem, v118: int:i64 = load.atomic.seqcst v1, v116
-// CHECK:     v119: mem = store.4 v118, v5, v117
-// CHECK:     br bb7(v119)
-// CHECK:
-// CHECK:   bb5(v121: mem):
-// CHECK:     v122: mem, v123: int:i64 = load.atomic.seqcst v1, v121
-// CHECK:     v124: mem = store.4 v123, v5, v122
-// CHECK:     br bb7(v124)
 // CHECK:
 // CHECK:   bb6(v126: mem):
 // CHECK:     v127: mem, v128: int:i64 = load.atomic.seqcst v1, v126
@@ -306,22 +306,22 @@
 // CHECK:   bb8(v134: mem):
 // CHECK:     v135: int:i64 = iconst 1
 // CHECK:     v136: bool = icmp.eq v10, v135
-// CHECK:     brif v136, bb3(v134), bb9(v134)
+// CHECK:     brif v136, bb5(v134), bb9(v134)
 // CHECK:
 // CHECK:   bb9(v138: mem):
 // CHECK:     v139: int:i64 = iconst 2
 // CHECK:     v140: bool = icmp.eq v10, v139
-// CHECK:     brif v140, bb5(v138), bb10(v138)
+// CHECK:     brif v140, bb4(v138), bb10(v138)
 // CHECK:
 // CHECK:   bb10(v142: mem):
 // CHECK:     v143: int:i64 = iconst 3
 // CHECK:     v144: bool = icmp.eq v10, v143
-// CHECK:     brif v144, bb2(v142), bb11(v142)
+// CHECK:     brif v144, bb3(v142), bb11(v142)
 // CHECK:
 // CHECK:   bb11(v146: mem):
 // CHECK:     v147: int:i64 = iconst 4
 // CHECK:     v148: bool = icmp.eq v10, v147
-// CHECK:     brif v148, bb4(v146), bb1(v146)
+// CHECK:     brif v148, bb2(v146), bb1(v146)
 // CHECK: }
 // CHECK:
 // CHECK: fn std::sync::atomic::atomic_store(_1: *mut T, _2: T, _3: std::sync::atomic::Ordering) -> () {
@@ -509,110 +509,110 @@
 // CHECK:     unreachable
 // CHECK:
 // CHECK:   bb2(v16: mem):
-// CHECK:     v17: ptr = symbol_addr @.Lstr.8
-// CHECK:     v18: int:i64 = iconst 50
-// CHECK:     v19: mem = store.8 v17, v8, v16
-// CHECK:     v20: int:i64 = iconst 8
-// CHECK:     v21: ptr = ptradd v8, v20
-// CHECK:     v22: mem = store.8 v18, v21, v19
-// CHECK:     v23: int:i64 = iconst 50
-// CHECK:     v24: int:i64 = iconst 8
-// CHECK:     v25: ptr = ptradd v8, v24
-// CHECK:     v26: mem = store.8 v23, v25, v22
-// CHECK:     v27: ptr = load.8 v8, v26
-// CHECK:     v28: int:i64 = iconst 8
-// CHECK:     v29: ptr = ptradd v8, v28
-// CHECK:     v30: int:i64 = load.8 v29, v26
-// CHECK:     v31: ptr = stack_slot 16
-// CHECK:     v32: mem = store.8 v27, v31, v26
-// CHECK:     v33: int:i64 = iconst 8
-// CHECK:     v34: ptr = ptradd v31, v33
-// CHECK:     v35: mem = store.8 v30, v34, v32
+// CHECK:     v17: mem = store.atomic.seqcst v2, v1, v16
+// CHECK:     br bb7(v17)
+// CHECK:
+// CHECK:   bb3(v19: mem):
+// CHECK:     v20: ptr = symbol_addr @.Lstr.8
+// CHECK:     v21: int:i64 = iconst 50
+// CHECK:     v22: mem = store.8 v20, v8, v19
+// CHECK:     v23: int:i64 = iconst 8
+// CHECK:     v24: ptr = ptradd v8, v23
+// CHECK:     v25: mem = store.8 v21, v24, v22
+// CHECK:     v26: int:i64 = iconst 50
+// CHECK:     v27: int:i64 = iconst 8
+// CHECK:     v28: ptr = ptradd v8, v27
+// CHECK:     v29: mem = store.8 v26, v28, v25
+// CHECK:     v30: ptr = load.8 v8, v29
+// CHECK:     v31: int:i64 = iconst 8
+// CHECK:     v32: ptr = ptradd v8, v31
+// CHECK:     v33: int:i64 = load.8 v32, v29
+// CHECK:     v34: ptr = stack_slot 16
+// CHECK:     v35: mem = store.8 v30, v34, v29
 // CHECK:     v36: int:i64 = iconst 8
-// CHECK:     v37: ptr = ptradd v8, v36
-// CHECK:     v38: int:i64 = load.8 v37, v35
+// CHECK:     v37: ptr = ptradd v34, v36
+// CHECK:     v38: mem = store.8 v33, v37, v35
 // CHECK:     v39: int:i64 = iconst 8
-// CHECK:     v40: ptr = ptradd v31, v39
-// CHECK:     v41: mem = store.8 v38, v40, v35
-// CHECK:     v42: ptr = load.8 v31, v41
-// CHECK:     v43: ptr = symbol_addr @.Lstr.9
-// CHECK:     v44: int:i64 = iconst 50
-// CHECK:     v45: int:i32 = iconst 1
-// CHECK:     v46: int:i64 = iconst 63
-// CHECK:     v47: int:i64 = and v45, v46
-// CHECK:     v48: int:i64 = shl v44:u64, v47
-// CHECK:     v49: int:u64 = zext v48, 64
-// CHECK:     v50: int:i64 = iconst 1
-// CHECK:     v51: int:i64 = or v49, v50:u64
+// CHECK:     v40: ptr = ptradd v8, v39
+// CHECK:     v41: int:i64 = load.8 v40, v38
+// CHECK:     v42: int:i64 = iconst 8
+// CHECK:     v43: ptr = ptradd v34, v42
+// CHECK:     v44: mem = store.8 v41, v43, v38
+// CHECK:     v45: ptr = load.8 v34, v44
+// CHECK:     v46: ptr = symbol_addr @.Lstr.9
+// CHECK:     v47: int:i64 = iconst 50
+// CHECK:     v48: int:i32 = iconst 1
+// CHECK:     v49: int:i64 = iconst 63
+// CHECK:     v50: int:i64 = and v48, v49
+// CHECK:     v51: int:i64 = shl v47:u64, v50
 // CHECK:     v52: int:u64 = zext v51, 64
-// CHECK:     v53: mem = store.8 v42, v7, v41
-// CHECK:     v54: int:i64 = iconst 8
-// CHECK:     v55: ptr = ptradd v7, v54
-// CHECK:     v56: mem = store.8 v52, v55, v53
-// CHECK:     v57: int:i64 = load.8 v7, v56
-// CHECK:     v58: int:i64 = iconst 8
-// CHECK:     v59: ptr = ptradd v7, v58
-// CHECK:     v60: int:i64 = load.8 v59, v56
-// CHECK:     v61: ptr = symbol_addr @.Lloc.11
-// CHECK:     v62: ptr = symbol_addr @_RNvNtC$HASH_4core9panicking9panic_fmt
-// CHECK:     v63: mem = call v62(v57, v60, v61), v56
-// CHECK:     v64: int:i64 = iconst 0
+// CHECK:     v53: int:i64 = iconst 1
+// CHECK:     v54: int:i64 = or v52, v53:u64
+// CHECK:     v55: int:u64 = zext v54, 64
+// CHECK:     v56: mem = store.8 v45, v7, v44
+// CHECK:     v57: int:i64 = iconst 8
+// CHECK:     v58: ptr = ptradd v7, v57
+// CHECK:     v59: mem = store.8 v55, v58, v56
+// CHECK:     v60: int:i64 = load.8 v7, v59
+// CHECK:     v61: int:i64 = iconst 8
+// CHECK:     v62: ptr = ptradd v7, v61
+// CHECK:     v63: int:i64 = load.8 v62, v59
+// CHECK:     v64: ptr = symbol_addr @.Lloc.11
+// CHECK:     v65: ptr = symbol_addr @_RNvNtC$HASH_4core9panicking9panic_fmt
+// CHECK:     v66: mem = call v65(v60, v63, v64), v59
+// CHECK:     v67: int:i64 = iconst 0
 // CHECK:     unreachable
 // CHECK:
-// CHECK:   bb3(v66: mem):
-// CHECK:     v67: ptr = symbol_addr @.Lstr.12
-// CHECK:     v68: int:i64 = iconst 42
-// CHECK:     v69: mem = store.8 v67, v9, v66
-// CHECK:     v70: int:i64 = iconst 8
-// CHECK:     v71: ptr = ptradd v9, v70
-// CHECK:     v72: mem = store.8 v68, v71, v69
-// CHECK:     v73: int:i64 = iconst 42
-// CHECK:     v74: int:i64 = iconst 8
-// CHECK:     v75: ptr = ptradd v9, v74
-// CHECK:     v76: mem = store.8 v73, v75, v72
-// CHECK:     v77: ptr = load.8 v9, v76
-// CHECK:     v78: int:i64 = iconst 8
-// CHECK:     v79: ptr = ptradd v9, v78
-// CHECK:     v80: int:i64 = load.8 v79, v76
-// CHECK:     v81: ptr = stack_slot 16
-// CHECK:     v82: mem = store.8 v77, v81, v76
-// CHECK:     v83: int:i64 = iconst 8
-// CHECK:     v84: ptr = ptradd v81, v83
-// CHECK:     v85: mem = store.8 v80, v84, v82
+// CHECK:   bb4(v69: mem):
+// CHECK:     v70: ptr = symbol_addr @.Lstr.12
+// CHECK:     v71: int:i64 = iconst 42
+// CHECK:     v72: mem = store.8 v70, v9, v69
+// CHECK:     v73: int:i64 = iconst 8
+// CHECK:     v74: ptr = ptradd v9, v73
+// CHECK:     v75: mem = store.8 v71, v74, v72
+// CHECK:     v76: int:i64 = iconst 42
+// CHECK:     v77: int:i64 = iconst 8
+// CHECK:     v78: ptr = ptradd v9, v77
+// CHECK:     v79: mem = store.8 v76, v78, v75
+// CHECK:     v80: ptr = load.8 v9, v79
+// CHECK:     v81: int:i64 = iconst 8
+// CHECK:     v82: ptr = ptradd v9, v81
+// CHECK:     v83: int:i64 = load.8 v82, v79
+// CHECK:     v84: ptr = stack_slot 16
+// CHECK:     v85: mem = store.8 v80, v84, v79
 // CHECK:     v86: int:i64 = iconst 8
-// CHECK:     v87: ptr = ptradd v9, v86
-// CHECK:     v88: int:i64 = load.8 v87, v85
+// CHECK:     v87: ptr = ptradd v84, v86
+// CHECK:     v88: mem = store.8 v83, v87, v85
 // CHECK:     v89: int:i64 = iconst 8
-// CHECK:     v90: ptr = ptradd v81, v89
-// CHECK:     v91: mem = store.8 v88, v90, v85
-// CHECK:     v92: ptr = load.8 v81, v91
-// CHECK:     v93: ptr = symbol_addr @.Lstr.13
-// CHECK:     v94: int:i64 = iconst 42
-// CHECK:     v95: int:i32 = iconst 1
-// CHECK:     v96: int:i64 = iconst 63
-// CHECK:     v97: int:i64 = and v95, v96
-// CHECK:     v98: int:i64 = shl v94:u64, v97
-// CHECK:     v99: int:u64 = zext v98, 64
-// CHECK:     v100: int:i64 = iconst 1
-// CHECK:     v101: int:i64 = or v99, v100:u64
+// CHECK:     v90: ptr = ptradd v9, v89
+// CHECK:     v91: int:i64 = load.8 v90, v88
+// CHECK:     v92: int:i64 = iconst 8
+// CHECK:     v93: ptr = ptradd v84, v92
+// CHECK:     v94: mem = store.8 v91, v93, v88
+// CHECK:     v95: ptr = load.8 v84, v94
+// CHECK:     v96: ptr = symbol_addr @.Lstr.13
+// CHECK:     v97: int:i64 = iconst 42
+// CHECK:     v98: int:i32 = iconst 1
+// CHECK:     v99: int:i64 = iconst 63
+// CHECK:     v100: int:i64 = and v98, v99
+// CHECK:     v101: int:i64 = shl v97:u64, v100
 // CHECK:     v102: int:u64 = zext v101, 64
-// CHECK:     v103: mem = store.8 v92, v6, v91
-// CHECK:     v104: int:i64 = iconst 8
-// CHECK:     v105: ptr = ptradd v6, v104
-// CHECK:     v106: mem = store.8 v102, v105, v103
-// CHECK:     v107: int:i64 = load.8 v6, v106
-// CHECK:     v108: int:i64 = iconst 8
-// CHECK:     v109: ptr = ptradd v6, v108
-// CHECK:     v110: int:i64 = load.8 v109, v106
-// CHECK:     v111: ptr = symbol_addr @.Lloc.15
-// CHECK:     v112: ptr = symbol_addr @_RNvNtC$HASH_4core9panicking9panic_fmt
-// CHECK:     v113: mem = call v112(v107, v110, v111), v106
-// CHECK:     v114: int:i64 = iconst 0
+// CHECK:     v103: int:i64 = iconst 1
+// CHECK:     v104: int:i64 = or v102, v103:u64
+// CHECK:     v105: int:u64 = zext v104, 64
+// CHECK:     v106: mem = store.8 v95, v6, v94
+// CHECK:     v107: int:i64 = iconst 8
+// CHECK:     v108: ptr = ptradd v6, v107
+// CHECK:     v109: mem = store.8 v105, v108, v106
+// CHECK:     v110: int:i64 = load.8 v6, v109
+// CHECK:     v111: int:i64 = iconst 8
+// CHECK:     v112: ptr = ptradd v6, v111
+// CHECK:     v113: int:i64 = load.8 v112, v109
+// CHECK:     v114: ptr = symbol_addr @.Lloc.15
+// CHECK:     v115: ptr = symbol_addr @_RNvNtC$HASH_4core9panicking9panic_fmt
+// CHECK:     v116: mem = call v115(v110, v113, v114), v109
+// CHECK:     v117: int:i64 = iconst 0
 // CHECK:     unreachable
-// CHECK:
-// CHECK:   bb4(v116: mem):
-// CHECK:     v117: mem = store.atomic.seqcst v2, v1, v116
-// CHECK:     br bb7(v117)
 // CHECK:
 // CHECK:   bb5(v119: mem):
 // CHECK:     v120: mem = store.atomic.seqcst v2, v1, v119
@@ -633,17 +633,17 @@
 // CHECK:   bb9(v131: mem):
 // CHECK:     v132: int:i64 = iconst 2
 // CHECK:     v133: bool = icmp.eq v10, v132
-// CHECK:     brif v133, bb3(v131), bb10(v131)
+// CHECK:     brif v133, bb4(v131), bb10(v131)
 // CHECK:
 // CHECK:   bb10(v135: mem):
 // CHECK:     v136: int:i64 = iconst 3
 // CHECK:     v137: bool = icmp.eq v10, v136
-// CHECK:     brif v137, bb2(v135), bb11(v135)
+// CHECK:     brif v137, bb3(v135), bb11(v135)
 // CHECK:
 // CHECK:   bb11(v139: mem):
 // CHECK:     v140: int:i64 = iconst 4
 // CHECK:     v141: bool = icmp.eq v10, v140
-// CHECK:     brif v141, bb4(v139), bb1(v139)
+// CHECK:     brif v141, bb2(v139), bb1(v139)
 // CHECK: }
 // CHECK:
 // CHECK: fn std::sync::atomic::atomic_compare_exchange(_1: *mut T, _2: T, _3: T, _4: std::sync::atomic::Ordering, _5: std::sync::atomic::Ordering) -> std::result::Result<T, T> {
@@ -915,12 +915,12 @@
 // CHECK:     0x20 │ 61 73 65 20 66 61 69 6c 75 72 65 20 6f 72 64 65 │ ase failure orde
 // CHECK:     0x30 │ 72 69 6e 67                                     │ ring
 // CHECK: }
-// CHECK: data @.Lstr.16 = "there is no such thing as a release failure ordering"
-// CHECK: data @.Lstr.17 = "there is no such thing as a release failure ordering"
+// CHECK: data @.Lstr.16 = "there is no such thing as an acquire-release failure ordering"
+// CHECK: data @.Lstr.17 = "there is no such thing as an acquire-release failure ordering"
 // CHECK: data @.Lloc_file.18 = "$SYSROOT/library/core/src/panic.rs"
 // CHECK: data @.Lloc.19 = "..." relocs [0: @.Lloc_file.18]
-// CHECK: data @.Lstr.20 = "there is no such thing as an acquire-release failure ordering"
-// CHECK: data @.Lstr.21 = "there is no such thing as an acquire-release failure ordering"
+// CHECK: data @.Lstr.20 = "there is no such thing as a release failure ordering"
+// CHECK: data @.Lstr.21 = "there is no such thing as a release failure ordering"
 // CHECK: data @.Lloc_file.22 = "$SYSROOT/library/core/src/panic.rs"
 // CHECK: data @.Lloc.23 = "..." relocs [0: @.Lloc_file.22]
 // CHECK: func @_RINvNtNtC$HASH_4core4sync6atomic23atomic_compare_exchangemEC$HASH_10atomic_ops(ptr, int:u32, int:u32, int:i8, int:i8) -> int:i64 {
@@ -943,256 +943,256 @@
 // CHECK:     v16: int:i8 = load.1 v5, v9
 // CHECK:     v17: int:i64 = iconst 0
 // CHECK:     v18: bool = icmp.eq v16, v17
-// CHECK:     brif v18, bb2(v9), bb29(v9)
+// CHECK:     brif v18, bb17(v9), bb29(v9)
 // CHECK:
 // CHECK:   bb1(v20: mem):
 // CHECK:     v21: int:i8 = load.1 v7, v20
-// CHECK:     v22: int:i64 = iconst 1
+// CHECK:     v22: int:i64 = iconst 0
 // CHECK:     v23: bool = icmp.eq v21, v22
-// CHECK:     brif v23, bb8(v20), bb33(v20)
+// CHECK:     brif v23, bb4(v20), bb33(v20)
 // CHECK:
 // CHECK:   bb2(v25: mem):
-// CHECK:     v26: int:i8 = load.1 v7, v25
-// CHECK:     v27: int:i64 = iconst 0
-// CHECK:     v28: bool = icmp.eq v26, v27
-// CHECK:     brif v28, bb24(v25), bb34(v25)
+// CHECK:     v26: mem, v27: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v25
+// CHECK:     v28: bool = icmp.eq v27, v2
+// CHECK:     v29: mem = store.4 v27, v10, v26
+// CHECK:     v30: int:i64 = iconst 4
+// CHECK:     v31: ptr = ptradd v10, v30
+// CHECK:     v32: mem = store.1 v28, v31, v29
+// CHECK:     br bb25(v32)
 // CHECK:
-// CHECK:   bb3(v30: mem):
-// CHECK:     v31: int:i8 = load.1 v7, v30
-// CHECK:     v32: int:i64 = iconst 0
-// CHECK:     v33: bool = icmp.eq v31, v32
-// CHECK:     brif v33, bb21(v30), bb36(v30)
+// CHECK:   bb3(v34: mem):
+// CHECK:     v35: mem, v36: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v34
+// CHECK:     v37: bool = icmp.eq v36, v2
+// CHECK:     v38: mem = store.4 v36, v10, v35
+// CHECK:     v39: int:i64 = iconst 4
+// CHECK:     v40: ptr = ptradd v10, v39
+// CHECK:     v41: mem = store.1 v37, v40, v38
+// CHECK:     br bb25(v41)
 // CHECK:
-// CHECK:   bb4(v35: mem):
-// CHECK:     v36: int:i8 = load.1 v7, v35
-// CHECK:     v37: int:i64 = iconst 0
-// CHECK:     v38: bool = icmp.eq v36, v37
-// CHECK:     brif v38, bb18(v35), bb38(v35)
+// CHECK:   bb4(v43: mem):
+// CHECK:     v44: mem, v45: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v43
+// CHECK:     v46: bool = icmp.eq v45, v2
+// CHECK:     v47: mem = store.4 v45, v10, v44
+// CHECK:     v48: int:i64 = iconst 4
+// CHECK:     v49: ptr = ptradd v10, v48
+// CHECK:     v50: mem = store.1 v46, v49, v47
+// CHECK:     br bb25(v50)
 // CHECK:
-// CHECK:   bb5(v40: mem):
-// CHECK:     v41: int:i8 = load.1 v7, v40
-// CHECK:     v42: int:i64 = iconst 0
-// CHECK:     v43: bool = icmp.eq v41, v42
-// CHECK:     brif v43, bb15(v40), bb40(v40)
+// CHECK:   bb5(v52: mem):
+// CHECK:     v53: int:i8 = load.1 v7, v52
+// CHECK:     v54: int:i64 = iconst 0
+// CHECK:     v55: bool = icmp.eq v53, v54
+// CHECK:     brif v55, bb8(v52), bb35(v52)
 // CHECK:
-// CHECK:   bb6(v45: mem):
-// CHECK:     v46: int:i8 = load.1 v7, v45
-// CHECK:     v47: int:i64 = iconst 0
-// CHECK:     v48: bool = icmp.eq v46, v47
-// CHECK:     brif v48, bb12(v45), bb42(v45)
+// CHECK:   bb6(v57: mem):
+// CHECK:     v58: mem, v59: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v57
+// CHECK:     v60: bool = icmp.eq v59, v2
+// CHECK:     v61: mem = store.4 v59, v10, v58
+// CHECK:     v62: int:i64 = iconst 4
+// CHECK:     v63: ptr = ptradd v10, v62
+// CHECK:     v64: mem = store.1 v60, v63, v61
+// CHECK:     br bb25(v64)
 // CHECK:
-// CHECK:   bb7(v50: mem):
-// CHECK:     unreachable
+// CHECK:   bb7(v66: mem):
+// CHECK:     v67: mem, v68: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v66
+// CHECK:     v69: bool = icmp.eq v68, v2
+// CHECK:     v70: mem = store.4 v68, v10, v67
+// CHECK:     v71: int:i64 = iconst 4
+// CHECK:     v72: ptr = ptradd v10, v71
+// CHECK:     v73: mem = store.1 v69, v72, v70
+// CHECK:     br bb25(v73)
 // CHECK:
-// CHECK:   bb8(v52: mem):
-// CHECK:     v53: ptr = symbol_addr @.Lstr.16
-// CHECK:     v54: int:i64 = iconst 52
-// CHECK:     v55: mem = store.8 v53, v14, v52
-// CHECK:     v56: int:i64 = iconst 8
-// CHECK:     v57: ptr = ptradd v14, v56
-// CHECK:     v58: mem = store.8 v54, v57, v55
-// CHECK:     v59: int:i64 = iconst 52
-// CHECK:     v60: int:i64 = iconst 8
-// CHECK:     v61: ptr = ptradd v14, v60
-// CHECK:     v62: mem = store.8 v59, v61, v58
-// CHECK:     v63: ptr = load.8 v14, v62
-// CHECK:     v64: int:i64 = iconst 8
-// CHECK:     v65: ptr = ptradd v14, v64
-// CHECK:     v66: int:i64 = load.8 v65, v62
-// CHECK:     v67: ptr = stack_slot 16
-// CHECK:     v68: mem = store.8 v63, v67, v62
-// CHECK:     v69: int:i64 = iconst 8
-// CHECK:     v70: ptr = ptradd v67, v69
-// CHECK:     v71: mem = store.8 v66, v70, v68
-// CHECK:     v72: int:i64 = iconst 8
-// CHECK:     v73: ptr = ptradd v14, v72
-// CHECK:     v74: int:i64 = load.8 v73, v71
-// CHECK:     v75: int:i64 = iconst 8
-// CHECK:     v76: ptr = ptradd v67, v75
-// CHECK:     v77: mem = store.8 v74, v76, v71
-// CHECK:     v78: ptr = load.8 v67, v77
-// CHECK:     v79: ptr = symbol_addr @.Lstr.17
-// CHECK:     v80: int:i64 = iconst 52
-// CHECK:     v81: int:i32 = iconst 1
-// CHECK:     v82: int:i64 = iconst 63
-// CHECK:     v83: int:i64 = and v81, v82
-// CHECK:     v84: int:i64 = shl v80:u64, v83
-// CHECK:     v85: int:u64 = zext v84, 64
-// CHECK:     v86: int:i64 = iconst 1
-// CHECK:     v87: int:i64 = or v85, v86:u64
-// CHECK:     v88: int:u64 = zext v87, 64
-// CHECK:     v89: mem = store.8 v78, v13, v77
-// CHECK:     v90: int:i64 = iconst 8
-// CHECK:     v91: ptr = ptradd v13, v90
-// CHECK:     v92: mem = store.8 v88, v91, v89
-// CHECK:     v93: int:i64 = load.8 v13, v92
-// CHECK:     v94: int:i64 = iconst 8
-// CHECK:     v95: ptr = ptradd v13, v94
-// CHECK:     v96: int:i64 = load.8 v95, v92
-// CHECK:     v97: ptr = symbol_addr @.Lloc.19
-// CHECK:     v98: ptr = symbol_addr @_RNvNtC$HASH_4core9panicking9panic_fmt
-// CHECK:     v99: mem = call v98(v93, v96, v97), v92
-// CHECK:     v100: int:i64 = iconst 0
-// CHECK:     unreachable
+// CHECK:   bb8(v75: mem):
+// CHECK:     v76: mem, v77: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v75
+// CHECK:     v78: bool = icmp.eq v77, v2
+// CHECK:     v79: mem = store.4 v77, v10, v76
+// CHECK:     v80: int:i64 = iconst 4
+// CHECK:     v81: ptr = ptradd v10, v80
+// CHECK:     v82: mem = store.1 v78, v81, v79
+// CHECK:     br bb25(v82)
 // CHECK:
-// CHECK:   bb9(v102: mem):
-// CHECK:     v103: ptr = symbol_addr @.Lstr.20
-// CHECK:     v104: int:i64 = iconst 61
-// CHECK:     v105: mem = store.8 v103, v15, v102
-// CHECK:     v106: int:i64 = iconst 8
-// CHECK:     v107: ptr = ptradd v15, v106
-// CHECK:     v108: mem = store.8 v104, v107, v105
-// CHECK:     v109: int:i64 = iconst 61
-// CHECK:     v110: int:i64 = iconst 8
-// CHECK:     v111: ptr = ptradd v15, v110
-// CHECK:     v112: mem = store.8 v109, v111, v108
-// CHECK:     v113: ptr = load.8 v15, v112
-// CHECK:     v114: int:i64 = iconst 8
-// CHECK:     v115: ptr = ptradd v15, v114
-// CHECK:     v116: int:i64 = load.8 v115, v112
-// CHECK:     v117: ptr = stack_slot 16
-// CHECK:     v118: mem = store.8 v113, v117, v112
-// CHECK:     v119: int:i64 = iconst 8
-// CHECK:     v120: ptr = ptradd v117, v119
-// CHECK:     v121: mem = store.8 v116, v120, v118
-// CHECK:     v122: int:i64 = iconst 8
-// CHECK:     v123: ptr = ptradd v15, v122
-// CHECK:     v124: int:i64 = load.8 v123, v121
-// CHECK:     v125: int:i64 = iconst 8
-// CHECK:     v126: ptr = ptradd v117, v125
-// CHECK:     v127: mem = store.8 v124, v126, v121
-// CHECK:     v128: ptr = load.8 v117, v127
-// CHECK:     v129: ptr = symbol_addr @.Lstr.21
-// CHECK:     v130: int:i64 = iconst 61
-// CHECK:     v131: int:i32 = iconst 1
-// CHECK:     v132: int:i64 = iconst 63
-// CHECK:     v133: int:i64 = and v131, v132
-// CHECK:     v134: int:i64 = shl v130:u64, v133
-// CHECK:     v135: int:u64 = zext v134, 64
-// CHECK:     v136: int:i64 = iconst 1
-// CHECK:     v137: int:i64 = or v135, v136:u64
-// CHECK:     v138: int:u64 = zext v137, 64
-// CHECK:     v139: mem = store.8 v128, v12, v127
-// CHECK:     v140: int:i64 = iconst 8
-// CHECK:     v141: ptr = ptradd v12, v140
-// CHECK:     v142: mem = store.8 v138, v141, v139
-// CHECK:     v143: int:i64 = load.8 v12, v142
-// CHECK:     v144: int:i64 = iconst 8
-// CHECK:     v145: ptr = ptradd v12, v144
-// CHECK:     v146: int:i64 = load.8 v145, v142
-// CHECK:     v147: ptr = symbol_addr @.Lloc.23
-// CHECK:     v148: ptr = symbol_addr @_RNvNtC$HASH_4core9panicking9panic_fmt
-// CHECK:     v149: mem = call v148(v143, v146, v147), v142
+// CHECK:   bb9(v84: mem):
+// CHECK:     v85: int:i8 = load.1 v7, v84
+// CHECK:     v86: int:i64 = iconst 0
+// CHECK:     v87: bool = icmp.eq v85, v86
+// CHECK:     brif v87, bb12(v84), bb37(v84)
+// CHECK:
+// CHECK:   bb10(v89: mem):
+// CHECK:     v90: mem, v91: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v89
+// CHECK:     v92: bool = icmp.eq v91, v2
+// CHECK:     v93: mem = store.4 v91, v10, v90
+// CHECK:     v94: int:i64 = iconst 4
+// CHECK:     v95: ptr = ptradd v10, v94
+// CHECK:     v96: mem = store.1 v92, v95, v93
+// CHECK:     br bb25(v96)
+// CHECK:
+// CHECK:   bb11(v98: mem):
+// CHECK:     v99: mem, v100: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v98
+// CHECK:     v101: bool = icmp.eq v100, v2
+// CHECK:     v102: mem = store.4 v100, v10, v99
+// CHECK:     v103: int:i64 = iconst 4
+// CHECK:     v104: ptr = ptradd v10, v103
+// CHECK:     v105: mem = store.1 v101, v104, v102
+// CHECK:     br bb25(v105)
+// CHECK:
+// CHECK:   bb12(v107: mem):
+// CHECK:     v108: mem, v109: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v107
+// CHECK:     v110: bool = icmp.eq v109, v2
+// CHECK:     v111: mem = store.4 v109, v10, v108
+// CHECK:     v112: int:i64 = iconst 4
+// CHECK:     v113: ptr = ptradd v10, v112
+// CHECK:     v114: mem = store.1 v110, v113, v111
+// CHECK:     br bb25(v114)
+// CHECK:
+// CHECK:   bb13(v116: mem):
+// CHECK:     v117: int:i8 = load.1 v7, v116
+// CHECK:     v118: int:i64 = iconst 0
+// CHECK:     v119: bool = icmp.eq v117, v118
+// CHECK:     brif v119, bb16(v116), bb39(v116)
+// CHECK:
+// CHECK:   bb14(v121: mem):
+// CHECK:     v122: mem, v123: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v121
+// CHECK:     v124: bool = icmp.eq v123, v2
+// CHECK:     v125: mem = store.4 v123, v10, v122
+// CHECK:     v126: int:i64 = iconst 4
+// CHECK:     v127: ptr = ptradd v10, v126
+// CHECK:     v128: mem = store.1 v124, v127, v125
+// CHECK:     br bb25(v128)
+// CHECK:
+// CHECK:   bb15(v130: mem):
+// CHECK:     v131: mem, v132: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v130
+// CHECK:     v133: bool = icmp.eq v132, v2
+// CHECK:     v134: mem = store.4 v132, v10, v131
+// CHECK:     v135: int:i64 = iconst 4
+// CHECK:     v136: ptr = ptradd v10, v135
+// CHECK:     v137: mem = store.1 v133, v136, v134
+// CHECK:     br bb25(v137)
+// CHECK:
+// CHECK:   bb16(v139: mem):
+// CHECK:     v140: mem, v141: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v139
+// CHECK:     v142: bool = icmp.eq v141, v2
+// CHECK:     v143: mem = store.4 v141, v10, v140
+// CHECK:     v144: int:i64 = iconst 4
+// CHECK:     v145: ptr = ptradd v10, v144
+// CHECK:     v146: mem = store.1 v142, v145, v143
+// CHECK:     br bb25(v146)
+// CHECK:
+// CHECK:   bb17(v148: mem):
+// CHECK:     v149: int:i8 = load.1 v7, v148
 // CHECK:     v150: int:i64 = iconst 0
+// CHECK:     v151: bool = icmp.eq v149, v150
+// CHECK:     brif v151, bb24(v148), bb41(v148)
+// CHECK:
+// CHECK:   bb18(v153: mem):
+// CHECK:     v154: int:i8 = load.1 v7, v153
+// CHECK:     v155: int:i64 = iconst 1
+// CHECK:     v156: bool = icmp.eq v154, v155
+// CHECK:     brif v156, bb21(v153), bb43(v153)
+// CHECK:
+// CHECK:   bb19(v158: mem):
 // CHECK:     unreachable
 // CHECK:
-// CHECK:   bb10(v152: mem):
-// CHECK:     v153: mem, v154: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v152
-// CHECK:     v155: bool = icmp.eq v154, v2
-// CHECK:     v156: mem = store.4 v154, v10, v153
-// CHECK:     v157: int:i64 = iconst 4
-// CHECK:     v158: ptr = ptradd v10, v157
-// CHECK:     v159: mem = store.1 v155, v158, v156
-// CHECK:     br bb25(v159)
+// CHECK:   bb20(v160: mem):
+// CHECK:     v161: ptr = symbol_addr @.Lstr.16
+// CHECK:     v162: int:i64 = iconst 61
+// CHECK:     v163: mem = store.8 v161, v15, v160
+// CHECK:     v164: int:i64 = iconst 8
+// CHECK:     v165: ptr = ptradd v15, v164
+// CHECK:     v166: mem = store.8 v162, v165, v163
+// CHECK:     v167: int:i64 = iconst 61
+// CHECK:     v168: int:i64 = iconst 8
+// CHECK:     v169: ptr = ptradd v15, v168
+// CHECK:     v170: mem = store.8 v167, v169, v166
+// CHECK:     v171: ptr = load.8 v15, v170
+// CHECK:     v172: int:i64 = iconst 8
+// CHECK:     v173: ptr = ptradd v15, v172
+// CHECK:     v174: int:i64 = load.8 v173, v170
+// CHECK:     v175: ptr = stack_slot 16
+// CHECK:     v176: mem = store.8 v171, v175, v170
+// CHECK:     v177: int:i64 = iconst 8
+// CHECK:     v178: ptr = ptradd v175, v177
+// CHECK:     v179: mem = store.8 v174, v178, v176
+// CHECK:     v180: int:i64 = iconst 8
+// CHECK:     v181: ptr = ptradd v15, v180
+// CHECK:     v182: int:i64 = load.8 v181, v179
+// CHECK:     v183: int:i64 = iconst 8
+// CHECK:     v184: ptr = ptradd v175, v183
+// CHECK:     v185: mem = store.8 v182, v184, v179
+// CHECK:     v186: ptr = load.8 v175, v185
+// CHECK:     v187: ptr = symbol_addr @.Lstr.17
+// CHECK:     v188: int:i64 = iconst 61
+// CHECK:     v189: int:i32 = iconst 1
+// CHECK:     v190: int:i64 = iconst 63
+// CHECK:     v191: int:i64 = and v189, v190
+// CHECK:     v192: int:i64 = shl v188:u64, v191
+// CHECK:     v193: int:u64 = zext v192, 64
+// CHECK:     v194: int:i64 = iconst 1
+// CHECK:     v195: int:i64 = or v193, v194:u64
+// CHECK:     v196: int:u64 = zext v195, 64
+// CHECK:     v197: mem = store.8 v186, v12, v185
+// CHECK:     v198: int:i64 = iconst 8
+// CHECK:     v199: ptr = ptradd v12, v198
+// CHECK:     v200: mem = store.8 v196, v199, v197
+// CHECK:     v201: int:i64 = load.8 v12, v200
+// CHECK:     v202: int:i64 = iconst 8
+// CHECK:     v203: ptr = ptradd v12, v202
+// CHECK:     v204: int:i64 = load.8 v203, v200
+// CHECK:     v205: ptr = symbol_addr @.Lloc.19
+// CHECK:     v206: ptr = symbol_addr @_RNvNtC$HASH_4core9panicking9panic_fmt
+// CHECK:     v207: mem = call v206(v201, v204, v205), v200
+// CHECK:     v208: int:i64 = iconst 0
+// CHECK:     unreachable
 // CHECK:
-// CHECK:   bb11(v161: mem):
-// CHECK:     v162: mem, v163: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v161
-// CHECK:     v164: bool = icmp.eq v163, v2
-// CHECK:     v165: mem = store.4 v163, v10, v162
-// CHECK:     v166: int:i64 = iconst 4
-// CHECK:     v167: ptr = ptradd v10, v166
-// CHECK:     v168: mem = store.1 v164, v167, v165
-// CHECK:     br bb25(v168)
-// CHECK:
-// CHECK:   bb12(v170: mem):
-// CHECK:     v171: mem, v172: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v170
-// CHECK:     v173: bool = icmp.eq v172, v2
-// CHECK:     v174: mem = store.4 v172, v10, v171
-// CHECK:     v175: int:i64 = iconst 4
-// CHECK:     v176: ptr = ptradd v10, v175
-// CHECK:     v177: mem = store.1 v173, v176, v174
-// CHECK:     br bb25(v177)
-// CHECK:
-// CHECK:   bb13(v179: mem):
-// CHECK:     v180: mem, v181: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v179
-// CHECK:     v182: bool = icmp.eq v181, v2
-// CHECK:     v183: mem = store.4 v181, v10, v180
-// CHECK:     v184: int:i64 = iconst 4
-// CHECK:     v185: ptr = ptradd v10, v184
-// CHECK:     v186: mem = store.1 v182, v185, v183
-// CHECK:     br bb25(v186)
-// CHECK:
-// CHECK:   bb14(v188: mem):
-// CHECK:     v189: mem, v190: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v188
-// CHECK:     v191: bool = icmp.eq v190, v2
-// CHECK:     v192: mem = store.4 v190, v10, v189
-// CHECK:     v193: int:i64 = iconst 4
-// CHECK:     v194: ptr = ptradd v10, v193
-// CHECK:     v195: mem = store.1 v191, v194, v192
-// CHECK:     br bb25(v195)
-// CHECK:
-// CHECK:   bb15(v197: mem):
-// CHECK:     v198: mem, v199: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v197
-// CHECK:     v200: bool = icmp.eq v199, v2
-// CHECK:     v201: mem = store.4 v199, v10, v198
-// CHECK:     v202: int:i64 = iconst 4
-// CHECK:     v203: ptr = ptradd v10, v202
-// CHECK:     v204: mem = store.1 v200, v203, v201
-// CHECK:     br bb25(v204)
-// CHECK:
-// CHECK:   bb16(v206: mem):
-// CHECK:     v207: mem, v208: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v206
-// CHECK:     v209: bool = icmp.eq v208, v2
-// CHECK:     v210: mem = store.4 v208, v10, v207
-// CHECK:     v211: int:i64 = iconst 4
-// CHECK:     v212: ptr = ptradd v10, v211
-// CHECK:     v213: mem = store.1 v209, v212, v210
-// CHECK:     br bb25(v213)
-// CHECK:
-// CHECK:   bb17(v215: mem):
-// CHECK:     v216: mem, v217: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v215
-// CHECK:     v218: bool = icmp.eq v217, v2
-// CHECK:     v219: mem = store.4 v217, v10, v216
-// CHECK:     v220: int:i64 = iconst 4
-// CHECK:     v221: ptr = ptradd v10, v220
-// CHECK:     v222: mem = store.1 v218, v221, v219
-// CHECK:     br bb25(v222)
-// CHECK:
-// CHECK:   bb18(v224: mem):
-// CHECK:     v225: mem, v226: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v224
-// CHECK:     v227: bool = icmp.eq v226, v2
-// CHECK:     v228: mem = store.4 v226, v10, v225
-// CHECK:     v229: int:i64 = iconst 4
-// CHECK:     v230: ptr = ptradd v10, v229
-// CHECK:     v231: mem = store.1 v227, v230, v228
-// CHECK:     br bb25(v231)
-// CHECK:
-// CHECK:   bb19(v233: mem):
-// CHECK:     v234: mem, v235: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v233
-// CHECK:     v236: bool = icmp.eq v235, v2
-// CHECK:     v237: mem = store.4 v235, v10, v234
-// CHECK:     v238: int:i64 = iconst 4
-// CHECK:     v239: ptr = ptradd v10, v238
-// CHECK:     v240: mem = store.1 v236, v239, v237
-// CHECK:     br bb25(v240)
-// CHECK:
-// CHECK:   bb20(v242: mem):
-// CHECK:     v243: mem, v244: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v242
-// CHECK:     v245: bool = icmp.eq v244, v2
-// CHECK:     v246: mem = store.4 v244, v10, v243
-// CHECK:     v247: int:i64 = iconst 4
-// CHECK:     v248: ptr = ptradd v10, v247
-// CHECK:     v249: mem = store.1 v245, v248, v246
-// CHECK:     br bb25(v249)
-// CHECK:
-// CHECK:   bb21(v251: mem):
-// CHECK:     v252: mem, v253: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v251
-// CHECK:     v254: bool = icmp.eq v253, v2
-// CHECK:     v255: mem = store.4 v253, v10, v252
-// CHECK:     v256: int:i64 = iconst 4
-// CHECK:     v257: ptr = ptradd v10, v256
-// CHECK:     v258: mem = store.1 v254, v257, v255
-// CHECK:     br bb25(v258)
+// CHECK:   bb21(v210: mem):
+// CHECK:     v211: ptr = symbol_addr @.Lstr.20
+// CHECK:     v212: int:i64 = iconst 52
+// CHECK:     v213: mem = store.8 v211, v14, v210
+// CHECK:     v214: int:i64 = iconst 8
+// CHECK:     v215: ptr = ptradd v14, v214
+// CHECK:     v216: mem = store.8 v212, v215, v213
+// CHECK:     v217: int:i64 = iconst 52
+// CHECK:     v218: int:i64 = iconst 8
+// CHECK:     v219: ptr = ptradd v14, v218
+// CHECK:     v220: mem = store.8 v217, v219, v216
+// CHECK:     v221: ptr = load.8 v14, v220
+// CHECK:     v222: int:i64 = iconst 8
+// CHECK:     v223: ptr = ptradd v14, v222
+// CHECK:     v224: int:i64 = load.8 v223, v220
+// CHECK:     v225: ptr = stack_slot 16
+// CHECK:     v226: mem = store.8 v221, v225, v220
+// CHECK:     v227: int:i64 = iconst 8
+// CHECK:     v228: ptr = ptradd v225, v227
+// CHECK:     v229: mem = store.8 v224, v228, v226
+// CHECK:     v230: int:i64 = iconst 8
+// CHECK:     v231: ptr = ptradd v14, v230
+// CHECK:     v232: int:i64 = load.8 v231, v229
+// CHECK:     v233: int:i64 = iconst 8
+// CHECK:     v234: ptr = ptradd v225, v233
+// CHECK:     v235: mem = store.8 v232, v234, v229
+// CHECK:     v236: ptr = load.8 v225, v235
+// CHECK:     v237: ptr = symbol_addr @.Lstr.21
+// CHECK:     v238: int:i64 = iconst 52
+// CHECK:     v239: int:i32 = iconst 1
+// CHECK:     v240: int:i64 = iconst 63
+// CHECK:     v241: int:i64 = and v239, v240
+// CHECK:     v242: int:i64 = shl v238:u64, v241
+// CHECK:     v243: int:u64 = zext v242, 64
+// CHECK:     v244: int:i64 = iconst 1
+// CHECK:     v245: int:i64 = or v243, v244:u64
+// CHECK:     v246: int:u64 = zext v245, 64
+// CHECK:     v247: mem = store.8 v236, v13, v235
+// CHECK:     v248: int:i64 = iconst 8
+// CHECK:     v249: ptr = ptradd v13, v248
+// CHECK:     v250: mem = store.8 v246, v249, v247
+// CHECK:     v251: int:i64 = load.8 v13, v250
+// CHECK:     v252: int:i64 = iconst 8
+// CHECK:     v253: ptr = ptradd v13, v252
+// CHECK:     v254: int:i64 = load.8 v253, v250
+// CHECK:     v255: ptr = symbol_addr @.Lloc.23
+// CHECK:     v256: ptr = symbol_addr @_RNvNtC$HASH_4core9panicking9panic_fmt
+// CHECK:     v257: mem = call v256(v251, v254, v255), v250
+// CHECK:     v258: int:i64 = iconst 0
+// CHECK:     unreachable
 // CHECK:
 // CHECK:   bb22(v260: mem):
 // CHECK:     v261: mem, v262: int:i64 = cmpxchg.seqcst.seqcst v1, v2, v3, v260
@@ -1265,12 +1265,12 @@
 // CHECK:   bb29(v324: mem):
 // CHECK:     v325: int:i64 = iconst 1
 // CHECK:     v326: bool = icmp.eq v16, v325
-// CHECK:     brif v326, bb4(v324), bb30(v324)
+// CHECK:     brif v326, bb13(v324), bb30(v324)
 // CHECK:
 // CHECK:   bb30(v328: mem):
 // CHECK:     v329: int:i64 = iconst 2
 // CHECK:     v330: bool = icmp.eq v16, v329
-// CHECK:     brif v330, bb3(v328), bb31(v328)
+// CHECK:     brif v330, bb9(v328), bb31(v328)
 // CHECK:
 // CHECK:   bb31(v332: mem):
 // CHECK:     v333: int:i64 = iconst 3
@@ -1280,62 +1280,62 @@
 // CHECK:   bb32(v336: mem):
 // CHECK:     v337: int:i64 = iconst 4
 // CHECK:     v338: bool = icmp.eq v16, v337
-// CHECK:     brif v338, bb6(v336), bb7(v336)
+// CHECK:     brif v338, bb1(v336), bb19(v336)
 // CHECK:
 // CHECK:   bb33(v340: mem):
-// CHECK:     v341: int:i64 = iconst 3
+// CHECK:     v341: int:i64 = iconst 2
 // CHECK:     v342: bool = icmp.eq v21, v341
-// CHECK:     brif v342, bb9(v340), bb7(v340)
+// CHECK:     brif v342, bb3(v340), bb34(v340)
 // CHECK:
 // CHECK:   bb34(v344: mem):
-// CHECK:     v345: int:i64 = iconst 2
-// CHECK:     v346: bool = icmp.eq v26, v345
-// CHECK:     brif v346, bb23(v344), bb35(v344)
+// CHECK:     v345: int:i64 = iconst 4
+// CHECK:     v346: bool = icmp.eq v21, v345
+// CHECK:     brif v346, bb2(v344), bb18(v344)
 // CHECK:
 // CHECK:   bb35(v348: mem):
-// CHECK:     v349: int:i64 = iconst 4
-// CHECK:     v350: bool = icmp.eq v26, v349
-// CHECK:     brif v350, bb22(v348), bb1(v348)
+// CHECK:     v349: int:i64 = iconst 2
+// CHECK:     v350: bool = icmp.eq v53, v349
+// CHECK:     brif v350, bb7(v348), bb36(v348)
 // CHECK:
 // CHECK:   bb36(v352: mem):
-// CHECK:     v353: int:i64 = iconst 2
-// CHECK:     v354: bool = icmp.eq v31, v353
-// CHECK:     brif v354, bb20(v352), bb37(v352)
+// CHECK:     v353: int:i64 = iconst 4
+// CHECK:     v354: bool = icmp.eq v53, v353
+// CHECK:     brif v354, bb6(v352), bb18(v352)
 // CHECK:
 // CHECK:   bb37(v356: mem):
-// CHECK:     v357: int:i64 = iconst 4
-// CHECK:     v358: bool = icmp.eq v31, v357
-// CHECK:     brif v358, bb19(v356), bb1(v356)
+// CHECK:     v357: int:i64 = iconst 2
+// CHECK:     v358: bool = icmp.eq v85, v357
+// CHECK:     brif v358, bb11(v356), bb38(v356)
 // CHECK:
 // CHECK:   bb38(v360: mem):
-// CHECK:     v361: int:i64 = iconst 2
-// CHECK:     v362: bool = icmp.eq v36, v361
-// CHECK:     brif v362, bb17(v360), bb39(v360)
+// CHECK:     v361: int:i64 = iconst 4
+// CHECK:     v362: bool = icmp.eq v85, v361
+// CHECK:     brif v362, bb10(v360), bb18(v360)
 // CHECK:
 // CHECK:   bb39(v364: mem):
-// CHECK:     v365: int:i64 = iconst 4
-// CHECK:     v366: bool = icmp.eq v36, v365
-// CHECK:     brif v366, bb16(v364), bb1(v364)
+// CHECK:     v365: int:i64 = iconst 2
+// CHECK:     v366: bool = icmp.eq v117, v365
+// CHECK:     brif v366, bb15(v364), bb40(v364)
 // CHECK:
 // CHECK:   bb40(v368: mem):
-// CHECK:     v369: int:i64 = iconst 2
-// CHECK:     v370: bool = icmp.eq v41, v369
-// CHECK:     brif v370, bb14(v368), bb41(v368)
+// CHECK:     v369: int:i64 = iconst 4
+// CHECK:     v370: bool = icmp.eq v117, v369
+// CHECK:     brif v370, bb14(v368), bb18(v368)
 // CHECK:
 // CHECK:   bb41(v372: mem):
-// CHECK:     v373: int:i64 = iconst 4
-// CHECK:     v374: bool = icmp.eq v41, v373
-// CHECK:     brif v374, bb13(v372), bb1(v372)
+// CHECK:     v373: int:i64 = iconst 2
+// CHECK:     v374: bool = icmp.eq v149, v373
+// CHECK:     brif v374, bb23(v372), bb42(v372)
 // CHECK:
 // CHECK:   bb42(v376: mem):
-// CHECK:     v377: int:i64 = iconst 2
-// CHECK:     v378: bool = icmp.eq v46, v377
-// CHECK:     brif v378, bb11(v376), bb43(v376)
+// CHECK:     v377: int:i64 = iconst 4
+// CHECK:     v378: bool = icmp.eq v149, v377
+// CHECK:     brif v378, bb22(v376), bb18(v376)
 // CHECK:
 // CHECK:   bb43(v380: mem):
-// CHECK:     v381: int:i64 = iconst 4
-// CHECK:     v382: bool = icmp.eq v46, v381
-// CHECK:     brif v382, bb10(v380), bb1(v380)
+// CHECK:     v381: int:i64 = iconst 3
+// CHECK:     v382: bool = icmp.eq v154, v381
+// CHECK:     brif v382, bb20(v380), bb19(v380)
 // CHECK: }
 // CHECK:
 // CHECK: fn atomic_compare_exchange(_1: &std::sync::atomic::Atomic<u32>, _2: u32, _3: u32) -> std::result::Result<u32, u32> {
@@ -1371,23 +1371,23 @@
 // CHECK:     v3: int:u32 = param 2
 // CHECK:     v4: ptr = stack_slot 8
 // CHECK:     v5: mem = store.8 v1, v4, v0
-// CHECK:     v6: ptr = load.8 v4, v5
-// CHECK:     v7: int:i64 = iconst 4
+// CHECK:     v6: ptr = stack_slot 8
+// CHECK:     v7: ptr = load.8 v4, v5
 // CHECK:     v8: int:i64 = iconst 4
-// CHECK:     v9: ptr = symbol_addr @_RINvNtNtC$HASH_4core4sync6atomic23atomic_compare_exchangemEC$HASH_10atomic_ops
-// CHECK:     v10: mem, v11: int:i32 = call v9(v6, v2, v3, v7, v8), v5 -> int:i32
-// CHECK:     v12: ptr = stack_slot 8
-// CHECK:     v13: mem = store.4 v11, v12, v10
+// CHECK:     v9: int:i64 = iconst 4
+// CHECK:     v10: ptr = symbol_addr @_RINvNtNtC$HASH_4core4sync6atomic23atomic_compare_exchangemEC$HASH_10atomic_ops
+// CHECK:     v11: mem, v12: int:i32 = call v10(v7, v2, v3, v8, v9), v5 -> int:i32
+// CHECK:     v13: mem = store.4 v12, v6, v11
 // CHECK:     v14: int:i64 = iconst 0
 // CHECK:     v15: int:i64 = iconst 4
-// CHECK:     v16: ptr = ptradd v12, v15
+// CHECK:     v16: ptr = ptradd v6, v15
 // CHECK:     v17: mem = store.4 v14, v16, v13
 // CHECK:     br bb1(v17)
 // CHECK:
 // CHECK:   bb1(v19: mem):
-// CHECK:     v20: int:i32 = load.4 v12, v19
+// CHECK:     v20: int:i32 = load.4 v6, v19
 // CHECK:     v21: int:i64 = iconst 4
-// CHECK:     v22: ptr = ptradd v12, v21
+// CHECK:     v22: ptr = ptradd v6, v21
 // CHECK:     v23: int:i32 = load.4 v22, v19
 // CHECK:     ret v20, v19
 // CHECK: }

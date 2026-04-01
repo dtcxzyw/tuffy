@@ -55,6 +55,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 if let Some(&v) = ir_args.first() {
                     self.locals.set(destination_local, v);
                 }
+                // For fat pointer args the arg loader pushes a second
+                // element (the metadata).  Propagate it so that the
+                // ScalarPair survives the identity operation.
+                if ir_args.len() >= 2 {
+                    self.fat_locals.set(destination_local, ir_args[1]);
+                }
                 true
             }
 
@@ -69,6 +75,67 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
             // assume: optimizer hint, no runtime effect. Treat as no-op.
             "assume" => true,
+
+            // select_unpredictable: branchless conditional select.
+            // Equivalent to `if cond { true_val } else { false_val }`.
+            "select_unpredictable" => {
+                if ir_args.len() >= 3 {
+                    let cond = ir_args[0];
+                    let true_val = ir_args[1];
+                    let false_val = ir_args[2];
+
+                    // cond may be Bool or Int — normalise to Bool.
+                    let cond_bool = if matches!(self.builder.value_type(cond), Some(Type::Bool)) {
+                        cond
+                    } else {
+                        let cond_int = self.coerce_to_int(cond);
+                        let zero = self.builder.iconst(
+                            0,
+                            64,
+                            IntSignedness::DontCare,
+                            Origin::synthetic(),
+                        );
+                        self.builder
+                            .icmp(
+                                ICmpOp::Ne,
+                                cond_int.into(),
+                                zero.into(),
+                                Origin::synthetic(),
+                            )
+                            .raw()
+                    };
+
+                    let result_ty = self
+                        .builder
+                        .value_type(true_val)
+                        .cloned()
+                        .unwrap_or(Type::Ptr(0));
+                    // Derive annotation: use the generic type param T first,
+                    // falling back to byte-width annotation when T is a pointer
+                    // or otherwise unannotated.
+                    let ann = substs
+                        .first()
+                        .and_then(|a| a.as_type())
+                        .and_then(|t| translate_annotation(t))
+                        .or_else(|| {
+                            if matches!(result_ty, Type::Int) {
+                                int_annotation_for_bytes(8)
+                            } else {
+                                None
+                            }
+                        });
+                    let result = self.builder.select(
+                        cond_bool.into(),
+                        true_val.into(),
+                        false_val.into(),
+                        result_ty,
+                        ann,
+                        Origin::synthetic(),
+                    );
+                    self.locals.set(destination_local, result);
+                }
+                true
+            }
 
             // assert_inhabited / assert_zero_valid / assert_mem_uninitialized_valid:
             // compile-time checks, no runtime effect.

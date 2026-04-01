@@ -57,29 +57,26 @@ fi
 echo ""
 
 # ── Bitflags cargo test ───────────────────────────────────────────────────────
-# Override the hardcoded release backend path in scratch/bitflags/.cargo/config.toml
-# (CARGO_TARGET_<triple>_RUSTFLAGS env var takes precedence over config.toml).
-# The [host] rustflags = [] entry in config.toml is unaffected, so proc macros
-# (serde derive, etc.) continue to compile with the system backend.
+# Uses Cargo host/target separation (-Z host-config -Z target-applies-to-host)
+# so that ALL target crates (bitflags + every dependency) are compiled with the
+# tuffy backend, while build scripts and proc-macros use the system backend.
+# A temporary .cargo/config.toml is written with the current backend path.
 
 BITFLAGS_DIR="$REPO_ROOT/scratch/bitflags"
 if [ -d "$BITFLAGS_DIR" ]; then
     echo "=== Bitflags cargo test ==="
 
-    # Copy rustc wrapper to the temp dir and make it executable so that
-    # RUSTC_WRAPPER can invoke it. Only the bitflags crate itself is compiled
-    # with the tuffy backend; all dependencies and dev-deps use the default.
-    # CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="" overrides the
-    # hardcoded release backend path in scratch/bitflags/.cargo/config.toml.
-    WRAPPER_EXEC="$TEMP_DIR/rustc-wrapper-tuffy"
-    cp "$SCRIPT_DIR/rustc-wrapper-tuffy.sh" "$WRAPPER_EXEC"
-    python3 -c "import os; os.chmod('$WRAPPER_EXEC', 0o755)"
+    mkdir -p "$BITFLAGS_DIR/.cargo"
+    cat > "$BITFLAGS_DIR/.cargo/config.toml" <<CFGEOF
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-Z", "codegen-backend=$BACKEND"]
 
-    if RUSTC_WRAPPER="$WRAPPER_EXEC" \
-       TUFFY_BACKEND="$BACKEND" \
-       TUFFY_CRATE="bitflags" \
-       CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="" \
-       cargo test --manifest-path "$BITFLAGS_DIR/Cargo.toml"; then
+[host]
+rustflags = []
+CFGEOF
+
+    if cargo test --manifest-path "$BITFLAGS_DIR/Cargo.toml" \
+       -Z host-config -Z target-applies-to-host; then
         overall_pass=$((overall_pass + 1))
     else
         overall_fail=$((overall_fail + 1))

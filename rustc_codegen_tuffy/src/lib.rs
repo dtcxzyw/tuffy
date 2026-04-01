@@ -9,6 +9,7 @@
 #![feature(box_patterns)]
 
 extern crate rustc_abi;
+extern crate rustc_ast;
 extern crate rustc_codegen_ssa;
 extern crate rustc_data_structures;
 extern crate rustc_driver;
@@ -306,11 +307,18 @@ impl CodegenBackend for TuffyCodegenBackend {
                         )
                         .unwrap();
                     }
+                    // A static is writable if it's `static mut` OR if its
+                    // type has interior mutability (contains UnsafeCell),
+                    // e.g. Mutex, Cell, AtomicU32.  Such types must live
+                    // in .data, not .rodata.
+                    let static_ty = tcx.type_of(*def_id).instantiate_identity();
+                    let needs_write = tcx.is_mutable_static(*def_id)
+                        || !static_ty.is_freeze(tcx, ty::TypingEnv::fully_monomorphized());
                     all_static_data.push(StaticData {
                         name: sym_name,
                         data: bytes,
                         relocations: relocs,
-                        writable: tcx.is_mutable_static(*def_id),
+                        writable: needs_write,
                     });
                 }
             }

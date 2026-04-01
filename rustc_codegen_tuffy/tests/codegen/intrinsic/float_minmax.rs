@@ -122,7 +122,7 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @_RNvNtCsa3SJzwB9S2T_4core10intrinsics10maximumf32CshcqLDH83PT8_12float_minmax(f32, f32) -> f32 {
+// CHECK: func @_RNvNtC$HASH_4core10intrinsics10maximumf32C$HASH_12float_minmax(f32, f32) -> f32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: f32 = param 0
 // CHECK:     v2: f32 = param 1
@@ -356,7 +356,7 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @_RNvNtCsa3SJzwB9S2T_4core10intrinsics10maximumf64CshcqLDH83PT8_12float_minmax(f64, f64) -> f64 {
+// CHECK: func @_RNvNtC$HASH_4core10intrinsics10maximumf64C$HASH_12float_minmax(f64, f64) -> f64 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: f64 = param 0
 // CHECK:     v2: f64 = param 1
@@ -588,7 +588,7 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @_RNvNtCsa3SJzwB9S2T_4core10intrinsics10minimumf32CshcqLDH83PT8_12float_minmax(f32, f32) -> f32 {
+// CHECK: func @_RNvNtC$HASH_4core10intrinsics10minimumf32C$HASH_12float_minmax(f32, f32) -> f32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: f32 = param 0
 // CHECK:     v2: f32 = param 1
@@ -822,7 +822,7 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @_RNvNtCsa3SJzwB9S2T_4core10intrinsics10minimumf64CshcqLDH83PT8_12float_minmax(f64, f64) -> f64 {
+// CHECK: func @_RNvNtC$HASH_4core10intrinsics10minimumf64C$HASH_12float_minmax(f64, f64) -> f64 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: f64 = param 0
 // CHECK:     v2: f64 = param 1

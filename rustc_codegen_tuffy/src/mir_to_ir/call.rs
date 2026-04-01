@@ -404,12 +404,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     {
                         let dest_ty = self.monomorphize(self.mir.local_decls[destination.local].ty);
                         let size = type_size(self.tcx, dest_ty).unwrap_or(8) as u32;
-                        // When result_val is a pointer (another stack slot) and
-                        // the type is wider than 8 bytes, copy word-by-word
-                        // instead of storing the pointer value as data.
+                        // When result_val is a pointer to a known memory
+                        // location (stack slot, symbol, ptr_add) and the type
+                        // is wider than 8 bytes, copy word-by-word from that
+                        // address.  Bare pointer *values* (e.g. the data-ptr
+                        // half of a fat pointer returned by black_box) must
+                        // NOT be dereferenced — fall through to the scalar
+                        // store path instead.
                         let val_is_ptr =
                             matches!(self.builder.value_type(result_val), Some(Type::Ptr(_)));
-                        if val_is_ptr && size > 8 {
+                        if val_is_ptr && size > 8 && self.builder.is_memory_address(result_val) {
                             let mut offset = 0u32;
                             while offset < size {
                                 let chunk = std::cmp::min(8, size - offset);
@@ -465,18 +469,57 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 offset += chunk;
                             }
                         } else {
+                            // For fat-pointer types the result is just the
+                            // first scalar (e.g. data_ptr); cap the store at 8
+                            // bytes so we don't write past the value width.
+                            // The second half (metadata) is persisted separately
+                            // by the fat-metadata propagation below.
+                            let store_size = if val_is_ptr && size > 8 {
+                                8u32
+                            } else {
+                                size.max(1)
+                            };
                             self.current_mem = self
                                 .builder
                                 .store(
                                     result_val.into(),
                                     slot.into(),
-                                    size.max(1),
+                                    store_size,
                                     self.current_mem.into(),
                                     Origin::synthetic(),
                                 )
                                 .raw();
                         }
                         self.locals.set(destination.local, slot);
+                    }
+
+                    // Propagate fat pointer metadata to the stack slot.
+                    // When an intrinsic (e.g. black_box) sets fat_locals for
+                    // the destination, we must also persist the metadata to
+                    // slot+8 so that Return loads see both halves.
+                    if let Some(fat_val) = self.fat_locals.get(destination.local)
+                        && let Some(slot) = self.locals.get(destination.local)
+                        && self.stack_locals.is_stack(destination.local)
+                    {
+                        let off = self.builder.iconst(
+                            8,
+                            64,
+                            IntSignedness::DontCare,
+                            Origin::synthetic(),
+                        );
+                        let meta_addr =
+                            self.builder
+                                .ptradd(slot.into(), off.into(), 0, Origin::synthetic());
+                        self.current_mem = self
+                            .builder
+                            .store(
+                                fat_val.into(),
+                                meta_addr.into(),
+                                8,
+                                self.current_mem.into(),
+                                Origin::synthetic(),
+                            )
+                            .raw();
                     }
                 } // end else (no dest projection)
                 if let Some(target) = target {

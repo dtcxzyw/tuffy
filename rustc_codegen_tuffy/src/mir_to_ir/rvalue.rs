@@ -859,6 +859,34 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         }
                     }
                 }
+                // For Unsize coercions from [T; N] to [T], emit the
+                // array length as slice metadata.
+                if let CastKind::PointerCoercion(_, _) = cast_kind {
+                    let src_ty = self.operand_ty_mono(op);
+                    if let Some(src_ty) = src_ty {
+                        let src_inner = match src_ty.kind() {
+                            ty::Ref(_, inner, _) => Some(*inner),
+                            ty::RawPtr(inner, _) => Some(*inner),
+                            _ if src_ty.is_box() => src_ty.boxed_ty(),
+                            _ => None,
+                        };
+                        if let Some(inner) = src_inner
+                            && let ty::Array(_, len_const) = inner.kind()
+                        {
+                            let len = len_const.try_to_target_usize(self.tcx).unwrap_or(0);
+                            return Some(
+                                self.builder
+                                    .iconst(
+                                        len as i64,
+                                        64,
+                                        IntSignedness::DontCare,
+                                        Origin::synthetic(),
+                                    )
+                                    .raw(),
+                            );
+                        }
+                    }
+                }
                 // For Unsize coercions to trait objects, generate the vtable pointer.
                 if let CastKind::PointerCoercion(pc, _) = cast_kind {
                     // Check if this is an Unsize coercion by examining the target type.

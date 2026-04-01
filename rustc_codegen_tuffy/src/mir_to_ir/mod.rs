@@ -129,7 +129,7 @@ pub fn translate_function<'tcx>(
                     // use 64-bit annotation since the function returns the first
                     // 8 bytes in RAX; the remaining bytes are returned in RDX
                     // via ABI metadata (see terminator.rs).
-                    if matches!(ret_repr, ReprKind::ScalarPair) && ret_size > 8 {
+                    if matches!(ret_repr, ReprKind::ScalarPair) {
                         int_annotation_for_bytes(8)
                     } else {
                         int_annotation_for_bytes(ret_size as u32)
@@ -240,22 +240,56 @@ pub fn translate_function<'tcx>(
     let root = builder.create_region(RegionKind::Function);
     builder.enter_region(root);
 
-    // Create IR blocks for all MIR basic blocks upfront so branches can
-    // reference target blocks before they are translated.
-    // Each block gets a Type::Mem block argument for MemSSA threading.
+    // Compute reverse-postorder so that (except for back edges) every
+    // definition of a MIR local is processed before its uses.  Creating
+    // IR blocks in this order also means the ISel (which iterates blocks
+    // sequentially) sees definitions before cross-block uses.
+    let rpo_order = {
+        let num_blocks = mir.basic_blocks.len();
+        let mut visited = vec![false; num_blocks];
+        let mut postorder = Vec::with_capacity(num_blocks);
+        let mut stack: Vec<(BasicBlock, usize)> = vec![(BasicBlock::from_usize(0), 0)];
+        visited[0] = true;
+        while let Some((bb, next_succ)) = stack.last_mut() {
+            let term = mir.basic_blocks[*bb].terminator();
+            let succs: Vec<BasicBlock> = term.successors().collect();
+            if *next_succ < succs.len() {
+                let s = succs[*next_succ];
+                *next_succ += 1;
+                if !visited[s.as_usize()] {
+                    visited[s.as_usize()] = true;
+                    stack.push((s, 0));
+                }
+            } else {
+                postorder.push(*bb);
+                stack.pop();
+            }
+        }
+        for (idx, &vis) in visited.iter().enumerate().take(num_blocks) {
+            if !vis {
+                postorder.push(BasicBlock::from_usize(idx));
+            }
+        }
+        postorder.reverse();
+        postorder
+    };
+
+    // Create IR blocks in RPO order so branches can reference target
+    // blocks before they are translated, and block numbering follows RPO.
     let mut block_map = BlockMap::new(mir.basic_blocks.len());
-    let mut block_mem_args = Vec::with_capacity(mir.basic_blocks.len());
-    for (bb, _) in mir.basic_blocks.iter_enumerated() {
+    let mut block_mem_args: Vec<Option<tuffy_ir::value::ValueRef>> =
+        vec![None; mir.basic_blocks.len()];
+    for &bb in &rpo_order {
         let ir_block = builder.create_block();
         block_map.set(bb, ir_block);
         let mem_arg = builder.add_block_arg(ir_block, Type::Mem, None);
-        block_mem_args.push(mem_arg);
+        block_mem_args[bb.as_usize()] = Some(mem_arg);
     }
 
     let entry = block_map.get(BasicBlock::from_u32(0));
     builder.switch_to_block(entry);
 
-    let initial_mem = block_mem_args[0];
+    let initial_mem = block_mem_args[0].expect("entry block mem arg missing");
 
     let mut ctx = TranslationCtx {
         tcx,
@@ -686,28 +720,34 @@ pub fn translate_function<'tcx>(
     }
 
     // Pre-allocate a stack slot for the return place (_0) when it is a
-    // multi-word type (9-16 bytes, e.g. &str, &[T]).
+    // multi-word type (9-16 bytes, e.g. &str, &[T]) or a ScalarPair
+    // (e.g. Option<u8>).  ScalarPair returns are always two-register
+    // (RAX + RDX), so the return handler needs a stack slot to load
+    // both scalars from.
     {
         let ret_local = mir::Local::from_usize(0);
         let ret_ty = ctx.monomorphize(mir.local_decls[ret_local].ty);
         let ret_size = type_size(ctx.tcx, ret_ty).unwrap_or(0);
-        if ret_size > 8
+        let ret_repr = repr_kind(ctx.tcx, ret_ty);
+        let needs_slot = (ret_size > 8
             && ret_size <= 16
-            && !ctx.stack_locals.is_stack(ret_local)
-            && !matches!(repr_kind(ctx.tcx, ret_ty), ReprKind::Scalar if ret_size <= 8)
-        {
+            && !matches!(ret_repr, ReprKind::Scalar if ret_size <= 8))
+            || (matches!(ret_repr, ReprKind::ScalarPair) && ret_size > 0 && ret_size <= 8);
+        if needs_slot && !ctx.stack_locals.is_stack(ret_local) {
             let slot = ctx.builder.stack_slot(ret_size as u32, Origin::synthetic());
             ctx.locals.set(ret_local, slot);
             ctx.stack_locals.mark(ret_local);
         }
     }
 
-    // Translate each basic block.
-    for (bb, bb_data) in mir.basic_blocks.iter_enumerated() {
+    // Translate each basic block in reverse-postorder.
+    for bb in &rpo_order {
+        let bb = *bb;
+        let bb_data = &mir.basic_blocks[bb];
         let ir_block = ctx.block_map.get(bb);
         ctx.builder.switch_to_block(ir_block);
         if bb.as_usize() != 0 {
-            ctx.current_mem = ctx.block_mem_args[bb.as_usize()];
+            ctx.current_mem = ctx.block_mem_args[bb.as_usize()].expect("block mem arg missing");
         }
 
         for stmt in &bb_data.statements {

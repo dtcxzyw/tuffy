@@ -35,6 +35,48 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 // ZST: nothing to store.
                             } else if matches!(self.builder.value_type(val), Some(Type::Ptr(_)))
                                 && bytes > 8
+                                && !self.builder.is_memory_address(val)
+                            {
+                                // Fat pointer value (e.g. &[u8]): val is the data
+                                // pointer, metadata lives in fat_locals / extract_fat_component.
+                                // Store both halves directly.
+                                self.current_mem = self
+                                    .builder
+                                    .store(
+                                        val.into(),
+                                        addr.into(),
+                                        8,
+                                        self.current_mem.into(),
+                                        Origin::synthetic(),
+                                    )
+                                    .raw();
+                                let fat_val = self.extract_fat_component(rvalue);
+                                if let Some(meta) = fat_val {
+                                    let off = self.builder.iconst(
+                                        8,
+                                        64,
+                                        IntSignedness::DontCare,
+                                        Origin::synthetic(),
+                                    );
+                                    let meta_addr = self.builder.ptradd(
+                                        addr.into(),
+                                        off.into(),
+                                        0,
+                                        Origin::synthetic(),
+                                    );
+                                    self.current_mem = self
+                                        .builder
+                                        .store(
+                                            meta.into(),
+                                            meta_addr.into(),
+                                            8,
+                                            self.current_mem.into(),
+                                            Origin::synthetic(),
+                                        )
+                                        .raw();
+                                }
+                            } else if matches!(self.builder.value_type(val), Some(Type::Ptr(_)))
+                                && bytes > 8
                             {
                                 // Large aggregate: copy word by word
                                 let words = bytes.div_ceil(8);
@@ -90,6 +132,32 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         )
                                         .raw();
                                 }
+                            } else if matches!(self.builder.value_type(val), Some(Type::Ptr(_)))
+                                && self.builder.is_local_memory_address(val)
+                            {
+                                // Small aggregate in a stack slot (≤8 bytes):
+                                // load the data from the source and store to dest.
+                                // Use is_local_memory_address (not is_memory_address)
+                                // so that computed pointers (e.g. PtrAdd from Offset)
+                                // are stored directly as pointer values, not loaded from.
+                                let data = self.builder.load(
+                                    val.into(),
+                                    bytes,
+                                    Type::Int,
+                                    self.current_mem.into(),
+                                    int_annotation_for_bytes(bytes),
+                                    Origin::synthetic(),
+                                );
+                                self.current_mem = self
+                                    .builder
+                                    .store(
+                                        data.into(),
+                                        addr.into(),
+                                        bytes,
+                                        self.current_mem.into(),
+                                        Origin::synthetic(),
+                                    )
+                                    .raw();
                             } else {
                                 // Scalar or small: store directly.
                                 // Coerce the value to match the store type.
@@ -1330,7 +1398,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     }
                 }
                 // Check if the rvalue produces a fat pointer (e.g., &str from ConstValue::Slice).
-                if let Some(fat_val) = self.extract_fat_component(rvalue) {
+                // Only propagate fat metadata for direct local assignments (no
+                // projection).  For deref / field stores we are writing THROUGH
+                // the local, not TO it, so the rvalue's metadata must not be
+                // associated with the base local (that would clobber unrelated
+                // stack slots).
+                if place.projection.is_empty()
+                    && let Some(fat_val) = self.extract_fat_component(rvalue)
+                {
                     self.fat_locals.set(place.local, fat_val);
                     // For stack-allocated locals, also store the metadata to
                     // the stack slot at offset 8 so that code loading the full
