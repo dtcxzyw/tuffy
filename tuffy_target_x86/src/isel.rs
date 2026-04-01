@@ -1328,7 +1328,17 @@ fn select_inst(
         }
 
         Op::Load(ptr, bytes, _mem) => {
-            if *bytes >= 9 {
+            if *bytes == 0 {
+                // Zero-byte load (ZST): produce a dummy zero value so
+                // downstream uses have a valid vreg, but emit no memory access.
+                let dst = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRI {
+                    size: OpSize::S32,
+                    dst,
+                    imm: 0,
+                });
+                ctx.regs.assign(vref, dst);
+            } else if *bytes >= 9 {
                 // 9-16 byte load: lo 8 bytes + remaining hi bytes as a second load.
                 let lo_dst = ctx.alloc.alloc();
                 let hi_dst = ctx.alloc.alloc();
@@ -1369,39 +1379,46 @@ fn select_inst(
         }
 
         Op::Store(val, ptr, bytes, _mem) => {
-            let val_vreg = ctx.ensure_in_reg(val.value)?;
-            // Determine the base register and base offset for the target address.
-            let (base, base_offset) = if let Some(offset) = ctx.stack.get(ptr.clone().raw().value) {
-                let rbp = ctx.alloc.alloc_fixed(Gpr::Rbp.to_preg());
-                (rbp, offset)
+            // Zero-byte store is a no-op (ZST); skip to avoid emitting
+            // spurious writes that corrupt the stack frame.
+            if *bytes == 0 {
+                // Still "use" the operands so the ISel doesn't fail on them.
             } else {
-                (ctx.ensure_in_reg(ptr.clone().raw().value)?, 0i32)
-            };
-            if *bytes >= 9 {
-                // 9-16 byte store: lo 8 bytes + remaining from hi half.
-                ctx.out.push(MInst::MovMR {
-                    size: OpSize::S64,
-                    base,
-                    offset: base_offset,
-                    src: val_vreg,
-                });
-                let hi_vreg =
-                    ensure_hi_in_reg(ctx, val.value, get_int_annotation(func, val.value))?;
-                let hi_bytes = *bytes - 8;
-                if hi_bytes == 8 {
+                let val_vreg = ctx.ensure_in_reg(val.value)?;
+                // Determine the base register and base offset for the target address.
+                let (base, base_offset) =
+                    if let Some(offset) = ctx.stack.get(ptr.clone().raw().value) {
+                        let rbp = ctx.alloc.alloc_fixed(Gpr::Rbp.to_preg());
+                        (rbp, offset)
+                    } else {
+                        (ctx.ensure_in_reg(ptr.clone().raw().value)?, 0i32)
+                    };
+                if *bytes >= 9 {
+                    // 9-16 byte store: lo 8 bytes + remaining from hi half.
                     ctx.out.push(MInst::MovMR {
                         size: OpSize::S64,
                         base,
-                        offset: base_offset + 8,
-                        src: hi_vreg,
+                        offset: base_offset,
+                        src: val_vreg,
                     });
+                    let hi_vreg =
+                        ensure_hi_in_reg(ctx, val.value, get_int_annotation(func, val.value))?;
+                    let hi_bytes = *bytes - 8;
+                    if hi_bytes == 8 {
+                        ctx.out.push(MInst::MovMR {
+                            size: OpSize::S64,
+                            base,
+                            offset: base_offset + 8,
+                            src: hi_vreg,
+                        });
+                    } else {
+                        emit_partial_store(ctx, base, base_offset + 8, hi_vreg, hi_bytes);
+                    }
                 } else {
-                    emit_partial_store(ctx, base, base_offset + 8, hi_vreg, hi_bytes);
+                    // Emit stores; for non-power-of-2 sizes split into standard-size pieces.
+                    emit_partial_store(ctx, base, base_offset, val_vreg, *bytes);
                 }
-            } else {
-                // Emit stores; for non-power-of-2 sizes split into standard-size pieces.
-                emit_partial_store(ctx, base, base_offset, val_vreg, *bytes);
-            }
+            } // end of bytes != 0 else
         }
 
         Op::MemCopy(dst, src, count, _mem) => {

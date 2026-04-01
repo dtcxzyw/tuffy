@@ -566,34 +566,45 @@ fn rewrite_with_spills(
                 }
             }
         } else {
-            // Multiple spilled operands: use R10 for one operand and R11
-            // for the other to avoid clobbering.
+            // Multiple spilled operands: use R10 for some operands and R11
+            // for the others to avoid clobbering.
             //
-            // Identify which vreg gets R10 (the secondary spill register).
-            // Prefer assigning R10 to a Use-only operand. If there are
-            // multiple spilled Defs (e.g. MovRR2 with both dsts spilled),
-            // assign R10 to the second Def to keep them distinct.
-            let r10_vreg = spilled
+            // Constraints:
+            //  - Two spilled Defs MUST get different registers (the pseudo-
+            //    instruction writes to both sequentially).
+            //  - Two spilled Uses SHOULD get different registers (both are
+            //    loaded before the instruction; the second load would
+            //    clobber the first if they share R11).
+            //  - A Use and a Def MAY share a register when the encoding
+            //    consumes Uses before writing Defs (e.g. UMulOverflow).
+            let spilled_uses: Vec<&SpilledOp> = spilled
                 .iter()
-                .find(|sp| matches!(sp.kind, OpKind::Use))
-                .map(|sp| sp.vreg_idx)
-                .or_else(|| {
-                    // No Use operand to assign R10 — check for multiple Defs.
-                    let defs: Vec<_> = spilled
-                        .iter()
-                        .filter(|sp| matches!(sp.kind, OpKind::Def | OpKind::UseDef))
-                        .collect();
-                    if defs.len() >= 2 {
-                        Some(defs[1].vreg_idx)
-                    } else {
-                        None
-                    }
-                });
+                .filter(|sp| matches!(sp.kind, OpKind::Use))
+                .collect();
+            let spilled_defs: Vec<&SpilledOp> = spilled
+                .iter()
+                .filter(|sp| matches!(sp.kind, OpKind::Def | OpKind::UseDef))
+                .collect();
 
-            // Emit loads: UseDef → R11, Use → R10.
+            let mut r10_set: HashSet<u32> = HashSet::new();
+
+            if spilled_defs.len() >= 2 {
+                // Multiple Defs: assign R10 to the second Def.
+                r10_set.insert(spilled_defs[1].vreg_idx);
+                // If there are also 2+ spilled Uses, pair one Use with
+                // the R10 Def to keep the Uses on separate registers.
+                if spilled_uses.len() >= 2 {
+                    r10_set.insert(spilled_uses[0].vreg_idx);
+                }
+            } else if let Some(sp) = spilled_uses.first() {
+                // At most 1 Def: assign R10 to one Use (original behavior).
+                r10_set.insert(sp.vreg_idx);
+            }
+
+            // Emit loads: Use/UseDef → R10 if in set, R11 otherwise.
             for sp in &spilled {
                 if matches!(sp.kind, OpKind::Use | OpKind::UseDef) {
-                    let is_r10 = r10_vreg == Some(sp.vreg_idx) && matches!(sp.kind, OpKind::Use);
+                    let is_r10 = r10_set.contains(&sp.vreg_idx) && matches!(sp.kind, OpKind::Use);
                     let dst_gpr = if is_r10 { spill_gpr2 } else { Gpr::R11 };
                     out.push(MInst::MovRM {
                         size: OpSize::S64,
@@ -604,10 +615,12 @@ fn rewrite_with_spills(
                 }
             }
 
-            // Rewrite the instruction with R10 override for the designated operand.
-            if let Some(r10_vi) = r10_vreg {
+            // Rewrite the instruction with R10 overrides for all designated operands.
+            if !r10_set.is_empty() {
                 let mut overrides = alloc_result.assignments.to_vec();
-                overrides[r10_vi as usize] = SPILL_REG2;
+                for &vi in &r10_set {
+                    overrides[vi as usize] = SPILL_REG2;
+                }
                 out.push(rewrite_inst(inst, &overrides));
             } else {
                 out.push(rewrite_inst(inst, &alloc_result.assignments));
@@ -616,7 +629,7 @@ fn rewrite_with_spills(
             // Emit stores for Def/UseDef operands.
             for sp in &spilled {
                 if matches!(sp.kind, OpKind::Def | OpKind::UseDef) {
-                    let src_gpr = if r10_vreg == Some(sp.vreg_idx) {
+                    let src_gpr = if r10_set.contains(&sp.vreg_idx) {
                         spill_gpr2
                     } else {
                         Gpr::R11
