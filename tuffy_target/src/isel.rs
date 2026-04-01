@@ -70,7 +70,9 @@ impl StackMap {
     }
 
     pub fn alloc(&mut self, val: ValueRef, bytes: u32) -> i32 {
-        self.frame_size += bytes as i32;
+        // Reserve at least 1 byte so ZST allocations still advance
+        // frame_size (offset 0 conflicts with saved rbp).
+        self.frame_size += std::cmp::max(bytes as i32, 1);
         // Align to natural alignment (at least 8 bytes for pointers).
         let align = std::cmp::max(bytes as i32, 8);
         self.frame_size = (self.frame_size + align - 1) & !(align - 1);
