@@ -1,7 +1,7 @@
 #!/bin/bash
 # Unified quick build-and-test script for rustc_codegen_tuffy.
 # Runs: smoke tests (hello world + fixture programs), codegen CHECK tests,
-# and bitflags cargo test (building bitflags with the tuffy backend).
+# bitflags cargo test, and syn cargo test (building each with the tuffy backend).
 #
 # Temporary output: scratch/rustc_codegen_tuffy_test/ (cleared before each run).
 # Abort on unset variables; propagate pipeline failures.
@@ -87,6 +87,36 @@ if [ -d "$BITFLAGS_DIR" ]; then
     echo ""
 else
     echo "=== Bitflags cargo test: SKIP (scratch/bitflags not found) ==="
+    echo ""
+fi
+
+# ── Syn cargo test ────────────────────────────────────────────────────────────
+# syn is a widely-used parser crate. Because many proc-macros depend on syn
+# from crates.io, TUFFY_SRC_DIR restricts the tuffy backend to the workspace
+# copy of syn (prevents applying tuffy to the registry copy used by proc-macros).
+
+SYN_DIR="$REPO_ROOT/scratch/syn"
+if [ -d "$SYN_DIR" ]; then
+    echo "=== Syn cargo test ==="
+
+    WRAPPER_EXEC="$TEMP_DIR/rustc-wrapper-tuffy"
+    if [ ! -f "$WRAPPER_EXEC" ]; then
+        cp "$SCRIPT_DIR/rustc-wrapper-tuffy.sh" "$WRAPPER_EXEC"
+        python3 -c "import os; os.chmod('$WRAPPER_EXEC', 0o755)"
+    fi
+
+    if RUSTC_WRAPPER="$WRAPPER_EXEC" \
+       TUFFY_BACKEND="$BACKEND" \
+       TUFFY_CRATE="syn" \
+       TUFFY_SRC_DIR="$SYN_DIR" \
+       cargo test --manifest-path "$SYN_DIR/Cargo.toml" --all-features; then
+        overall_pass=$((overall_pass + 1))
+    else
+        overall_fail=$((overall_fail + 1))
+    fi
+    echo ""
+else
+    echo "=== Syn cargo test: SKIP (scratch/syn not found) ==="
     echo ""
 fi
 
