@@ -169,10 +169,16 @@ impl<'a> Builder<'a> {
             return false;
         }
         match self.func.inst_pool.get(v.index()) {
-            Some(node) => matches!(
-                &node.inst.op,
-                Op::StackSlot(_) | Op::SymbolAddr(_) | Op::TlsSymbolAddr(_) | Op::PtrAdd(..)
-            ),
+            Some(node) => match &node.inst.op {
+                Op::StackSlot(_) | Op::SymbolAddr(_) | Op::TlsSymbolAddr(_) => true,
+                // Only treat PtrAdd as a memory address when its base is
+                // itself a local memory address (StackSlot / SymbolAddr).
+                // A PtrAdd rooted at a call result, load, or param is
+                // pointer arithmetic on a value, not an address into our
+                // local storage.
+                Op::PtrAdd(base, _) => self.is_memory_address(base.0.value),
+                _ => false,
+            },
             None => false,
         }
     }
