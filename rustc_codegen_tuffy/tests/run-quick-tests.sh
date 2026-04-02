@@ -66,25 +66,24 @@ echo ""
 # library (from the sysroot) uses LLVM.
 
 BITFLAGS_DIR="$REPO_ROOT/scratch/bitflags"
-if [ -d "$BITFLAGS_DIR" ]; then
-    echo "=== Bitflags cargo test ==="
+if [ ! -d "$BITFLAGS_DIR" ]; then
+    echo "=== Cloning bitflags ==="
+    git clone --filter=blob:none https://github.com/bitflags/bitflags.git "$BITFLAGS_DIR"
+fi
+echo "=== Bitflags cargo test ==="
 
-    mkdir -p "$BITFLAGS_DIR/.cargo"
-    cat > "$BITFLAGS_DIR/.cargo/config.toml" <<CFGEOF
+mkdir -p "$BITFLAGS_DIR/.cargo"
+cat > "$BITFLAGS_DIR/.cargo/config.toml" <<CFGEOF
 [build]
 rustflags = ["-Z", "codegen-backend=$BACKEND"]
 CFGEOF
 
-    if cargo +nightly-2026-03-28 test --manifest-path "$BITFLAGS_DIR/Cargo.toml"; then
-        overall_pass=$((overall_pass + 1))
-    else
-        overall_fail=$((overall_fail + 1))
-    fi
-    echo ""
+if cargo +nightly-2026-03-28 test --manifest-path "$BITFLAGS_DIR/Cargo.toml"; then
+    overall_pass=$((overall_pass + 1))
 else
-    echo "=== Bitflags cargo test: SKIP (scratch/bitflags not found) ==="
-    echo ""
+    overall_fail=$((overall_fail + 1))
 fi
+echo ""
 
 # ── Syn cargo test ────────────────────────────────────────────────────────────
 # syn is a widely-used parser crate. Because many proc-macros depend on syn
@@ -92,29 +91,28 @@ fi
 # copy of syn (prevents applying tuffy to the registry copy used by proc-macros).
 
 SYN_DIR="$REPO_ROOT/scratch/syn"
-if [ -d "$SYN_DIR" ]; then
-    echo "=== Syn cargo test ==="
-
-    WRAPPER_EXEC="$TEMP_DIR/rustc-wrapper-tuffy"
-    if [ ! -f "$WRAPPER_EXEC" ]; then
-        cp "$SCRIPT_DIR/rustc-wrapper-tuffy.sh" "$WRAPPER_EXEC"
-        python3 -c "import os; os.chmod('$WRAPPER_EXEC', 0o755)"
-    fi
-
-    if RUSTC_WRAPPER="$WRAPPER_EXEC" \
-       TUFFY_BACKEND="$BACKEND" \
-       TUFFY_CRATE="syn" \
-       TUFFY_SRC_DIR="$SYN_DIR" \
-       cargo test --manifest-path "$SYN_DIR/Cargo.toml" --all-features; then
-        overall_pass=$((overall_pass + 1))
-    else
-        overall_fail=$((overall_fail + 1))
-    fi
-    echo ""
-else
-    echo "=== Syn cargo test: SKIP (scratch/syn not found) ==="
-    echo ""
+if [ ! -d "$SYN_DIR" ]; then
+    echo "=== Cloning syn ==="
+    git clone --filter=blob:none https://github.com/dtolnay/syn.git "$SYN_DIR"
 fi
+echo "=== Syn cargo test ==="
+
+WRAPPER_EXEC="$TEMP_DIR/rustc-wrapper-tuffy"
+if [ ! -f "$WRAPPER_EXEC" ]; then
+    cp "$SCRIPT_DIR/rustc-wrapper-tuffy.sh" "$WRAPPER_EXEC"
+    python3 -c "import os; os.chmod('$WRAPPER_EXEC', 0o755)"
+fi
+
+if RUSTC_WRAPPER="$WRAPPER_EXEC" \
+   TUFFY_BACKEND="$BACKEND" \
+   TUFFY_CRATE="syn" \
+   TUFFY_SRC_DIR="$SYN_DIR" \
+   cargo test --manifest-path "$SYN_DIR/Cargo.toml" --all-features; then
+    overall_pass=$((overall_pass + 1))
+else
+    overall_fail=$((overall_fail + 1))
+fi
+echo ""
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 
