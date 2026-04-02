@@ -148,16 +148,17 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @_RINvNtC$HASH_4core10intrinsics14disjoint_bitormEC$HASH_6rotate(int:u32, int:u32) -> int:u32 {
+// CHECK: func @_RINvNtC$HASH_4core10intrinsics14disjoint_bitormEC$HASH_6rotate(int:u32, int:u32, ptr) -> int:u32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u32 = param 0
 // CHECK:     v2: int:u32 = param 1
-// CHECK:     v3: ptr = symbol_addr @_RNvXsd_NtNtC$HASH_4core10intrinsics8fallbackmNtB5_13DisjointBitOr14disjoint_bitorC$HASH_6rotate
-// CHECK:     v4: mem, v5: int:u32 = call v3(v1, v2), v0 -> int:u32
-// CHECK:     br bb1(v4)
+// CHECK:     v3: ptr = param 2
+// CHECK:     v4: ptr = symbol_addr @_RNvXsd_NtNtC$HASH_4core10intrinsics8fallbackmNtB5_13DisjointBitOr14disjoint_bitorC$HASH_6rotate
+// CHECK:     v5: mem, v6: int:u32 = call v4(v1, v2), v0 -> int:u32
+// CHECK:     br bb1(v5)
 // CHECK:
-// CHECK:   bb1(v7: mem):
-// CHECK:     ret v5, v7
+// CHECK:   bb1(v8: mem):
+// CHECK:     ret v6, v8
 // CHECK: }
 // CHECK:
 // CHECK: fn core::intrinsics::unchecked_funnel_shl(_1: T, _2: T, _3: u32) -> T {
@@ -174,17 +175,18 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @_RINvNtC$HASH_4core10intrinsics20unchecked_funnel_shlmEC$HASH_6rotate(int:u32, int:u32, int:u32) -> int:u32 {
+// CHECK: func @_RINvNtC$HASH_4core10intrinsics20unchecked_funnel_shlmEC$HASH_6rotate(int:u32, int:u32, int:u32, ptr) -> int:u32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u32 = param 0
 // CHECK:     v2: int:u32 = param 1
 // CHECK:     v3: int:u32 = param 2
-// CHECK:     v4: ptr = symbol_addr @_RNvXsp_NtNtC$HASH_4core10intrinsics8fallbackmNtB5_11FunnelShift20unchecked_funnel_shlC$HASH_6rotate
-// CHECK:     v5: mem, v6: int:u32 = call v4(v1, v2, v3), v0 -> int:u32
-// CHECK:     br bb1(v5)
+// CHECK:     v4: ptr = param 3
+// CHECK:     v5: ptr = symbol_addr @_RNvXsp_NtNtC$HASH_4core10intrinsics8fallbackmNtB5_11FunnelShift20unchecked_funnel_shlC$HASH_6rotate
+// CHECK:     v6: mem, v7: int:u32 = call v5(v1, v2, v3), v0 -> int:u32
+// CHECK:     br bb1(v6)
 // CHECK:
-// CHECK:   bb1(v8: mem):
-// CHECK:     ret v6, v8
+// CHECK:   bb1(v9: mem):
+// CHECK:     ret v7, v9
 // CHECK: }
 // CHECK:
 // CHECK: fn core::intrinsics::unchecked_funnel_shr(_1: T, _2: T, _3: u32) -> T {
@@ -201,17 +203,18 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
-// CHECK: func @_RINvNtC$HASH_4core10intrinsics20unchecked_funnel_shrmEC$HASH_6rotate(int:u32, int:u32, int:u32) -> int:u32 {
+// CHECK: func @_RINvNtC$HASH_4core10intrinsics20unchecked_funnel_shrmEC$HASH_6rotate(int:u32, int:u32, int:u32, ptr) -> int:u32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u32 = param 0
 // CHECK:     v2: int:u32 = param 1
 // CHECK:     v3: int:u32 = param 2
-// CHECK:     v4: ptr = symbol_addr @_RNvXsp_NtNtC$HASH_4core10intrinsics8fallbackmNtB5_11FunnelShift20unchecked_funnel_shrC$HASH_6rotate
-// CHECK:     v5: mem, v6: int:u32 = call v4(v1, v2, v3), v0 -> int:u32
-// CHECK:     br bb1(v5)
+// CHECK:     v4: ptr = param 3
+// CHECK:     v5: ptr = symbol_addr @_RNvXsp_NtNtC$HASH_4core10intrinsics8fallbackmNtB5_11FunnelShift20unchecked_funnel_shrC$HASH_6rotate
+// CHECK:     v6: mem, v7: int:u32 = call v5(v1, v2, v3), v0 -> int:u32
+// CHECK:     br bb1(v6)
 // CHECK:
-// CHECK:   bb1(v8: mem):
-// CHECK:     ret v6, v8
+// CHECK:   bb1(v9: mem):
+// CHECK:     ret v7, v9
 // CHECK: }
 // CHECK:
 // CHECK: fn <u32 as core::intrinsics::fallback::DisjointBitOr>::disjoint_bitor(_1: u32, _2: u32) -> u32 {

@@ -770,14 +770,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 if is_fat_ptr(self.tcx, target_ty_mono) {
                     // From a local with existing fat component.
                     if let Operand::Copy(place) | Operand::Move(place) = op {
-                        if place.projection.is_empty()
-                            && let Some(fat) = self.fat_locals.get(place.local)
-                        {
-                            return Some(fat);
-                        }
-                        // Stack local: load metadata from offset 8.
+                        // For stack locals, always reload metadata from memory
+                        // (the stack slot at offset 8).  The cached fat_locals
+                        // value may be an SSA value defined in a non-dominating
+                        // block, which would be invalid on control-flow paths
+                        // that bypassed that block.
                         if place.projection.is_empty()
                             && self.stack_locals.is_stack(place.local)
+                            && self.fat_locals.get(place.local).is_some()
                             && let Some(slot) = self.locals.get(place.local)
                         {
                             let off8 = self.builder.iconst(
@@ -801,6 +801,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 Origin::synthetic(),
                             );
                             return Some(meta);
+                        }
+                        // Non-stack local with cached fat component.
+                        if place.projection.is_empty()
+                            && !self.stack_locals.is_stack(place.local)
+                            && let Some(fat) = self.fat_locals.get(place.local)
+                        {
+                            return Some(fat);
                         }
                         // Projected place (e.g. _3.0.0 where the inner
                         // type is a fat-pointer-sized ADT wrapper like

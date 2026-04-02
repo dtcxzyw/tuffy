@@ -141,6 +141,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // compile-time checks, no runtime effect.
             "assert_inhabited" | "assert_zero_valid" | "assert_mem_uninitialized_valid" => true,
 
+            // caller_location: returns the implicit &Location parameter
+            // received by the enclosing #[track_caller] function.
+            "caller_location" => {
+                let loc = self.caller_location_param.unwrap_or_else(|| {
+                    self.make_caller_location(mir::SourceInfo::outermost(self.mir.span))
+                });
+                self.locals.set(destination_local, loc);
+                true
+            }
+
             // ctpop: population count (count set bits).
             "ctpop" => {
                 if let Some(&v) = ir_args.first() {
@@ -569,6 +579,125 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             "unchecked_mul" => {
                 if ir_args.len() >= 2 {
                     let result = self.builder.mul(
+                        ir_args[0].into(),
+                        ir_args[1].into(),
+                        I64,
+                        Origin::synthetic(),
+                    );
+                    self.locals.set(destination_local, result.raw());
+                }
+                true
+            }
+            // carrying_mul_add(a, b, carry, add) -> (lo, hi)
+            // Computes a*b + carry + add as a widened result.
+            "carrying_mul_add" => {
+                if ir_args.len() >= 4 {
+                    let elem_bytes = substs
+                        .first()
+                        .and_then(|a| a.as_type())
+                        .and_then(|t| type_size(tcx, t))
+                        .unwrap_or(8) as u32;
+                    let wide_bits = elem_bytes * 8 * 2;
+                    let narrow_bits = elem_bytes * 8;
+                    let wide_ann = IntAnnotation {
+                        bit_width: wide_bits,
+                        signedness: IntSignedness::Unsigned,
+                    };
+                    let _narrow_ann = IntAnnotation {
+                        bit_width: narrow_bits,
+                        signedness: IntSignedness::Unsigned,
+                    };
+
+                    let a_wide =
+                        self.builder
+                            .zext(ir_args[0].into(), wide_bits, Origin::synthetic());
+                    let b_wide =
+                        self.builder
+                            .zext(ir_args[1].into(), wide_bits, Origin::synthetic());
+                    let product = self.builder.mul(
+                        a_wide.into(),
+                        b_wide.into(),
+                        wide_ann,
+                        Origin::synthetic(),
+                    );
+
+                    let carry_wide =
+                        self.builder
+                            .zext(ir_args[2].into(), wide_bits, Origin::synthetic());
+                    let add_wide =
+                        self.builder
+                            .zext(ir_args[3].into(), wide_bits, Origin::synthetic());
+                    let sum1 = self.builder.add(
+                        product.into(),
+                        carry_wide.into(),
+                        wide_ann,
+                        Origin::synthetic(),
+                    );
+                    let full = self.builder.add(
+                        sum1.into(),
+                        add_wide.into(),
+                        wide_ann,
+                        Origin::synthetic(),
+                    );
+
+                    let shift_amt = self.builder.iconst(
+                        narrow_bits as i64,
+                        narrow_bits,
+                        IntSignedness::Unsigned,
+                        Origin::synthetic(),
+                    );
+                    let shift_wide =
+                        self.builder
+                            .zext(shift_amt.into(), wide_bits, Origin::synthetic());
+                    let hi_wide = self.builder.shr(
+                        full.into(),
+                        shift_wide.into(),
+                        wide_ann,
+                        Origin::synthetic(),
+                    );
+
+                    // Store full result (lo|hi) into a stack slot.
+                    // The lower `elem_bytes` of `full` is lo, the lower
+                    // `elem_bytes` of `hi_wide` is hi.
+                    let slot = self.builder.stack_slot(elem_bytes * 2, Origin::synthetic());
+                    self.current_mem = self
+                        .builder
+                        .store(
+                            full.raw().into(),
+                            slot.into(),
+                            elem_bytes,
+                            self.current_mem.into(),
+                            Origin::synthetic(),
+                        )
+                        .raw();
+                    let hi_offset = self.builder.iconst(
+                        elem_bytes as i64,
+                        64,
+                        IntSignedness::Unsigned,
+                        Origin::synthetic(),
+                    );
+                    let hi_addr =
+                        self.builder
+                            .ptradd(slot.into(), hi_offset.into(), 0, Origin::synthetic());
+                    self.current_mem = self
+                        .builder
+                        .store(
+                            hi_wide.raw().into(),
+                            hi_addr.raw().into(),
+                            elem_bytes,
+                            self.current_mem.into(),
+                            Origin::synthetic(),
+                        )
+                        .raw();
+                    self.locals.set(destination_local, slot);
+                    self.stack_locals.mark(destination_local);
+                }
+                true
+            }
+            // exact_div: division where the remainder is guaranteed to be zero.
+            "exact_div" => {
+                if ir_args.len() >= 2 {
+                    let result = self.builder.div(
                         ir_args[0].into(),
                         ir_args[1].into(),
                         I64,

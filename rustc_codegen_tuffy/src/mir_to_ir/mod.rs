@@ -274,6 +274,17 @@ pub fn translate_function<'tcx>(
         }
     }
 
+    // #[track_caller] functions receive an implicit &Location as the last
+    // ABI parameter.  Add it to the IR signature so the callee body can
+    // retrieve it via the `caller_location` intrinsic.
+    let is_track_caller = instance.def.requires_caller_location(tcx);
+    if is_track_caller {
+        params.push(Type::Ptr(0));
+        param_anns.push(None);
+        param_names.push(None);
+        byval_sizes.push(None);
+    }
+
     let mut func = Function::new(func_sym, params, param_anns, param_names, ret_ty, ret_ann);
     func.byval_sizes = byval_sizes;
     let mut builder = Builder::new(&mut func);
@@ -353,6 +364,7 @@ pub fn translate_function<'tcx>(
         data_counter,
         sret_ptr: None,
         weak_undefined_symbols: std::collections::HashSet::new(),
+        caller_location_param: None,
     };
 
     // Emit params into the entry block.

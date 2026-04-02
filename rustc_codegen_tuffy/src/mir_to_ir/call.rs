@@ -939,6 +939,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             ir_args.push(slot.into());
         }
 
+        // Track how many ir_args were pushed before the argument loop
+        // (i.e. just the SRET slot, if any) so the virtual dispatch
+        // vtable-skip heuristic accounts for it.
+        let pre_args_count = ir_args.len();
+
         for arg in args {
             // Skip zero-sized (Unit) and untranslatable args — they don't
             // occupy a runtime slot. But don't skip structs with non-zero size.
@@ -1147,6 +1152,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let decomposed = if is_fat_stack_local && arg_size > 8 && arg_size <= 16 {
                     // Load both words from the stack slot (at the projected
                     // field offset if applicable).
+                    // For virtual dispatch self args, only pass the data
+                    // pointer (w0) — the vtable (w1) was already used to
+                    // look up the function pointer and must not be forwarded.
+                    let skip_vtable = is_virtual && ir_args.len() == pre_args_count;
                     let slot_base = match &arg.node {
                         Operand::Copy(p) | Operand::Move(p) => {
                             if p.projection.is_empty() {
@@ -1171,27 +1180,29 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             Origin::synthetic(),
                         );
                         ir_args.push(w0.into());
-                        let off8 = self.builder.iconst(
-                            8,
-                            64,
-                            IntSignedness::DontCare,
-                            Origin::synthetic(),
-                        );
-                        let hi_addr = self.builder.ptradd(
-                            slot_addr.into(),
-                            off8.into(),
-                            0,
-                            Origin::synthetic(),
-                        );
-                        let w1 = self.builder.load(
-                            hi_addr.into(),
-                            8,
-                            Type::Int,
-                            self.current_mem.into(),
-                            int_annotation_for_bytes(8),
-                            Origin::synthetic(),
-                        );
-                        ir_args.push(w1.into());
+                        if !skip_vtable {
+                            let off8 = self.builder.iconst(
+                                8,
+                                64,
+                                IntSignedness::DontCare,
+                                Origin::synthetic(),
+                            );
+                            let hi_addr = self.builder.ptradd(
+                                slot_addr.into(),
+                                off8.into(),
+                                0,
+                                Origin::synthetic(),
+                            );
+                            let w1 = self.builder.load(
+                                hi_addr.into(),
+                                8,
+                                Type::Int,
+                                self.current_mem.into(),
+                                int_annotation_for_bytes(8),
+                                Origin::synthetic(),
+                            );
+                            ir_args.push(w1.into());
+                        }
                         true
                     } else {
                         false
@@ -1481,7 +1492,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // If this arg is a Copy/Move of a fat local, also pass the high part.
                     // Exception: for virtual dispatch, skip the vtable pointer on the
                     // first argument (self) — the actual method only takes the data ptr.
-                    let skip_fat = is_virtual && ir_args.len() == 1;
+                    // Use pre_args_count to account for any SRET slot pushed before the loop.
+                    let skip_fat = is_virtual && ir_args.len() == pre_args_count + 1;
                     if !skip_fat
                         && let Operand::Copy(place) | Operand::Move(place) = &arg.node
                         && let Some(fat_v) = self.fat_locals.get(place.local)

@@ -184,6 +184,9 @@ pub(super) struct TranslationCtx<'a, 'tcx> {
     /// Symbol names that should be emitted as weak undefined references
     /// (e.g. from `#[linkage = "extern_weak"]` statics).
     pub(super) weak_undefined_symbols: HashSet<String>,
+    /// For `#[track_caller]` functions, the implicit `&Location` parameter.
+    /// Used by the `caller_location` intrinsic to return the caller's location.
+    pub(super) caller_location_param: Option<ValueRef>,
 }
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
@@ -538,6 +541,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
                 param_idx += 1;
             }
+        }
+
+        // --- Phase 1b: receive implicit #[track_caller] &Location param ---
+        if self.instance.def.requires_caller_location(self.tcx) {
+            let loc_param = self
+                .builder
+                .param(param_idx, Type::Ptr(0), None, Origin::synthetic());
+            self.caller_location_param = Some(loc_param);
         }
 
         // --- Phase 2: emit stores and mem_copy after all params are received ---
