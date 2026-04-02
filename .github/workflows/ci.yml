@@ -67,15 +67,11 @@ jobs:
       - name: Build codegen backend (release)
         run: cd rustc_codegen_tuffy && cargo build --release
 
-      - name: Run hello world test
+      - name: Run quick tests
         run: |
-          chmod +x rustc_codegen_tuffy/tests/run-tests.sh
-          rustc_codegen_tuffy/tests/run-tests.sh
-
-      - name: Run codegen tests
-        run: |
-          chmod +x rustc_codegen_tuffy/tests/run-codegen-tests.sh
-          rustc_codegen_tuffy/tests/run-codegen-tests.sh
+          chmod +x rustc_codegen_tuffy/tests/run-quick-tests.sh
+          BACKEND=rustc_codegen_tuffy/target/release/librustc_codegen_tuffy.so \
+            rustc_codegen_tuffy/tests/run-quick-tests.sh
 
       - name: Clone rustc UI tests (pinned to 1.93.1)
         run: |

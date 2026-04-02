@@ -22,10 +22,14 @@ overall_fail=0
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
-echo "=== Build ==="
-cargo build --manifest-path "$CRATE_ROOT/Cargo.toml"
+if [ -n "${BACKEND:-}" ]; then
+    echo "=== Using pre-built backend ==="
+else
+    echo "=== Build ==="
+    cargo build --manifest-path "$CRATE_ROOT/Cargo.toml"
+    BACKEND="$CRATE_ROOT/target/debug/librustc_codegen_tuffy.so"
+fi
 
-BACKEND="$CRATE_ROOT/target/debug/librustc_codegen_tuffy.so"
 if [ ! -f "$BACKEND" ]; then
     echo "ERROR: Backend not found at $BACKEND"
     exit 1
