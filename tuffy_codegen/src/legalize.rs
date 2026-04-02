@@ -970,8 +970,23 @@ fn legalize_inst<M: AbiMetadata + Clone>(
                 s.vmap.set(old_vref, Mapped::One(new_mem.into()));
                 return;
             }
-            // Not from a load — fall through to copy_inst.
-            copy_inst(old, s, b, old_vref, inst, symbols);
+            // Not from a load — the value is a pointer to the source data
+            // (e.g. result of a call returning via SRET, or a stack slot).
+            // Convert to mem_copy so the backend can handle it.
+            let src = remap_op(s, val);
+            let dst = remap_op(s, &ptr.clone().raw());
+            let m = remap_op(s, &mem.clone().raw());
+            let count = b.iconst(*bytes as i64, 64, IntSignedness::Unsigned, o());
+            let dst_annotated = Operand::annotated(dst.value, Annotation::Align(1));
+            let src_annotated = Operand::annotated(src.value, Annotation::Align(1));
+            let new_mem = b.mem_copy(
+                dst_annotated.into(),
+                src_annotated.into(),
+                count.into(),
+                m.into(),
+                o(),
+            );
+            s.vmap.set(old_vref, Mapped::One(new_mem.into()));
         }
         Op::Store(val, ptr, bytes, mem) if is_wide(s, val.value) => {
             // For wide stores > 16 bytes (e.g. store.32 load32_result, dst),
