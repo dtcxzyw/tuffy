@@ -70,6 +70,11 @@ if [ ! -d "$BITFLAGS_DIR" ]; then
     echo "=== Cloning bitflags ==="
     git clone --filter=blob:none https://github.com/bitflags/bitflags.git "$BITFLAGS_DIR"
 fi
+# Ensure the package has its own [workspace] so Cargo doesn't try to join
+# the parent tuffy workspace (upstream bitflags doesn't define one).
+if ! grep -q '^\[workspace\]' "$BITFLAGS_DIR/Cargo.toml"; then
+    printf '\n[workspace]\n' >> "$BITFLAGS_DIR/Cargo.toml"
+fi
 echo "=== Bitflags cargo test ==="
 
 mkdir -p "$BITFLAGS_DIR/.cargo"
