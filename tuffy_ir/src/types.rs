@@ -188,4 +188,9 @@ pub enum Annotation {
     Align(u32),
     /// Integer refinement: narrows bit width and/or signedness at use site.
     Int(IntAnnotation),
+    /// C ABI byval: the pointer argument actually references a struct that
+    /// the callee expects *on the stack* (SysV MEMORY-class parameter).
+    /// The ISel must copy `size` bytes from the pointed-to memory onto the
+    /// call frame instead of passing the pointer in a register.
+    Byval(u32),
 }

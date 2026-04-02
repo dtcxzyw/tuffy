@@ -85,6 +85,7 @@ pub fn translate_function<'tcx>(
 
     let mut params = Vec::new();
     let mut param_anns = Vec::new();
+    let mut byval_sizes: Vec<Option<u32>> = Vec::new();
 
     let ret_mir_ty = monomorphize(mir.local_decls[mir::RETURN_PLACE].ty);
     let ret_size = type_size(tcx, ret_mir_ty).unwrap_or(0);
@@ -144,6 +145,32 @@ pub fn translate_function<'tcx>(
     let mut symbols = SymbolTable::new();
     let func_sym = symbols.intern(&name);
 
+    // Detect C ABI for byval stack parameter handling.
+    // In SysV x86-64, struct params > 4 eightbytes (> 32 bytes) are MEMORY
+    // class and passed on the stack (byval), not by hidden pointer in a register.
+    let is_c_abi = {
+        // Only Item instances have fn_sig; closures, generators, etc. do not.
+        match instance.def {
+            ty::InstanceKind::Item(def_id) => {
+                let def_kind = tcx.def_kind(def_id);
+                if matches!(
+                    def_kind,
+                    rustc_hir::def::DefKind::Fn | rustc_hir::def::DefKind::AssocFn
+                ) {
+                    let fn_sig = tcx.fn_sig(def_id).instantiate(tcx, instance.args);
+                    let fn_sig = tcx.normalize_erasing_late_bound_regions(
+                        ty::TypingEnv::fully_monomorphized(),
+                        fn_sig,
+                    );
+                    !fn_sig.abi.is_rustic_abi()
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    };
+
     // Build all-args name map first, then filter to match params.
     let _all_names = extract_param_names(mir, &mut symbols);
     let mut param_names = Vec::new();
@@ -153,6 +180,7 @@ pub fn translate_function<'tcx>(
         params.push(Type::Ptr(0));
         param_anns.push(None);
         param_names.push(None);
+        byval_sizes.push(None);
     }
 
     for i in 0..mir.arg_count {
@@ -173,18 +201,25 @@ pub fn translate_function<'tcx>(
                 params.push(Type::Int);
                 param_anns.push(int_annotation_for_bytes(8));
                 param_names.push(None);
+                byval_sizes.push(None);
                 params.push(Type::Int);
                 param_anns.push(int_annotation_for_bytes((sz - 8) as u32));
                 param_names.push(None);
+                byval_sizes.push(None);
             } else if sz > 8 {
                 // Memory type > 8 bytes: passed by hidden pointer.
+                // For C ABI with size > 32 bytes, the data is on the
+                // caller's stack (byval) rather than via a register pointer.
+                let is_byval = is_c_abi && sz > 32;
                 params.push(Type::Ptr(0));
                 param_anns.push(None);
                 param_names.push(None);
+                byval_sizes.push(if is_byval { Some(sz as u32) } else { None });
             } else {
                 params.push(Type::Int);
                 param_anns.push(int_annotation_for_bytes(sz as u32));
                 param_names.push(None);
+                byval_sizes.push(None);
             }
             continue;
         }
@@ -212,6 +247,9 @@ pub fn translate_function<'tcx>(
         params.push(param_ty);
         param_anns.push(param_ann);
         param_names.push(None);
+        // For C ABI with translatable types > 32 bytes, mark as byval.
+        let is_byval = is_c_abi && sz > 32;
+        byval_sizes.push(if is_byval { Some(sz as u32) } else { None });
         // Fat pointer types (&str, &[T], &dyn Trait) are passed
         // as two register-sized values: data pointer + metadata
         // (length or vtable pointer).
@@ -230,10 +268,12 @@ pub fn translate_function<'tcx>(
             params.push(meta_ty);
             param_anns.push(meta_ann);
             param_names.push(None);
+            byval_sizes.push(None);
         }
     }
 
     let mut func = Function::new(func_sym, params, param_anns, param_names, ret_ty, ret_ann);
+    func.byval_sizes = byval_sizes;
     let mut builder = Builder::new(&mut func);
     let abi_metadata = session.new_metadata();
 

@@ -1524,15 +1524,30 @@ fn copy_inst<M: AbiMetadata + Clone>(
                 o(),
             )
             .raw(),
-        Op::FRem(a, op_b, flags) => b
-            .frem(
-                remap_op(s, &a.clone().raw()).into(),
-                remap_op(s, &op_b.clone().raw()).into(),
-                *flags,
+        Op::FRem(a, op_b, _flags) => {
+            let lhs = remap_op(s, &a.clone().raw());
+            let rhs = remap_op(s, &op_b.clone().raw());
+            let name = match &inst.ty {
+                Type::Float(FloatType::F32) => "fmodf",
+                _ => "fmod",
+            };
+            let sym_id = symbols.intern(name);
+            let callee = b.symbol_addr(sym_id, o()).raw();
+            let old_mem = s
+                .current_old_mem
+                .expect("FRem legalization requires a mem token in scope");
+            let new_mem = s.vmap.one(old_mem);
+            let (call_mem, data) = b.call(
+                Operand::new(callee).into(),
+                vec![Operand::new(lhs.value), Operand::new(rhs.value)],
                 inst.ty.clone(),
+                Operand::new(new_mem).into(),
+                None,
                 o(),
-            )
-            .raw(),
+            );
+            s.vmap.set(old_mem, Mapped::One(call_mem.into()));
+            data.unwrap()
+        }
         Op::FMinNum(a, op_b) => b
             .fminnum(
                 remap_op(s, &a.clone().raw()).into(),

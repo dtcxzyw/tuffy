@@ -327,6 +327,10 @@ impl<'a> FuncVerifier<'a> {
                     );
                 }
             }
+            Annotation::Byval(_) => {
+                // Byval annotations are only meaningful on Call arguments;
+                // the verifier does not enforce further constraints here.
+            }
         }
     }
 }

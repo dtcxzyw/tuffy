@@ -785,6 +785,7 @@ impl Backend for X86Backend {
     fn generate_entry_point(&self, main_sym: &str, start_sym: &str) -> Vec<CompiledFunction> {
         let main_code = vec![
             0x55, // push rbp
+            0x48, 0x89, 0xe5, // mov rbp, rsp
             0x48, 0x63, 0xc7, // movsxd rax, edi
             0x48, 0x89, 0xf2, // mov rdx, rsi
             0x48, 0x89, 0xc6, // mov rsi, rax
@@ -796,12 +797,12 @@ impl Backend for X86Backend {
         ];
         let main_relocs = vec![
             Relocation {
-                offset: 13,
+                offset: 16,
                 symbol: main_sym.to_string(),
                 kind: RelocKind::PcRel,
             },
             Relocation {
-                offset: 20,
+                offset: 23,
                 symbol: start_sym.to_string(),
                 kind: RelocKind::Call,
             },
@@ -823,7 +824,7 @@ impl Backend for X86Backend {
                 relocations: main_relocs,
                 weak: false,
                 local: false,
-                has_frame_pointer: false,
+                has_frame_pointer: true,
             },
             CompiledFunction {
                 name: start_sym.to_string(),

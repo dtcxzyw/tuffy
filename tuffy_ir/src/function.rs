@@ -92,6 +92,11 @@ pub struct Function {
     pub block_args: Vec<BlockArg>,
     /// Root region (always a Function region).
     pub root_region: RegionRef,
+    /// Per-parameter byval sizes. When `Some(size)`, the parameter is a
+    /// C ABI "byval" stack argument: the caller copies `size` bytes onto
+    /// the stack and the callee receives a pointer to that data.
+    /// `None` means normal register-passed parameter.
+    pub byval_sizes: Vec<Option<u32>>,
 }
 
 impl Function {
@@ -121,6 +126,7 @@ impl Function {
             regions: Vec::new(),
             block_args: Vec::new(),
             root_region: RegionRef(0),
+            byval_sizes: vec![None; param_count],
         }
     }
 

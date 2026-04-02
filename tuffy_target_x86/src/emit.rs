@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use object::write::{Object, Relocation as ObjRelocation, Symbol, SymbolId, SymbolSection};
 use object::{
     Architecture, BinaryFormat, Endianness, RelocationEncoding, RelocationFlags, RelocationKind,
-    SymbolFlags, SymbolKind, SymbolScope,
+    SectionFlags, SectionKind, SymbolFlags, SymbolKind, SymbolScope,
 };
 
 use tuffy_target::reloc::{RelocKind, Relocation};
@@ -43,7 +43,41 @@ pub fn emit_elf_with_data(functions: &[CompiledFunction], statics: &[StaticData]
         let data_rel_ro = obj.section_id(object::write::StandardSection::ReadOnlyDataWithRel);
         let data_rw = obj.section_id(object::write::StandardSection::Data);
         for sd in statics {
-            let section = if sd.writable {
+            let section = if sd.used {
+                // #[used] statics must survive linker GC (e.g. proc_macro_decls).
+                // Place in a per-symbol section with SHF_GNU_RETAIN so --gc-sections
+                // keeps it even without incoming references.
+                let sec_name = if sd.writable {
+                    format!(".data.{}", sd.name)
+                } else if sd.relocations.is_empty() {
+                    format!(".rodata.{}", sd.name)
+                } else {
+                    format!(".data.rel.ro.{}", sd.name)
+                };
+                let kind = if sd.writable {
+                    SectionKind::Data
+                } else if sd.relocations.is_empty() {
+                    SectionKind::ReadOnlyData
+                } else {
+                    SectionKind::ReadOnlyDataWithRel
+                };
+                let sec_id = obj.add_section(vec![], sec_name.into_bytes(), kind);
+                // SHF_GNU_RETAIN = 0x00200000 prevents linker GC.
+                // We must also set the proper ELF base flags (SHF_ALLOC, SHF_WRITE)
+                // because overriding SectionFlags::Elf replaces the kind-derived defaults.
+                let shf_alloc: u64 = 0x2;
+                let shf_write: u64 = 0x1;
+                let shf_gnu_retain: u64 = 0x0020_0000;
+                let base = if sd.writable || !sd.relocations.is_empty() {
+                    shf_alloc | shf_write
+                } else {
+                    shf_alloc
+                };
+                obj.section_mut(sec_id).flags = SectionFlags::Elf {
+                    sh_flags: base | shf_gnu_retain,
+                };
+                sec_id
+            } else if sd.writable {
                 data_rw
             } else if sd.relocations.is_empty() {
                 rodata
@@ -54,6 +88,10 @@ pub fn emit_elf_with_data(functions: &[CompiledFunction], statics: &[StaticData]
 
             let scope = if sd.name.starts_with(".L") {
                 SymbolScope::Compilation
+            } else if sd.used {
+                // #[used] statics (e.g. proc_macro_decls) must be visible in the
+                // dynamic symbol table so dlsym can find them in proc-macro .so files.
+                SymbolScope::Dynamic
             } else {
                 SymbolScope::Linkage
             };

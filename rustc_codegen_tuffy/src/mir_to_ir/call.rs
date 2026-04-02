@@ -903,6 +903,37 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         // Translate arguments to IR operands using semantic values.
         let mut ir_args: Vec<tuffy_ir::instruction::Operand> = Vec::new();
 
+        // Detect whether this call uses C ABI (extern "C").  For C ABI,
+        // struct params > 32 bytes (SysV MEMORY class) must be placed on the
+        // caller's stack frame (byval) instead of passed by pointer in a GPR.
+        let is_c_abi_call = {
+            let func_ty = match func {
+                Operand::Constant(c) => {
+                    let ty = self.tcx.instantiate_and_normalize_erasing_regions(
+                        self.instance.args,
+                        ty::TypingEnv::fully_monomorphized(),
+                        ty::EarlyBinder::bind(c.ty()),
+                    );
+                    Some(ty)
+                }
+                Operand::Copy(place) | Operand::Move(place) => {
+                    let ty = self.monomorphize(place.ty(&self.mir.local_decls, self.tcx).ty);
+                    Some(ty)
+                }
+                _ => None,
+            };
+            func_ty.is_some_and(|ty| {
+                let sig = match ty.kind() {
+                    ty::FnDef(def_id, args) => {
+                        Some(self.tcx.fn_sig(*def_id).instantiate(self.tcx, args))
+                    }
+                    ty::FnPtr(sig_tys, hdr) => Some(sig_tys.with(*hdr)),
+                    _ => None,
+                };
+                sig.is_some_and(|s| !s.skip_binder().abi.is_rustic_abi())
+            })
+        };
+
         // For SRET, pass the return slot address as the first argument.
         if let Some(slot) = sret_slot {
             ir_args.push(slot.into());
@@ -1003,37 +1034,44 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             );
                             ir_args.push(val.into());
                         } else if fsz <= 16 {
-                            // Decompose 9-16 byte fields into two words.
-                            let w0 = self.builder.load(
-                                addr.into(),
-                                8,
-                                Type::Int,
-                                self.current_mem.into(),
-                                int_annotation_for_bytes(8),
-                                Origin::synthetic(),
-                            );
-                            ir_args.push(w0.into());
-                            let off8 = self.builder.iconst(
-                                8,
-                                64,
-                                IntSignedness::DontCare,
-                                Origin::synthetic(),
-                            );
-                            let a1 = self.builder.ptradd(
-                                addr.into(),
-                                off8.into(),
-                                0,
-                                Origin::synthetic(),
-                            );
-                            let w1 = self.builder.load(
-                                a1.into(),
-                                8,
-                                Type::Int,
-                                self.current_mem.into(),
-                                int_annotation_for_bytes(8),
-                                Origin::synthetic(),
-                            );
-                            ir_args.push(w1.into());
+                            let prk = repr_kind(self.tcx, ft);
+                            if matches!(prk, ReprKind::ScalarPair | ReprKind::Scalar) {
+                                // ScalarPair/Scalar: decompose into two words.
+                                let w0 = self.builder.load(
+                                    addr.into(),
+                                    8,
+                                    Type::Int,
+                                    self.current_mem.into(),
+                                    int_annotation_for_bytes(8),
+                                    Origin::synthetic(),
+                                );
+                                ir_args.push(w0.into());
+                                let off8 = self.builder.iconst(
+                                    8,
+                                    64,
+                                    IntSignedness::DontCare,
+                                    Origin::synthetic(),
+                                );
+                                let a1 = self.builder.ptradd(
+                                    addr.into(),
+                                    off8.into(),
+                                    0,
+                                    Origin::synthetic(),
+                                );
+                                let w1 = self.builder.load(
+                                    a1.into(),
+                                    8,
+                                    Type::Int,
+                                    self.current_mem.into(),
+                                    int_annotation_for_bytes(8),
+                                    Origin::synthetic(),
+                                );
+                                ir_args.push(w1.into());
+                            } else {
+                                // Memory repr: pass pointer (callee
+                                // expects indirect).
+                                ir_args.push(addr.into());
+                            }
                         } else {
                             // >16 byte fields: pass pointer.
                             ir_args.push(addr.into());
@@ -1218,7 +1256,18 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             Origin::synthetic(),
                         );
                         self.current_mem = new_mem.raw();
-                        ir_args.push(tmp.into());
+                        // For C ABI, structs > 32 bytes are MEMORY class:
+                        // the callee expects the data ON THE STACK, not a
+                        // pointer in a register.  Annotate with Byval so
+                        // the ISel emits a stack copy.
+                        if is_c_abi_call && arg_size > 32 {
+                            ir_args.push(IrOperand::annotated(
+                                tmp,
+                                Annotation::Byval(arg_size as u32),
+                            ));
+                        } else {
+                            ir_args.push(tmp.into());
+                        }
                     } else if arg_size > 0
                         && arg_size <= 8
                         && matches!(self.builder.value_type(v), Some(Type::Ptr(_)))

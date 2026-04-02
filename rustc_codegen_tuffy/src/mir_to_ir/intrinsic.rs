@@ -519,6 +519,28 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 true
             }
 
+            // try intrinsic: used by catch_unwind / panicking::try.
+            // Lowers to a call to __rust_try(try_fn, data, catch_fn) -> i32.
+            "catch_unwind" | "r#try" | "try" => {
+                if ir_args.len() >= 3 {
+                    let sym_id = self.symbols.intern("__rust_try");
+                    let callee = self.builder.symbol_addr(sym_id, Origin::synthetic());
+                    let (mem_out, data) = self.builder.call(
+                        callee.into(),
+                        vec![ir_args[0].into(), ir_args[1].into(), ir_args[2].into()],
+                        Type::Int,
+                        current_mem.into(),
+                        int_annotation_for_bytes(4),
+                        Origin::synthetic(),
+                    );
+                    self.current_mem = mem_out.raw();
+                    if let Some(result) = data {
+                        self.locals.set(destination_local, result);
+                    }
+                }
+                true
+            }
+
             // unchecked arithmetic: same as wrapping ops (no overflow check).
             "unchecked_add" => {
                 if ir_args.len() >= 2 {
@@ -969,6 +991,376 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     }
                     self.locals.set(destination_local, slot);
                 }
+                true
+            }
+
+            "simd_reduce_all" => {
+                macro_rules! o {
+                    () => {
+                        Origin::synthetic()
+                    };
+                }
+                let u64_int = IntAnnotation {
+                    bit_width: 64,
+                    signedness: IntSignedness::Unsigned,
+                };
+                let u64_opt = Some(Annotation::Int(u64_int));
+                let simd_bytes = self.simd_size_from_substs(substs).unwrap_or(16);
+                let src = self.ensure_simd_on_stack(ir_args[0], simd_bytes);
+
+                // AND all qwords together.
+                let n_words = simd_bytes.div_ceil(8);
+                let first = self.builder.load(
+                    src.into(),
+                    8,
+                    Type::Int,
+                    self.current_mem.into(),
+                    u64_opt,
+                    o!(),
+                );
+                let mut acc: ValueRef = first;
+                for w in 1..n_words {
+                    let off = self
+                        .builder
+                        .iconst(w as i64 * 8, 64, IntSignedness::Unsigned, o!());
+                    let ptr = self.builder.ptradd(src.into(), off.into(), 0, o!());
+                    let word = self.builder.load(
+                        ptr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        u64_opt,
+                        o!(),
+                    );
+                    acc = self
+                        .builder
+                        .and(acc.into(), word.into(), u64_int, o!())
+                        .raw();
+                }
+                // Fold qword down to a single byte via AND.
+                let sh32 = self
+                    .builder
+                    .iconst(32i64, 64, IntSignedness::Unsigned, o!());
+                let f1 = self.builder.shr(acc.into(), sh32.into(), u64_int, o!());
+                let acc2 = self.builder.and(acc.into(), f1.into(), u64_int, o!());
+                let sh16 = self
+                    .builder
+                    .iconst(16i64, 64, IntSignedness::Unsigned, o!());
+                let f2 = self.builder.shr(acc2.into(), sh16.into(), u64_int, o!());
+                let acc3 = self.builder.and(acc2.into(), f2.into(), u64_int, o!());
+                let sh8 = self.builder.iconst(8i64, 64, IntSignedness::Unsigned, o!());
+                let f3 = self.builder.shr(acc3.into(), sh8.into(), u64_int, o!());
+                let result = self.builder.and(acc3.into(), f3.into(), u64_int, o!());
+                // Mask and test lowest byte (0xFF = all-true for i8 masks).
+                let mask_ff = self
+                    .builder
+                    .iconst(0xFFi64, 64, IntSignedness::Unsigned, o!());
+                let byte_result = self
+                    .builder
+                    .and(result.into(), mask_ff.into(), u64_int, o!());
+
+                self.locals.set(destination_local, byte_result.raw());
+                true
+            }
+
+            "simd_reduce_any" => {
+                macro_rules! o {
+                    () => {
+                        Origin::synthetic()
+                    };
+                }
+                let u64_int = IntAnnotation {
+                    bit_width: 64,
+                    signedness: IntSignedness::Unsigned,
+                };
+                let u64_opt = Some(Annotation::Int(u64_int));
+                let simd_bytes = self.simd_size_from_substs(substs).unwrap_or(16);
+                let src = self.ensure_simd_on_stack(ir_args[0], simd_bytes);
+
+                let n_words = simd_bytes.div_ceil(8);
+                let first = self.builder.load(
+                    src.into(),
+                    8,
+                    Type::Int,
+                    self.current_mem.into(),
+                    u64_opt,
+                    o!(),
+                );
+                let mut acc: ValueRef = first;
+                for w in 1..n_words {
+                    let off = self
+                        .builder
+                        .iconst(w as i64 * 8, 64, IntSignedness::Unsigned, o!());
+                    let ptr = self.builder.ptradd(src.into(), off.into(), 0, o!());
+                    let word = self.builder.load(
+                        ptr.into(),
+                        8,
+                        Type::Int,
+                        self.current_mem.into(),
+                        u64_opt,
+                        o!(),
+                    );
+                    acc = self
+                        .builder
+                        .or(acc.into(), word.into(), u64_int, o!())
+                        .raw();
+                }
+                let sh32 = self
+                    .builder
+                    .iconst(32i64, 64, IntSignedness::Unsigned, o!());
+                let f1 = self.builder.shr(acc.into(), sh32.into(), u64_int, o!());
+                let acc2 = self.builder.or(acc.into(), f1.into(), u64_int, o!());
+                let sh16 = self
+                    .builder
+                    .iconst(16i64, 64, IntSignedness::Unsigned, o!());
+                let f2 = self.builder.shr(acc2.into(), sh16.into(), u64_int, o!());
+                let acc3 = self.builder.or(acc2.into(), f2.into(), u64_int, o!());
+                let sh8 = self.builder.iconst(8i64, 64, IntSignedness::Unsigned, o!());
+                let f3 = self.builder.shr(acc3.into(), sh8.into(), u64_int, o!());
+                let result = self.builder.or(acc3.into(), f3.into(), u64_int, o!());
+                let mask_ff = self
+                    .builder
+                    .iconst(0xFFi64, 64, IntSignedness::Unsigned, o!());
+                let byte_result = self
+                    .builder
+                    .and(result.into(), mask_ff.into(), u64_int, o!());
+
+                self.locals.set(destination_local, byte_result.raw());
+                true
+            }
+
+            "simd_shuffle" => {
+                macro_rules! o {
+                    () => {
+                        Origin::synthetic()
+                    };
+                }
+                let u64_int = IntAnnotation {
+                    bit_width: 64,
+                    signedness: IntSignedness::Unsigned,
+                };
+                let u64_opt = Some(Annotation::Int(u64_int));
+
+                // Determine element size from the first generic arg (element type).
+                let elem_size: u32 = substs
+                    .first()
+                    .and_then(|a| a.as_type())
+                    .and_then(|t| type_size(self.tcx, t))
+                    .unwrap_or(1) as u32;
+
+                // Input vector size from the first arg's type.
+                let input_simd_bytes = substs
+                    .first()
+                    .and_then(|a| a.as_type())
+                    .and_then(|_| {
+                        // Element count from second generic arg.
+                        substs
+                            .get(1)
+                            .and_then(|c| c.as_const())
+                            .and_then(|c| c.try_to_target_usize(self.tcx))
+                    })
+                    .map(|n| (n as u32) * elem_size)
+                    .unwrap_or(16);
+
+                // The third argument is the index array.
+                // For simd_shuffle, args are: (vec_a, vec_b, indices).
+                // indices is a [u32; N] constant array.
+                let n_input_lanes = input_simd_bytes / elem_size;
+                let output_lanes = if ir_args.len() >= 3 {
+                    // Determine output lanes from the index array type via substs.
+                    // The index array length IS the output lane count.
+                    // We'll infer it from the return type.
+                    let ret_ty = self.monomorphize(self.mir.local_decls[destination_local].ty);
+                    type_size(self.tcx, ret_ty).unwrap_or(input_simd_bytes as u64) as u32
+                        / elem_size
+                } else {
+                    n_input_lanes
+                };
+
+                let output_bytes = output_lanes * elem_size;
+
+                // Place both input vectors on the stack contiguously.
+                let concat_bytes = input_simd_bytes * 2;
+                let concat_slot = self.builder.stack_slot(concat_bytes, o!());
+                if ir_args.len() >= 2 {
+                    let a_ptr = self.ensure_simd_on_stack(ir_args[0], input_simd_bytes);
+                    let b_ptr = self.ensure_simd_on_stack(ir_args[1], input_simd_bytes);
+                    // Copy a to concat_slot[0..input_simd_bytes]
+                    for w in 0..input_simd_bytes.div_ceil(8) {
+                        let load_size = 8.min(input_simd_bytes - w * 8);
+                        let src_off = if w == 0 {
+                            a_ptr
+                        } else {
+                            let off = self.builder.iconst(
+                                w as i64 * 8,
+                                64,
+                                IntSignedness::Unsigned,
+                                o!(),
+                            );
+                            self.builder.ptradd(a_ptr.into(), off.into(), 0, o!()).raw()
+                        };
+                        let val = self.builder.load(
+                            src_off.into(),
+                            load_size,
+                            Type::Int,
+                            self.current_mem.into(),
+                            u64_opt,
+                            o!(),
+                        );
+                        let dst_off = if w == 0 {
+                            concat_slot
+                        } else {
+                            let off = self.builder.iconst(
+                                w as i64 * 8,
+                                64,
+                                IntSignedness::Unsigned,
+                                o!(),
+                            );
+                            self.builder
+                                .ptradd(concat_slot.into(), off.into(), 0, o!())
+                                .raw()
+                        };
+                        self.current_mem = self
+                            .builder
+                            .store(
+                                val.into(),
+                                dst_off.into(),
+                                load_size,
+                                self.current_mem.into(),
+                                o!(),
+                            )
+                            .raw();
+                    }
+                    // Copy b to concat_slot[input_simd_bytes..]
+                    for w in 0..input_simd_bytes.div_ceil(8) {
+                        let load_size = 8.min(input_simd_bytes - w * 8);
+                        let src_off = if w == 0 {
+                            b_ptr
+                        } else {
+                            let off = self.builder.iconst(
+                                w as i64 * 8,
+                                64,
+                                IntSignedness::Unsigned,
+                                o!(),
+                            );
+                            self.builder.ptradd(b_ptr.into(), off.into(), 0, o!()).raw()
+                        };
+                        let val = self.builder.load(
+                            src_off.into(),
+                            load_size,
+                            Type::Int,
+                            self.current_mem.into(),
+                            u64_opt,
+                            o!(),
+                        );
+                        let dest_byte_off = input_simd_bytes + w * 8;
+                        let off = self.builder.iconst(
+                            dest_byte_off as i64,
+                            64,
+                            IntSignedness::Unsigned,
+                            o!(),
+                        );
+                        let dst = self
+                            .builder
+                            .ptradd(concat_slot.into(), off.into(), 0, o!())
+                            .raw();
+                        self.current_mem = self
+                            .builder
+                            .store(
+                                val.into(),
+                                dst.into(),
+                                load_size,
+                                self.current_mem.into(),
+                                o!(),
+                            )
+                            .raw();
+                    }
+                }
+
+                // Read indices from the third argument and build output.
+                let out_slot = self.builder.stack_slot(output_bytes.max(8), o!());
+                if ir_args.len() >= 3 {
+                    let idx_ptr = self.ensure_simd_on_stack(ir_args[2], output_lanes * 4);
+                    for i in 0..output_lanes {
+                        // Load index as u32.
+                        let idx_off = if i == 0 {
+                            idx_ptr
+                        } else {
+                            let off = self.builder.iconst(
+                                i as i64 * 4,
+                                64,
+                                IntSignedness::Unsigned,
+                                o!(),
+                            );
+                            self.builder
+                                .ptradd(idx_ptr.into(), off.into(), 0, o!())
+                                .raw()
+                        };
+                        let idx_val = self.builder.load(
+                            idx_off.into(),
+                            4,
+                            Type::Int,
+                            self.current_mem.into(),
+                            Some(Annotation::Int(IntAnnotation {
+                                bit_width: 32,
+                                signedness: IntSignedness::Unsigned,
+                            })),
+                            o!(),
+                        );
+                        // Compute source byte offset: idx * elem_size.
+                        let byte_off = if elem_size == 1 {
+                            idx_val
+                        } else {
+                            let es = self.builder.iconst(
+                                elem_size as i64,
+                                64,
+                                IntSignedness::Unsigned,
+                                o!(),
+                            );
+                            self.builder
+                                .mul(idx_val.into(), es.into(), u64_int, o!())
+                                .raw()
+                        };
+                        let src_elem = self
+                            .builder
+                            .ptradd(concat_slot.into(), byte_off.into(), 0, o!())
+                            .raw();
+                        let elem_val = self.builder.load(
+                            src_elem.into(),
+                            elem_size,
+                            Type::Int,
+                            self.current_mem.into(),
+                            u64_opt,
+                            o!(),
+                        );
+                        let dst_elem = if i == 0 {
+                            out_slot
+                        } else {
+                            let off = self.builder.iconst(
+                                (i * elem_size) as i64,
+                                64,
+                                IntSignedness::Unsigned,
+                                o!(),
+                            );
+                            self.builder
+                                .ptradd(out_slot.into(), off.into(), 0, o!())
+                                .raw()
+                        };
+                        self.current_mem = self
+                            .builder
+                            .store(
+                                elem_val.into(),
+                                dst_elem.into(),
+                                elem_size,
+                                self.current_mem.into(),
+                                o!(),
+                            )
+                            .raw();
+                    }
+                }
+
+                let result = self.simd_result_from_stack(out_slot, output_bytes);
+                self.locals.set(destination_local, result);
                 true
             }
 

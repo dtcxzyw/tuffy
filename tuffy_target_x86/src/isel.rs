@@ -782,12 +782,18 @@ fn is_wide_scalar_type(ty: &Type, ann: &Option<Annotation>) -> bool {
 fn classify_param_abi(
     params: &[Type],
     param_annotations: &[Option<Annotation>],
+    byval_sizes: &[Option<u32>],
     param_idx: usize,
 ) -> ParamAbi {
     let mut int_count = 0usize;
     let mut float_count = 0usize;
     let mut stack_idx: i32 = 0;
     for (i, param_ty) in params.iter().enumerate().take(param_idx) {
+        // Byval params always go on the stack and consume ceil(size/8) slots.
+        if let Some(sz) = byval_sizes.get(i).copied().flatten() {
+            stack_idx += ((sz as i32) + 7) / 8;
+            continue;
+        }
         let param_ann = &param_annotations[i];
         let is_wide =
             !matches!(param_ty, Type::Float(_)) && is_wide_scalar_type(param_ty, param_ann);
@@ -809,6 +815,11 @@ fn classify_param_abi(
                 }
             }
         }
+    }
+    // Byval params always go on the stack.
+    if let Some(sz) = byval_sizes.get(param_idx).copied().flatten() {
+        let _ = sz;
+        return ParamAbi::Stack(stack_idx);
     }
     match &params[param_idx] {
         Type::Float(ft) => {
@@ -988,7 +999,13 @@ fn select_inst(
         Op::Param(idx) => {
             let idx = *idx as usize;
             let wide = is_wide_scalar_type(&func.params[idx], &func.param_annotations[idx]);
-            match classify_param_abi(&func.params, &func.param_annotations, idx) {
+            let is_byval = func.byval_sizes.get(idx).copied().flatten().is_some();
+            match classify_param_abi(
+                &func.params,
+                &func.param_annotations,
+                &func.byval_sizes,
+                idx,
+            ) {
                 ParamAbi::Gpr(i) => {
                     let fixed = ctx.alloc.alloc_fixed(ARG_REGS[i].to_preg());
                     // Immediately copy the argument register into a fresh unconstrained
@@ -1039,12 +1056,22 @@ fn select_inst(
                     let offset = 16 + stack_idx * 8;
                     let rbp = ctx.alloc.alloc_fixed(Gpr::Rbp.to_preg());
                     let dst = ctx.alloc.alloc();
-                    ctx.out.push(MInst::MovRM {
-                        size: OpSize::S64,
-                        dst,
-                        base: rbp,
-                        offset,
-                    });
+                    if is_byval {
+                        // Byval param: the data sits on the stack; produce
+                        // a pointer to it via LEA instead of loading a value.
+                        ctx.out.push(MInst::Lea {
+                            dst,
+                            base: rbp,
+                            offset,
+                        });
+                    } else {
+                        ctx.out.push(MInst::MovRM {
+                            size: OpSize::S64,
+                            dst,
+                            base: rbp,
+                            offset,
+                        });
+                    }
                     ctx.regs.assign(vref, dst);
                 }
             }
@@ -3235,8 +3262,17 @@ fn select_call(
     #[derive(Clone, Copy)]
     enum ArgDest {
         Gpr(usize),
-        Xmm { idx: usize, double: bool },
+        Xmm {
+            idx: usize,
+            double: bool,
+        },
         Stack,
+        /// C ABI byval: the vreg holds a *pointer* to a struct that must be
+        /// copied onto the call stack.  `size` is the byte count rounded up
+        /// to the next multiple of 8.
+        Byval {
+            size: u32,
+        },
     }
 
     let mut arg_dests: Vec<ArgDest> = Vec::new();
@@ -3244,6 +3280,26 @@ fn select_call(
 
     for (i, src) in arg_vregs.iter().enumerate() {
         let _ = src;
+
+        // Check for Byval annotation on this arg (C ABI MEMORY-class param).
+        let byval_size = if i >= sret_offset {
+            match &args[i - sret_offset].annotation {
+                Some(Annotation::Byval(sz)) => Some(*sz),
+                _ => None,
+            }
+        } else {
+            None
+        };
+
+        if let Some(sz) = byval_size {
+            // Byval args skip GPR allocation entirely; the struct goes
+            // on the stack.  Round size up to eightbyte boundary.
+            let rounded = sz.div_ceil(8) * 8;
+            stack_arg_indices.push(i);
+            arg_dests.push(ArgDest::Byval { size: rounded });
+            continue;
+        }
+
         let is_float = if i < sret_offset {
             false // SRET pointer is always integer
         } else {
@@ -3281,11 +3337,18 @@ fn select_call(
 
     // Phase 3: push stack arguments right-to-left.
     // RSP must be 16-byte aligned before the call instruction.
-    let num_stack_args = stack_arg_indices.len();
-    let stack_cleanup = if num_stack_args > 0 {
-        // Pad for 16-byte alignment if odd number of stack args.
-        let padding = if !num_stack_args.is_multiple_of(2) {
-            8
+    // Calculate total stack bytes: regular args = 8 each, byval = their size.
+    let total_stack_bytes: i32 = stack_arg_indices
+        .iter()
+        .map(|&i| match arg_dests[i] {
+            ArgDest::Byval { size } => size as i32,
+            _ => 8,
+        })
+        .sum();
+    let stack_cleanup = if total_stack_bytes > 0 {
+        // Pad for 16-byte alignment.
+        let padding = if total_stack_bytes % 16 != 0 {
+            16 - (total_stack_bytes % 16)
         } else {
             0
         };
@@ -3294,9 +3357,31 @@ fn select_call(
         }
         // Push in reverse order so first stack arg ends up at lowest address.
         for &i in stack_arg_indices.iter().rev() {
-            ctx.out.push(MInst::Push { reg: arg_vregs[i] });
+            match arg_dests[i] {
+                ArgDest::Byval { size } => {
+                    // Copy struct data from the pointer (in arg_vregs[i])
+                    // onto the stack, qword by qword in reverse order.
+                    let num_qwords = (size / 8) as i32;
+                    let src_ptr = arg_vregs[i];
+                    for q in (0..num_qwords).rev() {
+                        let offset = q * 8;
+                        // Load qword from [src_ptr + offset]
+                        let tmp = ctx.alloc.alloc();
+                        ctx.out.push(MInst::MovRM {
+                            size: OpSize::S64,
+                            dst: tmp,
+                            base: src_ptr,
+                            offset,
+                        });
+                        ctx.out.push(MInst::Push { reg: tmp });
+                    }
+                }
+                _ => {
+                    ctx.out.push(MInst::Push { reg: arg_vregs[i] });
+                }
+            }
         }
-        (num_stack_args as i32 * 8) + padding
+        total_stack_bytes + padding
     } else {
         0
     };
@@ -3331,7 +3416,8 @@ fn select_call(
                     double,
                 });
             }
-            ArgDest::Stack => {} // already pushed in Phase 3
+            ArgDest::Stack => {}        // already pushed in Phase 3
+            ArgDest::Byval { .. } => {} // already pushed in Phase 3
         }
     }
 

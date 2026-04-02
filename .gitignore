@@ -241,3 +241,5 @@ rustc-ice-*.txt
 book/output/
 
 *.rlib
+*.rcgu.o
+rustc-ice-*.txt

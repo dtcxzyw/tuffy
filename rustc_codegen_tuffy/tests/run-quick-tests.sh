@@ -57,10 +57,9 @@ fi
 echo ""
 
 # ── Bitflags cargo test ───────────────────────────────────────────────────────
-# Uses Cargo host/target separation (-Z host-config -Z target-applies-to-host)
-# so that ALL target crates (bitflags + every dependency) are compiled with the
-# tuffy backend, while build scripts and proc-macros use the system backend.
-# A temporary .cargo/config.toml is written with the current backend path.
+# Uses global RUSTFLAGS so that ALL crates — target crates, build scripts, and
+# proc-macros — are compiled with the tuffy backend.  Only the pre-built std
+# library (from the sysroot) uses LLVM.
 
 BITFLAGS_DIR="$REPO_ROOT/scratch/bitflags"
 if [ -d "$BITFLAGS_DIR" ]; then
@@ -68,15 +67,11 @@ if [ -d "$BITFLAGS_DIR" ]; then
 
     mkdir -p "$BITFLAGS_DIR/.cargo"
     cat > "$BITFLAGS_DIR/.cargo/config.toml" <<CFGEOF
-[target.x86_64-unknown-linux-gnu]
+[build]
 rustflags = ["-Z", "codegen-backend=$BACKEND"]
-
-[host]
-rustflags = []
 CFGEOF
 
-    if cargo test --manifest-path "$BITFLAGS_DIR/Cargo.toml" \
-       -Z host-config -Z target-applies-to-host; then
+    if cargo +nightly-2026-03-28 test --manifest-path "$BITFLAGS_DIR/Cargo.toml"; then
         overall_pass=$((overall_pass + 1))
     else
         overall_fail=$((overall_fail + 1))

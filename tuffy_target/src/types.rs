@@ -28,4 +28,7 @@ pub struct StaticData {
     pub relocations: Vec<Relocation>,
     /// If true, place in a writable section (.data) instead of .rodata.
     pub writable: bool,
+    /// If true, the static has `#[used]` semantics and must survive
+    /// linker garbage collection (e.g. proc_macro_decls).
+    pub used: bool,
 }

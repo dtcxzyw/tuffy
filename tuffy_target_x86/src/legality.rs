@@ -16,6 +16,8 @@ pub struct X86LegalityInfo;
 impl LegalityInfo for X86LegalityInfo {
     fn legalize_action(&self, op: &Op, width: Option<u32>) -> LegalizeAction {
         match (op, width) {
+            // FRem: x86 has no SSE remainder instruction → expand to fmod/fmodf call
+            (Op::FRem(_, _, _), _) => LegalizeAction::Expand,
             // Arithmetic operations legal at ≤64 bits
             (
                 Op::Add(_, _)

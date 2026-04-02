@@ -209,10 +209,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     // reference/pointer, val IS the pointer value
                                     // (not an address pointing to data).  Store it
                                     // directly instead of doing a word-by-word copy.
+                                    // Fat pointers (references to unsized types like
+                                    // &dyn Trait, &[T], &str, or &Struct<[T]>) need
+                                    // the fat-component assembly path, so exclude them.
+                                    let typing_env = ty::TypingEnv::fully_monomorphized();
                                     let dest_is_ptr_ty = matches!(ty.kind(),
-                                        ty::Ref(_, inner, _) if !matches!(inner.kind(), ty::Str | ty::Slice(..) | ty::Dynamic(..))
+                                        ty::Ref(_, inner, _) if inner.is_sized(self.tcx, typing_env)
                                     ) || matches!(ty.kind(),
-                                        ty::RawPtr(inner, _) if !matches!(inner.kind(), ty::Str | ty::Slice(..) | ty::Dynamic(..))
+                                        ty::RawPtr(inner, _) if inner.is_sized(self.tcx, typing_env)
                                     ) || matches!(ty.kind(), ty::FnPtr(..));
                                     if matches!(val_ty.as_ref(), Some(Type::Ptr(_)))
                                         && bytes > 0

@@ -1,5 +1,5 @@
 use rustc_middle::mir::{self, BinOp, CastKind, Operand, Place, PlaceElem, Rvalue};
-use rustc_middle::ty::{self, Instance, TypeVisitableExt};
+use rustc_middle::ty::{self, Instance, TypeVisitableExt, adjustment::PointerCoercion};
 use tuffy_ir::instruction::{FCmpOp, ICmpOp, Operand as IrOperand, Origin};
 use tuffy_ir::types::{Annotation, FloatType, FpRewriteFlags, IntAnnotation, IntSignedness, Type};
 use tuffy_ir::value::ValueRef;
@@ -802,6 +802,53 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             );
                             return Some(meta);
                         }
+                        // Projected place (e.g. _3.0.0 where the inner
+                        // type is a fat-pointer-sized ADT wrapper like
+                        // NonNull<[T]>): load metadata from offset +8.
+                        if !place.projection.is_empty() {
+                            let projected_ty = place.ty(&self.mir.local_decls, self.tcx).ty;
+                            let projected_ty = self.monomorphize(projected_ty);
+                            let proj_size = type_size(self.tcx, projected_ty).unwrap_or(0);
+                            if proj_size > 8
+                                && let Some((addr, _)) = self.translate_place_to_addr(place)
+                            {
+                                let addr = self.coerce_to_ptr(addr);
+                                let off8 = self.builder.iconst(
+                                    8,
+                                    64,
+                                    IntSignedness::DontCare,
+                                    Origin::synthetic(),
+                                );
+                                let meta_addr = self.builder.ptradd(
+                                    addr.into(),
+                                    off8.into(),
+                                    0,
+                                    Origin::synthetic(),
+                                );
+                                // Dyn trait metadata is a vtable pointer;
+                                // slice/str metadata is an integer length.
+                                let pointee = match target_ty_mono.kind() {
+                                    ty::RawPtr(inner, _) | ty::Ref(_, inner, _) => Some(*inner),
+                                    _ => None,
+                                };
+                                let is_vtable =
+                                    pointee.is_some_and(|p| matches!(p.kind(), ty::Dynamic(..)));
+                                let (meta_ty, meta_ann) = if is_vtable {
+                                    (Type::Ptr(0), None)
+                                } else {
+                                    (Type::Int, int_annotation_for_bytes(8))
+                                };
+                                let meta = self.builder.load(
+                                    meta_addr.into(),
+                                    8,
+                                    meta_ty,
+                                    self.current_mem.into(),
+                                    meta_ann,
+                                    Origin::synthetic(),
+                                );
+                                return Some(meta);
+                            }
+                        }
                     }
                     // From a constant fat pointer (e.g. `const "hello" as &[u8]`).
                     if let Operand::Constant(c) = op {
@@ -861,7 +908,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 }
                 // For Unsize coercions from [T; N] to [T], emit the
                 // array length as slice metadata.
-                if let CastKind::PointerCoercion(_, _) = cast_kind {
+                if let CastKind::PointerCoercion(PointerCoercion::Unsize, _) = cast_kind {
                     let src_ty = self.operand_ty_mono(op);
                     if let Some(src_ty) = src_ty {
                         let src_inner = match src_ty.kind() {
@@ -870,25 +917,31 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             _ if src_ty.is_box() => src_ty.boxed_ty(),
                             _ => None,
                         };
-                        if let Some(inner) = src_inner
-                            && let ty::Array(_, len_const) = inner.kind()
-                        {
-                            let len = len_const.try_to_target_usize(self.tcx).unwrap_or(0);
-                            return Some(
-                                self.builder
-                                    .iconst(
-                                        len as i64,
-                                        64,
-                                        IntSignedness::DontCare,
-                                        Origin::synthetic(),
-                                    )
-                                    .raw(),
-                            );
+                        if let Some(inner) = src_inner {
+                            // Use struct_tail_for_codegen to handle both direct
+                            // array unsizing (&[T; N] → &[T]) and struct unsizing
+                            // (&Wrapper<[T; N]> → &Wrapper<[T]>) where the array
+                            // is nested inside one or more wrapper structs.
+                            let typing_env = ty::TypingEnv::fully_monomorphized();
+                            let src_tail = self.tcx.struct_tail_for_codegen(inner, typing_env);
+                            if let ty::Array(_, len_const) = src_tail.kind() {
+                                let len = len_const.try_to_target_usize(self.tcx).unwrap_or(0);
+                                return Some(
+                                    self.builder
+                                        .iconst(
+                                            len as i64,
+                                            64,
+                                            IntSignedness::DontCare,
+                                            Origin::synthetic(),
+                                        )
+                                        .raw(),
+                                );
+                            }
                         }
                     }
                 }
                 // For Unsize coercions to trait objects, generate the vtable pointer.
-                if let CastKind::PointerCoercion(pc, _) = cast_kind {
+                if let CastKind::PointerCoercion(PointerCoercion::Unsize, _) = cast_kind {
                     // Check if this is an Unsize coercion by examining the target type.
                     let target_ty = self.monomorphize(*target_ty);
                     let target_inner = match target_ty.kind() {
@@ -900,8 +953,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     if let Some(inner) = target_inner
                         && let ty::Dynamic(predicates, _) = inner.kind()
                     {
-                        // This is an unsizing coercion to a trait object.
-                        // Get the concrete source type.
+                        // Direct unsizing to a trait object (e.g. &Concrete → &dyn Trait).
+                        // Use the source type directly (NOT struct_tail) since the
+                        // concrete type IS the one implementing the trait.
                         let src_ty = self.operand_ty_mono(op)?;
                         let src_inner = match src_ty.kind() {
                             ty::Ref(_, inner, _) => *inner,
@@ -993,66 +1047,80 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             _ if src_ty.is_box() => src_ty.boxed_ty().unwrap(),
                             _ => src_ty,
                         };
-                        let (src_tail, dst_tail) = self
-                            .tcx
-                            .struct_lockstep_tails_for_codegen(src_inner, inner, typing_env);
-                        match dst_tail.kind() {
-                            ty::Slice(_) => {
-                                if let ty::Array(_, len) = src_tail.kind()
-                                    && let Some(n) = len.try_to_target_usize(self.tcx)
+                        // Skip if source == target (no actual unsizing needed,
+                        // e.g. non-Unsize PointerCoercion that slipped through).
+                        if src_inner == inner {
+                            // No unsizing, nothing to do.
+                        } else {
+                            let (src_tail, dst_tail) = self
+                                .tcx
+                                .struct_lockstep_tails_for_codegen(src_inner, inner, typing_env);
+                            match dst_tail.kind() {
+                                ty::Slice(_) => {
+                                    if let ty::Array(_, len) = src_tail.kind()
+                                        && let Some(n) = len.try_to_target_usize(self.tcx)
+                                    {
+                                        return Some(
+                                            self.builder
+                                                .iconst(
+                                                    n as i64,
+                                                    64,
+                                                    IntSignedness::DontCare,
+                                                    Origin::synthetic(),
+                                                )
+                                                .raw(),
+                                        );
+                                    }
+                                }
+                                ty::Dynamic(predicates, _)
+                                    if !src_tail.has_escaping_bound_vars()
+                                        && !src_tail.is_trait()
+                                        && src_tail.is_sized(
+                                            self.tcx,
+                                            ty::TypingEnv::fully_monomorphized(),
+                                        ) =>
                                 {
-                                    return Some(
-                                        self.builder
-                                            .iconst(
-                                                n as i64,
-                                                64,
-                                                IntSignedness::DontCare,
-                                                Origin::synthetic(),
+                                    let principal = predicates
+                                        .principal()
+                                        .map(|p| self.tcx.instantiate_bound_regions_with_erased(p));
+                                    let vtable_alloc_id =
+                                        self.tcx.vtable_allocation((src_tail, principal));
+                                    let vtable_alloc = self.tcx.global_alloc(vtable_alloc_id);
+                                    if let rustc_middle::mir::interpret::GlobalAlloc::Memory(
+                                        alloc,
+                                    ) = vtable_alloc
+                                    {
+                                        let inner_alloc = alloc.inner();
+                                        let size = inner_alloc.len();
+                                        let bytes = inner_alloc
+                                            .inspect_with_uninit_and_ptr_outside_interpreter(
+                                                0..size,
                                             )
-                                            .raw(),
-                                    );
+                                            .to_vec();
+                                        let sym = format!(".Lvtable.{}", self.next_data_id());
+                                        let sym_id = self.symbols.intern(&sym);
+                                        let relocs = extract_alloc_relocs(
+                                            self.tcx,
+                                            inner_alloc,
+                                            0,
+                                            size,
+                                            &mut self.symbols,
+                                            &mut self.static_data,
+                                            &mut self.referenced_instances,
+                                            self.data_counter,
+                                        );
+                                        self.static_data.push((sym_id, bytes, relocs));
+                                        return Some(
+                                            self.builder
+                                                .symbol_addr(sym_id, Origin::synthetic())
+                                                .raw(),
+                                        );
+                                    }
                                 }
+                                _ => {}
                             }
-                            ty::Dynamic(predicates, _)
-                                if !src_tail.has_escaping_bound_vars() && !src_tail.is_trait() =>
-                            {
-                                let principal = predicates
-                                    .principal()
-                                    .map(|p| self.tcx.instantiate_bound_regions_with_erased(p));
-                                let vtable_alloc_id =
-                                    self.tcx.vtable_allocation((src_tail, principal));
-                                let vtable_alloc = self.tcx.global_alloc(vtable_alloc_id);
-                                if let rustc_middle::mir::interpret::GlobalAlloc::Memory(alloc) =
-                                    vtable_alloc
-                                {
-                                    let inner_alloc = alloc.inner();
-                                    let size = inner_alloc.len();
-                                    let bytes = inner_alloc
-                                        .inspect_with_uninit_and_ptr_outside_interpreter(0..size)
-                                        .to_vec();
-                                    let sym = format!(".Lvtable.{}", self.next_data_id());
-                                    let sym_id = self.symbols.intern(&sym);
-                                    let relocs = extract_alloc_relocs(
-                                        self.tcx,
-                                        inner_alloc,
-                                        0,
-                                        size,
-                                        &mut self.symbols,
-                                        &mut self.static_data,
-                                        &mut self.referenced_instances,
-                                        self.data_counter,
-                                    );
-                                    self.static_data.push((sym_id, bytes, relocs));
-                                    return Some(
-                                        self.builder.symbol_addr(sym_id, Origin::synthetic()).raw(),
-                                    );
-                                }
-                            }
-                            _ => {}
-                        }
+                        } // end else (src_inner != inner)
                     }
-
-                    let _ = pc; // suppress unused warning
                 }
                 None
             }
@@ -2629,8 +2697,29 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 return Some(loaded);
                             }
                         }
-                        // Transmute from an Int register value to a Float type: reinterpret
-                        // the bit pattern via a temporary stack slot (no bitcast in IR).
+                        // Transmute from a projected address (e.g. _3.0.0 where
+                        // the projected type is a fat-pointer-sized ADT wrapper
+                        // like NonNull<[T]>) to a fat raw pointer.  Val is a
+                        // memory address; load only the data pointer (first 8
+                        // bytes).  The metadata (second 8 bytes) is handled by
+                        // extract_fat_component in the statement handler.
+                        if matches!(kind, CastKind::Transmute)
+                            && matches!(self.builder.value_type(val), Some(Type::Ptr(_)))
+                            && self.builder.is_memory_address(val)
+                            && is_fat_ptr(self.tcx, target_ty_mono)
+                            && let Operand::Copy(src) | Operand::Move(src) = operand
+                            && !src.projection.is_empty()
+                        {
+                            let data_ptr = self.builder.load(
+                                val.into(),
+                                8,
+                                Type::Ptr(0),
+                                self.current_mem.into(),
+                                None,
+                                Origin::synthetic(),
+                            );
+                            return Some(data_ptr);
+                        }
                         if matches!(kind, CastKind::Transmute)
                             && matches!(self.builder.value_type(val), Some(Type::Int | Type::Bool))
                             && let Some(Type::Float(ft)) = translate_ty(self.tcx, target_ty_mono)
