@@ -2661,11 +2661,48 @@ fn select_inst(
                 dst: result,
                 src: l,
             });
-            ctx.out.push(MInst::AddRR {
-                size: OpSize::S64,
-                dst: result,
-                src: r,
-            });
+            // Sign-extend sub-word operands so 64-bit arithmetic
+            // produces a correctly-signed result for range checking.
+            if *bits < 64 {
+                let shift = 64u8 - *bits as u8;
+                ctx.out.push(MInst::ShlImm {
+                    size: OpSize::S64,
+                    dst: result,
+                    imm: shift,
+                });
+                ctx.out.push(MInst::SarImm {
+                    size: OpSize::S64,
+                    dst: result,
+                    imm: shift,
+                });
+                let r_ext = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst: r_ext,
+                    src: r,
+                });
+                ctx.out.push(MInst::ShlImm {
+                    size: OpSize::S64,
+                    dst: r_ext,
+                    imm: shift,
+                });
+                ctx.out.push(MInst::SarImm {
+                    size: OpSize::S64,
+                    dst: r_ext,
+                    imm: shift,
+                });
+                ctx.out.push(MInst::AddRR {
+                    size: OpSize::S64,
+                    dst: result,
+                    src: r_ext,
+                });
+            } else {
+                ctx.out.push(MInst::AddRR {
+                    size: OpSize::S64,
+                    dst: result,
+                    src: r,
+                });
+            }
             if *bits == 64 {
                 ctx.out.push(MInst::SetCC {
                     cc: CondCode::O,
@@ -2747,11 +2784,38 @@ fn select_inst(
                 dst: result,
                 src: l,
             });
-            ctx.out.push(MInst::AddRR {
-                size: OpSize::S64,
-                dst: result,
-                src: r,
-            });
+            // Zero-extend sub-word operands so 64-bit arithmetic
+            // doesn't carry junk upper bits into the overflow check.
+            if *bits < 64 {
+                let mask = (1u64 << bits) - 1;
+                ctx.out.push(MInst::AndRI {
+                    size: OpSize::S64,
+                    dst: result,
+                    imm: mask as i64,
+                });
+                let r_ext = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst: r_ext,
+                    src: r,
+                });
+                ctx.out.push(MInst::AndRI {
+                    size: OpSize::S64,
+                    dst: r_ext,
+                    imm: mask as i64,
+                });
+                ctx.out.push(MInst::AddRR {
+                    size: OpSize::S64,
+                    dst: result,
+                    src: r_ext,
+                });
+            } else {
+                ctx.out.push(MInst::AddRR {
+                    size: OpSize::S64,
+                    dst: result,
+                    src: r,
+                });
+            }
             if *bits == 64 {
                 ctx.out.push(MInst::SetCC {
                     cc: CondCode::B,
@@ -2808,11 +2872,48 @@ fn select_inst(
                 dst: result,
                 src: l,
             });
-            ctx.out.push(MInst::SubRR {
-                size: OpSize::S64,
-                dst: result,
-                src: r,
-            });
+            // Sign-extend sub-word operands so 64-bit arithmetic
+            // produces a correctly-signed result for range checking.
+            if *bits < 64 {
+                let shift = 64u8 - *bits as u8;
+                ctx.out.push(MInst::ShlImm {
+                    size: OpSize::S64,
+                    dst: result,
+                    imm: shift,
+                });
+                ctx.out.push(MInst::SarImm {
+                    size: OpSize::S64,
+                    dst: result,
+                    imm: shift,
+                });
+                let r_ext = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst: r_ext,
+                    src: r,
+                });
+                ctx.out.push(MInst::ShlImm {
+                    size: OpSize::S64,
+                    dst: r_ext,
+                    imm: shift,
+                });
+                ctx.out.push(MInst::SarImm {
+                    size: OpSize::S64,
+                    dst: r_ext,
+                    imm: shift,
+                });
+                ctx.out.push(MInst::SubRR {
+                    size: OpSize::S64,
+                    dst: result,
+                    src: r_ext,
+                });
+            } else {
+                ctx.out.push(MInst::SubRR {
+                    size: OpSize::S64,
+                    dst: result,
+                    src: r,
+                });
+            }
             if *bits == 64 {
                 ctx.out.push(MInst::SetCC {
                     cc: CondCode::O,
@@ -2894,11 +2995,38 @@ fn select_inst(
                 dst: result,
                 src: l,
             });
-            ctx.out.push(MInst::SubRR {
-                size: OpSize::S64,
-                dst: result,
-                src: r,
-            });
+            // Zero-extend sub-word operands so 64-bit arithmetic
+            // doesn't carry junk upper bits into the overflow check.
+            if *bits < 64 {
+                let mask = (1u64 << bits) - 1;
+                ctx.out.push(MInst::AndRI {
+                    size: OpSize::S64,
+                    dst: result,
+                    imm: mask as i64,
+                });
+                let r_ext = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst: r_ext,
+                    src: r,
+                });
+                ctx.out.push(MInst::AndRI {
+                    size: OpSize::S64,
+                    dst: r_ext,
+                    imm: mask as i64,
+                });
+                ctx.out.push(MInst::SubRR {
+                    size: OpSize::S64,
+                    dst: result,
+                    src: r_ext,
+                });
+            } else {
+                ctx.out.push(MInst::SubRR {
+                    size: OpSize::S64,
+                    dst: result,
+                    src: r,
+                });
+            }
             if *bits == 64 {
                 ctx.out.push(MInst::SetCC {
                     cc: CondCode::B,
@@ -2944,11 +3072,48 @@ fn select_inst(
                 dst: result,
                 src: l,
             });
-            ctx.out.push(MInst::ImulRR {
-                size: OpSize::S64,
-                dst: result,
-                src: r,
-            });
+            // Sign-extend sub-word operands so 64-bit arithmetic
+            // produces a correctly-signed result for range checking.
+            if *bits < 64 {
+                let shift = 64u8 - *bits as u8;
+                ctx.out.push(MInst::ShlImm {
+                    size: OpSize::S64,
+                    dst: result,
+                    imm: shift,
+                });
+                ctx.out.push(MInst::SarImm {
+                    size: OpSize::S64,
+                    dst: result,
+                    imm: shift,
+                });
+                let r_ext = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst: r_ext,
+                    src: r,
+                });
+                ctx.out.push(MInst::ShlImm {
+                    size: OpSize::S64,
+                    dst: r_ext,
+                    imm: shift,
+                });
+                ctx.out.push(MInst::SarImm {
+                    size: OpSize::S64,
+                    dst: r_ext,
+                    imm: shift,
+                });
+                ctx.out.push(MInst::ImulRR {
+                    size: OpSize::S64,
+                    dst: result,
+                    src: r_ext,
+                });
+            } else {
+                ctx.out.push(MInst::ImulRR {
+                    size: OpSize::S64,
+                    dst: result,
+                    src: r,
+                });
+            }
             if *bits == 64 {
                 ctx.out.push(MInst::SetCC {
                     cc: CondCode::O,
@@ -3035,15 +3200,33 @@ fn select_inst(
                     rhs: r,
                 });
             } else {
+                // Zero-extend sub-word operands before multiply.
+                let mask = (1u64 << bits) - 1;
                 ctx.out.push(MInst::MovRR {
                     size: OpSize::S64,
                     dst: result,
                     src: l,
                 });
+                ctx.out.push(MInst::AndRI {
+                    size: OpSize::S64,
+                    dst: result,
+                    imm: mask as i64,
+                });
+                let r_ext = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst: r_ext,
+                    src: r,
+                });
+                ctx.out.push(MInst::AndRI {
+                    size: OpSize::S64,
+                    dst: r_ext,
+                    imm: mask as i64,
+                });
                 ctx.out.push(MInst::ImulRR {
                     size: OpSize::S64,
                     dst: result,
-                    src: r,
+                    src: r_ext,
                 });
                 let tmp = ctx.alloc.alloc();
                 ctx.out.push(MInst::MovRR {
