@@ -308,18 +308,29 @@ impl CodegenBackend for TuffyCodegenBackend {
                         )
                         .unwrap();
                     }
-                    // A static is writable if it's `static mut` OR if its
-                    // type has interior mutability (contains UnsafeCell),
-                    // e.g. Mutex, Cell, AtomicU32.  Such types must live
-                    // in .data, not .rodata.
-                    let static_ty = tcx.type_of(*def_id).instantiate_identity();
-                    let needs_write = tcx.is_mutable_static(*def_id)
-                        || !static_ty.is_freeze(tcx, ty::TypingEnv::fully_monomorphized());
-                    let is_used = {
-                        let flags = tcx.codegen_fn_attrs(*def_id).flags;
-                        use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrFlags;
-                        flags.contains(CodegenFnAttrFlags::USED_LINKER)
-                            || flags.contains(CodegenFnAttrFlags::USED_COMPILER)
+                    // Nested statics (e.g. `FOO::{nested#0}`) are synthetic
+                    // allocations whose DefId does not support `type_of`.
+                    // Derive mutability from the DefKind directly.
+                    let (needs_write, is_used) = match tcx.def_kind(*def_id) {
+                        rustc_hir::def::DefKind::Static {
+                            mutability, nested, ..
+                        } if nested => (mutability == rustc_ast::Mutability::Mut, false),
+                        _ => {
+                            // A static is writable if it's `static mut` OR
+                            // if its type has interior mutability (contains
+                            // UnsafeCell), e.g. Mutex, Cell, AtomicU32.
+                            // Such types must live in .data, not .rodata.
+                            let static_ty = tcx.type_of(*def_id).instantiate_identity();
+                            let writable = tcx.is_mutable_static(*def_id)
+                                || !static_ty.is_freeze(tcx, ty::TypingEnv::fully_monomorphized());
+                            let used = {
+                                let flags = tcx.codegen_fn_attrs(*def_id).flags;
+                                use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrFlags;
+                                flags.contains(CodegenFnAttrFlags::USED_LINKER)
+                                    || flags.contains(CodegenFnAttrFlags::USED_COMPILER)
+                            };
+                            (writable, used)
+                        }
                     };
                     all_static_data.push(StaticData {
                         name: sym_name,
