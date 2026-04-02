@@ -52,7 +52,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly-2026-03-28
-          components: rustc-dev, llvm-tools-preview
+          components: rustc-dev, llvm-tools-preview, rust-src
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -92,6 +92,12 @@ jobs:
         run: |
           chmod +x rustc_codegen_tuffy/tests/run-doctest.sh
           rustc_codegen_tuffy/tests/run-doctest.sh scratch/rust/library
+
+      - name: Run build-std tests
+        run: |
+          chmod +x rustc_codegen_tuffy/tests/run-build-std-tests.sh
+          BACKEND=rustc_codegen_tuffy/target/release/librustc_codegen_tuffy.so \
+            rustc_codegen_tuffy/tests/run-build-std-tests.sh
 
   lean:
     name: Lean 4 CI
