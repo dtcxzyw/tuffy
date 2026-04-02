@@ -14,8 +14,6 @@ members = [
 ]
 exclude = [
     "rustc_codegen_tuffy",
-    "scratch/bitflags",
-    "scratch/syn",
 ]
 
 [workspace.package]
