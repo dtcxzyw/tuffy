@@ -21,7 +21,8 @@ CRATE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # ── Find backend .so ──────────────────────────────────────────────────────────
 
 if [ -n "${BACKEND:-}" ]; then
-    :
+    # Convert to absolute path so it works when cargo runs in WORK_DIR
+    BACKEND="$(realpath "$BACKEND")"
 elif [ -f "$CRATE_ROOT/target/release/librustc_codegen_tuffy.so" ]; then
     BACKEND="$CRATE_ROOT/target/release/librustc_codegen_tuffy.so"
 elif [ -f "$CRATE_ROOT/target/debug/librustc_codegen_tuffy.so" ]; then
