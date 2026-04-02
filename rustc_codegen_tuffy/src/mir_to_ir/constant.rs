@@ -115,6 +115,7 @@ pub(super) fn translate_const<'tcx>(
     current_mem: &mut ValueRef,
     referenced_instances: &mut Vec<Instance<'tcx>>,
     data_counter: &mut u64,
+    weak_undefined_symbols: &mut std::collections::HashSet<String>,
 ) -> Option<ValueRef> {
     // Monomorphize the constant using the instance's substitutions so that
     // associated type projections (e.g. <B as Flags>::Bits) are resolved
@@ -164,29 +165,66 @@ pub(super) fn translate_const<'tcx>(
                         referenced_instances,
                         data_counter,
                     );
-                    static_data.push((sym_id, bytes, relocs));
+                    static_data.push((sym_id, bytes, relocs, alloc.align.bytes()));
                     let base = builder.symbol_addr(sym_id, Origin::synthetic());
                     Some(base.raw())
                 }
                 rustc_middle::mir::interpret::GlobalAlloc::Static(def_id) => {
                     let instance = Instance::mono(tcx, def_id);
                     let sym_name = tcx.symbol_name(instance).name.to_string();
-                    let sym_id = symbols.intern(&sym_name);
-                    let base = builder.symbol_addr(sym_id, Origin::synthetic());
-                    if ptr_offset.bytes() > 0 {
-                        let off = builder.iconst(
-                            ptr_offset.bytes() as i64,
-                            64,
-                            IntSignedness::DontCare,
-                            Origin::synthetic(),
-                        );
-                        Some(
-                            builder
-                                .ptradd(base.raw().into(), off.into(), 0, Origin::synthetic())
-                                .raw(),
-                        )
+                    // Detect extern_weak statics (e.g. from `weak!` macro).
+                    // These need GOT-like indirection: a local data symbol with
+                    // an ABS64 relocation to the weak symbol. Direct PC-relative
+                    // references to weak undefined symbols are invalid in PIE.
+                    let import_link = tcx.codegen_fn_attrs(def_id).import_linkage;
+                    if matches!(import_link, Some(rustc_hir::attrs::Linkage::ExternalWeak)) {
+                        weak_undefined_symbols.insert(sym_name.clone());
+                        // Create a local data symbol that holds a pointer to
+                        // the weak symbol. The function code references this
+                        // local symbol (PC-relative safe), which has an ABS64
+                        // reloc to the actual weak symbol.
+                        let local_sym = format!("_rust_extern_with_linkage_{sym_name}");
+                        let local_sym_id = symbols.intern(&local_sym);
+                        static_data.push((
+                            local_sym_id,
+                            vec![0u8; 8],        // 8-byte pointer slot
+                            vec![(0, sym_name)], // ABS64 relocation at offset 0
+                            8,                   // pointer alignment
+                        ));
+                        let base = builder.symbol_addr(local_sym_id, Origin::synthetic());
+                        if ptr_offset.bytes() > 0 {
+                            let off = builder.iconst(
+                                ptr_offset.bytes() as i64,
+                                64,
+                                IntSignedness::DontCare,
+                                Origin::synthetic(),
+                            );
+                            Some(
+                                builder
+                                    .ptradd(base.raw().into(), off.into(), 0, Origin::synthetic())
+                                    .raw(),
+                            )
+                        } else {
+                            Some(base.raw())
+                        }
                     } else {
-                        Some(base.raw())
+                        let sym_id = symbols.intern(&sym_name);
+                        let base = builder.symbol_addr(sym_id, Origin::synthetic());
+                        if ptr_offset.bytes() > 0 {
+                            let off = builder.iconst(
+                                ptr_offset.bytes() as i64,
+                                64,
+                                IntSignedness::DontCare,
+                                Origin::synthetic(),
+                            );
+                            Some(
+                                builder
+                                    .ptradd(base.raw().into(), off.into(), 0, Origin::synthetic())
+                                    .raw(),
+                            )
+                        } else {
+                            Some(base.raw())
+                        }
                     }
                 }
                 rustc_middle::mir::interpret::GlobalAlloc::Function { instance } => {
@@ -227,7 +265,7 @@ pub(super) fn translate_const<'tcx>(
                             data_counter,
                         );
 
-                        static_data.push((sym_id, bytes, relocs));
+                        static_data.push((sym_id, bytes, relocs, inner.align.bytes()));
                         let base = builder.symbol_addr(sym_id, Origin::synthetic());
                         Some(base.raw())
                     } else {
@@ -293,7 +331,7 @@ pub(super) fn translate_const<'tcx>(
                     referenced_instances,
                     data_counter,
                 );
-                static_data.push((sym_id, bytes, relocs));
+                static_data.push((sym_id, bytes, relocs, inner.align.bytes()));
                 let base = builder.symbol_addr(sym_id, Origin::synthetic());
 
                 // For reference/pointer types, the Indirect constant contains
@@ -380,7 +418,7 @@ pub(super) fn extract_alloc_relocs<'tcx>(
                     referenced_instances,
                     data_counter,
                 );
-                static_data.push((sym_id, bytes, nested_relocs));
+                static_data.push((sym_id, bytes, nested_relocs, inner.align.bytes()));
                 relocs.push((rel_offset, symbols.resolve(sym_id).to_string()));
             }
             rustc_middle::mir::interpret::GlobalAlloc::VTable(vtable_ty, vtable_trait_ref) => {
@@ -410,7 +448,7 @@ pub(super) fn extract_alloc_relocs<'tcx>(
                         referenced_instances,
                         data_counter,
                     );
-                    static_data.push((sym_id, bytes, nested_relocs));
+                    static_data.push((sym_id, bytes, nested_relocs, inner.align.bytes()));
                     relocs.push((rel_offset, symbols.resolve(sym_id).to_string()));
                 }
             }
@@ -538,7 +576,7 @@ pub(super) fn translate_const_slice<'tcx>(
         id
     });
     let sym_id = symbols.intern(&sym);
-    static_data.push((sym_id, bytes, vec![]));
+    static_data.push((sym_id, bytes, vec![], alloc.align.bytes()));
 
     let ptr_val = builder.symbol_addr(sym_id, Origin::synthetic());
 

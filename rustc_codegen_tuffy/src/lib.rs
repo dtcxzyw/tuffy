@@ -139,7 +139,7 @@ impl CodegenBackend for TuffyCodegenBackend {
                     if let Some(mut result) = result_opt {
                         pending_instances.extend(result.referenced_instances.iter().copied());
                         if dump_ir {
-                            for (sym_id, data, relocs) in &result.static_data {
+                            for (sym_id, data, relocs, _align) in &result.static_data {
                                 let name = result.symbols.resolve(*sym_id);
                                 let reloc_strs: Vec<(usize, &str)> =
                                     relocs.iter().map(|(o, s)| (*o, s.as_str())).collect();
@@ -157,7 +157,7 @@ impl CodegenBackend for TuffyCodegenBackend {
                         }
                         if let Some(ref mut buf) = module_ir_text {
                             use std::fmt::Write;
-                            for (sym_id, data, relocs) in &result.static_data {
+                            for (sym_id, data, relocs, _align) in &result.static_data {
                                 let name = result.symbols.resolve(*sym_id);
                                 let reloc_strs: Vec<(usize, &str)> =
                                     relocs.iter().map(|(o, s)| (*o, s.as_str())).collect();
@@ -180,7 +180,22 @@ impl CodegenBackend for TuffyCodegenBackend {
                             let func_name = result.symbols.resolve(result.func.name);
                             panic!("IR verification failed for {func_name}: {vr}");
                         } else {
-                            for (sym_id, data, relocs) in &result.static_data {
+                            // Emit weak undefined symbols FIRST so they are in
+                            // sym_map before any static data relocations reference
+                            // them (otherwise the emitter creates strong references).
+                            for sym in &result.weak_undefined_symbols {
+                                all_static_data.push(StaticData {
+                                    name: sym.clone(),
+                                    data: vec![],
+                                    relocations: vec![],
+                                    writable: false,
+                                    used: false,
+                                    weak_undefined: true,
+                                    align: 1,
+                                    thread_local: false,
+                                });
+                            }
+                            for (sym_id, data, relocs, sd_align) in &result.static_data {
                                 all_static_data.push(StaticData {
                                     name: result.symbols.resolve(*sym_id).to_string(),
                                     data: data.clone(),
@@ -194,6 +209,9 @@ impl CodegenBackend for TuffyCodegenBackend {
                                         .collect(),
                                     writable: false,
                                     used: false,
+                                    weak_undefined: false,
+                                    align: *sd_align,
+                                    thread_local: false,
                                 });
                             }
 
@@ -275,70 +293,101 @@ impl CodegenBackend for TuffyCodegenBackend {
                         });
                     }
                 }
-                if let MonoItem::Static(def_id) = mono_item
-                    && let Ok(alloc) = tcx.eval_static_initializer(*def_id)
-                {
-                    let instance = Instance::mono(tcx, *def_id);
-                    let sym_name = tcx.symbol_name(instance).name.to_string();
-                    let inner = alloc.inner();
-                    let bytes = inner
-                        .inspect_with_uninit_and_ptr_outside_interpreter(0..inner.len())
-                        .to_vec();
-                    let relocs = collect_alloc_relocs(
-                        tcx,
-                        inner,
-                        &mut all_static_data,
-                        &mut pending_instances,
-                        &mut data_counter,
-                    );
-                    if let Some(ref mut buf) = module_ir_text {
-                        use std::fmt::Write;
-                        let reloc_strs: Vec<(usize, &str)> = relocs
-                            .iter()
-                            .map(|r| (r.offset, r.symbol.as_str()))
-                            .collect();
-                        writeln!(
-                            buf,
-                            "{}",
-                            tuffy_ir::display::StaticDataDisplay {
-                                name: &sym_name,
-                                data: &bytes,
-                                relocs: &reloc_strs
-                            }
-                        )
-                        .unwrap();
-                    }
-                    // Nested statics (e.g. `FOO::{nested#0}`) are synthetic
-                    // allocations whose DefId does not support `type_of`.
-                    // Derive mutability from the DefKind directly.
-                    let (needs_write, is_used) = match tcx.def_kind(*def_id) {
-                        rustc_hir::def::DefKind::Static {
-                            mutability, nested, ..
-                        } if nested => (mutability == rustc_ast::Mutability::Mut, false),
-                        _ => {
-                            // A static is writable if it's `static mut` OR
-                            // if its type has interior mutability (contains
-                            // UnsafeCell), e.g. Mutex, Cell, AtomicU32.
-                            // Such types must live in .data, not .rodata.
-                            let static_ty = tcx.type_of(*def_id).instantiate_identity();
-                            let writable = tcx.is_mutable_static(*def_id)
-                                || !static_ty.is_freeze(tcx, ty::TypingEnv::fully_monomorphized());
-                            let used = {
-                                let flags = tcx.codegen_fn_attrs(*def_id).flags;
-                                use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrFlags;
-                                flags.contains(CodegenFnAttrFlags::USED_LINKER)
-                                    || flags.contains(CodegenFnAttrFlags::USED_COMPILER)
-                            };
-                            (writable, used)
+                if let MonoItem::Static(def_id) = mono_item {
+                    // Extern weak statics (e.g. from `weak!` macro) have no
+                    // initializer — emit as weak undefined symbols so the
+                    // linker resolves them to 0 when not found.
+                    let attrs = tcx.codegen_fn_attrs(*def_id);
+                    let is_extern_weak =
+                        matches!(attrs.linkage, Some(rustc_hir::attrs::Linkage::ExternalWeak))
+                            || matches!(
+                                attrs.import_linkage,
+                                Some(rustc_hir::attrs::Linkage::ExternalWeak)
+                            );
+                    if is_extern_weak {
+                        let instance = Instance::mono(tcx, *def_id);
+                        let sym_name = tcx.symbol_name(instance).name.to_string();
+                        all_static_data.push(StaticData {
+                            name: sym_name,
+                            data: vec![],
+                            relocations: vec![],
+                            writable: false,
+                            used: false,
+                            weak_undefined: true,
+                            align: 1,
+                            thread_local: false,
+                        });
+                    } else if let Ok(alloc) = tcx.eval_static_initializer(*def_id) {
+                        let instance = Instance::mono(tcx, *def_id);
+                        let sym_name = tcx.symbol_name(instance).name.to_string();
+                        let inner = alloc.inner();
+                        let bytes = inner
+                            .inspect_with_uninit_and_ptr_outside_interpreter(0..inner.len())
+                            .to_vec();
+                        let relocs = collect_alloc_relocs(
+                            tcx,
+                            inner,
+                            &mut all_static_data,
+                            &mut pending_instances,
+                            &mut data_counter,
+                        );
+                        if let Some(ref mut buf) = module_ir_text {
+                            use std::fmt::Write;
+                            let reloc_strs: Vec<(usize, &str)> = relocs
+                                .iter()
+                                .map(|r| (r.offset, r.symbol.as_str()))
+                                .collect();
+                            writeln!(
+                                buf,
+                                "{}",
+                                tuffy_ir::display::StaticDataDisplay {
+                                    name: &sym_name,
+                                    data: &bytes,
+                                    relocs: &reloc_strs
+                                }
+                            )
+                            .unwrap();
                         }
-                    };
-                    all_static_data.push(StaticData {
-                        name: sym_name,
-                        data: bytes,
-                        relocations: relocs,
-                        writable: needs_write,
-                        used: is_used,
-                    });
+                        // Nested statics (e.g. `FOO::{nested#0}`) are synthetic
+                        // allocations whose DefId does not support `type_of`.
+                        // Derive mutability from the DefKind directly.
+                        let (needs_write, is_used) = match tcx.def_kind(*def_id) {
+                            rustc_hir::def::DefKind::Static {
+                                mutability, nested, ..
+                            } if nested => (mutability == rustc_ast::Mutability::Mut, false),
+                            _ => {
+                                // A static is writable if it's `static mut` OR
+                                // if its type has interior mutability (contains
+                                // UnsafeCell), e.g. Mutex, Cell, AtomicU32.
+                                // Such types must live in .data, not .rodata.
+                                let static_ty = tcx.type_of(*def_id).instantiate_identity();
+                                let writable = tcx.is_mutable_static(*def_id)
+                                    || !static_ty
+                                        .is_freeze(tcx, ty::TypingEnv::fully_monomorphized());
+                                let used = {
+                                    let flags = tcx.codegen_fn_attrs(*def_id).flags;
+                                    use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrFlags;
+                                    flags.contains(CodegenFnAttrFlags::USED_LINKER)
+                                        || flags.contains(CodegenFnAttrFlags::USED_COMPILER)
+                                };
+                                (writable, used)
+                            }
+                        };
+                        let is_tls = {
+                            use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrFlags;
+                            attrs.flags.contains(CodegenFnAttrFlags::THREAD_LOCAL)
+                        };
+                        all_static_data.push(StaticData {
+                            name: sym_name,
+                            data: bytes,
+                            relocations: relocs,
+                            writable: needs_write,
+                            used: is_used,
+                            weak_undefined: false,
+                            align: inner.align.bytes(),
+                            thread_local: is_tls,
+                        });
+                    }
                 }
             }
 
@@ -405,11 +454,10 @@ impl CodegenBackend for TuffyCodegenBackend {
                 break;
             }
             for inst in batch {
-                // Skip non-local functions without MIR — they already
-                // exist in the rlib. Emitting even a weak stub can
-                // confuse the linker when the rlib symbol is also weak.
+                // Skip items without MIR — cross-crate non-inline
+                // functions already exist in the rlib, and local extern
+                // declarations (no body) must be resolved by the linker.
                 if let ty::InstanceKind::Item(def_id) = inst.def
-                    && !def_id.is_local()
                     && !tcx.is_mir_available(def_id)
                     && !matches!(tcx.def_kind(def_id), rustc_hir::def::DefKind::Ctor(..))
                 {
@@ -444,7 +492,7 @@ impl CodegenBackend for TuffyCodegenBackend {
                 pending_instances.extend(result.referenced_instances.iter().copied());
                 if let Some(ref mut buf) = module_ir_text {
                     use std::fmt::Write;
-                    for (sym_id, data, relocs) in &result.static_data {
+                    for (sym_id, data, relocs, _sd_align) in &result.static_data {
                         let name = result.symbols.resolve(*sym_id);
                         let reloc_strs: Vec<(usize, &str)> =
                             relocs.iter().map(|(o, s)| (*o, s.as_str())).collect();
@@ -466,7 +514,20 @@ impl CodegenBackend for TuffyCodegenBackend {
                     let func_name = result.symbols.resolve(result.func.name);
                     panic!("IR verification failed for {func_name}: {vr}");
                 }
-                for (sym_id, data, relocs) in &result.static_data {
+                // Emit weak undefined symbols FIRST.
+                for sym in &result.weak_undefined_symbols {
+                    inline_static_data.push(StaticData {
+                        name: sym.clone(),
+                        data: vec![],
+                        relocations: vec![],
+                        writable: false,
+                        used: false,
+                        weak_undefined: true,
+                        align: 1,
+                        thread_local: false,
+                    });
+                }
+                for (sym_id, data, relocs, sd_align) in &result.static_data {
                     inline_static_data.push(StaticData {
                         name: result.symbols.resolve(*sym_id).to_string(),
                         data: data.clone(),
@@ -480,6 +541,9 @@ impl CodegenBackend for TuffyCodegenBackend {
                             .collect(),
                         writable: false,
                         used: false,
+                        weak_undefined: false,
+                        align: *sd_align,
+                        thread_local: false,
                     });
                 }
                 if let Some(mut cf) = session.compile_function(
@@ -744,6 +808,9 @@ fn collect_alloc_relocs<'tcx>(
                     relocations: nested_relocs,
                     writable: false,
                     used: false,
+                    weak_undefined: false,
+                    align: inner.align.bytes(),
+                    thread_local: false,
                 });
                 name
             }
@@ -777,6 +844,9 @@ fn collect_alloc_relocs<'tcx>(
                             relocations: nested_relocs,
                             writable: false,
                             used: false,
+                            weak_undefined: false,
+                            align: inner.align.bytes(),
+                            thread_local: false,
                         });
                         name
                     } else {

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use rustc_middle::mir::{self, BasicBlock};
 use rustc_middle::ty::{self, Instance, TyCtxt};
@@ -181,6 +181,9 @@ pub(super) struct TranslationCtx<'a, 'tcx> {
     /// SRET pointer for functions returning large structs (>16 bytes).
     /// When set, param indices are shifted by 1 (param 0 = hidden SRET ptr).
     pub(super) sret_ptr: Option<ValueRef>,
+    /// Symbol names that should be emitted as weak undefined references
+    /// (e.g. from `#[linkage = "extern_weak"]` statics).
+    pub(super) weak_undefined_symbols: HashSet<String>,
 }
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
@@ -329,7 +332,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let file_len = file_bytes.len() as u64;
         let file_sym_name = format!(".Lloc_file.{}", self.next_data_id());
         let file_sym_id = self.symbols.intern(&file_sym_name);
-        self.static_data.push((file_sym_id, file_bytes, vec![]));
+        self.static_data.push((file_sym_id, file_bytes, vec![], 1));
 
         // 2. Build the 24-byte Location struct.
         //    Layout: file_ptr(8) + file_len(8) + line(4) + col(4)
@@ -343,7 +346,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let loc_sym_id = self.symbols.intern(&loc_sym_name);
         let file_sym_str = self.symbols.resolve(file_sym_id).to_string();
         self.static_data
-            .push((loc_sym_id, loc_bytes, vec![(0, file_sym_str)]));
+            .push((loc_sym_id, loc_bytes, vec![(0, file_sym_str)], 8));
 
         self.builder
             .symbol_addr(loc_sym_id, Origin::synthetic())

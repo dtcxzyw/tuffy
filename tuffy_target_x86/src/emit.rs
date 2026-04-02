@@ -43,7 +43,26 @@ pub fn emit_elf_with_data(functions: &[CompiledFunction], statics: &[StaticData]
         let data_rel_ro = obj.section_id(object::write::StandardSection::ReadOnlyDataWithRel);
         let data_rw = obj.section_id(object::write::StandardSection::Data);
         for sd in statics {
-            let section = if sd.used {
+            // Weak undefined symbols (e.g. `#[linkage = "extern_weak"]`) have
+            // no data and no section — just a weak undefined ELF symbol.
+            if sd.weak_undefined {
+                let sid = obj.add_symbol(Symbol {
+                    name: sd.name.as_bytes().to_vec(),
+                    value: 0,
+                    size: 0,
+                    kind: SymbolKind::Data,
+                    scope: SymbolScope::Unknown,
+                    weak: true,
+                    section: SymbolSection::Undefined,
+                    flags: SymbolFlags::None,
+                });
+                sym_map.insert(sd.name.clone(), sid);
+                continue;
+            }
+            let section = if sd.thread_local {
+                // Thread-local statics go in .tdata (SHF_TLS | SHF_WRITE | SHF_ALLOC).
+                obj.section_id(object::write::StandardSection::Tls)
+            } else if sd.used {
                 // #[used] statics must survive linker GC (e.g. proc_macro_decls).
                 // Place in a per-symbol section with SHF_GNU_RETAIN so --gc-sections
                 // keeps it even without incoming references.
@@ -84,7 +103,7 @@ pub fn emit_elf_with_data(functions: &[CompiledFunction], statics: &[StaticData]
             } else {
                 data_rel_ro
             };
-            let offset = obj.append_section_data(section, &sd.data, 1);
+            let offset = obj.append_section_data(section, &sd.data, sd.align.max(1));
 
             let scope = if sd.name.starts_with(".L") {
                 SymbolScope::Compilation
@@ -99,7 +118,11 @@ pub fn emit_elf_with_data(functions: &[CompiledFunction], statics: &[StaticData]
                 name: sd.name.as_bytes().to_vec(),
                 value: offset,
                 size: sd.data.len() as u64,
-                kind: SymbolKind::Data,
+                kind: if sd.thread_local {
+                    SymbolKind::Tls
+                } else {
+                    SymbolKind::Data
+                },
                 scope,
                 weak: false,
                 section: SymbolSection::Section(section),

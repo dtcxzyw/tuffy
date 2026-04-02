@@ -998,7 +998,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 &mut self.referenced_instances,
                                 self.data_counter,
                             );
-                            self.static_data.push((sym_id, bytes, relocs));
+                            self.static_data.push((
+                                sym_id,
+                                bytes,
+                                relocs,
+                                inner_alloc.align.bytes(),
+                            ));
                             return Some(
                                 self.builder.symbol_addr(sym_id, Origin::synthetic()).raw(),
                             );
@@ -1109,7 +1114,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                             &mut self.referenced_instances,
                                             self.data_counter,
                                         );
-                                        self.static_data.push((sym_id, bytes, relocs));
+                                        self.static_data.push((
+                                            sym_id,
+                                            bytes,
+                                            relocs,
+                                            inner_alloc.align.bytes(),
+                                        ));
                                         return Some(
                                             self.builder
                                                 .symbol_addr(sym_id, Origin::synthetic())
@@ -3774,6 +3784,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 &mut self.current_mem,
                 &mut self.referenced_instances,
                 self.data_counter,
+                &mut self.weak_undefined_symbols,
             ),
             Operand::RuntimeChecks(_) => {
                 // UbChecks / ContractChecks / OverflowChecks: emit false (0)

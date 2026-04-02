@@ -32,7 +32,7 @@ use tuffy_ir::types::Type;
 
 /// Static data entry: (symbol_id, bytes, relocations).
 /// Relocations are (offset_in_bytes, target_symbol_name) for function pointers in vtables.
-type StaticDataVec = Vec<(SymbolId, Vec<u8>, Vec<(usize, String)>)>;
+type StaticDataVec = Vec<(SymbolId, Vec<u8>, Vec<(usize, String)>, u64)>;
 
 /// Result of MIR → IR translation.
 pub struct TranslationResult<'tcx> {
@@ -46,6 +46,8 @@ pub struct TranslationResult<'tcx> {
     /// Instances referenced by direct calls during translation.
     /// Used to compile `#[inline]` functions not collected as mono items.
     pub referenced_instances: Vec<Instance<'tcx>>,
+    /// Symbol names that need weak undefined binding in the object file.
+    pub weak_undefined_symbols: std::collections::HashSet<String>,
 }
 
 /// Translate a single MIR function instance to tuffy IR.
@@ -60,12 +62,12 @@ pub fn translate_function<'tcx>(
     if instance.args.has_non_region_param() {
         return None;
     }
-    // Cross-crate items only have MIR available if they are #[inline].
-    // Non-inline external functions are already compiled in the rlib.
+    // Skip items without MIR.  This covers:
+    //  - Cross-crate non-inline functions (already compiled in the rlib)
+    //  - Local extern declarations (e.g. `extern { fn panic_impl(); }` in core)
     // Exception: constructors (enum variant / struct) have synthesized MIR
     // via instance_mir even when is_mir_available returns false.
     if let ty::InstanceKind::Item(def_id) = instance.def
-        && !def_id.is_local()
         && !tcx.is_mir_available(def_id)
         && !matches!(tcx.def_kind(def_id), rustc_hir::def::DefKind::Ctor(..))
     {
@@ -350,6 +352,7 @@ pub fn translate_function<'tcx>(
         referenced_instances: Vec::new(),
         data_counter,
         sret_ptr: None,
+        weak_undefined_symbols: std::collections::HashSet::new(),
     };
 
     // Emit params into the entry block.
@@ -810,6 +813,7 @@ pub fn translate_function<'tcx>(
         static_data,
         abi_metadata,
         referenced_instances,
+        weak_undefined_symbols,
         ..
     } = ctx;
 
@@ -819,5 +823,6 @@ pub fn translate_function<'tcx>(
         static_data,
         abi_metadata,
         referenced_instances,
+        weak_undefined_symbols,
     })
 }

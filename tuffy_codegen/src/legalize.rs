@@ -943,6 +943,36 @@ fn legalize_inst<M: AbiMetadata + Clone>(
             );
             s.vmap.set(old_vref, Mapped::One(v));
         }
+        // Large struct stores (>16 bytes) where the value was NOT split into
+        // a wide (lo, hi) pair.  This happens when a load.N (N > 16) result
+        // passes through legalization as a single value.  Convert the
+        // load→store pair into a mem_copy so all bytes are transferred.
+        Op::Store(val, ptr, bytes, mem) if *bytes > 16 && !is_wide(s, val.value) => {
+            let src_ptr_op = match &old.inst(val.value.index()).op {
+                Op::Load(load_ptr, load_bytes, _) if *load_bytes >= *bytes => {
+                    Some(remap_op(s, &load_ptr.clone().raw()))
+                }
+                _ => None,
+            };
+            if let Some(src_ptr) = src_ptr_op {
+                let dst = remap_op(s, &ptr.clone().raw());
+                let m = remap_op(s, &mem.clone().raw());
+                let count = b.iconst(*bytes as i64, 64, IntSignedness::Unsigned, o());
+                let dst_annotated = Operand::annotated(dst.value, Annotation::Align(1));
+                let src_annotated = Operand::annotated(src_ptr.value, Annotation::Align(1));
+                let new_mem = b.mem_copy(
+                    dst_annotated.into(),
+                    src_annotated.into(),
+                    count.into(),
+                    m.into(),
+                    o(),
+                );
+                s.vmap.set(old_vref, Mapped::One(new_mem.into()));
+                return;
+            }
+            // Not from a load — fall through to copy_inst.
+            copy_inst(old, s, b, old_vref, inst, symbols);
+        }
         Op::Store(val, ptr, bytes, mem) if is_wide(s, val.value) => {
             // For wide stores > 16 bytes (e.g. store.32 load32_result, dst),
             // a 2-word lo/hi split would lose bytes 16+.  When the stored value

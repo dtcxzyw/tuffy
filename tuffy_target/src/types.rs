@@ -31,4 +31,12 @@ pub struct StaticData {
     /// If true, the static has `#[used]` semantics and must survive
     /// linker garbage collection (e.g. proc_macro_decls).
     pub used: bool,
+    /// If true, emit as a weak undefined symbol (no data, no section).
+    /// Used for `#[linkage = "extern_weak"]` statics.
+    pub weak_undefined: bool,
+    /// Required alignment in bytes (must be a power of two).
+    /// Defaults to 1 if unknown.
+    pub align: u64,
+    /// If true, place in a TLS section (.tdata/.tbss) and mark as STT_TLS.
+    pub thread_local: bool,
 }
