@@ -25,6 +25,10 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
+// CHECK: data @.Lloc_file.0 = "/tuffy/rustc_codegen_tuffy/tests/codegen/rvalue/div.rs"
+// CHECK: data @.Lloc.1 = "..." relocs [0: @.Lloc_file.0]
+// CHECK: data @.Lloc_file.2 = "/tuffy/rustc_codegen_tuffy/tests/codegen/rvalue/div.rs"
+// CHECK: data @.Lloc.3 = "..." relocs [0: @.Lloc_file.2]
 // CHECK: func @div_i32(int:s32, int:s32) -> int:s32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:s32 = param 0
@@ -60,9 +64,15 @@
 // CHECK:     ret v28, v27
 // CHECK:
 // CHECK:   bb3(v30: mem):
+// CHECK:     v31: ptr = symbol_addr @.Lloc.1
+// CHECK:     v32: ptr = symbol_addr @_RNvNtNtC$HASH_4core9panicking11panic_const23panic_const_div_by_zero
+// CHECK:     v33: mem = call v32(v31), v30
 // CHECK:     trap
 // CHECK:
-// CHECK:   bb4(v32: mem):
+// CHECK:   bb4(v35: mem):
+// CHECK:     v36: ptr = symbol_addr @.Lloc.3
+// CHECK:     v37: ptr = symbol_addr @_RNvNtNtC$HASH_4core9panicking11panic_const24panic_const_div_overflow
+// CHECK:     v38: mem = call v37(v36), v35
 // CHECK:     trap
 // CHECK: }
 // CHECK:
@@ -82,6 +92,8 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
+// CHECK: data @.Lloc_file.4 = "/tuffy/rustc_codegen_tuffy/tests/codegen/rvalue/div.rs"
+// CHECK: data @.Lloc.5 = "..." relocs [0: @.Lloc_file.4]
 // CHECK: func @div_u32(int:u32, int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u32 = param 0
@@ -100,6 +112,9 @@
 // CHECK:     ret v12, v11
 // CHECK:
 // CHECK:   bb2(v14: mem):
+// CHECK:     v15: ptr = symbol_addr @.Lloc.5
+// CHECK:     v16: ptr = symbol_addr @_RNvNtNtC$HASH_4core9panicking11panic_const23panic_const_div_by_zero
+// CHECK:     v17: mem = call v16(v15), v14
 // CHECK:     trap
 // CHECK: }
 // CHECK:
@@ -129,6 +144,10 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
+// CHECK: data @.Lloc_file.6 = "/tuffy/rustc_codegen_tuffy/tests/codegen/rvalue/div.rs"
+// CHECK: data @.Lloc.7 = "..." relocs [0: @.Lloc_file.6]
+// CHECK: data @.Lloc_file.8 = "/tuffy/rustc_codegen_tuffy/tests/codegen/rvalue/div.rs"
+// CHECK: data @.Lloc.9 = "..." relocs [0: @.Lloc_file.8]
 // CHECK: func @rem_i32(int:s32, int:s32) -> int:s32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:s32 = param 0
@@ -164,9 +183,15 @@
 // CHECK:     ret v28, v27
 // CHECK:
 // CHECK:   bb3(v30: mem):
+// CHECK:     v31: ptr = symbol_addr @.Lloc.7
+// CHECK:     v32: ptr = symbol_addr @_RNvNtNtC$HASH_4core9panicking11panic_const23panic_const_rem_by_zero
+// CHECK:     v33: mem = call v32(v31), v30
 // CHECK:     trap
 // CHECK:
-// CHECK:   bb4(v32: mem):
+// CHECK:   bb4(v35: mem):
+// CHECK:     v36: ptr = symbol_addr @.Lloc.9
+// CHECK:     v37: ptr = symbol_addr @_RNvNtNtC$HASH_4core9panicking11panic_const24panic_const_rem_overflow
+// CHECK:     v38: mem = call v37(v36), v35
 // CHECK:     trap
 // CHECK: }
 // CHECK:
@@ -186,6 +211,8 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
+// CHECK: data @.Lloc_file.10 = "/tuffy/rustc_codegen_tuffy/tests/codegen/rvalue/div.rs"
+// CHECK: data @.Lloc.11 = "..." relocs [0: @.Lloc_file.10]
 // CHECK: func @rem_u32(int:u32, int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u32 = param 0
@@ -204,6 +231,9 @@
 // CHECK:     ret v12, v11
 // CHECK:
 // CHECK:   bb2(v14: mem):
+// CHECK:     v15: ptr = symbol_addr @.Lloc.11
+// CHECK:     v16: ptr = symbol_addr @_RNvNtNtC$HASH_4core9panicking11panic_const23panic_const_rem_by_zero
+// CHECK:     v17: mem = call v16(v15), v14
 // CHECK:     trap
 // CHECK: }
 // CHECK:

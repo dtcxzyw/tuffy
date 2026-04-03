@@ -32,6 +32,8 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
+// CHECK: data @.Lloc_file.0 = "$SYSROOT/library/core/src/intrinsics/mod.rs"
+// CHECK: data @.Lloc.1 = "..." relocs [0: @.Lloc_file.0]
 // CHECK: func @_RINvNtC$HASH_4core10intrinsics11rotate_leftmEC$HASH_6rotate(int:u32, int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u32 = param 0
@@ -53,17 +55,23 @@
 // CHECK:
 // CHECK:   bb1(v17: mem):
 // CHECK:     v18: int:u32 = rem v2, v8
-// CHECK:     v19: int:i64 = iconst 32
-// CHECK:     v20: int:u64 = sub v19, v18
-// CHECK:     v21: int:u32 = shl v1, v18
-// CHECK:     v22: int:u32 = shr v1, v20
-// CHECK:     v23: int:u64 = or v21, v22
+// CHECK:     v19: int:u64 = iconst 4294967295
+// CHECK:     v20: int:u64 = and v1, v19
+// CHECK:     v21: int:u64 = iconst 32
+// CHECK:     v22: int:u64 = shl v1, v21
+// CHECK:     v23: int:u64 = or v22, v20
+// CHECK:     v24: int:u64 = sub v21, v18
+// CHECK:     v25: int:u64 = shr v23, v24
+// CHECK:     v26: int:u64 = and v25, v19
 // CHECK:     br bb2(v17)
 // CHECK:
-// CHECK:   bb2(v25: mem):
-// CHECK:     ret v23, v25
+// CHECK:   bb2(v28: mem):
+// CHECK:     ret v26, v28
 // CHECK:
-// CHECK:   bb3(v27: mem):
+// CHECK:   bb3(v30: mem):
+// CHECK:     v31: ptr = symbol_addr @.Lloc.1
+// CHECK:     v32: ptr = symbol_addr @_RNvNtNtC$HASH_4core9panicking11panic_const23panic_const_rem_by_zero
+// CHECK:     v33: mem = call v32(v31), v30
 // CHECK:     trap
 // CHECK: }
 // CHECK:
@@ -100,6 +108,8 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
+// CHECK: data @.Lloc_file.2 = "$SYSROOT/library/core/src/intrinsics/mod.rs"
+// CHECK: data @.Lloc.3 = "..." relocs [0: @.Lloc_file.2]
 // CHECK: func @_RINvNtC$HASH_4core10intrinsics12rotate_rightmEC$HASH_6rotate(int:u32, int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u32 = param 0
@@ -121,17 +131,22 @@
 // CHECK:
 // CHECK:   bb1(v17: mem):
 // CHECK:     v18: int:u32 = rem v2, v8
-// CHECK:     v19: int:i64 = iconst 32
-// CHECK:     v20: int:u64 = sub v19, v18
-// CHECK:     v21: int:u32 = shl v1, v20
-// CHECK:     v22: int:u32 = shr v1, v18
-// CHECK:     v23: int:u64 = or v21, v22
+// CHECK:     v19: int:u64 = iconst 4294967295
+// CHECK:     v20: int:u64 = and v1, v19
+// CHECK:     v21: int:u64 = iconst 32
+// CHECK:     v22: int:u64 = shl v1, v21
+// CHECK:     v23: int:u64 = or v22, v20
+// CHECK:     v24: int:u64 = shr v23, v18
+// CHECK:     v25: int:u64 = and v24, v19
 // CHECK:     br bb2(v17)
 // CHECK:
-// CHECK:   bb2(v25: mem):
-// CHECK:     ret v23, v25
+// CHECK:   bb2(v27: mem):
+// CHECK:     ret v25, v27
 // CHECK:
-// CHECK:   bb3(v27: mem):
+// CHECK:   bb3(v29: mem):
+// CHECK:     v30: ptr = symbol_addr @.Lloc.3
+// CHECK:     v31: ptr = symbol_addr @_RNvNtNtC$HASH_4core9panicking11panic_const23panic_const_rem_by_zero
+// CHECK:     v32: mem = call v31(v30), v29
 // CHECK:     trap
 // CHECK: }
 // CHECK:
@@ -318,18 +333,20 @@
 // CHECK:     v20: int:i64 = iconst 31
 // CHECK:     v21: int:i64 = and v19, v20
 // CHECK:     v22: int:u32 = shr v2, v21
-// CHECK:     br bb2(v12)
+// CHECK:     v23: int:u32 = or v16, v22
+// CHECK:     v24: mem = store.4 v23, v4, v12
+// CHECK:     br bb2(v24)
 // CHECK:
-// CHECK:   bb2(v24: mem):
-// CHECK:     br bb4(v24)
+// CHECK:   bb2(v26: mem):
+// CHECK:     br bb4(v26)
 // CHECK:
-// CHECK:   bb3(v26: mem):
-// CHECK:     v27: mem = store.4 v1, v4, v26
-// CHECK:     br bb4(v27)
+// CHECK:   bb3(v28: mem):
+// CHECK:     v29: mem = store.4 v1, v4, v28
+// CHECK:     br bb4(v29)
 // CHECK:
-// CHECK:   bb4(v29: mem):
-// CHECK:     v30: int:u32 = load.4 v4, v29
-// CHECK:     ret v30, v29
+// CHECK:   bb4(v31: mem):
+// CHECK:     v32: int:u32 = load.4 v4, v31
+// CHECK:     ret v32, v31
 // CHECK: }
 // CHECK:
 // CHECK: fn <u32 as core::intrinsics::fallback::FunnelShift>::unchecked_funnel_shr(_1: u32, _2: u32, _3: u32) -> u32 {
@@ -401,18 +418,20 @@
 // CHECK:     v20: int:i64 = iconst 31
 // CHECK:     v21: int:i64 = and v3, v20
 // CHECK:     v22: int:u32 = shr v2, v21
-// CHECK:     br bb2(v12)
+// CHECK:     v23: int:u32 = or v19, v22
+// CHECK:     v24: mem = store.4 v23, v4, v12
+// CHECK:     br bb2(v24)
 // CHECK:
-// CHECK:   bb2(v24: mem):
-// CHECK:     br bb4(v24)
+// CHECK:   bb2(v26: mem):
+// CHECK:     br bb4(v26)
 // CHECK:
-// CHECK:   bb3(v26: mem):
-// CHECK:     v27: mem = store.4 v2, v4, v26
-// CHECK:     br bb4(v27)
+// CHECK:   bb3(v28: mem):
+// CHECK:     v29: mem = store.4 v2, v4, v28
+// CHECK:     br bb4(v29)
 // CHECK:
-// CHECK:   bb4(v29: mem):
-// CHECK:     v30: int:u32 = load.4 v4, v29
-// CHECK:     ret v30, v29
+// CHECK:   bb4(v31: mem):
+// CHECK:     v32: int:u32 = load.4 v4, v31
+// CHECK:     ret v32, v31
 // CHECK: }
 // CHECK:
 // CHECK: fn rotate_left_u32(_1: u32, _2: u32) -> u32 {

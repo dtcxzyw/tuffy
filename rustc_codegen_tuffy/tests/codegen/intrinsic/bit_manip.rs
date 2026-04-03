@@ -64,11 +64,13 @@
 // CHECK: func @ctlz_u32(int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u32 = param 0
-// CHECK:     v2: int:u32 = count_leading_zeros.32 v1
+// CHECK:     v2: int:u64 = count_leading_zeros.64 v1
+// CHECK:     v3: int:u64 = iconst 32
+// CHECK:     v4: int:u64 = sub v2, v3
 // CHECK:     br bb1(v0)
 // CHECK:
-// CHECK:   bb1(v4: mem):
-// CHECK:     ret v2, v4
+// CHECK:   bb1(v6: mem):
+// CHECK:     ret v4, v6
 // CHECK: }
 // CHECK:
 // CHECK: fn ctpop_u32(_1: u32) -> u32 {
@@ -88,11 +90,13 @@
 // CHECK: func @ctpop_u32(int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u32 = param 0
-// CHECK:     v2: int:u64 = count_ones v1
+// CHECK:     v2: int:u64 = iconst 4294967295
+// CHECK:     v3: int:u64 = and v1, v2
+// CHECK:     v4: int:u64 = count_ones v3
 // CHECK:     br bb1(v0)
 // CHECK:
-// CHECK:   bb1(v4: mem):
-// CHECK:     ret v2, v4
+// CHECK:   bb1(v6: mem):
+// CHECK:     ret v4, v6
 // CHECK: }
 // CHECK:
 // CHECK: fn cttz_u32(_1: u32) -> u32 {
@@ -112,11 +116,13 @@
 // CHECK: func @cttz_u32(int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u32 = param 0
-// CHECK:     v2: int:u64 = count_trailing_zeros v1
+// CHECK:     v2: int:u64 = iconst 4294967296
+// CHECK:     v3: int:u64 = or v1, v2
+// CHECK:     v4: int:u64 = count_trailing_zeros v3
 // CHECK:     br bb1(v0)
 // CHECK:
-// CHECK:   bb1(v4: mem):
-// CHECK:     ret v2, v4
+// CHECK:   bb1(v6: mem):
+// CHECK:     ret v4, v6
 // CHECK: }
 // CHECK:
 

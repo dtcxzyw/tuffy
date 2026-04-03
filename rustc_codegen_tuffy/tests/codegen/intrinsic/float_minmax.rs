@@ -956,11 +956,23 @@
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: f32 = param 0
 // CHECK:     v2: f32 = param 1
-// CHECK:     v3: f32 = fmaxnum v1, v2
+// CHECK:     v3: bool = fcmp.uno v1, v1
+// CHECK:     v4: bool = fcmp.uno v2, v2
+// CHECK:     v5: bool = bor v3, v4
+// CHECK:     v6: f32 = fadd v1, v2
+// CHECK:     v7: bool = fcmp.ogt v1, v2
+// CHECK:     v8: bool = fcmp.olt v1, v2
+// CHECK:     v9: int:u32 = bitcast v1
+// CHECK:     v10: int:u32 = bitcast v2
+// CHECK:     v11: int:u32 = and v9, v10
+// CHECK:     v12: f32 = bitcast v11
+// CHECK:     v13: f32 = select v8, v2, v12
+// CHECK:     v14: f32 = select v7, v1, v13
+// CHECK:     v15: f32 = select v5, v6, v14
 // CHECK:     br bb1(v0)
 // CHECK:
-// CHECK:   bb1(v5: mem):
-// CHECK:     ret v3, v5
+// CHECK:   bb1(v17: mem):
+// CHECK:     ret v15, v17
 // CHECK: }
 // CHECK:
 // CHECK: fn maxf64(_1: f64, _2: f64) -> f64 {
@@ -988,11 +1000,23 @@
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: f64 = param 0
 // CHECK:     v2: f64 = param 1
-// CHECK:     v3: f64 = fmaxnum v1, v2
+// CHECK:     v3: bool = fcmp.uno v1, v1
+// CHECK:     v4: bool = fcmp.uno v2, v2
+// CHECK:     v5: bool = bor v3, v4
+// CHECK:     v6: f64 = fadd v1, v2
+// CHECK:     v7: bool = fcmp.ogt v1, v2
+// CHECK:     v8: bool = fcmp.olt v1, v2
+// CHECK:     v9: int:u64 = bitcast v1
+// CHECK:     v10: int:u64 = bitcast v2
+// CHECK:     v11: int:u64 = and v9, v10
+// CHECK:     v12: f64 = bitcast v11
+// CHECK:     v13: f64 = select v8, v2, v12
+// CHECK:     v14: f64 = select v7, v1, v13
+// CHECK:     v15: f64 = select v5, v6, v14
 // CHECK:     br bb1(v0)
 // CHECK:
-// CHECK:   bb1(v5: mem):
-// CHECK:     ret v3, v5
+// CHECK:   bb1(v17: mem):
+// CHECK:     ret v15, v17
 // CHECK: }
 // CHECK:
 // CHECK: fn minf32(_1: f32, _2: f32) -> f32 {
@@ -1020,11 +1044,23 @@
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: f32 = param 0
 // CHECK:     v2: f32 = param 1
-// CHECK:     v3: f32 = fminnum v1, v2
+// CHECK:     v3: bool = fcmp.uno v1, v1
+// CHECK:     v4: bool = fcmp.uno v2, v2
+// CHECK:     v5: bool = bor v3, v4
+// CHECK:     v6: f32 = fadd v1, v2
+// CHECK:     v7: bool = fcmp.olt v1, v2
+// CHECK:     v8: bool = fcmp.ogt v1, v2
+// CHECK:     v9: int:u32 = bitcast v1
+// CHECK:     v10: int:u32 = bitcast v2
+// CHECK:     v11: int:u32 = or v9, v10
+// CHECK:     v12: f32 = bitcast v11
+// CHECK:     v13: f32 = select v8, v2, v12
+// CHECK:     v14: f32 = select v7, v1, v13
+// CHECK:     v15: f32 = select v5, v6, v14
 // CHECK:     br bb1(v0)
 // CHECK:
-// CHECK:   bb1(v5: mem):
-// CHECK:     ret v3, v5
+// CHECK:   bb1(v17: mem):
+// CHECK:     ret v15, v17
 // CHECK: }
 // CHECK:
 // CHECK: fn minf64(_1: f64, _2: f64) -> f64 {
@@ -1052,11 +1088,23 @@
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: f64 = param 0
 // CHECK:     v2: f64 = param 1
-// CHECK:     v3: f64 = fminnum v1, v2
+// CHECK:     v3: bool = fcmp.uno v1, v1
+// CHECK:     v4: bool = fcmp.uno v2, v2
+// CHECK:     v5: bool = bor v3, v4
+// CHECK:     v6: f64 = fadd v1, v2
+// CHECK:     v7: bool = fcmp.olt v1, v2
+// CHECK:     v8: bool = fcmp.ogt v1, v2
+// CHECK:     v9: int:u64 = bitcast v1
+// CHECK:     v10: int:u64 = bitcast v2
+// CHECK:     v11: int:u64 = or v9, v10
+// CHECK:     v12: f64 = bitcast v11
+// CHECK:     v13: f64 = select v8, v2, v12
+// CHECK:     v14: f64 = select v7, v1, v13
+// CHECK:     v15: f64 = select v5, v6, v14
 // CHECK:     br bb1(v0)
 // CHECK:
-// CHECK:   bb1(v5: mem):
-// CHECK:     ret v3, v5
+// CHECK:   bb1(v17: mem):
+// CHECK:     ret v15, v17
 // CHECK: }
 // CHECK:
 

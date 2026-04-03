@@ -413,7 +413,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         // store path instead.
                         let val_is_ptr =
                             matches!(self.builder.value_type(result_val), Some(Type::Ptr(_)));
-                        if val_is_ptr && size > 8 && self.builder.is_memory_address(result_val) {
+                        if val_is_ptr && self.builder.is_memory_address(result_val) {
                             let mut offset = 0u32;
                             while offset < size {
                                 let chunk = std::cmp::min(8, size - offset);
@@ -555,7 +555,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let size = type_size(self.tcx, dest_ty).unwrap_or(8) as u32;
                     let val_is_ptr =
                         matches!(self.builder.value_type(result_val), Some(Type::Ptr(_)));
-                    if val_is_ptr && size > 8 {
+                    if val_is_ptr && self.builder.is_memory_address(result_val) {
                         let mut offset = 0u32;
                         while offset < size {
                             let chunk = std::cmp::min(8, size - offset);
@@ -632,17 +632,44 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // Intrinsic detected but not handled inline.  If it maps to a
             // libc symbol (e.g. compare_bytes → memcmp), fall through to
             // the normal call path so resolve_call_target can emit the call.
-            // Only treat truly unhandled intrinsics as no-ops.
+            // Newer intrinsics (e.g. carryless_mul) have fallback bodies
+            // compiled as regular functions — also fall through for those.
+            // Only treat truly unhandled intrinsics (no libc mapping, no
+            // fallback body) as no-ops.
             if intrinsic_to_libc(&intrinsic_name).is_none() {
-                if let Some(target) = target {
-                    let target_block = self.block_map.get(*target);
-                    self.builder.br(
-                        target_block,
-                        vec![self.current_mem.into()],
-                        Origin::synthetic(),
+                // Check if the intrinsic has a fallback body we can call.
+                // Intrinsics with must_be_overridden=false have Rust
+                // fallback implementations; those with must_be_overridden=true
+                // must be handled by the backend.
+                let has_fallback_body = if let Operand::Constant(c) = func {
+                    let fn_ty = self.tcx.instantiate_and_normalize_erasing_regions(
+                        self.instance.args,
+                        ty::TypingEnv::fully_monomorphized(),
+                        ty::EarlyBinder::bind(c.ty()),
                     );
+                    if let ty::FnDef(def_id, _) = fn_ty.kind() {
+                        self.tcx
+                            .intrinsic(*def_id)
+                            .is_some_and(|i| !i.must_be_overridden)
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+
+                if !has_fallback_body {
+                    if let Some(target) = target {
+                        let target_block = self.block_map.get(*target);
+                        self.builder.br(
+                            target_block,
+                            vec![self.current_mem.into()],
+                            Origin::synthetic(),
+                        );
+                    }
+                    return;
                 }
-                return;
+                // has_fallback_body: fall through to normal call path below
             }
         }
 

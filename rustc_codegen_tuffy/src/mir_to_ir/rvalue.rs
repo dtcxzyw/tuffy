@@ -273,8 +273,53 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 .ptradd(addr.into(), off_val.into(), 0, Origin::synthetic())
                                 .raw();
                         }
+                    } else {
+                        // from_end: index = len - offset
+                        let ann = IntAnnotation {
+                            bit_width: 64,
+                            signedness: IntSignedness::Unsigned,
+                        };
+                        let off_val = self.builder.iconst(
+                            offset as i64,
+                            64,
+                            IntSignedness::Unsigned,
+                            Origin::synthetic(),
+                        );
+                        let idx = match cur_ty.kind() {
+                            ty::Array(_, n) => {
+                                let n = n.try_to_target_usize(self.tcx).unwrap_or(0);
+                                self.builder.iconst(
+                                    (n - offset) as i64,
+                                    64,
+                                    IntSignedness::Unsigned,
+                                    Origin::synthetic(),
+                                )
+                            }
+                            ty::Slice(_) => {
+                                let len = self.find_fat_metadata_for_place(place)?;
+                                self.builder.sub(
+                                    len.into(),
+                                    off_val.into(),
+                                    ann,
+                                    Origin::synthetic(),
+                                )
+                            }
+                            _ => return None,
+                        };
+                        let size_val = self.builder.iconst(
+                            elem_size as i64,
+                            64,
+                            IntSignedness::DontCare,
+                            Origin::synthetic(),
+                        );
+                        let byte_off =
+                            self.builder
+                                .mul(idx.into(), size_val.into(), ann, Origin::synthetic());
+                        addr = self
+                            .builder
+                            .ptradd(addr.into(), byte_off.into(), 0, Origin::synthetic())
+                            .raw();
                     }
-                    // from_end case would need array length; skip for now.
                     cur_ty = elem_ty;
                 }
                 PlaceElem::Subslice { from, to, from_end } => {
@@ -916,33 +961,47 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // For Unsize coercions from [T; N] to [T], emit the
                 // array length as slice metadata.
                 if let CastKind::PointerCoercion(PointerCoercion::Unsize, _) = cast_kind {
-                    let src_ty = self.operand_ty_mono(op);
-                    if let Some(src_ty) = src_ty {
-                        let src_inner = match src_ty.kind() {
-                            ty::Ref(_, inner, _) => Some(*inner),
-                            ty::RawPtr(inner, _) => Some(*inner),
-                            _ if src_ty.is_box() => src_ty.boxed_ty(),
-                            _ => None,
-                        };
-                        if let Some(inner) = src_inner {
-                            // Use struct_tail_for_codegen to handle both direct
-                            // array unsizing (&[T; N] → &[T]) and struct unsizing
-                            // (&Wrapper<[T; N]> → &Wrapper<[T]>) where the array
-                            // is nested inside one or more wrapper structs.
-                            let typing_env = ty::TypingEnv::fully_monomorphized();
-                            let src_tail = self.tcx.struct_tail_for_codegen(inner, typing_env);
-                            if let ty::Array(_, len_const) = src_tail.kind() {
-                                let len = len_const.try_to_target_usize(self.tcx).unwrap_or(0);
-                                return Some(
-                                    self.builder
-                                        .iconst(
-                                            len as i64,
-                                            64,
-                                            IntSignedness::DontCare,
-                                            Origin::synthetic(),
-                                        )
-                                        .raw(),
-                                );
+                    // Check whether the target is a trait object — if so, skip
+                    // the array-length path and fall through to vtable generation.
+                    let target_ty_m = self.monomorphize(*target_ty);
+                    let target_inner = match target_ty_m.kind() {
+                        ty::Ref(_, inner, _) => Some(*inner),
+                        ty::RawPtr(inner, _) => Some(*inner),
+                        _ if target_ty_m.is_box() => target_ty_m.boxed_ty(),
+                        _ => None,
+                    };
+                    let is_trait_target =
+                        target_inner.is_some_and(|t| matches!(t.kind(), ty::Dynamic(..)));
+
+                    if !is_trait_target {
+                        let src_ty = self.operand_ty_mono(op);
+                        if let Some(src_ty) = src_ty {
+                            let src_inner = match src_ty.kind() {
+                                ty::Ref(_, inner, _) => Some(*inner),
+                                ty::RawPtr(inner, _) => Some(*inner),
+                                _ if src_ty.is_box() => src_ty.boxed_ty(),
+                                _ => None,
+                            };
+                            if let Some(inner) = src_inner {
+                                // Use struct_tail_for_codegen to handle both direct
+                                // array unsizing (&[T; N] → &[T]) and struct unsizing
+                                // (&Wrapper<[T; N]> → &Wrapper<[T]>) where the array
+                                // is nested inside one or more wrapper structs.
+                                let typing_env = ty::TypingEnv::fully_monomorphized();
+                                let src_tail = self.tcx.struct_tail_for_codegen(inner, typing_env);
+                                if let ty::Array(_, len_const) = src_tail.kind() {
+                                    let len = len_const.try_to_target_usize(self.tcx).unwrap_or(0);
+                                    return Some(
+                                        self.builder
+                                            .iconst(
+                                                len as i64,
+                                                64,
+                                                IntSignedness::DontCare,
+                                                Origin::synthetic(),
+                                            )
+                                            .raw(),
+                                    );
+                                }
                             }
                         }
                     }
@@ -1205,12 +1264,17 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     }
 
     /// Apply sign/zero extension based on result annotation signedness.
+    /// For 128-bit results the operation already produces a full-width value,
+    /// so we skip the redundant zext/sext to avoid legalization overhead.
     fn apply_int_extension(
         &mut self,
         value: ValueRef,
         res_ann: Option<IntAnn>,
         bits: u32,
     ) -> ValueRef {
+        if bits >= 128 {
+            return value;
+        }
         match res_ann.unwrap() {
             IntAnn::Signed(_) => self
                 .builder
@@ -2742,7 +2806,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             && let Some(Type::Float(ft)) = translate_ty(self.tcx, target_ty_mono)
                         {
                             let size = type_size(self.tcx, target_ty_mono).unwrap_or(0) as u32;
-                            if size > 0 && size <= 8 {
+                            if size > 0 && size <= 16 {
                                 let slot = self.builder.stack_slot(size, Origin::synthetic());
                                 self.current_mem = self
                                     .builder
@@ -2772,7 +2836,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             && matches!(translate_ty(self.tcx, target_ty_mono), Some(Type::Int))
                         {
                             let size = type_size(self.tcx, target_ty_mono).unwrap_or(0) as u32;
-                            if size > 0 && size <= 8 {
+                            if size > 0 && size <= 16 {
                                 let slot = self.builder.stack_slot(size, Origin::synthetic());
                                 self.current_mem = self
                                     .builder

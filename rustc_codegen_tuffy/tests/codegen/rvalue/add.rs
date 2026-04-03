@@ -34,10 +34,9 @@
 // CHECK:     v2: int:u128 = param 1
 // CHECK:     v3: ptr = stack_slot 16
 // CHECK:     v4: int:i128 = add v1, v2
-// CHECK:     v5: int:u128 = zext v4, 128
-// CHECK:     v6: mem = store.16 v5, v3, v0
-// CHECK:     v7: int:u128 = load.16 v3, v6
-// CHECK:     ret v7, v6
+// CHECK:     v5: mem = store.16 v4, v3, v0
+// CHECK:     v6: int:u128 = load.16 v3, v5
+// CHECK:     ret v6, v5
 // CHECK: }
 // CHECK:
 

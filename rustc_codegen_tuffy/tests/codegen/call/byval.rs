@@ -28,6 +28,10 @@
 // CHECK:         return;
 // CHECK:     }
 // CHECK: }
+// CHECK: data @.Lloc_file.0 = "/tuffy/rustc_codegen_tuffy/tests/codegen/call/byval.rs"
+// CHECK: data @.Lloc.1 = "..." relocs [0: @.Lloc_file.0]
+// CHECK: data @.Lloc_file.2 = "/tuffy/rustc_codegen_tuffy/tests/codegen/call/byval.rs"
+// CHECK: data @.Lloc.3 = "..." relocs [0: @.Lloc_file.2]
 // CHECK: func @use_large(ptr) -> int:u64 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
@@ -62,9 +66,15 @@
 // CHECK:     ret v21, v29
 // CHECK:
 // CHECK:   bb3(v31: mem):
+// CHECK:     v32: ptr = symbol_addr @.Lloc.1
+// CHECK:     v33: ptr = symbol_addr @_RNvNtNtC$HASH_4core9panicking11panic_const24panic_const_add_overflow
+// CHECK:     v34: mem = call v33(v32), v31
 // CHECK:     trap
 // CHECK:
-// CHECK:   bb4(v33: mem):
+// CHECK:   bb4(v36: mem):
+// CHECK:     v37: ptr = symbol_addr @.Lloc.3
+// CHECK:     v38: ptr = symbol_addr @_RNvNtNtC$HASH_4core9panicking11panic_const24panic_const_add_overflow
+// CHECK:     v39: mem = call v38(v37), v36
 // CHECK:     trap
 // CHECK: }
 // CHECK:
