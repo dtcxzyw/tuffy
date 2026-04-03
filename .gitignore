@@ -242,4 +242,7 @@ book/output/
 
 *.rlib
 *.rcgu.o
+*.rcgu.S
 rustc-ice-*.txt
+*.mir
+*.rmeta

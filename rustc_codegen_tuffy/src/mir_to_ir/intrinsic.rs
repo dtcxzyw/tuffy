@@ -239,9 +239,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         .and_then(|t| type_size(tcx, t))
                         .map(|sz| (sz * 8) as u32)
                         .unwrap_or(64);
-                    if std::env::var("TUFFY_DEBUG_CLZ").is_ok() {
-                        eprintln!("[CLZ] bits={bits} for {:?}", self.instance);
-                    }
                     if bits <= 64 {
                         // Emit lzcnt64 and adjust for sub-64-bit types.
                         let clz =

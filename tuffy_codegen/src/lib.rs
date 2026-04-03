@@ -68,27 +68,11 @@ impl CodegenSession {
         match (&self.inner, metadata) {
             (CodegenInner::X86(backend), AbiMetadataBox::X86(meta)) => {
                 let legality = X86LegalityInfo;
-                let dump_fn = std::env::var("TUFFY_DUMP_FN").ok();
-                let fn_name = symbols.resolve(func.name).to_string();
-                if dump_fn
-                    .as_ref()
-                    .is_some_and(|pat| fn_name.contains(pat.as_str()))
-                {
-                    eprintln!("[DUMP-PRE] {fn_name}");
-                    eprintln!("{func}");
-                }
                 let legalized = legalize::legalize(func, meta, &legality, symbols);
                 let (func_ref, meta_ref) = match &legalized {
                     Some((f, m)) => (f, m),
                     None => (func, meta),
                 };
-                if dump_fn
-                    .as_ref()
-                    .is_some_and(|pat| fn_name.contains(pat.as_str()))
-                {
-                    eprintln!("[DUMP-POST] {fn_name}");
-                    eprintln!("{func_ref}");
-                }
                 backend.compile_function(func_ref, symbols, meta_ref)
             }
         }

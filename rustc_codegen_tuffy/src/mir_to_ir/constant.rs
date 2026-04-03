@@ -525,22 +525,27 @@ pub(super) fn translate_scalar(
             Some(builder.fconst(ft, bits, Origin::synthetic()).raw())
         }
         ty::Adt(..) => {
-            // Newtype structs (e.g., ExitCode(u8)) are represented as
-            // scalars. Treat the raw bits as an unsigned integer.
+            // Newtype structs (e.g., ExitCode(u8), NonZero<u128>) are
+            // represented as scalars. Use the scalar's actual bit width
+            // so 128-bit newtypes get an I128 annotation for legalization.
+            let size_bytes = int.size().bytes();
             let val = BigInt::from(bits);
+            let bit_width = (size_bytes * 8).min(128) as u32;
             Some(
                 builder
-                    .iconst(val, 64, IntSignedness::DontCare, Origin::synthetic())
+                    .iconst(val, bit_width, IntSignedness::DontCare, Origin::synthetic())
                     .raw(),
             )
         }
         ty::Tuple(_) => {
             // 1-tuples optimized to scalars by MIR (e.g., const (42_i32,)).
-            // Treat the raw bits as an unsigned integer.
+            // Use the scalar's actual bit width for correct legalization.
+            let size_bytes = int.size().bytes();
             let val = BigInt::from(bits);
+            let bit_width = (size_bytes * 8).min(128) as u32;
             Some(
                 builder
-                    .iconst(val, 64, IntSignedness::DontCare, Origin::synthetic())
+                    .iconst(val, bit_width, IntSignedness::DontCare, Origin::synthetic())
                     .raw(),
             )
         }

@@ -1487,14 +1487,6 @@ fn copy_inst<M: AbiMetadata + Clone>(
             // 128-bit CLZ: hi == 0 ? 64 + clz64(lo) : clz64(hi)
             let val_vref = a.clone().raw().value;
             let wide = is_wide(s, val_vref);
-            if std::env::var("TUFFY_DEBUG_CLZ").is_ok() {
-                let m = s.vmap.get(val_vref);
-                let desc = match m {
-                    Mapped::One(v) => format!("One({:?})", v),
-                    Mapped::Pair(lo, hi) => format!("Pair({:?}, {:?})", lo, hi),
-                };
-                eprintln!("[LEG-CLZ128] val_vref={val_vref:?} is_wide={wide} mapping={desc}");
-            }
             let (lo, hi) = if wide {
                 s.vmap.pair(val_vref)
             } else {
