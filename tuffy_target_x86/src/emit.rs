@@ -169,7 +169,18 @@ pub fn emit_elf_with_data(functions: &[CompiledFunction], statics: &[StaticData]
                     },
                 };
                 let addend = match reloc.kind {
-                    RelocKind::Abs64 => 0,
+                    RelocKind::Abs64 => {
+                        // Read existing bytes at reloc site as the addend.
+                        // CTFE stores the byte offset within the target allocation
+                        // in the pointer bytes; RELA format ignores the bytes and
+                        // uses only S+A, so we must capture the offset here.
+                        let off = reloc.offset;
+                        if off + 8 <= sd.data.len() {
+                            i64::from_le_bytes(sd.data[off..off + 8].try_into().unwrap())
+                        } else {
+                            0
+                        }
+                    }
                     _ => -4,
                 };
                 obj.add_relocation(

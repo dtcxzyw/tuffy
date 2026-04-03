@@ -2082,23 +2082,37 @@ fn select_inst(
             // Fallback: treat as regular load (x86 has strong memory model).
             let base = ctx.ensure_in_reg(addr.clone().raw().value)?;
             let dst = ctx.alloc.alloc();
+            // The data annotation is on secondary_result_annotation (data is secondary result).
+            let inst_ann = func.inst_pool.get(vref.index()).and_then(|n| {
+                match &n.inst.secondary_result_annotation {
+                    Some(Annotation::Int(ann)) => Some(*ann),
+                    _ => None,
+                }
+            });
+            let size = match inst_ann {
+                Some(ann) if ann.bit_width > 0 => bytes_to_opsize(ann.bit_width / 8),
+                _ => OpSize::S64,
+            };
             ctx.out.push(MInst::MovRM {
-                size: OpSize::S64,
+                size,
                 dst,
                 base,
                 offset: 0,
             });
             let data_vref = ValueRef::inst_secondary_result(vref.index());
             ctx.regs.assign(data_vref, dst);
-            // Secondary result (data) uses the same vreg — handled by
-            // ensure_in_reg for secondary refs.
         }
         Op::StoreAtomic(val, addr, _ordering, _mem) => {
             // Fallback: treat as regular store.
             let src = ctx.ensure_in_reg(val.value)?;
             let base = ctx.ensure_in_reg(addr.clone().raw().value)?;
+            let val_ann = get_int_annotation(func, val.value);
+            let size = match val_ann {
+                Some(ann) if ann.bit_width > 0 => bytes_to_opsize(ann.bit_width / 8),
+                _ => OpSize::S64,
+            };
             ctx.out.push(MInst::MovMR {
-                size: OpSize::S64,
+                size,
                 base,
                 offset: 0,
                 src,
@@ -2107,10 +2121,23 @@ fn select_inst(
         Op::AtomicRmw(rmw_op, ptr, val, _ordering, _mem) => {
             let base = ctx.ensure_in_reg(ptr.clone().raw().value)?;
             let val_reg = ctx.ensure_in_reg(val.value)?;
-            let val_ann = get_int_annotation(func, val.value);
-            let size = match val_ann {
-                Some(ann) => bytes_to_opsize(ann.bit_width / 8),
-                None => OpSize::S64,
+            // The size annotation is on secondary_result_annotation.
+            let inst_ann = func.inst_pool.get(vref.index()).and_then(|n| {
+                match &n.inst.secondary_result_annotation {
+                    Some(Annotation::Int(ann)) => Some(*ann),
+                    _ => None,
+                }
+            });
+            let size = match inst_ann {
+                Some(ann) if ann.bit_width > 0 => bytes_to_opsize(ann.bit_width / 8),
+                _ => {
+                    // Fall back to input value annotation.
+                    let val_ann = get_int_annotation(func, val.value);
+                    match val_ann {
+                        Some(ann) => bytes_to_opsize(ann.bit_width / 8),
+                        None => OpSize::S64,
+                    }
+                }
             };
             let op_kind = match rmw_op {
                 tuffy_ir::instruction::AtomicRmwOp::Xchg => AtomicRmwOpKind::Xchg,
@@ -2135,10 +2162,21 @@ fn select_inst(
             let base = ctx.ensure_in_reg(ptr.clone().raw().value)?;
             let expected_reg = ctx.ensure_in_reg(expected.value)?;
             let desired_reg = ctx.ensure_in_reg(desired.value)?;
-            let exp_ann = get_int_annotation(func, expected.value);
-            let size = match exp_ann {
-                Some(ann) => bytes_to_opsize(ann.bit_width / 8),
-                None => OpSize::S64,
+            let inst_ann = func.inst_pool.get(vref.index()).and_then(|n| {
+                match &n.inst.secondary_result_annotation {
+                    Some(Annotation::Int(ann)) => Some(*ann),
+                    _ => None,
+                }
+            });
+            let size = match inst_ann {
+                Some(ann) if ann.bit_width > 0 => bytes_to_opsize(ann.bit_width / 8),
+                _ => {
+                    let exp_ann = get_int_annotation(func, expected.value);
+                    match exp_ann {
+                        Some(ann) => bytes_to_opsize(ann.bit_width / 8),
+                        None => OpSize::S64,
+                    }
+                }
             };
             let dst = ctx.alloc.alloc();
             ctx.out.push(MInst::AtomicCmpXchg {
@@ -2266,11 +2304,13 @@ fn select_inst(
                 dst,
                 src: s,
             });
-            let bc = *bits / 8;
-            if bc >= 4 {
-                let sz = if bc >= 8 { OpSize::S64 } else { OpSize::S32 };
-                ctx.out.push(MInst::Bswap { size: sz, dst });
-            }
+            let _bc = *bits / 8;
+            // Always BSWAP64 to reverse byte order so that the final
+            // right-shift by (64 - bits) extracts the correct result.
+            ctx.out.push(MInst::Bswap {
+                size: OpSize::S64,
+                dst,
+            });
             // Reverse bits within each byte: 3 rounds of swap-adjacent-groups
             for (mask, shift) in [
                 (0x5555555555555555u64, 1u8),
@@ -2496,12 +2536,12 @@ fn select_inst(
                 dst,
                 src: l,
             });
-            ctx.out.push(MInst::AddRR {
-                size: OpSize::S64,
-                dst,
-                src: r,
-            });
             if *bits < 64 {
+                ctx.out.push(MInst::AddRR {
+                    size: OpSize::S64,
+                    dst,
+                    src: r,
+                });
                 let max_val = (1i64 << (bits - 1)) - 1;
                 let min_val = -(1i64 << (bits - 1));
                 let sat_hi = ctx.alloc.alloc();
@@ -2538,6 +2578,8 @@ fn select_inst(
                 });
             } else {
                 // 64-bit: use overflow flag. sat = (a >> 63) XOR I64_MAX = I64_MAX if a>=0, I64_MIN if a<0.
+                // Compute the saturation value BEFORE the addition so
+                // that SAR/XOR don't clobber the overflow flag.
                 let sat = ctx.alloc.alloc();
                 ctx.out.push(MInst::MovRR {
                     size: OpSize::S64,
@@ -2559,6 +2601,12 @@ fn select_inst(
                     dst: sat,
                     src: imax,
                 });
+                // Now do the addition — OF flag is set here.
+                ctx.out.push(MInst::AddRR {
+                    size: OpSize::S64,
+                    dst,
+                    src: r,
+                });
                 ctx.out.push(MInst::CMOVcc {
                     size: OpSize::S64,
                     cc: CondCode::O,
@@ -2578,12 +2626,12 @@ fn select_inst(
                 dst,
                 src: l,
             });
-            ctx.out.push(MInst::SubRR {
-                size: OpSize::S64,
-                dst,
-                src: r,
-            });
             if *bits < 64 {
+                ctx.out.push(MInst::SubRR {
+                    size: OpSize::S64,
+                    dst,
+                    src: r,
+                });
                 let max_val = (1i64 << (bits - 1)) - 1;
                 let min_val = -(1i64 << (bits - 1));
                 let sat_hi = ctx.alloc.alloc();
@@ -2620,6 +2668,8 @@ fn select_inst(
                 });
             } else {
                 // 64-bit: use overflow flag. sat = (a >> 63) XOR I64_MAX.
+                // Compute the saturation value BEFORE the subtraction so
+                // that SAR/XOR don't clobber the overflow flag.
                 let sat = ctx.alloc.alloc();
                 ctx.out.push(MInst::MovRR {
                     size: OpSize::S64,
@@ -2640,6 +2690,12 @@ fn select_inst(
                     size: OpSize::S64,
                     dst: sat,
                     src: imax,
+                });
+                // Now do the subtraction — OF flag is set here.
+                ctx.out.push(MInst::SubRR {
+                    size: OpSize::S64,
+                    dst,
+                    src: r,
                 });
                 ctx.out.push(MInst::CMOVcc {
                     size: OpSize::S64,

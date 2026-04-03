@@ -12,7 +12,7 @@ use num_traits::{ToPrimitive, Zero};
 
 use tuffy_ir::builder::Builder;
 use tuffy_ir::function::{CfgNode, Function};
-use tuffy_ir::instruction::{ICmpOp, Op, Operand, Origin};
+use tuffy_ir::instruction::{FCmpOp, ICmpOp, Op, Operand, Origin};
 use tuffy_ir::module::SymbolTable;
 use tuffy_ir::typed::IntOperand;
 use tuffy_ir::types::{Annotation, FloatType, IntAnnotation, IntSignedness, Type};
@@ -237,6 +237,7 @@ fn has_wide_values<M: AbiMetadata>(
                 return true;
             }
             Op::Bswap(_, bytes) if *bytes > legality.max_int_width() / 8 => return true,
+            Op::BitReverse(_, bits) if *bits > legality.max_int_width() => return true,
             Op::RotateLeft(_, _, bits) | Op::RotateRight(_, _, bits)
                 if *bits > legality.max_int_width() =>
             {
@@ -261,6 +262,8 @@ fn has_wide_values<M: AbiMetadata>(
                 return true;
             }
             Op::Const(v) if needs_wide_const(v) => return true,
+            // FMaxNum/FMinNum always need legalization for IEEE NaN handling
+            Op::FMaxNum(..) | Op::FMinNum(..) => return true,
             // A call with any 128-bit annotated argument needs legalization to
             // split it into (lo, hi) even when the value fits in 64 bits.
             Op::Call(_, args, _) if args.iter().any(|a| is_128_bit_value(func, a.value)) => {
@@ -297,6 +300,7 @@ fn has_128bit_values(func: &Function) -> bool {
             Op::Sext(_, 128) | Op::Zext(_, 128) => return true,
             Op::Bswap(_, 16) => return true,
             Op::RotateLeft(_, _, 128) | Op::RotateRight(_, _, 128) => return true,
+            Op::BitReverse(_, 128) => return true,
             Op::SaturatingAdd(_, _, 128)
             | Op::SaturatingSub(_, _, 128)
             | Op::SignedSaturatingAdd(_, _, 128)
@@ -478,6 +482,9 @@ fn collect_wide_values<M: AbiMetadata>(
             Op::RotateLeft(_, _, bits) | Op::RotateRight(_, _, bits)
                 if *bits > legality.max_int_width() =>
             {
+                wide.insert(vref.raw());
+            }
+            Op::BitReverse(_, bits) if *bits > legality.max_int_width() => {
                 wide.insert(vref.raw());
             }
             Op::SaturatingAdd(_, _, bits)
@@ -806,6 +813,31 @@ fn legalize_inst<M: AbiMetadata + Clone>(
                 a.clone().raw().annotation.as_ref(),
             );
         }
+        Op::RotateLeft(a, amt, bits) if wide_result && *bits > 64 => {
+            leg_rotate_128(
+                old,
+                s,
+                b,
+                old_vref,
+                &a.clone().raw(),
+                &amt.clone().raw(),
+                true,
+            );
+        }
+        Op::RotateRight(a, amt, bits) if wide_result && *bits > 64 => {
+            leg_rotate_128(
+                old,
+                s,
+                b,
+                old_vref,
+                &a.clone().raw(),
+                &amt.clone().raw(),
+                false,
+            );
+        }
+        Op::BitReverse(a, bits) if wide_result && *bits > 64 => {
+            leg_bit_reverse_128(old, s, b, old_vref, &a.clone().raw());
+        }
         Op::ICmp(cmp_op, a, op_b)
             if is_wide(s, a.clone().raw().value)
                 || is_128_bit_value(old, a.clone().raw().value) =>
@@ -847,6 +879,124 @@ fn legalize_inst<M: AbiMetadata + Clone>(
                 &mem.clone().raw(),
             );
         }
+        // 9–15 byte stores where the value comes from a load.N or is a
+        // (lo, hi) pair: split into 8-byte lo store + (bytes-8)-byte hi store.
+        Op::Store(val, ptr, bytes, mem) if *bytes > 8 && *bytes < 16 => {
+            let hi_bytes = bytes - 8;
+            let p = remap_op(s, &ptr.clone().raw());
+            let m = remap_op(s, &mem.clone().raw());
+            if is_wide(s, val.value) {
+                let (lo, hi) = s.vmap.pair(val.value);
+                let m1 = b.store(Operand::new(lo), p.clone().into(), 8, m.into(), o());
+                let c8 = b.iconst(8i64, 64, IntSignedness::Unsigned, o());
+                let p_hi = b.ptradd(p.into(), c8.raw().into(), 0, o());
+                let m2 = b.store(Operand::new(hi), p_hi.into(), hi_bytes, m1.into(), o());
+                s.vmap.set(old_vref, Mapped::One(m2.into()));
+            } else {
+                // Check if the value is a constant (same fix as >16 path).
+                let is_const = matches!(&old.inst(val.value.index()).op, Op::Const(_));
+                if is_const {
+                    let const_val = match &old.inst(val.value.index()).op {
+                        Op::Const(v) => v.clone(),
+                        _ => unreachable!(),
+                    };
+                    let byte_val = if const_val.is_zero() {
+                        Some(0u8)
+                    } else {
+                        let (_, le_bytes) = const_val.to_bytes_le();
+                        let first = *le_bytes.first().unwrap_or(&0);
+                        if le_bytes.iter().all(|&bb| bb == first) {
+                            Some(first)
+                        } else {
+                            None
+                        }
+                    };
+                    if let Some(bv) = byte_val {
+                        let set_val = b.iconst(bv as i64, 8, IntSignedness::Unsigned, o());
+                        let count = b.iconst(*bytes as i64, 64, IntSignedness::Unsigned, o());
+                        let dst_annotated = Operand::annotated(p.value, Annotation::Align(1));
+                        let new_mem = b.mem_set(
+                            dst_annotated.into(),
+                            set_val.into(),
+                            count.into(),
+                            m.into(),
+                            o(),
+                        );
+                        s.vmap.set(old_vref, Mapped::One(new_mem.into()));
+                    } else {
+                        // Non-uniform constant: split into word stores.
+                        let (_, le_bytes) = const_val.to_bytes_le();
+                        let mut cur_mem = m;
+                        let num_words = (*bytes as u64).div_ceil(8);
+                        for w in 0..num_words {
+                            let off = w * 8;
+                            let chunk = std::cmp::min(8, *bytes as u64 - off) as usize;
+                            let mut word_bytes = [0u8; 8];
+                            for (i, wb) in word_bytes.iter_mut().enumerate().take(chunk) {
+                                let idx = off as usize + i;
+                                if idx < le_bytes.len() {
+                                    *wb = le_bytes[idx];
+                                }
+                            }
+                            let word_val = u64::from_le_bytes(word_bytes);
+                            let word = b.iconst(word_val as i64, 64, IntSignedness::Unsigned, o());
+                            let dst_w = if w == 0 {
+                                p.clone()
+                            } else {
+                                let off_v = b.iconst(off as i64, 64, IntSignedness::Unsigned, o());
+                                Operand::new(b.ptradd(p.clone().into(), off_v.into(), 0, o()).raw())
+                            };
+                            cur_mem = Operand::new(
+                                b.store(
+                                    word.into(),
+                                    dst_w.into(),
+                                    chunk as u32,
+                                    cur_mem.into(),
+                                    o(),
+                                )
+                                .raw(),
+                            );
+                        }
+                        s.vmap.set(old_vref, Mapped::One(cur_mem.value));
+                    }
+                } else {
+                    // Value comes from a load — use mem_copy.
+                    let src_ptr_op = match &old.inst(val.value.index()).op {
+                        Op::Load(load_ptr, load_bytes, _) if *load_bytes >= *bytes => {
+                            Some(remap_op(s, &load_ptr.clone().raw()))
+                        }
+                        _ => None,
+                    };
+                    if let Some(src_ptr) = src_ptr_op {
+                        let count = b.iconst(*bytes as i64, 64, IntSignedness::Unsigned, o());
+                        let dst_annotated = Operand::annotated(p.value, Annotation::Align(1));
+                        let src_annotated = Operand::annotated(src_ptr.value, Annotation::Align(1));
+                        let new_mem = b.mem_copy(
+                            dst_annotated.into(),
+                            src_annotated.into(),
+                            count.into(),
+                            m.into(),
+                            o(),
+                        );
+                        s.vmap.set(old_vref, Mapped::One(new_mem.into()));
+                    } else {
+                        // Treat as a pointer to source data.
+                        let src = remap_op(s, val);
+                        let count = b.iconst(*bytes as i64, 64, IntSignedness::Unsigned, o());
+                        let dst_annotated = Operand::annotated(p.value, Annotation::Align(1));
+                        let src_annotated = Operand::annotated(src.value, Annotation::Align(1));
+                        let new_mem = b.mem_copy(
+                            dst_annotated.into(),
+                            src_annotated.into(),
+                            count.into(),
+                            m.into(),
+                            o(),
+                        );
+                        s.vmap.set(old_vref, Mapped::One(new_mem.into()));
+                    }
+                }
+            }
+        }
         Op::Sext(val, 128) if is_wide(s, val.clone().raw().value) => {
             // Sext/Zext from 128-bit to 128-bit is an identity: the source
             // already occupies a full (lo, hi) pair.
@@ -877,6 +1027,53 @@ fn legalize_inst<M: AbiMetadata + Clone>(
         }
         Op::Bswap(val, 16) => {
             leg_bswap_128(s, b, old_vref, &val.clone().raw());
+        }
+        // 128-bit signed saturating add/sub: compute wrapping result + overflow,
+        // clamp to MIN/MAX on overflow.
+        Op::SignedSaturatingAdd(a, op_b, 128) => {
+            leg_signed_saturating_addsub_128(
+                old,
+                s,
+                b,
+                old_vref,
+                &a.clone().raw(),
+                &op_b.clone().raw(),
+                true,
+            );
+        }
+        Op::SignedSaturatingSub(a, op_b, 128) => {
+            leg_signed_saturating_addsub_128(
+                old,
+                s,
+                b,
+                old_vref,
+                &a.clone().raw(),
+                &op_b.clone().raw(),
+                false,
+            );
+        }
+        // 128-bit unsigned saturating add/sub.
+        Op::SaturatingAdd(a, op_b, 128) => {
+            leg_unsigned_saturating_addsub_128(
+                old,
+                s,
+                b,
+                old_vref,
+                &a.clone().raw(),
+                &op_b.clone().raw(),
+                true,
+            );
+        }
+        Op::SaturatingSub(a, op_b, 128) => {
+            leg_unsigned_saturating_addsub_128(
+                old,
+                s,
+                b,
+                old_vref,
+                &a.clone().raw(),
+                &op_b.clone().raw(),
+                false,
+            );
         }
         Op::Select(cond, tv, fv) if wide_result => {
             leg_select_128(old, s, b, old_vref, &cond.clone().raw(), tv, fv);
@@ -970,23 +1167,91 @@ fn legalize_inst<M: AbiMetadata + Clone>(
                 s.vmap.set(old_vref, Mapped::One(new_mem.into()));
                 return;
             }
-            // Not from a load — the value is a pointer to the source data
-            // (e.g. result of a call returning via SRET, or a stack slot).
-            // Convert to mem_copy so the backend can handle it.
-            let src = remap_op(s, val);
-            let dst = remap_op(s, &ptr.clone().raw());
-            let m = remap_op(s, &mem.clone().raw());
-            let count = b.iconst(*bytes as i64, 64, IntSignedness::Unsigned, o());
-            let dst_annotated = Operand::annotated(dst.value, Annotation::Align(1));
-            let src_annotated = Operand::annotated(src.value, Annotation::Align(1));
-            let new_mem = b.mem_copy(
-                dst_annotated.into(),
-                src_annotated.into(),
-                count.into(),
-                m.into(),
-                o(),
-            );
-            s.vmap.set(old_vref, Mapped::One(new_mem.into()));
+            // Check if the value is a constant — we can't use it as a source
+            // pointer for mem_copy. Use mem_set for uniform byte patterns
+            // (e.g. iconst 0 → memset 0), or split into word stores otherwise.
+            let is_const = matches!(&old.inst(val.value.index()).op, Op::Const(_));
+            if is_const {
+                let const_val = match &old.inst(val.value.index()).op {
+                    Op::Const(v) => v.clone(),
+                    _ => unreachable!(),
+                };
+                let dst = remap_op(s, &ptr.clone().raw());
+                let m = remap_op(s, &mem.clone().raw());
+                // Check if all bytes are the same (common case: zero)
+                let byte_val = if const_val.is_zero() {
+                    Some(0u8)
+                } else {
+                    let (_, le_bytes) = const_val.to_bytes_le();
+                    let first = *le_bytes.first().unwrap_or(&0);
+                    if le_bytes.iter().all(|&b| b == first) {
+                        Some(first)
+                    } else {
+                        None
+                    }
+                };
+                if let Some(bv) = byte_val {
+                    // Uniform byte pattern — use memset.
+                    let set_val = b.iconst(bv as i64, 8, IntSignedness::Unsigned, o());
+                    let count = b.iconst(*bytes as i64, 64, IntSignedness::Unsigned, o());
+                    let dst_annotated = Operand::annotated(dst.value, Annotation::Align(1));
+                    let new_mem = b.mem_set(
+                        dst_annotated.into(),
+                        set_val.into(),
+                        count.into(),
+                        m.into(),
+                        o(),
+                    );
+                    s.vmap.set(old_vref, Mapped::One(new_mem.into()));
+                } else {
+                    // Non-uniform constant: split into 8-byte word stores.
+                    let (_, le_bytes) = const_val.to_bytes_le();
+                    let mut cur_mem = m;
+                    let num_words = (*bytes as u64).div_ceil(8);
+                    for w in 0..num_words {
+                        let off = w * 8;
+                        let chunk = std::cmp::min(8, *bytes as u64 - off) as usize;
+                        let mut word_bytes = [0u8; 8];
+                        for (i, wb) in word_bytes.iter_mut().enumerate().take(chunk) {
+                            let idx = off as usize + i;
+                            if idx < le_bytes.len() {
+                                *wb = le_bytes[idx];
+                            }
+                        }
+                        let word_val = u64::from_le_bytes(word_bytes);
+                        let word = b.iconst(word_val as i64, 64, IntSignedness::Unsigned, o());
+                        let dst_w = if w == 0 {
+                            dst.clone()
+                        } else {
+                            let off_v = b.iconst(off as i64, 64, IntSignedness::Unsigned, o());
+                            Operand::new(b.ptradd(dst.clone().into(), off_v.into(), 0, o()).raw())
+                        };
+                        cur_mem = Operand::new(
+                            b.store(word.into(), dst_w.into(), chunk as u32, cur_mem.into(), o())
+                                .raw(),
+                        );
+                    }
+                    s.vmap.set(old_vref, Mapped::One(cur_mem.value));
+                }
+            } else {
+                // Not from a load and not a constant — the value is a pointer
+                // to the source data (e.g. result of a call returning via SRET,
+                // or a stack slot). Convert to mem_copy so the backend can handle it.
+                let src = remap_op(s, val);
+                let dst = remap_op(s, &ptr.clone().raw());
+                let m = remap_op(s, &mem.clone().raw());
+                let count = b.iconst(*bytes as i64, 64, IntSignedness::Unsigned, o());
+                let dst_annotated = Operand::annotated(dst.value, Annotation::Align(1));
+                let src_annotated = Operand::annotated(src.value, Annotation::Align(1));
+                let new_mem = b.mem_copy(
+                    dst_annotated.into(),
+                    src_annotated.into(),
+                    count.into(),
+                    m.into(),
+                    o(),
+                );
+                s.vmap.set(old_vref, Mapped::One(new_mem.into()));
+            }
         }
         Op::Store(val, ptr, bytes, mem) if is_wide(s, val.value) => {
             // For wide stores > 16 bytes (e.g. store.32 load32_result, dst),
@@ -1195,15 +1460,80 @@ fn copy_inst<M: AbiMetadata + Clone>(
                 o(),
             )
             .raw(),
-        Op::CountOnes(a) => b
-            .count_ones(remap_op(s, &a.clone().raw()).into(), 64, o())
+        Op::CountOnes(a) => {
+            let val_vref = a.clone().raw().value;
+            if is_wide(s, val_vref) {
+                // 128-bit popcount: popcnt64(lo) + popcnt64(hi)
+                let (lo, hi) = s.vmap.pair(val_vref);
+                let pop_lo = b.count_ones(lo.into(), 64, o());
+                let pop_hi = b.count_ones(hi.into(), 64, o());
+                b.add(pop_lo.into(), pop_hi.into(), I64, o()).raw()
+            } else {
+                b.count_ones(remap_op(s, &a.clone().raw()).into(), 64, o())
+                    .raw()
+            }
+        }
+        Op::CountLeadingZeros(a, bits) if *bits < 64 => {
+            // Sub-64-bit CLZ: lzcnt64(val) - (64 - bits)
+            let v = remap_op(s, &a.clone().raw());
+            let clz = b.count_leading_zeros(v.into(), 64, 64, o());
+            let adjust = b.iconst((64 - bits) as i64, 64, IntSignedness::Unsigned, o());
+            b.sub(clz.into(), adjust.into(), I64, o()).raw()
+        }
+        Op::CountLeadingZeros(a, bits) if *bits == 64 => b
+            .count_leading_zeros(remap_op(s, &a.clone().raw()).into(), 64, 64, o())
             .raw(),
-        Op::CountLeadingZeros(a, bits) => b
-            .count_leading_zeros(remap_op(s, &a.clone().raw()).into(), *bits, 64, o())
+        Op::CountLeadingZeros(a, bits) if *bits == 128 => {
+            // 128-bit CLZ: hi == 0 ? 64 + clz64(lo) : clz64(hi)
+            let val_vref = a.clone().raw().value;
+            let (lo, hi) = if is_wide(s, val_vref) {
+                s.vmap.pair(val_vref)
+            } else {
+                let v = s.vmap.one(val_vref);
+                (v, b.iconst(0i64, 64, IntSignedness::Unsigned, o()).raw())
+            };
+            let clz_hi = b.count_leading_zeros(hi.into(), 64, 64, o());
+            let clz_lo = b.count_leading_zeros(lo.into(), 64, 64, o());
+            let c64 = b.iconst(64i64, 64, IntSignedness::Unsigned, o());
+            let lo_adjusted = b.add(clz_lo.into(), c64.into(), I64, o());
+            let c0 = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
+            let hi_is_zero = b.icmp(ICmpOp::Eq, hi.into(), c0.into(), o());
+            b.select(
+                hi_is_zero.into(),
+                lo_adjusted.into(),
+                clz_hi.into(),
+                Type::Int,
+                Some(Annotation::Int(I64)),
+                o(),
+            )
+        }
+        Op::CountLeadingZeros(a, _bits) => b
+            .count_leading_zeros(remap_op(s, &a.clone().raw()).into(), 64, 64, o())
             .raw(),
-        Op::CountTrailingZeros(a) => b
-            .count_trailing_zeros(remap_op(s, &a.clone().raw()).into(), 64, o())
-            .raw(),
+        Op::CountTrailingZeros(a) => {
+            let val_vref = a.clone().raw().value;
+            if is_wide(s, val_vref) {
+                // 128-bit CTZ: lo == 0 ? 64 + tzcnt64(hi) : tzcnt64(lo)
+                let (lo, hi) = s.vmap.pair(val_vref);
+                let ctz_lo = b.count_trailing_zeros(lo.into(), 64, o());
+                let ctz_hi = b.count_trailing_zeros(hi.into(), 64, o());
+                let c64 = b.iconst(64i64, 64, IntSignedness::Unsigned, o());
+                let hi_adjusted = b.add(ctz_hi.into(), c64.into(), I64, o());
+                let c0 = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
+                let lo_is_zero = b.icmp(ICmpOp::Eq, lo.into(), c0.into(), o());
+                b.select(
+                    lo_is_zero.into(),
+                    hi_adjusted.into(),
+                    ctz_lo.into(),
+                    Type::Int,
+                    Some(Annotation::Int(I64)),
+                    o(),
+                )
+            } else {
+                b.count_trailing_zeros(remap_op(s, &a.clone().raw()).into(), 64, o())
+                    .raw()
+            }
+        }
         Op::Bswap(a, bytes) => b
             .bswap(remap_op(s, &a.clone().raw()).into(), *bytes, o())
             .raw(),
@@ -1593,22 +1923,30 @@ fn copy_inst<M: AbiMetadata + Clone>(
             s.vmap.set(old_mem, Mapped::One(call_mem.into()));
             data.unwrap()
         }
-        Op::FMinNum(a, op_b) => b
-            .fminnum(
-                remap_op(s, &a.clone().raw()).into(),
-                remap_op(s, &op_b.clone().raw()).into(),
-                inst.ty.clone(),
-                o(),
-            )
-            .raw(),
-        Op::FMaxNum(a, op_b) => b
-            .fmaxnum(
-                remap_op(s, &a.clone().raw()).into(),
-                remap_op(s, &op_b.clone().raw()).into(),
-                inst.ty.clone(),
-                o(),
-            )
-            .raw(),
+        Op::FMinNum(a, op_b) => {
+            let lhs: Operand = remap_op(s, &a.clone().raw());
+            let rhs: Operand = remap_op(s, &op_b.clone().raw());
+            let ty = inst.ty.clone();
+            // IEEE 754 minNum: return non-NaN argument if one is NaN
+            let b_nan = b.fcmp(FCmpOp::Uno, rhs.clone().into(), rhs.clone().into(), o());
+            let a_nan = b.fcmp(FCmpOp::Uno, lhs.clone().into(), lhs.clone().into(), o());
+            let cmp = b.fcmp(FCmpOp::OLe, lhs.clone().into(), rhs.clone().into(), o());
+            let r1 = b.select(cmp.into(), lhs.clone(), rhs.clone(), ty.clone(), None, o());
+            let r2 = b.select(b_nan.into(), lhs.clone(), r1.into(), ty.clone(), None, o());
+            b.select(a_nan.into(), rhs.clone(), r2.into(), ty.clone(), None, o())
+        }
+        Op::FMaxNum(a, op_b) => {
+            let lhs: Operand = remap_op(s, &a.clone().raw());
+            let rhs: Operand = remap_op(s, &op_b.clone().raw());
+            let ty = inst.ty.clone();
+            // IEEE 754 maxNum: return non-NaN argument if one is NaN
+            let b_nan = b.fcmp(FCmpOp::Uno, rhs.clone().into(), rhs.clone().into(), o());
+            let a_nan = b.fcmp(FCmpOp::Uno, lhs.clone().into(), lhs.clone().into(), o());
+            let cmp = b.fcmp(FCmpOp::OGe, lhs.clone().into(), rhs.clone().into(), o());
+            let r1 = b.select(cmp.into(), lhs.clone(), rhs.clone(), ty.clone(), None, o());
+            let r2 = b.select(b_nan.into(), lhs.clone(), r1.into(), ty.clone(), None, o());
+            b.select(a_nan.into(), rhs.clone(), r2.into(), ty.clone(), None, o())
+        }
         Op::FNeg(a) => b
             .fneg(remap_op(s, &a.clone().raw()).into(), inst.ty.clone(), o())
             .raw(),
@@ -2081,9 +2419,14 @@ fn leg_sadd_with_overflow_128<M>(
     // Signed overflow: ((a_hi ^ hi) & (b_hi ^ hi)) has sign bit set
     let ax = b.xor(Operand::new(a_hi).into(), Operand::new(hi).into(), I64, o());
     let bx = b.xor(Operand::new(b_hi).into(), Operand::new(hi).into(), I64, o());
-    let combined = b.and(ax.into(), bx.into(), I64, o());
-    let zero = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
-    let overflow = b.icmp(ICmpOp::Lt, combined.into(), zero.into(), o());
+    let combined = b.and(ax.into(), bx.into(), SIGNED_64_INT, o());
+    let zero = b.iconst(0i64, 64, IntSignedness::Signed, o());
+    let overflow = b.icmp(
+        ICmpOp::Lt,
+        Operand::annotated(combined.raw(), Annotation::Int(SIGNED_64_INT)).into(),
+        zero.into(),
+        o(),
+    );
 
     s.vmap.set(old_vref, Mapped::Pair(lo, hi));
     let old_sec = ValueRef::inst_secondary_result(old_vref.index());
@@ -2161,6 +2504,223 @@ fn leg_usub_with_overflow_128<M>(
     s.vmap.set(old_sec, Mapped::One(overflow.into()));
 }
 
+/// 128-bit signed saturating add/sub.
+/// `is_add == true` → saturating_add, `is_add == false` → saturating_sub.
+fn leg_signed_saturating_addsub_128<M>(
+    old: &Function,
+    s: &mut State<M>,
+    b: &mut Builder,
+    old_vref: ValueRef,
+    a: &Operand,
+    op_b: &Operand,
+    is_add: bool,
+) {
+    let (a_lo, a_hi) = wide_pair(s, old, b, a);
+    let (b_lo, b_hi) = wide_pair(s, old, b, op_b);
+
+    // Compute 128-bit wrapping result.
+    let (lo, hi) = if is_add {
+        let lo = b.add(a_lo.into(), b_lo.into(), I64, o());
+        let carry = b.icmp(ICmpOp::Lt, lo.into(), a_lo.into(), o());
+        let carry_int = bool_to_u64(b, carry);
+        let hi_sum = b.add(a_hi.into(), b_hi.into(), I64, o());
+        let hi = b.add(hi_sum.into(), carry_int.into(), I64, o());
+        (lo.raw(), hi.raw())
+    } else {
+        let lo = b.sub(a_lo.into(), b_lo.into(), I64, o());
+        let borrow = b.icmp(ICmpOp::Gt, lo.into(), a_lo.into(), o());
+        let borrow_int = bool_to_u64(b, borrow);
+        let hi_diff = b.sub(a_hi.into(), b_hi.into(), I64, o());
+        let hi = b.sub(hi_diff.into(), borrow_int.into(), I64, o());
+        (lo.raw(), hi.raw())
+    };
+
+    // Signed overflow: ((a_hi ^ effective_b_hi) & (a_hi ^ hi)) has sign bit set.
+    // For add, effective_b_hi = ~b_hi; for sub, effective_b_hi = b_hi.
+    let xor_ab = if is_add {
+        // For addition: overflow when signs of a and b are the same but result differs.
+        // Use (a_hi ^ b_hi) inverted, which is NOT(a_hi ^ b_hi) = a_hi XNOR b_hi.
+        // Overflow = ((a_hi XNOR b_hi) & (a_hi ^ hi)).sign_bit
+        // Simplify: not_xor = !(a_hi ^ b_hi); overflow = (not_xor & (a_hi ^ hi)).sign_bit < 0
+        let ax = b.xor(
+            Operand::new(a_hi).into(),
+            Operand::new(b_hi).into(),
+            I64,
+            o(),
+        );
+        let not_mask = b.iconst(-1i64, 64, IntSignedness::Unsigned, o());
+        b.xor(ax.into(), not_mask.into(), I64, o())
+    } else {
+        // For subtraction: overflow when signs of a and b differ.
+        b.xor(
+            Operand::new(a_hi).into(),
+            Operand::new(b_hi).into(),
+            I64,
+            o(),
+        )
+    };
+    let xor_ar = b.xor(Operand::new(a_hi).into(), Operand::new(hi).into(), I64, o());
+    let combined = b.and(xor_ab.into(), xor_ar.into(), SIGNED_64_INT, o());
+    let zero_s = b.iconst(0i64, 64, IntSignedness::Signed, o());
+    let overflow = b.icmp(
+        ICmpOp::Lt,
+        Operand::annotated(combined.raw(), Annotation::Int(SIGNED_64_INT)).into(),
+        zero_s.into(),
+        o(),
+    );
+
+    // Saturation values: if a_hi < 0 → MIN, else → MAX.
+    let a_neg = b.icmp(
+        ICmpOp::Lt,
+        Operand::annotated(a_hi, Annotation::Int(SIGNED_64_INT)).into(),
+        zero_s.into(),
+        o(),
+    );
+    // i128::MIN = (lo=0, hi=0x8000000000000000)
+    let min_lo = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
+    let min_hi = b.iconst(i64::MIN, 64, IntSignedness::Unsigned, o());
+    // i128::MAX = (lo=0xFFFFFFFFFFFFFFFF, hi=0x7FFFFFFFFFFFFFFF)
+    let max_lo = b.iconst(-1i64, 64, IntSignedness::Unsigned, o());
+    let max_hi = b.iconst(i64::MAX, 64, IntSignedness::Unsigned, o());
+
+    let sat_lo = b.select(
+        a_neg.into(),
+        min_lo.into(),
+        max_lo.into(),
+        Type::Int,
+        Some(Annotation::Int(I64)),
+        o(),
+    );
+    let sat_hi = b.select(
+        a_neg.into(),
+        min_hi.into(),
+        max_hi.into(),
+        Type::Int,
+        Some(Annotation::Int(I64)),
+        o(),
+    );
+
+    // Select between saturated and wrapping result.
+    let res_lo = b.select(
+        overflow.into(),
+        sat_lo.into(),
+        Operand::new(lo),
+        Type::Int,
+        Some(Annotation::Int(I64)),
+        o(),
+    );
+    let res_hi = b.select(
+        overflow.into(),
+        sat_hi.into(),
+        Operand::new(hi),
+        Type::Int,
+        Some(Annotation::Int(I64)),
+        o(),
+    );
+
+    s.vmap.set(old_vref, Mapped::Pair(res_lo, res_hi));
+}
+
+/// 128-bit unsigned saturating add/sub.
+fn leg_unsigned_saturating_addsub_128<M>(
+    old: &Function,
+    s: &mut State<M>,
+    b: &mut Builder,
+    old_vref: ValueRef,
+    a: &Operand,
+    op_b: &Operand,
+    is_add: bool,
+) {
+    let (a_lo, a_hi) = wide_pair(s, old, b, a);
+    let (b_lo, b_hi) = wide_pair(s, old, b, op_b);
+
+    if is_add {
+        // Unsigned saturating add: clamp to u128::MAX on overflow.
+        let lo = b.add(a_lo.into(), b_lo.into(), I64, o());
+        let carry = b.icmp(ICmpOp::Lt, lo.into(), a_lo.into(), o());
+        let carry_int = bool_to_u64(b, carry);
+        let hi_sum = b.add(a_hi.into(), b_hi.into(), I64, o());
+        let hi = b.add(hi_sum.into(), carry_int.into(), I64, o());
+        // Overflow: hi < a_hi || (hi == a_hi && carry on hi_sum+carry_int)
+        let hi_overflow1 = b.icmp(ICmpOp::Lt, hi_sum.into(), a_hi.into(), o());
+        let hi_overflow2 = b.icmp(ICmpOp::Lt, hi.into(), hi_sum.into(), o());
+        let hi_overflow_a = bool_to_u64(b, hi_overflow1);
+        let hi_overflow_b = bool_to_u64(b, hi_overflow2);
+        let hi_overflow_sum = b.add(hi_overflow_a.into(), hi_overflow_b.into(), I64, o());
+        let zero = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
+        let overflow = b.icmp(ICmpOp::Ne, hi_overflow_sum.into(), zero.into(), o());
+        let all_ones = b.iconst(-1i64, 64, IntSignedness::Unsigned, o());
+        let res_lo = b.select(
+            overflow.into(),
+            all_ones.into(),
+            Operand::new(lo.raw()),
+            Type::Int,
+            Some(Annotation::Int(I64)),
+            o(),
+        );
+        let res_hi = b.select(
+            overflow.into(),
+            all_ones.into(),
+            Operand::new(hi.raw()),
+            Type::Int,
+            Some(Annotation::Int(I64)),
+            o(),
+        );
+        s.vmap.set(old_vref, Mapped::Pair(res_lo, res_hi));
+    } else {
+        // Unsigned saturating sub: clamp to 0 on underflow.
+        let lo = b.sub(a_lo.into(), b_lo.into(), I64, o());
+        let borrow = b.icmp(ICmpOp::Gt, lo.into(), a_lo.into(), o());
+        let borrow_int = bool_to_u64(b, borrow);
+        let hi_diff = b.sub(a_hi.into(), b_hi.into(), I64, o());
+        let hi = b.sub(hi_diff.into(), borrow_int.into(), I64, o());
+        // Underflow: b > a (unsigned 128-bit comparison)
+        // b > a iff b_hi > a_hi || (b_hi == a_hi && b_lo > a_lo)
+        let hi_gt = b.icmp(
+            ICmpOp::Gt,
+            Operand::new(b_hi).into(),
+            Operand::new(a_hi).into(),
+            o(),
+        );
+        let hi_eq = b.icmp(
+            ICmpOp::Eq,
+            Operand::new(b_hi).into(),
+            Operand::new(a_hi).into(),
+            o(),
+        );
+        let lo_gt = b.icmp(
+            ICmpOp::Gt,
+            Operand::new(b_lo).into(),
+            Operand::new(a_lo).into(),
+            o(),
+        );
+        let lo_gt_int = bool_to_u64(b, lo_gt);
+        let hi_eq_int = bool_to_u64(b, hi_eq);
+        let eq_and_lo = b.mul(lo_gt_int.into(), hi_eq_int.into(), I64, o());
+        let hi_gt_int = bool_to_u64(b, hi_gt);
+        let underflow_int = b.add(hi_gt_int.into(), eq_and_lo.into(), I64, o());
+        let zero = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
+        let underflow = b.icmp(ICmpOp::Ne, underflow_int.into(), zero.into(), o());
+        let res_lo = b.select(
+            underflow.into(),
+            zero.into(),
+            Operand::new(lo.raw()),
+            Type::Int,
+            Some(Annotation::Int(I64)),
+            o(),
+        );
+        let res_hi = b.select(
+            underflow.into(),
+            zero.into(),
+            Operand::new(hi.raw()),
+            Type::Int,
+            Some(Annotation::Int(I64)),
+            o(),
+        );
+        s.vmap.set(old_vref, Mapped::Pair(res_lo, res_hi));
+    }
+}
+
 fn leg_ssub_with_overflow_128<M>(
     old: &Function,
     s: &mut State<M>,
@@ -2199,9 +2759,14 @@ fn leg_ssub_with_overflow_128<M>(
         o(),
     );
     let bx = b.xor(Operand::new(a_hi).into(), hi.into(), I64, o());
-    let combined = b.and(ax.into(), bx.into(), I64, o());
-    let zero = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
-    let overflow = b.icmp(ICmpOp::Lt, combined.into(), zero.into(), o());
+    let combined = b.and(ax.into(), bx.into(), SIGNED_64_INT, o());
+    let zero = b.iconst(0i64, 64, IntSignedness::Signed, o());
+    let overflow = b.icmp(
+        ICmpOp::Lt,
+        Operand::annotated(combined.raw(), Annotation::Int(SIGNED_64_INT)).into(),
+        zero.into(),
+        o(),
+    );
 
     s.vmap.set(old_vref, Mapped::Pair(lo.raw(), hi.raw()));
     let old_sec = ValueRef::inst_secondary_result(old_vref.index());
@@ -2539,6 +3104,172 @@ fn leg_shr<M>(
     );
 
     s.vmap.set(old_vref, Mapped::Pair(lo, hi));
+}
+
+// ---------------------------------------------------------------------------
+// 128-bit rotate (left or right)
+// ---------------------------------------------------------------------------
+
+/// Helper: compute 128-bit shl as a (lo, hi) pair without setting vmap.
+fn shl_128_pair(
+    b: &mut Builder,
+    a_lo: ValueRef,
+    a_hi: ValueRef,
+    amt: ValueRef,
+) -> (ValueRef, ValueRef) {
+    let c0 = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
+    let c64 = b.iconst(64i64, 64, IntSignedness::Unsigned, o());
+
+    let lo_small = b.shl(a_lo.into(), amt.into(), UNSIGNED_64_INT, o());
+    let hi_shifted = b.shl(a_hi.into(), amt.into(), UNSIGNED_64_INT, o());
+    let comp = b.sub(c64.into(), amt.into(), I64, o());
+    let lo_spill = b.shr(a_lo.into(), comp.into(), UNSIGNED_64_INT, o());
+    let is_nonzero = b.icmp(ICmpOp::Ne, amt.into(), c0.into(), o());
+    let lo_spill_safe = b.select(
+        is_nonzero.into(),
+        lo_spill.into(),
+        c0.into(),
+        I64_TYPE,
+        Some(Annotation::Int(I64)),
+        o(),
+    );
+    let hi_small = b.or(hi_shifted.into(), lo_spill_safe.into(), I64, o());
+
+    let amt_minus_64 = b.sub(amt.into(), c64.into(), I64, o());
+    let hi_large = b.shl(a_lo.into(), amt_minus_64.into(), UNSIGNED_64_INT, o());
+
+    let is_large = b.icmp(ICmpOp::Ge, amt.into(), c64.into(), o());
+
+    let lo = b.select(
+        is_large.into(),
+        c0.into(),
+        lo_small.into(),
+        I64_TYPE,
+        Some(Annotation::Int(I64)),
+        o(),
+    );
+    let hi = b.select(
+        is_large.into(),
+        hi_large.into(),
+        hi_small.into(),
+        I64_TYPE,
+        Some(Annotation::Int(I64)),
+        o(),
+    );
+
+    (lo, hi)
+}
+
+/// Helper: compute 128-bit unsigned shr as a (lo, hi) pair without setting vmap.
+fn shr_128_pair(
+    b: &mut Builder,
+    a_lo: ValueRef,
+    a_hi: ValueRef,
+    amt: ValueRef,
+) -> (ValueRef, ValueRef) {
+    let c0 = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
+    let c64 = b.iconst(64i64, 64, IntSignedness::Unsigned, o());
+
+    let hi_small = b.shr(a_hi.into(), amt.into(), UNSIGNED_64_INT, o());
+    let lo_shifted = b.shr(a_lo.into(), amt.into(), UNSIGNED_64_INT, o());
+    let comp = b.sub(c64.into(), amt.into(), I64, o());
+    let hi_spill = b.shl(a_hi.into(), comp.into(), UNSIGNED_64_INT, o());
+    let is_nonzero = b.icmp(ICmpOp::Ne, amt.into(), c0.into(), o());
+    let hi_spill_safe = b.select(
+        is_nonzero.into(),
+        hi_spill.into(),
+        c0.into(),
+        I64_TYPE,
+        Some(Annotation::Int(I64)),
+        o(),
+    );
+    let lo_small = b.or(lo_shifted.into(), hi_spill_safe.into(), I64, o());
+
+    let amt_minus_64 = b.sub(amt.into(), c64.into(), I64, o());
+    let lo_large = b.shr(a_hi.into(), amt_minus_64.into(), UNSIGNED_64_INT, o());
+
+    let is_large = b.icmp(ICmpOp::Ge, amt.into(), c64.into(), o());
+
+    let lo = b.select(
+        is_large.into(),
+        lo_large.into(),
+        lo_small.into(),
+        I64_TYPE,
+        Some(Annotation::Int(I64)),
+        o(),
+    );
+    let hi = b.select(
+        is_large.into(),
+        c0.into(),
+        hi_small.into(),
+        I64_TYPE,
+        Some(Annotation::Int(I64)),
+        o(),
+    );
+
+    (lo, hi)
+}
+
+fn leg_rotate_128<M>(
+    old: &Function,
+    s: &mut State<M>,
+    b: &mut Builder,
+    old_vref: ValueRef,
+    a: &Operand,
+    amt_op: &Operand,
+    is_left: bool,
+) {
+    let (a_lo, a_hi) = wide_pair(s, old, b, a);
+    let n = s.vmap.one(amt_op.value);
+
+    // Mask shift amount to 0..127
+    let c127 = b.iconst(127i64, 64, IntSignedness::Unsigned, o());
+    let n_mod = b.and(n.into(), c127.into(), I64, o()).raw();
+
+    // Complement: (128 - n_mod) & 127
+    // When n_mod == 0, complement becomes 128, masked to 0 → shr by 0 = identity,
+    // then shl_result | shr_result = x | x = x, which is correct.
+    let c128 = b.iconst(128i64, 64, IntSignedness::Unsigned, o());
+    let comp = b.sub(c128.into(), n_mod.into(), I64, o());
+    let comp_mod = b.and(comp.into(), c127.into(), I64, o()).raw();
+
+    let (fwd_lo, fwd_hi, bwd_lo, bwd_hi) = if is_left {
+        let (shl_lo, shl_hi) = shl_128_pair(b, a_lo, a_hi, n_mod);
+        let (shr_lo, shr_hi) = shr_128_pair(b, a_lo, a_hi, comp_mod);
+        (shl_lo, shl_hi, shr_lo, shr_hi)
+    } else {
+        let (shr_lo, shr_hi) = shr_128_pair(b, a_lo, a_hi, n_mod);
+        let (shl_lo, shl_hi) = shl_128_pair(b, a_lo, a_hi, comp_mod);
+        (shr_lo, shr_hi, shl_lo, shl_hi)
+    };
+
+    let lo = b.or(fwd_lo.into(), bwd_lo.into(), I64, o());
+    let hi = b.or(fwd_hi.into(), bwd_hi.into(), I64, o());
+
+    s.vmap.set(old_vref, Mapped::Pair(lo.raw(), hi.raw()));
+}
+
+// ---------------------------------------------------------------------------
+// 128-bit bit reverse
+// ---------------------------------------------------------------------------
+
+fn leg_bit_reverse_128<M>(
+    old: &Function,
+    s: &mut State<M>,
+    b: &mut Builder,
+    old_vref: ValueRef,
+    a: &Operand,
+) {
+    let (a_lo, a_hi) = wide_pair(s, old, b, a);
+
+    // bit_reverse(128-bit x) = swap(bit_reverse(x_hi), bit_reverse(x_lo))
+    // Reverse bits in each half, then swap the halves.
+    let rev_lo = b.bit_reverse(a_lo.into(), 64, o());
+    let rev_hi = b.bit_reverse(a_hi.into(), 64, o());
+
+    // Swapped: lo of result = reversed hi, hi of result = reversed lo
+    s.vmap
+        .set(old_vref, Mapped::Pair(rev_hi.raw(), rev_lo.raw()));
 }
 
 // ---------------------------------------------------------------------------
