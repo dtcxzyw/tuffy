@@ -175,12 +175,24 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     } else {
                                         val
                                     };
+                                // For 128-bit integers (u128/i128), store the
+                                // full 16 bytes; the legalizer splits into two
+                                // 64-bit stores.  Other scalars cap at 8.
+                                let store_bytes = if matches!(
+                                    self.builder.value_type(store_val),
+                                    Some(Type::Int)
+                                ) && bytes > 8
+                                {
+                                    bytes.min(16)
+                                } else {
+                                    bytes.min(8)
+                                };
                                 self.current_mem = self
                                     .builder
                                     .store(
                                         store_val.into(),
                                         addr.into(),
-                                        bytes.min(8),
+                                        store_bytes,
                                         self.current_mem.into(),
                                         Origin::synthetic(),
                                     )

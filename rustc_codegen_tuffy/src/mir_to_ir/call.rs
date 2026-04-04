@@ -1115,11 +1115,17 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // For constant aggregates (tuples, structs, arrays) ≤8 bytes, translate_operand
                 // returns a pointer to the constant data. Load the value so it's passed
                 // by value in a register, not by reference.
+                // Exception: scalar ADTs (e.g. DynMetadata which wraps a single pointer)
+                // where translate_const already returns the scalar value directly via
+                // symbol_addr — loading from it would dereference THROUGH the value.
+                let is_scalar_adt = matches!(arg_ty.kind(), ty::Adt(..))
+                    && matches!(repr_kind(self.tcx, arg_ty), ReprKind::Scalar);
                 if matches!(&arg.node, Operand::Constant(_))
                     && matches!(arg_ty.kind(), ty::Tuple(_) | ty::Adt(..) | ty::Array(..))
                     && arg_size > 0
                     && arg_size <= 8
                     && matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
+                    && !is_scalar_adt
                 {
                     v = self.builder.load(
                         v.into(),
@@ -1307,12 +1313,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         && matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
                         && self.builder.is_local_memory_address(v)
                         && translate_ty(self.tcx, arg_ty).is_none()
+                        && !matches!(repr_kind(self.tcx, arg_ty), ReprKind::Scalar)
                     {
                         // Small aggregate (1-8 bytes) in a stack slot:
                         // load the value so it is passed by register.
                         // Only load when `v` is actually a stack slot /
                         // memory address — NOT when it is a loaded pointer
                         // value (e.g. NonNull<u8> transmuted from *mut u8).
+                        // Exclude scalar ADTs (e.g. DynMetadata) where the
+                        // symbol_addr IS the scalar value (a vtable pointer),
+                        // not a reference to the data.
                         let loaded = self.builder.load(
                             v.into(),
                             arg_size as u32,
