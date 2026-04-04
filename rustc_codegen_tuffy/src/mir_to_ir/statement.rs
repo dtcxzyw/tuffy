@@ -976,16 +976,21 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                             }
                                         } // close ref_fat_src else
                                     } else {
-                                        self.current_mem = self
-                                            .builder
-                                            .store(
-                                                val.into(),
-                                                slot.into(),
-                                                bytes,
-                                                self.current_mem.into(),
-                                                Origin::synthetic(),
-                                            )
-                                            .raw();
+                                        // When the Aggregate rvalue reused the
+                                        // destination slot, val == slot and the
+                                        // data is already in place — skip the copy.
+                                        if val != slot {
+                                            self.current_mem = self
+                                                .builder
+                                                .store(
+                                                    val.into(),
+                                                    slot.into(),
+                                                    bytes,
+                                                    self.current_mem.into(),
+                                                    Origin::synthetic(),
+                                                )
+                                                .raw();
+                                        }
                                         // For checked ops (AddWithOverflow etc.), the
                                         // primary result was stored but the overflow
                                         // flag must also be written to its field offset
