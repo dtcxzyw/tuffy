@@ -77,6 +77,22 @@ const CALLEE_SAVED_REGS: [PReg; 5] = [
     PReg(15), // R15
 ];
 
+/// Map a physical register number (PReg index) to its x86-64 DWARF register number.
+fn preg_to_dwarf(p: PReg) -> u8 {
+    match p.0 {
+        0 => 0,          // Rax
+        1 => 2,          // Rcx
+        2 => 1,          // Rdx
+        3 => 3,          // Rbx
+        4 => 7,          // Rsp
+        5 => 6,          // Rbp
+        6 => 4,          // Rsi
+        7 => 5,          // Rdi
+        n @ 8..=15 => n, // R8–R15
+        _ => panic!("preg_to_dwarf: unexpected PReg({})", p.0),
+    }
+}
+
 /// X86-64 ABI metadata tracking secondary return register (RDX) usage.
 #[derive(Default, Clone)]
 pub struct X86AbiMetadata {
@@ -86,6 +102,10 @@ pub struct X86AbiMetadata {
     /// Call instruction indices whose return value is i128/u128 (needs
     /// legalization into a lo/hi pair).
     pub wide_return_calls: HashSet<u32>,
+    /// Map from IR call instruction index to the landing-pad wrapper block
+    /// index (used as label id during isel).  Only populated for calls that
+    /// have `UnwindAction::Cleanup`.
+    pub call_cleanup_labels: HashMap<u32, u32>,
 }
 
 impl X86AbiMetadata {
@@ -204,15 +224,27 @@ fn rewrite_inst(inst: &VInst, assignments: &[PReg]) -> PInst {
             src1: r(src1),
             src2: r(src2),
         },
-        MInst::CallSym { name, ret, ret2 } => MInst::CallSym {
+        MInst::CallSym {
+            name,
+            ret,
+            ret2,
+            cleanup_label,
+        } => MInst::CallSym {
             name: name.clone(),
             ret: ret.map(|v| r(&v)),
             ret2: ret2.map(|v| r(&v)),
+            cleanup_label: *cleanup_label,
         },
-        MInst::CallReg { callee, ret, ret2 } => MInst::CallReg {
+        MInst::CallReg {
+            callee,
+            ret,
+            ret2,
+            cleanup_label,
+        } => MInst::CallReg {
             callee: r(callee),
             ret: ret.map(|v| r(&v)),
             ret2: ret2.map(|v| r(&v)),
+            cleanup_label: *cleanup_label,
         },
         MInst::Push { reg } => MInst::Push { reg: r(reg) },
         MInst::Pop { reg } => MInst::Pop { reg: r(reg) },
@@ -409,6 +441,7 @@ fn rewrite_inst(inst: &VInst, assignments: &[PReg]) -> PInst {
             src2: r(src2),
         },
         MInst::Ud2 => MInst::Ud2,
+        MInst::LandingPadCapture { dst } => MInst::LandingPadCapture { dst: r(dst) },
         MInst::FpBinOp {
             op,
             dst,
@@ -695,6 +728,7 @@ impl Backend for X86Backend {
             &metadata.rdx_captures,
             &metadata.rdx_moves,
             &call_secondary_return,
+            &metadata.call_cleanup_labels,
         ) {
             Some(r) => r,
             None => {
@@ -735,6 +769,20 @@ impl Backend for X86Backend {
         let total_frame = isel_result.isel_frame_size + (alloc_result.spill_slots as i32) * 8;
         let has_frame_pointer =
             total_frame > 0 || isel_result.has_calls || !alloc_result.used_callee_saved.is_empty();
+
+        // Compute sub_amount for FDE generation (same logic as frame.rs)
+        let callee_save_bytes = alloc_result.used_callee_saved.len() as i32 * 8;
+        let padding = if isel_result.has_calls { 8 } else { 0 };
+        let total_needed = total_frame + callee_save_bytes + padding;
+        let aligned_total = (total_needed + 15) & !15;
+        let sub_amount = aligned_total - callee_save_bytes;
+
+        let callee_saved_dwarf_regs: Vec<u8> = alloc_result
+            .used_callee_saved
+            .iter()
+            .map(|p| preg_to_dwarf(*p))
+            .collect();
+
         Some(CompiledFunction {
             name: isel_result.name,
             code: enc.code,
@@ -742,6 +790,9 @@ impl Backend for X86Backend {
             weak: false,
             local: false,
             has_frame_pointer,
+            call_site_table: enc.call_site_table,
+            callee_saved_dwarf_regs,
+            sub_amount,
         })
     }
 
@@ -769,6 +820,9 @@ impl Backend for X86Backend {
                 weak: false,
                 local: false,
                 has_frame_pointer: false,
+                call_site_table: vec![],
+                callee_saved_dwarf_regs: vec![],
+                sub_amount: 0,
             });
         }
         funcs.push(CompiledFunction {
@@ -778,6 +832,9 @@ impl Backend for X86Backend {
             weak: false,
             local: false,
             has_frame_pointer: false,
+            call_site_table: vec![],
+            callee_saved_dwarf_regs: vec![],
+            sub_amount: 0,
         });
         funcs
     }
@@ -825,6 +882,9 @@ impl Backend for X86Backend {
                 weak: false,
                 local: false,
                 has_frame_pointer: true,
+                call_site_table: vec![],
+                callee_saved_dwarf_regs: vec![],
+                sub_amount: 0,
             },
             CompiledFunction {
                 name: start_sym.to_string(),
@@ -833,6 +893,9 @@ impl Backend for X86Backend {
                 weak: false,
                 local: false,
                 has_frame_pointer: true,
+                call_site_table: vec![],
+                callee_saved_dwarf_regs: vec![],
+                sub_amount: 0,
             },
         ]
     }

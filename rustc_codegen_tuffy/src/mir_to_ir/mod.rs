@@ -365,6 +365,9 @@ pub fn translate_function<'tcx>(
         sret_ptr: None,
         weak_undefined_symbols: std::collections::HashSet::new(),
         caller_location_param: None,
+        exc_ptr_slot: None,
+        landing_pad_wrappers: Vec::new(),
+        last_call_vref: None,
     };
 
     // Emit params into the entry block.
@@ -795,6 +798,30 @@ pub fn translate_function<'tcx>(
         }
     }
 
+    // Pre-scan: if any block has an unwind cleanup action, allocate an
+    // exception-pointer stack slot in the entry block.  This must happen
+    // before the main translation loop so that the slot is available when
+    // cleanup terminators are processed.
+    {
+        use mir::UnwindAction;
+        let has_cleanup = mir.basic_blocks.iter().any(|bb| {
+            if let Some(ref term) = bb.terminator {
+                match &term.kind {
+                    TerminatorKind::Call { unwind, .. } | TerminatorKind::Drop { unwind, .. } => {
+                        matches!(unwind, UnwindAction::Cleanup(_))
+                    }
+                    _ => false,
+                }
+            } else {
+                false
+            }
+        });
+        if has_cleanup {
+            let slot = ctx.builder.stack_slot(8, Origin::synthetic());
+            ctx.exc_ptr_slot = Some(slot);
+        }
+    }
+
     // Translate each basic block in reverse-postorder.
     for bb in &rpo_order {
         let bb = *bb;
@@ -814,6 +841,31 @@ pub fn translate_function<'tcx>(
 
         if !ctx.builder.current_block_is_terminated() {
             ctx.builder.unreachable(Origin::synthetic());
+        }
+    }
+
+    // Emit landing-pad wrapper blocks for unwind cleanup.
+    //
+    // Each wrapper block is entered by the unwinder (not by normal control flow).
+    // It captures the exception pointer via LandingPad, stores it to a
+    // per-function stack slot, and branches to the actual MIR cleanup block.
+    if !ctx.landing_pad_wrappers.is_empty() {
+        let exc_slot = ctx.exc_ptr_slot.expect("exc_ptr_slot must be allocated");
+        for (wrapper_block, cleanup_bb) in ctx.landing_pad_wrappers.clone() {
+            ctx.builder.switch_to_block(wrapper_block);
+            let exc_ptr = ctx.builder.landing_pad(Origin::synthetic());
+            // Create a fresh mem token as a block arg (dead — no predecessor branches here)
+            let wrapper_mem = ctx.builder.add_block_arg(wrapper_block, Type::Mem, None);
+            let new_mem = ctx.builder.store(
+                exc_ptr.into(),
+                exc_slot.into(),
+                8,
+                wrapper_mem.into(),
+                Origin::synthetic(),
+            );
+            let target = ctx.block_map.get(cleanup_bb);
+            ctx.builder
+                .br(target, vec![new_mem.into()], Origin::synthetic());
         }
     }
 

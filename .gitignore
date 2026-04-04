@@ -246,3 +246,4 @@ book/output/
 rustc-ice-*.txt
 *.mir
 *.rmeta
+*.dot

@@ -460,6 +460,14 @@ pub enum Op {
     Unreachable,
     /// Trap: unconditionally abort execution (e.g., failed assertion).
     Trap,
+
+    /// Capture the exception pointer at a landing-pad entry.
+    ///
+    /// The unwinder deposits the exception object in the return-value register
+    /// (%rax on x86-64) before transferring control to the landing pad.
+    /// This operation materialises that value so it can be saved and later
+    /// passed to `_Unwind_Resume`.
+    LandingPad,
 }
 
 impl Op {
@@ -469,7 +477,7 @@ impl Op {
         match self {
             // No operands
             Param(_) | Const(_) | BConst(_) | FConst(_) | StackSlot(_) | SymbolAddr(_)
-            | TlsSymbolAddr(_) | Unreachable | Trap => {}
+            | TlsSymbolAddr(_) | Unreachable | Trap | LandingPad => {}
 
             // One typed operand
             CountOnes(a)
@@ -680,7 +688,7 @@ impl Op {
         use Op::*;
         match self {
             Param(_) | Const(_) | BConst(_) | FConst(_) | StackSlot(_) | SymbolAddr(_)
-            | TlsSymbolAddr(_) | Unreachable | Trap => {}
+            | TlsSymbolAddr(_) | Unreachable | Trap | LandingPad => {}
 
             CountOnes(a)
             | CountLeadingZeros(a, _)

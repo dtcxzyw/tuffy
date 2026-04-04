@@ -187,6 +187,15 @@ pub(super) struct TranslationCtx<'a, 'tcx> {
     /// For `#[track_caller]` functions, the implicit `&Location` parameter.
     /// Used by the `caller_location` intrinsic to return the caller's location.
     pub(super) caller_location_param: Option<ValueRef>,
+    /// Stack slot for the exception pointer during stack unwinding.
+    /// Allocated lazily when the first `UnwindAction::Cleanup` is encountered.
+    pub(super) exc_ptr_slot: Option<ValueRef>,
+    /// Landing-pad wrapper blocks to emit after the main translation loop.
+    /// Each entry is `(wrapper_ir_block, cleanup_mir_bb)`.
+    pub(super) landing_pad_wrappers: Vec<(tuffy_ir::value::BlockRef, BasicBlock)>,
+    /// ValueRef index of the last emitted call instruction (Op::Call).
+    /// Used by the terminator handler to record cleanup label associations.
+    pub(super) last_call_vref: Option<u32>,
 }
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {

@@ -132,4 +132,13 @@ impl AbiMetadataBox {
             AbiMetadataBox::X86(meta) => meta.mark_wide_return_call(call_idx),
         }
     }
+
+    /// Record that the call at `call_idx` has a cleanup landing pad at `label`.
+    pub fn mark_call_cleanup(&mut self, call_idx: u32, label: u32) {
+        match self {
+            AbiMetadataBox::X86(meta) => {
+                meta.call_cleanup_labels.insert(call_idx, label);
+            }
+        }
+    }
 }

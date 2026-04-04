@@ -20,6 +20,9 @@ pub fn emit_elf(name: &str, code: &[u8], relocations: &[Relocation]) -> Vec<u8> 
         weak: false,
         local: false,
         has_frame_pointer: false,
+        call_site_table: vec![],
+        callee_saved_dwarf_regs: vec![],
+        sub_amount: 0,
     }])
 }
 
@@ -285,7 +288,7 @@ pub fn emit_elf_with_data(functions: &[CompiledFunction], statics: &[StaticData]
 
     // Generate .eh_frame unwind information so that libunwind can traverse
     // tuffy-compiled frames (required for panic unwinding / catch_unwind).
-    emit_eh_frame(&mut obj, functions, &sym_map);
+    emit_eh_frame(&mut obj, functions, &mut sym_map);
 
     let mut buf = Vec::new();
     obj.emit(&mut buf).expect("failed to emit ELF object");
@@ -336,9 +339,9 @@ fn pad_to(buf: &mut Vec<u8>, start: usize, align: usize) {
     buf.resize(start + padded, 0x00);
 }
 
-/// Build the CIE (Common Information Entry) for x86-64.
+/// Build a "zR" CIE (no personality, no LSDA) for x86-64.
 /// Returns the byte offset within `eh` where the CIE length field starts.
-fn emit_cie(eh: &mut Vec<u8>) -> usize {
+fn emit_cie_zr(eh: &mut Vec<u8>) -> usize {
     let cie_start = eh.len();
     eh.extend_from_slice(&[0; 4]); // placeholder for length
 
@@ -355,11 +358,7 @@ fn emit_cie(eh: &mut Vec<u8>) -> usize {
     eh.push(0x1b); // FDE pointer encoding: DW_EH_PE_pcrel | DW_EH_PE_sdata4
 
     // Initial instructions: CFA = RSP + 8, RA at CFA - 8
-    eh.push(0x0c); // DW_CFA_def_cfa
-    uleb128(eh, DW_REG_RSP as u64);
-    uleb128(eh, 8);
-    eh.push(0x80 | DW_REG_RA); // DW_CFA_offset(RA, 1) → RA at CFA - 8
-    uleb128(eh, 1); // factored offset: 1 * 8 = 8
+    emit_cie_initial_instructions(eh);
 
     pad_to(eh, content_start, PTR_SIZE);
 
@@ -370,16 +369,75 @@ fn emit_cie(eh: &mut Vec<u8>) -> usize {
     cie_start
 }
 
+/// Build a "zPLR" CIE (personality + LSDA + FDE encoding) for x86-64.
+/// Returns `(cie_start, personality_ptr_offset)` — the CIE start offset
+/// and the offset of the personality pointer field that needs a relocation.
+fn emit_cie_zplr(eh: &mut Vec<u8>) -> (usize, usize) {
+    let cie_start = eh.len();
+    eh.extend_from_slice(&[0; 4]); // placeholder for length
+
+    let content_start = eh.len();
+    eh.extend_from_slice(&0u32.to_ne_bytes()); // CIE id = 0
+    eh.push(1); // version
+    eh.extend_from_slice(b"zPLR\0"); // augmentation: personality + LSDA + FDE encoding
+    uleb128(eh, 1); // code alignment factor
+    sleb128(eh, -8); // data alignment factor
+    uleb128(eh, DW_REG_RA as u64); // return address register
+
+    // Augmentation data: personality_enc(1) + personality_ptr(4) + lsda_enc(1) + fde_enc(1) = 7
+    uleb128(eh, 7); // augmentation data length
+
+    // P: personality function encoding + pointer
+    // DW_EH_PE_indirect | DW_EH_PE_pcrel | DW_EH_PE_sdata4 = 0x9b
+    eh.push(0x9b);
+    let personality_ptr_offset = eh.len();
+    eh.extend_from_slice(&0i32.to_ne_bytes()); // placeholder, needs relocation
+
+    // L: LSDA pointer encoding in FDEs
+    // DW_EH_PE_pcrel | DW_EH_PE_sdata4 = 0x1b
+    eh.push(0x1b);
+
+    // R: FDE pointer encoding
+    // DW_EH_PE_pcrel | DW_EH_PE_sdata4 = 0x1b
+    eh.push(0x1b);
+
+    // Initial instructions: CFA = RSP + 8, RA at CFA - 8
+    emit_cie_initial_instructions(eh);
+
+    pad_to(eh, content_start, PTR_SIZE);
+
+    // Patch length field
+    let content_len = (eh.len() - content_start) as u32;
+    eh[cie_start..cie_start + 4].copy_from_slice(&content_len.to_ne_bytes());
+
+    (cie_start, personality_ptr_offset)
+}
+
+/// Emit the initial CFA instructions shared by all CIE variants.
+fn emit_cie_initial_instructions(eh: &mut Vec<u8>) {
+    eh.push(0x0c); // DW_CFA_def_cfa
+    uleb128(eh, DW_REG_RSP as u64);
+    uleb128(eh, 8);
+    eh.push(0x80 | DW_REG_RA); // DW_CFA_offset(RA, 1) → RA at CFA - 8
+    uleb128(eh, 1); // factored offset: 1 * 8 = 8
+}
+
 /// Build an FDE for one function and append it to `eh`.
-/// Returns `(fde_start, initial_location_offset)` — the byte offset in `eh`
-/// where the FDE starts, and the offset of the `initial_location` field that
-/// needs a relocation.
+///
+/// When `has_lsda` is true the CIE uses "zPLR" augmentation and each FDE
+/// carries a 4-byte LSDA pointer in its augmentation data.
+///
+/// Returns `(fde_start, initial_location_offset, lsda_ptr_offset)`.
+/// `lsda_ptr_offset` is `Some` only when `has_lsda` is true.
 fn emit_fde(
     eh: &mut Vec<u8>,
     cie_start: usize,
     code_len: u32,
     has_frame_pointer: bool,
-) -> (usize, usize) {
+    has_lsda: bool,
+    callee_saved_dwarf_regs: &[u8],
+    sub_amount: i32,
+) -> (usize, usize, Option<usize>) {
     let fde_start = eh.len();
     eh.extend_from_slice(&[0; 4]); // placeholder for length
 
@@ -396,8 +454,16 @@ fn emit_fde(
     // address_range
     eh.extend_from_slice(&code_len.to_ne_bytes());
 
-    // Augmentation data (empty for "zR")
-    uleb128(eh, 0);
+    // Augmentation data
+    let lsda_ptr_offset = if has_lsda {
+        uleb128(eh, 4); // augmentation data length: 4 bytes for sdata4 LSDA pointer
+        let off = eh.len();
+        eh.extend_from_slice(&0i32.to_ne_bytes()); // placeholder LSDA pointer
+        Some(off)
+    } else {
+        uleb128(eh, 0); // no augmentation data
+        None
+    };
 
     if has_frame_pointer {
         // After push rbp (+1 byte):
@@ -413,6 +479,30 @@ fn emit_fde(
         eh.push(0x40 | 3); // DW_CFA_advance_loc(3)
         eh.push(0x0d); // DW_CFA_def_cfa_register
         uleb128(eh, DW_REG_RBP as u64);
+
+        // Callee-saved register pushes happen after `sub $sub_amount, %rsp`.
+        // Prologue: push rbp(1) | mov rsp,rbp(3) | sub $N,rsp(7) | push reg0 | push reg1 ...
+        // sub $imm32 is always 7 bytes (Sub_rm64_imm32 encoding).
+        // push reg is 1 byte for regs 0-7 (no REX), 2 bytes for regs 8-15 (REX.B).
+        //
+        // Frame layout (CFA = RBP + 16):
+        //   [RBP - sub_amount - 8*(i+1)] = callee_saved[i]
+        //   => CFA offset = 16 + sub_amount + 8*(i+1)
+        if !callee_saved_dwarf_regs.is_empty() {
+            // Advance past the sub instruction (7 bytes) and first push.
+            let sub_size: u32 = 7;
+            for (i, &dwarf_reg) in callee_saved_dwarf_regs.iter().enumerate() {
+                let delta = if i == 0 {
+                    sub_size + push_size(dwarf_reg) as u32
+                } else {
+                    push_size(dwarf_reg) as u32
+                };
+                emit_advance_loc(eh, delta);
+                let factored = (sub_amount as u64 + 8 * (i as u64 + 1) + 16) / 8;
+                eh.push(0x80 | dwarf_reg); // DW_CFA_offset(reg, N)
+                uleb128(eh, factored);
+            }
+        }
     }
 
     pad_to(eh, content_start, PTR_SIZE);
@@ -421,46 +511,235 @@ fn emit_fde(
     let content_len = (eh.len() - content_start) as u32;
     eh[fde_start..fde_start + 4].copy_from_slice(&content_len.to_ne_bytes());
 
-    (fde_start, initial_loc_offset)
+    (fde_start, initial_loc_offset, lsda_ptr_offset)
 }
 
-/// Generate the complete .eh_frame section and add it to the object file.
+/// Byte size of a `push` instruction for a register with the given DWARF number.
+fn push_size(dwarf_reg: u8) -> u8 {
+    if dwarf_reg >= 8 { 2 } else { 1 } // REX prefix needed for extended registers
+}
+
+/// Emit a DW_CFA_advance_loc of the appropriate size.
+fn emit_advance_loc(eh: &mut Vec<u8>, delta: u32) {
+    if delta <= 0x3f {
+        eh.push(0x40 | delta as u8);
+    } else if delta <= 0xff {
+        eh.push(0x02); // DW_CFA_advance_loc1
+        eh.push(delta as u8);
+    } else {
+        eh.push(0x03); // DW_CFA_advance_loc2
+        eh.extend_from_slice(&(delta as u16).to_ne_bytes());
+    }
+}
+
+/// Build an LSDA (Language-Specific Data Area) for one function.
+/// Returns the bytes to be placed in `.gcc_except_table`.
+fn build_lsda(entries: &[tuffy_target::types::CallSiteEntry]) -> Vec<u8> {
+    let mut lsda = Vec::new();
+
+    // Header
+    lsda.push(0xff); // LPStart encoding = DW_EH_PE_omit (use function start)
+    lsda.push(0xff); // TType encoding = DW_EH_PE_omit (no type table)
+
+    // Call-site table encoding = DW_EH_PE_uleb128
+    lsda.push(0x01);
+
+    // Build call-site table body first to measure its length.
+    let mut cs_table = Vec::new();
+    for e in entries {
+        uleb128(&mut cs_table, e.call_start as u64);
+        uleb128(&mut cs_table, e.call_length as u64);
+        uleb128(&mut cs_table, e.landing_pad as u64);
+        uleb128(&mut cs_table, 0); // action = 0 (cleanup only)
+    }
+
+    uleb128(&mut lsda, cs_table.len() as u64); // call-site table length
+    lsda.extend_from_slice(&cs_table);
+
+    lsda
+}
+
+/// Emit `DW.ref.rust_eh_personality` in `.data.rel.ro`.
+///
+/// This is an indirect pointer: a hidden weak 8-byte object containing
+/// the address of `rust_eh_personality`, referenced from the CIE.
+fn emit_personality_ref(obj: &mut Object, sym_map: &mut HashMap<String, SymbolId>) -> SymbolId {
+    let section = obj.section_id(object::write::StandardSection::ReadOnlyDataWithRel);
+    let data = [0u8; 8];
+    let offset = obj.append_section_data(section, &data, 8);
+
+    let dw_ref_sid = obj.add_symbol(Symbol {
+        name: b"DW.ref.rust_eh_personality".to_vec(),
+        value: offset,
+        size: 8,
+        kind: SymbolKind::Data,
+        scope: SymbolScope::Linkage,
+        weak: true,
+        section: SymbolSection::Section(section),
+        flags: SymbolFlags::Elf {
+            st_info: (object::elf::STB_WEAK << 4) | object::elf::STT_OBJECT,
+            st_other: object::elf::STV_HIDDEN,
+        },
+    });
+    sym_map.insert("DW.ref.rust_eh_personality".to_string(), dw_ref_sid);
+
+    // The 8 bytes hold a R_X86_64_64 relocation to rust_eh_personality.
+    let personality_sid = if let Some(&sid) = sym_map.get("rust_eh_personality") {
+        sid
+    } else {
+        let sid = obj.add_symbol(Symbol {
+            name: b"rust_eh_personality".to_vec(),
+            value: 0,
+            size: 0,
+            kind: SymbolKind::Text,
+            scope: SymbolScope::Unknown,
+            weak: false,
+            section: SymbolSection::Undefined,
+            flags: SymbolFlags::None,
+        });
+        sym_map.insert("rust_eh_personality".to_string(), sid);
+        sid
+    };
+
+    obj.add_relocation(
+        section,
+        ObjRelocation {
+            offset,
+            symbol: personality_sid,
+            addend: 0,
+            flags: RelocationFlags::Generic {
+                kind: RelocationKind::Absolute,
+                encoding: RelocationEncoding::Generic,
+                size: 64,
+            },
+        },
+    )
+    .expect("failed to add DW.ref.rust_eh_personality relocation");
+
+    dw_ref_sid
+}
+
+/// Generate `.eh_frame` (and optionally `.gcc_except_table`) for all
+/// functions in the object file.
 fn emit_eh_frame(
     obj: &mut Object,
     functions: &[CompiledFunction],
-    sym_map: &HashMap<String, SymbolId>,
+    sym_map: &mut HashMap<String, SymbolId>,
 ) {
     if functions.is_empty() {
         return;
     }
 
+    let needs_personality = functions.iter().any(|f| !f.call_site_table.is_empty());
+
+    // ── Personality reference ────────────────────────────────────────────
+    let personality_ref_sid = if needs_personality {
+        Some(emit_personality_ref(obj, sym_map))
+    } else {
+        None
+    };
+
+    // ── .gcc_except_table (LSDAs) ───────────────────────────────────────
+    // Build LSDA bytes for each function with cleanup entries.
+    // lsda_info[i] = Some((offset_in_section, lsda_bytes_len)) or None.
+    let mut except_table_data = Vec::new();
+    let mut lsda_info: Vec<Option<usize>> = Vec::with_capacity(functions.len());
+    for func in functions {
+        if func.call_site_table.is_empty() {
+            lsda_info.push(None);
+        } else {
+            let offset = except_table_data.len();
+            let lsda = build_lsda(&func.call_site_table);
+            except_table_data.extend_from_slice(&lsda);
+            lsda_info.push(Some(offset));
+        }
+    }
+
+    let except_section_id = if !except_table_data.is_empty() {
+        let sid = obj.add_section(
+            vec![],
+            b".gcc_except_table".to_vec(),
+            SectionKind::ReadOnlyData,
+        );
+        obj.set_section_data(sid, except_table_data, 4);
+        Some(sid)
+    } else {
+        None
+    };
+
+    // ── .eh_frame ───────────────────────────────────────────────────────
+    // Two CIEs: "zR" for functions without cleanup, "zPLR" for functions
+    // with cleanup. Each FDE references the appropriate CIE so the
+    // personality function is only invoked for frames that actually have
+    // LSDA data.
     let mut eh = Vec::new();
 
-    // Emit CIE
-    let cie_start = emit_cie(&mut eh);
+    let zr_cie_start = emit_cie_zr(&mut eh);
 
-    // Collect FDE relocation info
-    struct FdeReloc {
+    // Emit "zPLR" CIE only when at least one function needs it.
+    let zplr_cie = if needs_personality {
+        let (start, pers_off) = emit_cie_zplr(&mut eh);
+        Some((start, pers_off))
+    } else {
+        None
+    };
+
+    struct EhReloc {
         offset_in_section: usize,
         symbol: SymbolId,
+        addend: i64,
     }
-    let mut fde_relocs = Vec::new();
+    let mut eh_relocs: Vec<EhReloc> = Vec::new();
+
+    // CIE personality pointer relocation
+    if let (Some((_, pers_off)), Some(pers_sid)) = (zplr_cie, personality_ref_sid) {
+        eh_relocs.push(EhReloc {
+            offset_in_section: pers_off,
+            symbol: pers_sid,
+            addend: 0,
+        });
+    }
 
     // Emit FDE for each function
-    for func in functions {
-        let (_, initial_loc_offset) = emit_fde(
+    for (i, func) in functions.iter().enumerate() {
+        let func_has_cleanup = !func.call_site_table.is_empty();
+        let (cie_start, has_lsda) = if func_has_cleanup {
+            // Must have zPLR CIE when function has cleanup
+            (zplr_cie.unwrap().0, true)
+        } else {
+            // Use simple "zR" CIE — no personality invoked for this frame
+            (zr_cie_start, false)
+        };
+
+        let (_, initial_loc_offset, lsda_ptr_offset) = emit_fde(
             &mut eh,
             cie_start,
             func.code.len() as u32,
             func.has_frame_pointer,
+            has_lsda,
+            &func.callee_saved_dwarf_regs,
+            func.sub_amount,
         );
 
-        // The initial_location field needs a R_X86_64_PC32 relocation
-        // pointing to the function's start in .text.
+        // initial_location relocation → function symbol
         if let Some(&sym_id) = sym_map.get(&func.name) {
-            fde_relocs.push(FdeReloc {
+            eh_relocs.push(EhReloc {
                 offset_in_section: initial_loc_offset,
                 symbol: sym_id,
+                addend: 0,
+            });
+        }
+
+        // LSDA pointer relocation → .gcc_except_table + offset
+        if let (Some(lsda_off), Some(Some(lsda_offset_in_section))) =
+            (lsda_ptr_offset, lsda_info.get(i))
+            && let Some(except_sid) = except_section_id
+        {
+            let section_sym = obj.section_symbol(except_sid);
+            eh_relocs.push(EhReloc {
+                offset_in_section: lsda_off,
+                symbol: section_sym,
+                addend: *lsda_offset_in_section as i64,
             });
         }
     }
@@ -469,21 +748,17 @@ fn emit_eh_frame(
     eh.extend_from_slice(&0u32.to_ne_bytes());
 
     // Add .eh_frame section
-    let eh_section_id = obj.add_section(
-        vec![],
-        b".eh_frame".to_vec(),
-        object::SectionKind::ReadOnlyData,
-    );
+    let eh_section_id = obj.add_section(vec![], b".eh_frame".to_vec(), SectionKind::ReadOnlyData);
     obj.set_section_data(eh_section_id, eh, PTR_SIZE as u64);
 
-    // Add relocations for FDE initial_location fields
-    for reloc in fde_relocs {
+    // Add relocations
+    for reloc in eh_relocs {
         obj.add_relocation(
             eh_section_id,
             ObjRelocation {
                 offset: reloc.offset_in_section as u64,
                 symbol: reloc.symbol,
-                addend: 0,
+                addend: reloc.addend,
                 flags: RelocationFlags::Generic {
                     kind: RelocationKind::Relative,
                     encoding: RelocationEncoding::Generic,

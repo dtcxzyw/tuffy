@@ -89,6 +89,19 @@ pub fn insert_prologue_epilogue(
             out.push(MInst::AddSPI { imm: sub_amount });
             out.push(MInst::Pop { reg: Gpr::Rbp });
         }
+        // Landing pads are entered from the unwinder which sets RSP = CFA
+        // (= RBP + 16).  Restore RSP to the correct in-body position so
+        // cleanup code can safely make function calls.
+        if matches!(inst, MInst::LandingPadCapture { .. }) {
+            out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst: Gpr::Rsp,
+                src: Gpr::Rbp,
+            });
+            if aligned_total > 0 {
+                out.push(MInst::SubSPI { imm: aligned_total });
+            }
+        }
         out.push(inst);
     }
 

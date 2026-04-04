@@ -1197,6 +1197,82 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             }
                         } // end else (src_inner != inner)
                     }
+
+                    // Fallback for ADT types (Rc, Arc, etc.) where target_inner
+                    // is None because the type is not Ref/RawPtr/Box.
+                    // Use struct_lockstep_tails_for_codegen on the raw source and
+                    // target types to find the unsizing boundary.
+                    if target_inner.is_none() {
+                        let src_ty = self.operand_ty_mono(op)?;
+                        let typing_env = ty::TypingEnv::fully_monomorphized();
+                        let (src_tail, dst_tail) = self
+                            .tcx
+                            .struct_lockstep_tails_for_codegen(src_ty, target_ty, typing_env);
+                        match dst_tail.kind() {
+                            ty::Slice(_) => {
+                                if let ty::Array(_, len) = src_tail.kind()
+                                    && let Some(n) = len.try_to_target_usize(self.tcx)
+                                {
+                                    return Some(
+                                        self.builder
+                                            .iconst(
+                                                n as i64,
+                                                64,
+                                                IntSignedness::DontCare,
+                                                Origin::synthetic(),
+                                            )
+                                            .raw(),
+                                    );
+                                }
+                            }
+                            ty::Dynamic(predicates, _)
+                                if !src_tail.has_escaping_bound_vars()
+                                    && !src_tail.is_trait()
+                                    && src_tail.is_sized(
+                                        self.tcx,
+                                        ty::TypingEnv::fully_monomorphized(),
+                                    ) =>
+                            {
+                                let principal = predicates
+                                    .principal()
+                                    .map(|p| self.tcx.instantiate_bound_regions_with_erased(p));
+                                let vtable_alloc_id =
+                                    self.tcx.vtable_allocation((src_tail, principal));
+                                let vtable_alloc = self.tcx.global_alloc(vtable_alloc_id);
+                                if let rustc_middle::mir::interpret::GlobalAlloc::Memory(alloc) =
+                                    vtable_alloc
+                                {
+                                    let inner_alloc = alloc.inner();
+                                    let size = inner_alloc.len();
+                                    let bytes = inner_alloc
+                                        .inspect_with_uninit_and_ptr_outside_interpreter(0..size)
+                                        .to_vec();
+                                    let sym = format!(".Lvtable.{}", self.next_data_id());
+                                    let sym_id = self.symbols.intern(&sym);
+                                    let relocs = extract_alloc_relocs(
+                                        self.tcx,
+                                        inner_alloc,
+                                        0,
+                                        size,
+                                        &mut self.symbols,
+                                        &mut self.static_data,
+                                        &mut self.referenced_instances,
+                                        self.data_counter,
+                                    );
+                                    self.static_data.push((
+                                        sym_id,
+                                        bytes,
+                                        relocs,
+                                        inner_alloc.align.bytes(),
+                                    ));
+                                    return Some(
+                                        self.builder.symbol_addr(sym_id, Origin::synthetic()).raw(),
+                                    );
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
                 }
                 None
             }

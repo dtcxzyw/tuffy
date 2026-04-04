@@ -1712,6 +1712,10 @@ pub fn execute_instruction(
         }
         Op::Unreachable => Ok(ExecResult::Terminator(TerminatorAction::Unreachable)),
         Op::Trap => Ok(ExecResult::Terminator(TerminatorAction::Trap)),
+        Op::LandingPad => {
+            // The interpreter doesn't model exception handling. Treat as unreachable.
+            Ok(ExecResult::Terminator(TerminatorAction::Unreachable))
+        }
     }
 }
 

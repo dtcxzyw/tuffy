@@ -1373,8 +1373,8 @@
 // CHECK:     v5: mem = store.8 v1, v4, v0
 // CHECK:     v6: ptr = stack_slot 8
 // CHECK:     v7: ptr = load.8 v4, v5
-// CHECK:     v8: int:i64 = iconst 4
-// CHECK:     v9: int:i64 = iconst 4
+// CHECK:     v8: int:i8 = iconst 4
+// CHECK:     v9: int:i8 = iconst 4
 // CHECK:     v10: ptr = symbol_addr @_RINvNtNtC$HASH_4core4sync6atomic23atomic_compare_exchangemEC$HASH_10atomic_ops
 // CHECK:     v11: mem, v12: int:i32 = call v10(v7, v2, v3, v8, v9), v5 -> int:i32
 // CHECK:     v13: mem = store.4 v12, v6, v11
@@ -1463,7 +1463,7 @@
 // CHECK:     v2: ptr = stack_slot 8
 // CHECK:     v3: mem = store.8 v1, v2, v0
 // CHECK:     v4: ptr = load.8 v2, v3
-// CHECK:     v5: int:i64 = iconst 0
+// CHECK:     v5: int:i8 = iconst 0
 // CHECK:     v6: ptr = symbol_addr @_RINvNtNtC$HASH_4core4sync6atomic11atomic_loadmEC$HASH_10atomic_ops
 // CHECK:     v7: mem, v8: int:u32 = call v6(v4, v5), v3 -> int:u32
 // CHECK:     br bb1(v7)
@@ -1505,7 +1505,7 @@
 // CHECK:     v3: ptr = stack_slot 8
 // CHECK:     v4: mem = store.8 v1, v3, v0
 // CHECK:     v5: ptr = load.8 v3, v4
-// CHECK:     v6: int:i64 = iconst 1
+// CHECK:     v6: int:i8 = iconst 1
 // CHECK:     v7: ptr = symbol_addr @_RINvNtNtC$HASH_4core4sync6atomic12atomic_storemEC$HASH_10atomic_ops
 // CHECK:     v8: mem = call v7(v5, v2, v6), v4
 // CHECK:     v9: int:i64 = iconst 0

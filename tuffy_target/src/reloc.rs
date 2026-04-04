@@ -30,4 +30,6 @@ pub struct EncodeResult {
     pub code: Vec<u8>,
     /// Relocations for external symbol references.
     pub relocations: Vec<Relocation>,
+    /// Call-site table for LSDA generation (panic cleanup / landing pads).
+    pub call_site_table: Vec<crate::types::CallSiteEntry>,
 }

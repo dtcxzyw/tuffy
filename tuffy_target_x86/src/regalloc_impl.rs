@@ -221,7 +221,9 @@ impl RegAllocInst for VInst {
                 ops.push(use_op(*src2));
             }
             // Indirect call: callee register is a use operand
-            MInst::CallReg { callee, ret, ret2 } => {
+            MInst::CallReg {
+                callee, ret, ret2, ..
+            } => {
                 ops.push(use_op(*callee));
                 if let Some(r) = ret {
                     ops.push(def_op(*r));
@@ -238,6 +240,10 @@ impl RegAllocInst for VInst {
                 if let Some(r) = ret2 {
                     ops.push(def_op(*r));
                 }
+            }
+            // Landing pad capture: defines the exception pointer register
+            MInst::LandingPadCapture { dst } => {
+                ops.push(def_op(*dst));
             }
             // No register operands
             MInst::Ret

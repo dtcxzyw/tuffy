@@ -52,8 +52,15 @@ fn compile_add_func() -> Vec<u8> {
     let no_rdx_captures = HashMap::new();
     let no_rdx_moves = HashMap::new();
     let no_ret2 = HashSet::new();
-    let result = isel::isel(&func, &symbols, &no_rdx_captures, &no_rdx_moves, &no_ret2)
-        .expect("isel should succeed for add");
+    let result = isel::isel(
+        &func,
+        &symbols,
+        &no_rdx_captures,
+        &no_rdx_moves,
+        &no_ret2,
+        &HashMap::new(),
+    )
+    .expect("isel should succeed for add");
     let pinsts = backend::lower_isel_result(&result);
     let enc = encode::encode_function(&pinsts);
     emit::emit_elf(&result.name, &enc.code, &enc.relocations)

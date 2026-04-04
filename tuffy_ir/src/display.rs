@@ -880,6 +880,7 @@ fn fmt_inst(
         }
         Op::Unreachable => "unreachable".to_string(),
         Op::Trap => "trap".to_string(),
+        Op::LandingPad => "landing_pad".to_string(),
     }
 }
 

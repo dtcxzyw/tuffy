@@ -673,14 +673,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             }
         }
 
-        // Skip drop_in_place calls within function bodies.  The Drop
-        // terminator handler above calls drop_in_place directly for types
-        // that need it, but recursive field-dropping inside drop glue may
-        // reference drop_in_place instances that rustc didn't collect as
-        // MonoItems.  Skipping these avoids undefined symbol errors while
-        // still executing custom Drop impls.
-        // Also skip precondition_check calls — these are debug-mode
+        // Skip precondition_check calls — these are debug-mode
         // assertions for unchecked operations that may not have MonoItems.
+        // Note: drop_in_place calls are NOT skipped — they must be emitted
+        // for assume_init_drop, ptr::drop_in_place, etc. to work correctly.
+        // The Drop terminator handler only covers implicit drops at end of scope.
         if let Operand::Constant(c) = func {
             let fn_ty = self.tcx.instantiate_and_normalize_erasing_regions(
                 self.instance.args,
@@ -688,11 +685,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 ty::EarlyBinder::bind(c.ty()),
             );
             if let ty::FnDef(def_id, _fn_args) = fn_ty.kind() {
-                let skip = Some(*def_id) == self.tcx.lang_items().drop_in_place_fn()
-                    || self
-                        .tcx
-                        .opt_item_name(*def_id)
-                        .is_some_and(|n| n.as_str() == "precondition_check");
+                let skip = self
+                    .tcx
+                    .opt_item_name(*def_id)
+                    .is_some_and(|n| n.as_str() == "precondition_check");
                 if skip {
                     if let Some(target) = target {
                         let target_block = self.block_map.get(*target);
@@ -1688,6 +1684,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             call_ret_ann,
             Origin::synthetic(),
         );
+        self.last_call_vref = Some(call_mem.index());
         self.current_mem = call_mem.raw();
 
         // Mark calls with 128-bit return values for legalization

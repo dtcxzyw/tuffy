@@ -115,12 +115,18 @@ pub enum MInst<R: RegType> {
         name: String,
         ret: Option<R>,
         ret2: Option<R>,
+        /// If present, this call has a cleanup landing pad at the given
+        /// label (used for LSDA generation).
+        cleanup_label: Option<u32>,
     },
     /// indirect call through register (call *%reg)
     CallReg {
         callee: R,
         ret: Option<R>,
         ret2: Option<R>,
+        /// If present, this call has a cleanup landing pad at the given
+        /// label (used for LSDA generation).
+        cleanup_label: Option<u32>,
     },
     /// push reg onto stack
     Push { reg: R },
@@ -320,6 +326,12 @@ pub enum MInst<R: RegType> {
         expected: R,
         desired: R,
     },
+    /// Pseudo-instruction: landing pad entry.
+    ///
+    /// Marks the definition of `dst` which receives the exception pointer
+    /// from %rax (deposited by the unwinder).  Emits no machine code —
+    /// the physical register is already correct.
+    LandingPadCapture { dst: R },
 }
 
 /// SSE2 floating-point binary operation kind.

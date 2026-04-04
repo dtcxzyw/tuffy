@@ -257,6 +257,9 @@ impl CodegenBackend for TuffyCodegenBackend {
                                     ),
                                     local: false,
                                     has_frame_pointer: false,
+                                    call_site_table: vec![],
+                                    callee_saved_dwarf_regs: vec![],
+                                    sub_amount: 0,
                                 });
                             }
                         }
@@ -290,6 +293,9 @@ impl CodegenBackend for TuffyCodegenBackend {
                             ),
                             local: false,
                             has_frame_pointer: false,
+                            call_site_table: vec![],
+                            callee_saved_dwarf_regs: vec![],
+                            sub_amount: 0,
                         });
                     }
                 }
@@ -485,6 +491,9 @@ impl CodegenBackend for TuffyCodegenBackend {
                             weak: true,
                             local: false,
                             has_frame_pointer: false,
+                            call_site_table: vec![],
+                            callee_saved_dwarf_regs: vec![],
+                            sub_amount: 0,
                         });
                         continue;
                     }
@@ -568,6 +577,9 @@ impl CodegenBackend for TuffyCodegenBackend {
                         weak: true,
                         local: false,
                         has_frame_pointer: false,
+                        call_site_table: vec![],
+                        callee_saved_dwarf_regs: vec![],
+                        sub_amount: 0,
                     });
                 }
             }
@@ -915,7 +927,9 @@ __rust_try:
     .cfi_restore_state
     movq    8(%rsp), %rdi
     movq    %rax, %rsi
+.Lcatch_call_begin:
     callq   *16(%rsp)
+.Lcatch_call_end:
 
     movl    $1, %eax
     addq    $24, %rsp
@@ -935,10 +949,16 @@ __rust_try:
     .byte   1
     .uleb128 .Lcst_end0 - .Lcst_begin0
 .Lcst_begin0:
+    # try_fn call: landing pad = catch handler (action 1 = catch-all)
     .uleb128 .Ltry_begin - __rust_try
     .uleb128 .Ltry_end - .Ltry_begin
     .uleb128 .Lcatch_landing_pad - __rust_try
     .uleb128 1
+    # catch_fn call: no landing pad (continue unwinding on double-panic)
+    .uleb128 .Lcatch_call_begin - __rust_try
+    .uleb128 .Lcatch_call_end - .Lcatch_call_begin
+    .uleb128 0
+    .uleb128 0
 .Lcst_end0:
     .byte   1
     .byte   0

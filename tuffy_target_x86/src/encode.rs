@@ -457,6 +457,13 @@ struct EncodeContext {
     labels: HashMap<u32, usize>,
     fixups: Vec<JumpFixup>,
     relocations: Vec<Relocation>,
+    /// Raw call-site entries: (call_start, call_length, cleanup_label).
+    /// `Some(label)` → cleanup landing pad; `None` → no handler (cs_lpad = 0).
+    /// Resolved to byte offsets after encoding.
+    call_site_cleanups: Vec<(usize, usize, Option<u32>)>,
+    /// Whether this function has any cleanup blocks (used to decide whether to
+    /// emit call-site entries for calls without cleanup labels).
+    has_any_cleanup: bool,
 }
 
 impl EncodeContext {
@@ -467,6 +474,8 @@ impl EncodeContext {
             labels: HashMap::new(),
             fixups: Vec::new(),
             relocations: Vec::new(),
+            call_site_cleanups: Vec::new(),
+            has_any_cleanup: false,
         }
     }
 
@@ -511,6 +520,23 @@ impl EncodeContext {
 pub fn encode_function(insts: &[PInst]) -> EncodeResult {
     let mut ctx = EncodeContext::new();
 
+    // Check if this function has any cleanup landing pads.  When it does,
+    // every call instruction must have a call-site entry in the LSDA so
+    // the unwinder doesn't mistake an IP in cleanup code for a nounwind
+    // region (which would cause it to abort).
+    ctx.has_any_cleanup = insts.iter().any(|inst| {
+        matches!(
+            inst,
+            MInst::CallSym {
+                cleanup_label: Some(_),
+                ..
+            } | MInst::CallReg {
+                cleanup_label: Some(_),
+                ..
+            }
+        )
+    });
+
     for inst in insts {
         encode_inst(inst, &mut ctx);
     }
@@ -525,9 +551,31 @@ pub fn encode_function(insts: &[PInst]) -> EncodeResult {
         buf[fixup.patch_offset..fixup.patch_offset + 4].copy_from_slice(&rel.to_le_bytes());
     }
 
+    // Resolve call-site entries to byte offsets.
+    let call_site_table = ctx
+        .call_site_cleanups
+        .iter()
+        .filter_map(|(start, len, label)| match label {
+            Some(lbl) => ctx
+                .labels
+                .get(lbl)
+                .map(|&lp| tuffy_target::types::CallSiteEntry {
+                    call_start: *start,
+                    call_length: *len,
+                    landing_pad: lp,
+                }),
+            None => Some(tuffy_target::types::CallSiteEntry {
+                call_start: *start,
+                call_length: *len,
+                landing_pad: 0,
+            }),
+        })
+        .collect();
+
     EncodeResult {
         code: buf,
         relocations: ctx.relocations,
+        call_site_table,
     }
 }
 
@@ -730,6 +778,10 @@ fn encode_inst(inst: &PInst, ctx: &mut EncodeContext) {
         MInst::Label { id } => {
             ctx.labels.insert(*id, ctx.pos);
         }
+        MInst::LandingPadCapture { .. } => {
+            // No-op: exception pointer is already in RAX from the unwinder.
+            // The register allocator maps `dst` to a physical register via MovRR.
+        }
         MInst::Jmp { target } => {
             ctx.emit_branch(Code::Jmp_rel32_64, *target);
         }
@@ -744,18 +796,41 @@ fn encode_inst(inst: &PInst, ctx: &mut EncodeContext) {
         }
 
         // --- Calls ---
-        MInst::CallSym { name, .. } => {
+        MInst::CallSym {
+            name,
+            cleanup_label,
+            ..
+        } => {
             let start = ctx.pos;
             ctx.emit(Instruction::with_branch(Code::Call_rel32_64, 0).unwrap());
+            let call_end = ctx.pos;
             let offsets = ctx.encoder.get_constant_offsets();
             ctx.relocations.push(Relocation {
                 offset: start + offsets.immediate_offset(),
                 symbol: name.clone(),
                 kind: RelocKind::Call,
             });
+            if let Some(label) = cleanup_label {
+                ctx.call_site_cleanups
+                    .push((start, call_end - start, Some(*label)));
+            } else if ctx.has_any_cleanup {
+                ctx.call_site_cleanups.push((start, call_end - start, None));
+            }
         }
-        MInst::CallReg { callee, .. } => {
+        MInst::CallReg {
+            callee,
+            cleanup_label,
+            ..
+        } => {
+            let start = ctx.pos;
             ctx.emit(Instruction::with1(Code::Call_rm64, gpr64(*callee)).unwrap());
+            let call_end = ctx.pos;
+            if let Some(label) = cleanup_label {
+                ctx.call_site_cleanups
+                    .push((start, call_end - start, Some(*label)));
+            } else if ctx.has_any_cleanup {
+                ctx.call_site_cleanups.push((start, call_end - start, None));
+            }
         }
 
         // --- Stack ---

@@ -1577,6 +1577,17 @@ impl<'a> Builder<'a> {
         self.push_inst(Op::Trap, Type::Unit, None, origin, None)
     }
 
+    /// Capture the exception pointer deposited by the unwinder in the
+    /// return-value register. Used at the start of landing-pad blocks.
+    pub fn landing_pad(&mut self, origin: Origin) -> ValueRef {
+        self.push_inst(Op::LandingPad, Type::Ptr(0), None, origin, None)
+    }
+
+    /// Returns the current block reference, if any.
+    pub fn current_block(&self) -> Option<BlockRef> {
+        self.current_block
+    }
+
     /// Returns `true` if the current block already ends with a terminator.
     pub fn current_block_is_terminated(&self) -> bool {
         let Some(bb_ref) = self.current_block else {

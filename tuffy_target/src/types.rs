@@ -18,6 +18,33 @@ pub struct CompiledFunction {
     /// (push rbp; mov rbp, rsp). Used to generate correct .eh_frame
     /// unwind information.
     pub has_frame_pointer: bool,
+    /// Call-site table for LSDA generation (panic cleanup / landing pads).
+    /// Each entry maps a call instruction region to its landing pad.
+    /// Empty if the function has no cleanup blocks.
+    pub call_site_table: Vec<CallSiteEntry>,
+    /// DWARF register numbers of callee-saved registers saved in the prologue,
+    /// in push order. Used to generate correct .eh_frame unwind rules so the
+    /// unwinder can restore these registers.
+    pub callee_saved_dwarf_regs: Vec<u8>,
+    /// The `sub $N, %rsp` amount from the prologue. Needed to compute the
+    /// CFA offset of each callee-saved register save location.
+    pub sub_amount: i32,
+}
+
+/// One entry in the call-site table embedded in the LSDA.
+///
+/// Describes a region of code (a call instruction) and its associated
+/// landing pad for stack unwinding.
+#[derive(Debug, Clone)]
+pub struct CallSiteEntry {
+    /// Byte offset of the call region start, relative to function start.
+    pub call_start: usize,
+    /// Length of the call region in bytes.
+    pub call_length: usize,
+    /// Byte offset of the landing pad, relative to function start.
+    /// 0 means no landing pad (should not appear in practice for entries
+    /// that are explicitly tracked).
+    pub landing_pad: usize,
 }
 
 /// A static data blob to be placed in a data section.

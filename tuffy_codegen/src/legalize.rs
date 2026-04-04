@@ -1861,6 +1861,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
         }
         Op::Unreachable => b.unreachable(o()),
         Op::Trap => b.trap(o()),
+        Op::LandingPad => b.landing_pad(o()),
         Op::Br(..) | Op::BrIf(..) | Op::Call(..) | Op::Continue(..) | Op::RegionYield(..) => {
             unreachable!("branch/call should be handled by dedicated leg_* function")
         }

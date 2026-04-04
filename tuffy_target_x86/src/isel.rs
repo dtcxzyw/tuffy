@@ -885,6 +885,7 @@ pub fn isel(
     rdx_captures: &HashMap<u32, u32>,
     rdx_moves: &HashMap<u32, u32>,
     call_has_ret2: &HashSet<u32>,
+    call_cleanup_labels: &HashMap<u32, u32>,
 ) -> Option<IselResult<VInst>> {
     let ba_cap = func.block_args.len();
     let pool_cap = func.inst_pool.next_index() as usize;
@@ -918,6 +919,7 @@ pub fn isel(
                     rdx_captures,
                     rdx_moves,
                     call_has_ret2,
+                    call_cleanup_labels,
                 )
                 .is_none()
                 {
@@ -982,6 +984,7 @@ fn select_inst(
     rdx_captures: &HashMap<u32, u32>,
     rdx_moves: &HashMap<u32, u32>,
     call_has_ret2: &HashSet<u32>,
+    call_cleanup_labels: &HashMap<u32, u32>,
 ) -> Option<()> {
     // Handle 128-bit integer operations before the generated rules.
     if has_wide_scalar_annotation(func, vref.index())
@@ -1347,6 +1350,7 @@ fn select_inst(
                 func,
                 symbols,
                 call_has_ret2,
+                call_cleanup_labels,
             )?;
         }
 
@@ -1472,6 +1476,21 @@ fn select_inst(
 
         Op::Unreachable | Op::Trap => {
             ctx.out.push(MInst::Ud2);
+        }
+
+        Op::LandingPad => {
+            // The unwinder deposits the exception pointer in %rax.
+            // Define a fixed-RAX vreg, then copy to an unconstrained vreg
+            // so the register allocator can manage it freely.
+            let rax_vreg = ctx.alloc.alloc_fixed(crate::reg::Gpr::Rax.to_preg());
+            ctx.out.push(MInst::LandingPadCapture { dst: rax_vreg });
+            let exc_ptr = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst: exc_ptr,
+                src: rax_vreg,
+            });
+            ctx.regs.assign(vref, exc_ptr);
         }
 
         Op::Select(cond, tv, fv) => {
@@ -3444,6 +3463,7 @@ fn select_brif(
     Some(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn select_call(
     ctx: &mut IselCtx,
     vref: ValueRef,
@@ -3452,6 +3472,7 @@ fn select_call(
     func: &Function,
     symbols: &SymbolTable,
     call_has_ret2: &HashSet<u32>,
+    call_cleanup_labels: &HashMap<u32, u32>,
 ) -> Option<()> {
     // Phase 1: materialize all args into unconstrained vregs.
     // This must happen before any fixed-register moves, otherwise
@@ -3704,12 +3725,14 @@ fn select_call(
     };
 
     let callee_idx = callee.value.index();
+    let cleanup_label = call_cleanup_labels.get(&{ vref.index() }).copied();
     if let Op::SymbolAddr(sym_id) = &func.inst(callee_idx).op {
         let name = symbols.resolve(*sym_id).to_string();
         ctx.out.push(MInst::CallSym {
             name,
             ret: ret_vreg,
             ret2: ret2_vreg,
+            cleanup_label,
         });
     } else {
         // Indirect call through a register (e.g. virtual dispatch).
@@ -3718,6 +3741,7 @@ fn select_call(
             callee: callee_vreg,
             ret: ret_vreg,
             ret2: ret2_vreg,
+            cleanup_label,
         });
     }
 
@@ -4079,6 +4103,7 @@ fn emit_libc_call(ctx: &mut IselCtx, name: &str, args: &[&Operand]) -> Option<()
         name: name.to_string(),
         ret: None,
         ret2: None,
+        cleanup_label: None,
     });
     Some(())
 }

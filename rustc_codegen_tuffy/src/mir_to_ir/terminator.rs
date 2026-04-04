@@ -409,10 +409,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             TerminatorKind::Unreachable => {
                 self.builder.unreachable(Origin::synthetic());
             }
-            TerminatorKind::Drop { place, target, .. } => {
+            TerminatorKind::Drop {
+                place,
+                target,
+                unwind,
+                ..
+            } => {
                 let drop_ty = place.ty(&self.mir.local_decls, self.tcx).ty;
                 let drop_ty = self.monomorphize(drop_ty);
                 let target_block = self.block_map.get(*target);
+                self.last_call_vref = None;
 
                 // Only emit drop glue when the type actually needs dropping.
                 if drop_ty.needs_drop(self.tcx, ty::TypingEnv::fully_monomorphized()) {
@@ -478,6 +484,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 None,
                                 Origin::synthetic(),
                             );
+                            self.last_call_vref = Some(call_mem.index());
                             self.builder.br(
                                 merge_block,
                                 vec![call_mem.into()],
@@ -594,6 +601,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     None,
                                     Origin::synthetic(),
                                 );
+                                self.last_call_vref = Some(call_mem.index());
                                 self.current_mem = call_mem.raw();
                             }
                         }
@@ -605,6 +613,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     vec![self.current_mem.into()],
                     Origin::synthetic(),
                 );
+                // If the drop has an unwind cleanup target, register a
+                // landing-pad wrapper so the unwinder can invoke cleanup.
+                if let mir::UnwindAction::Cleanup(cleanup_bb) = unwind
+                    && let Some(call_idx) = self.last_call_vref
+                {
+                    self.setup_cleanup_landing_pad(call_idx, *cleanup_bb);
+                }
             }
             TerminatorKind::FalseEdge { real_target, .. } => {
                 let target_block = self.block_map.get(*real_target);
@@ -627,9 +642,18 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 args,
                 destination,
                 target,
+                unwind,
                 ..
             } => {
+                self.last_call_vref = None;
                 self.translate_call(func, args, destination, target, term.source_info);
+                // If the call has an unwind cleanup target, create a landing-pad
+                // wrapper block and record the call → wrapper mapping.
+                if let mir::UnwindAction::Cleanup(cleanup_bb) = unwind
+                    && let Some(call_idx) = self.last_call_vref
+                {
+                    self.setup_cleanup_landing_pad(call_idx, *cleanup_bb);
+                }
             }
             TerminatorKind::InlineAsm {
                 template,
@@ -639,6 +663,46 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             } => {
                 self.translate_inline_asm(template, operands, targets);
             }
+            TerminatorKind::UnwindResume => {
+                // Resume unwinding: load the exception pointer from the
+                // stack slot (stored by the landing-pad wrapper) and call
+                // `_Unwind_Resume(exc_ptr)` to continue stack unwinding.
+                if let Some(exc_slot) = self.exc_ptr_slot {
+                    let exc_ptr = self.builder.load(
+                        exc_slot.into(),
+                        8,
+                        Type::Ptr(0),
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
+                    );
+                    let resume_sym = self.symbols.intern("_Unwind_Resume");
+                    let resume_addr = self.builder.symbol_addr(resume_sym, Origin::synthetic());
+                    let (_, _) = self.builder.call(
+                        resume_addr.into(),
+                        vec![exc_ptr.into()],
+                        Type::Unit,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
+                    );
+                }
+                self.builder.unreachable(Origin::synthetic());
+            }
+            TerminatorKind::UnwindTerminate(_) => {
+                // Terminate on double-panic: call std::process::abort.
+                let abort_sym = self.symbols.intern("rust_begin_unwind");
+                let abort_addr = self.builder.symbol_addr(abort_sym, Origin::synthetic());
+                let (_, _) = self.builder.call(
+                    abort_addr.into(),
+                    vec![],
+                    Type::Unit,
+                    self.current_mem.into(),
+                    None,
+                    Origin::synthetic(),
+                );
+                self.builder.trap(Origin::synthetic());
+            }
             _ => {
                 // For any unhandled terminator (including Resume, Yield, etc.),
                 // treat as a trap since we don't support exception handling
@@ -646,6 +710,23 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 self.builder.trap(Origin::synthetic());
             }
         }
+    }
+
+    /// Create a landing-pad wrapper block for a call with unwind cleanup.
+    ///
+    /// The wrapper captures the exception pointer from the unwinder,
+    /// stores it to the shared `exc_ptr_slot`, and branches to the
+    /// actual MIR cleanup block.
+    fn setup_cleanup_landing_pad(&mut self, call_idx: u32, cleanup_bb: mir::BasicBlock) {
+        // Create the wrapper IR block (no block args — entered by unwinder).
+        let wrapper_block = self.builder.create_block();
+
+        // Record the cleanup label mapping.
+        self.abi_metadata
+            .mark_call_cleanup(call_idx, wrapper_block.index());
+
+        // Defer wrapper block population to after the main translation loop.
+        self.landing_pad_wrappers.push((wrapper_block, cleanup_bb));
     }
 
     /// Handle an InlineAsm terminator.
