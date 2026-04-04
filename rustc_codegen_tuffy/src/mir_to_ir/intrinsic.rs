@@ -240,10 +240,30 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         .map(|sz| (sz * 8) as u32)
                         .unwrap_or(64);
                     if bits <= 64 {
-                        // Emit lzcnt64 and adjust for sub-64-bit types.
-                        let clz =
+                        // For sub-64-bit types, mask the value to clear any
+                        // sign-extended upper bits. Without this, lzcnt64 on
+                        // e.g. 0xFFFFFFFFFFFFFF80 (-128i8 as u8) returns 0
+                        // instead of 56.
+                        let masked = if bits < 64 {
+                            let mask = self.builder.iconst(
+                                (1i64 << bits) - 1,
+                                64,
+                                IntSignedness::Unsigned,
+                                Origin::synthetic(),
+                            );
                             self.builder
-                                .count_leading_zeros(v.into(), 64, 64, Origin::synthetic());
+                                .and(v.into(), mask.into(), I64, Origin::synthetic())
+                                .raw()
+                        } else {
+                            v
+                        };
+                        // Emit lzcnt64 and adjust for sub-64-bit types.
+                        let clz = self.builder.count_leading_zeros(
+                            masked.into(),
+                            64,
+                            64,
+                            Origin::synthetic(),
+                        );
                         if bits < 64 {
                             let adjust = self.builder.iconst(
                                 (64 - bits) as i64,
@@ -677,9 +697,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 true
             }
 
-            // ptr_offset_from_unsigned<T>(ptr1, ptr2) → (ptr1 - ptr2) / sizeof(T)
+            // ptr_offset_from<T>(ptr1, ptr2) → (ptr1 - ptr2) / sizeof(T) (signed)
+            // ptr_offset_from_unsigned<T>(ptr1, ptr2) → (ptr1 - ptr2) / sizeof(T) (unsigned)
             "ptr_offset_from_unsigned" | "ptr_offset_from" => {
                 if ir_args.len() >= 2 {
+                    let is_signed = name == "ptr_offset_from";
                     let ptr1 = self.coerce_to_ptr(ir_args[0]);
                     let ptr2 = self.coerce_to_ptr(ir_args[1]);
                     let diff =
@@ -693,6 +715,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let result = if elem_size <= 1 {
                         diff
                     } else {
+                        let div_ann = IntAnnotation {
+                            bit_width: 64,
+                            signedness: if is_signed {
+                                IntSignedness::Signed
+                            } else {
+                                IntSignedness::Unsigned
+                            },
+                        };
                         let sz = self.builder.iconst(
                             elem_size as i64,
                             64,
@@ -700,7 +730,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             Origin::synthetic(),
                         );
                         self.builder
-                            .div(diff.into(), sz.into(), I64, Origin::synthetic())
+                            .div(diff.into(), sz.into(), div_ann, Origin::synthetic())
                     };
                     self.locals.set(destination_local, result.raw());
                 }

@@ -64,13 +64,15 @@
 // CHECK: func @ctlz_u32(int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u32 = param 0
-// CHECK:     v2: int:u64 = count_leading_zeros.64 v1
-// CHECK:     v3: int:u64 = iconst 32
-// CHECK:     v4: int:u64 = sub v2, v3
+// CHECK:     v2: int:u64 = iconst 4294967295
+// CHECK:     v3: int:u64 = and v1, v2
+// CHECK:     v4: int:u64 = count_leading_zeros.64 v3
+// CHECK:     v5: int:u64 = iconst 32
+// CHECK:     v6: int:u64 = sub v4, v5
 // CHECK:     br bb1(v0)
 // CHECK:
-// CHECK:   bb1(v6: mem):
-// CHECK:     ret v4, v6
+// CHECK:   bb1(v8: mem):
+// CHECK:     ret v6, v8
 // CHECK: }
 // CHECK:
 // CHECK: fn ctpop_u32(_1: u32) -> u32 {

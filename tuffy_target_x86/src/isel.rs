@@ -4010,8 +4010,8 @@ fn select_divrem(
     kind: DivRemKind,
     func: &Function,
 ) -> Option<()> {
-    let lhs_vreg = ctx.ensure_in_reg(lhs.value)?;
-    let rhs_vreg = ctx.ensure_in_reg(rhs.value)?;
+    let mut lhs_vreg = ctx.ensure_in_reg(lhs.value)?;
+    let mut rhs_vreg = ctx.ensure_in_reg(rhs.value)?;
     // Use the Div/Rem instruction's own annotation (which carries the
     // correct signedness from the frontend), not the LHS operand's
     // defining instruction (which may have DontCare or Unsigned).
@@ -4023,6 +4023,56 @@ fn select_divrem(
             ..
         })
     );
+
+    // For signed sub-64-bit division, sign-extend operands to 64 bits.
+    // encode_divrem uses 64-bit idiv with CQO, which sign-extends based on
+    // bit 63. Sub-64-bit negative values are zero-extended in registers
+    // (e.g. -292i16 = 0x000000000000FEDC), so CQO sees them as positive.
+    if signed {
+        let bit_width = inst_ann.map(|a| a.bit_width).unwrap_or(64);
+        if bit_width < 64 {
+            let ext_lhs = ctx.alloc.alloc();
+            let ext_rhs = ctx.alloc.alloc();
+            match bit_width {
+                8 => {
+                    ctx.out.push(MInst::MovsxB {
+                        dst: ext_lhs,
+                        src: lhs_vreg,
+                    });
+                    ctx.out.push(MInst::MovsxB {
+                        dst: ext_rhs,
+                        src: rhs_vreg,
+                    });
+                }
+                16 => {
+                    ctx.out.push(MInst::MovsxW {
+                        dst: ext_lhs,
+                        src: lhs_vreg,
+                    });
+                    ctx.out.push(MInst::MovsxW {
+                        dst: ext_rhs,
+                        src: rhs_vreg,
+                    });
+                }
+                32 => {
+                    ctx.out.push(MInst::MovsxD {
+                        dst: ext_lhs,
+                        src: lhs_vreg,
+                    });
+                    ctx.out.push(MInst::MovsxD {
+                        dst: ext_rhs,
+                        src: rhs_vreg,
+                    });
+                }
+                _ => {}
+            }
+            if bit_width <= 32 {
+                lhs_vreg = ext_lhs;
+                rhs_vreg = ext_rhs;
+            }
+        }
+    }
+
     let rem = matches!(kind, DivRemKind::Rem);
 
     let dst = ctx.alloc.alloc();
