@@ -10,6 +10,7 @@ use tuffy_ir::types::{Annotation, IntAnnotation, IntSignedness, Type};
 use tuffy_ir::value::{BlockRef, ValueRef};
 
 use super::StaticDataVec;
+use super::constant::extract_alloc_relocs;
 use super::types::*;
 
 pub(super) struct LocalMap {
@@ -178,6 +179,9 @@ pub(super) struct TranslationCtx<'a, 'tcx> {
     pub(super) referenced_instances: Vec<Instance<'tcx>>,
     /// Counter for generating unique static data symbol names within a CGU.
     pub(super) data_counter: &'a mut u64,
+    /// Cache mapping rustc vtable AllocId → emitted symbol name, shared across
+    /// all functions in the CGU to ensure vtable deduplication.
+    pub(super) vtable_cache: &'a mut super::VtableCache,
     /// SRET pointer for functions returning large structs (>16 bytes).
     /// When set, param indices are shifted by 1 (param 0 = hidden SRET ptr).
     pub(super) sret_ptr: Option<ValueRef>,
@@ -203,6 +207,46 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let id = *self.data_counter;
         *self.data_counter += 1;
         id
+    }
+
+    /// Emit a vtable (or reuse a previously emitted one) and return the symbol_addr ValueRef.
+    /// Uses `vtable_cache` keyed by the rustc AllocId to deduplicate.
+    pub(super) fn emit_vtable(
+        &mut self,
+        vtable_alloc_id: rustc_middle::mir::interpret::AllocId,
+    ) -> Option<ValueRef> {
+        if let Some(existing_name) = self.vtable_cache.get(&vtable_alloc_id) {
+            let sym_id = self.symbols.intern(existing_name);
+            return Some(self.builder.symbol_addr(sym_id, Origin::synthetic()).raw());
+        }
+
+        let vtable_alloc = self.tcx.global_alloc(vtable_alloc_id);
+        if let rustc_middle::mir::interpret::GlobalAlloc::Memory(alloc) = vtable_alloc {
+            let inner_alloc = alloc.inner();
+            let size = inner_alloc.len();
+            let bytes = inner_alloc
+                .inspect_with_uninit_and_ptr_outside_interpreter(0..size)
+                .to_vec();
+            let sym = format!(".Lvtable.{}", self.next_data_id());
+            self.vtable_cache.insert(vtable_alloc_id, sym.clone());
+            let sym_id = self.symbols.intern(&sym);
+            let relocs = extract_alloc_relocs(
+                self.tcx,
+                inner_alloc,
+                0,
+                size,
+                &mut self.symbols,
+                &mut self.static_data,
+                &mut self.referenced_instances,
+                self.data_counter,
+                self.vtable_cache,
+            );
+            self.static_data
+                .push((sym_id, bytes, relocs, inner_alloc.align.bytes()));
+            Some(self.builder.symbol_addr(sym_id, Origin::synthetic()).raw())
+        } else {
+            None
+        }
     }
 
     /// Get the target pointer width in bits.

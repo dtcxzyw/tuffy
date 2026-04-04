@@ -104,6 +104,7 @@ impl CodegenBackend for TuffyCodegenBackend {
 
             let mut compiled_funcs: Vec<CompiledFunction> = Vec::new();
             let mut all_static_data: Vec<StaticData> = Vec::new();
+            let mut vtable_cache: mir_to_ir::VtableCache = std::collections::HashMap::new();
 
             for (mono_item, item_data) in &mono_items {
                 if let MonoItem::Fn(instance) = mono_item {
@@ -134,8 +135,13 @@ impl CodegenBackend for TuffyCodegenBackend {
                             eprint!("{}", String::from_utf8_lossy(&buf));
                         });
                     }
-                    let result_opt =
-                        mir_to_ir::translate_function(tcx, *instance, &session, &mut data_counter);
+                    let result_opt = mir_to_ir::translate_function(
+                        tcx,
+                        *instance,
+                        &session,
+                        &mut data_counter,
+                        &mut vtable_cache,
+                    );
                     if let Some(mut result) = result_opt {
                         pending_instances.extend(result.referenced_instances.iter().copied());
                         if dump_ir {
@@ -336,6 +342,7 @@ impl CodegenBackend for TuffyCodegenBackend {
                             &mut all_static_data,
                             &mut pending_instances,
                             &mut data_counter,
+                            &mut vtable_cache,
                         );
                         if let Some(ref mut buf) = module_ir_text {
                             use std::fmt::Write;
@@ -448,6 +455,7 @@ impl CodegenBackend for TuffyCodegenBackend {
         let mut inline_funcs: Vec<CompiledFunction> = Vec::new();
         let mut inline_static_data: Vec<StaticData> = Vec::new();
         let mut inline_data_counter: u64 = data_counter; // continues from main loop
+        let mut inline_vtable_cache: mir_to_ir::VtableCache = std::collections::HashMap::new();
         loop {
             let batch: Vec<Instance<'tcx>> = pending_instances
                 .drain(..)
@@ -474,6 +482,7 @@ impl CodegenBackend for TuffyCodegenBackend {
                     inst,
                     &session,
                     &mut inline_data_counter,
+                    &mut inline_vtable_cache,
                 ) {
                     Some(r) => r,
                     None => {
@@ -783,6 +792,7 @@ fn collect_alloc_relocs<'tcx>(
     static_data: &mut Vec<StaticData>,
     referenced_instances: &mut Vec<Instance<'tcx>>,
     data_counter: &mut u64,
+    vtable_cache: &mut mir_to_ir::VtableCache,
 ) -> Vec<tuffy_target::reloc::Relocation> {
     let mut relocs = Vec::new();
     for (offset, prov) in alloc.provenance().ptrs().iter() {
@@ -813,6 +823,7 @@ fn collect_alloc_relocs<'tcx>(
                     static_data,
                     referenced_instances,
                     data_counter,
+                    vtable_cache,
                 );
                 static_data.push(StaticData {
                     name: name.clone(),
@@ -833,7 +844,10 @@ fn collect_alloc_relocs<'tcx>(
                         tcx.vtable_allocation((ty, principal))
                     }))
                 {
-                    if let GlobalAlloc::Memory(vtable_alloc) = tcx.global_alloc(vtable_id) {
+                    // Check vtable cache for deduplication.
+                    if let Some(existing_name) = vtable_cache.get(&vtable_id) {
+                        existing_name.clone()
+                    } else if let GlobalAlloc::Memory(vtable_alloc) = tcx.global_alloc(vtable_id) {
                         let inner = vtable_alloc.inner();
                         let bytes = inner
                             .inspect_with_uninit_and_ptr_outside_interpreter(0..inner.len())
@@ -843,12 +857,14 @@ fn collect_alloc_relocs<'tcx>(
                             *data_counter += 1;
                             id
                         });
+                        vtable_cache.insert(vtable_id, name.clone());
                         let nested_relocs = collect_alloc_relocs(
                             tcx,
                             inner,
                             static_data,
                             referenced_instances,
                             data_counter,
+                            vtable_cache,
                         );
                         static_data.push(StaticData {
                             name: name.clone(),

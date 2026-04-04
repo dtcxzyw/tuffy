@@ -34,6 +34,10 @@ use tuffy_ir::types::Type;
 /// Relocations are (offset_in_bytes, target_symbol_name) for function pointers in vtables.
 type StaticDataVec = Vec<(SymbolId, Vec<u8>, Vec<(usize, String)>, u64)>;
 
+/// Cache mapping rustc vtable `AllocId` → emitted symbol name.
+/// Prevents duplicate vtable emissions for the same (type, trait) pair.
+pub type VtableCache = std::collections::HashMap<rustc_middle::mir::interpret::AllocId, String>;
+
 /// Result of MIR → IR translation.
 pub struct TranslationResult<'tcx> {
     pub func: Function,
@@ -56,6 +60,7 @@ pub fn translate_function<'tcx>(
     instance: Instance<'tcx>,
     session: &CodegenSession,
     data_counter: &mut u64,
+    vtable_cache: &mut VtableCache,
 ) -> Option<TranslationResult<'tcx>> {
     // Skip partially substituted polymorphic instances — the symbol mangler
     // will panic if generic parameters are still present.
@@ -362,6 +367,7 @@ pub fn translate_function<'tcx>(
         cast_fat_meta: FatLocalMap::new(),
         referenced_instances: Vec::new(),
         data_counter,
+        vtable_cache,
         sret_ptr: None,
         weak_undefined_symbols: std::collections::HashSet::new(),
         caller_location_param: None,

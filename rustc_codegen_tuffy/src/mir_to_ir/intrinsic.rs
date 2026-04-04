@@ -569,14 +569,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             self.locals.set(destination_local, result);
                         }
                     } else if matches!(tail.kind(), ty::Slice(..) | ty::Str) {
-                        // Slice/str: alignment is known at compile time (element alignment).
-                        let elem_align = if let ty::Slice(elem_ty) = tail.kind() {
-                            type_align(tcx, *elem_ty).unwrap_or(1)
-                        } else {
-                            1 // str has align 1
-                        };
+                        // Slice/str: alignment is known at compile time.
+                        // Use the alignment of the containing type (not the element),
+                        // so that #[repr(packed)] structs report their packed alignment.
+                        let align = type_align(tcx, t).unwrap_or(1);
                         let result = self.builder.iconst(
-                            elem_align as i64,
+                            align as i64,
                             64,
                             IntSignedness::DontCare,
                             Origin::synthetic(),

@@ -1043,36 +1043,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             .principal()
                             .map(|p| self.tcx.instantiate_bound_regions_with_erased(p));
                         let vtable_alloc_id = self.tcx.vtable_allocation((src_inner, principal));
-                        let vtable_alloc = self.tcx.global_alloc(vtable_alloc_id);
-                        if let rustc_middle::mir::interpret::GlobalAlloc::Memory(alloc) =
-                            vtable_alloc
-                        {
-                            let inner_alloc = alloc.inner();
-                            let size = inner_alloc.len();
-                            let bytes = inner_alloc
-                                .inspect_with_uninit_and_ptr_outside_interpreter(0..size)
-                                .to_vec();
-                            let sym = format!(".Lvtable.{}", self.next_data_id());
-                            let sym_id = self.symbols.intern(&sym);
-                            let relocs = extract_alloc_relocs(
-                                self.tcx,
-                                inner_alloc,
-                                0,
-                                size,
-                                &mut self.symbols,
-                                &mut self.static_data,
-                                &mut self.referenced_instances,
-                                self.data_counter,
-                            );
-                            self.static_data.push((
-                                sym_id,
-                                bytes,
-                                relocs,
-                                inner_alloc.align.bytes(),
-                            ));
-                            return Some(
-                                self.builder.symbol_addr(sym_id, Origin::synthetic()).raw(),
-                            );
+                        if let Some(vtable_val) = self.emit_vtable(vtable_alloc_id) {
+                            return Some(vtable_val);
                         }
                     }
                     // Handle array-to-slice unsizing: &[T; N] → &[T].
@@ -1156,41 +1128,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         .map(|p| self.tcx.instantiate_bound_regions_with_erased(p));
                                     let vtable_alloc_id =
                                         self.tcx.vtable_allocation((src_tail, principal));
-                                    let vtable_alloc = self.tcx.global_alloc(vtable_alloc_id);
-                                    if let rustc_middle::mir::interpret::GlobalAlloc::Memory(
-                                        alloc,
-                                    ) = vtable_alloc
-                                    {
-                                        let inner_alloc = alloc.inner();
-                                        let size = inner_alloc.len();
-                                        let bytes = inner_alloc
-                                            .inspect_with_uninit_and_ptr_outside_interpreter(
-                                                0..size,
-                                            )
-                                            .to_vec();
-                                        let sym = format!(".Lvtable.{}", self.next_data_id());
-                                        let sym_id = self.symbols.intern(&sym);
-                                        let relocs = extract_alloc_relocs(
-                                            self.tcx,
-                                            inner_alloc,
-                                            0,
-                                            size,
-                                            &mut self.symbols,
-                                            &mut self.static_data,
-                                            &mut self.referenced_instances,
-                                            self.data_counter,
-                                        );
-                                        self.static_data.push((
-                                            sym_id,
-                                            bytes,
-                                            relocs,
-                                            inner_alloc.align.bytes(),
-                                        ));
-                                        return Some(
-                                            self.builder
-                                                .symbol_addr(sym_id, Origin::synthetic())
-                                                .raw(),
-                                        );
+                                    if let Some(vtable_val) = self.emit_vtable(vtable_alloc_id) {
+                                        return Some(vtable_val);
                                     }
                                 }
                                 _ => {}
@@ -1238,36 +1177,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     .map(|p| self.tcx.instantiate_bound_regions_with_erased(p));
                                 let vtable_alloc_id =
                                     self.tcx.vtable_allocation((src_tail, principal));
-                                let vtable_alloc = self.tcx.global_alloc(vtable_alloc_id);
-                                if let rustc_middle::mir::interpret::GlobalAlloc::Memory(alloc) =
-                                    vtable_alloc
-                                {
-                                    let inner_alloc = alloc.inner();
-                                    let size = inner_alloc.len();
-                                    let bytes = inner_alloc
-                                        .inspect_with_uninit_and_ptr_outside_interpreter(0..size)
-                                        .to_vec();
-                                    let sym = format!(".Lvtable.{}", self.next_data_id());
-                                    let sym_id = self.symbols.intern(&sym);
-                                    let relocs = extract_alloc_relocs(
-                                        self.tcx,
-                                        inner_alloc,
-                                        0,
-                                        size,
-                                        &mut self.symbols,
-                                        &mut self.static_data,
-                                        &mut self.referenced_instances,
-                                        self.data_counter,
-                                    );
-                                    self.static_data.push((
-                                        sym_id,
-                                        bytes,
-                                        relocs,
-                                        inner_alloc.align.bytes(),
-                                    ));
-                                    return Some(
-                                        self.builder.symbol_addr(sym_id, Origin::synthetic()).raw(),
-                                    );
+                                if let Some(vtable_val) = self.emit_vtable(vtable_alloc_id) {
+                                    return Some(vtable_val);
                                 }
                             }
                             _ => {}
@@ -3932,6 +3843,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 &mut self.referenced_instances,
                 self.data_counter,
                 &mut self.weak_undefined_symbols,
+                self.vtable_cache,
             ),
             Operand::RuntimeChecks(_) => {
                 // UbChecks / ContractChecks / OverflowChecks: emit false (0)
