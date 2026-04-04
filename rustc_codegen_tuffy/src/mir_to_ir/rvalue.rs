@@ -3052,19 +3052,29 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             {
                                 // If val is still a memory address (e.g. fat
                                 // pointer in a stack slot), load the thin
-                                // pointer first.
-                                let ptr_val = if self.builder.is_memory_address(val) {
-                                    self.builder.load(
-                                        val.into(),
-                                        8,
-                                        Type::Ptr(0),
-                                        self.current_mem.into(),
-                                        None,
-                                        Origin::synthetic(),
-                                    )
-                                } else {
-                                    val
-                                };
+                                // pointer first.  Skip the load for non-stack
+                                // simple locals whose value is a stack_slot from
+                                // `&raw mut` aliasing — val IS the pointer, not a
+                                // location storing a pointer.
+                                let is_aliased_ptr = matches!(
+                                    operand,
+                                    Operand::Copy(src) | Operand::Move(src)
+                                        if src.projection.is_empty()
+                                            && !self.stack_locals.is_stack(src.local)
+                                );
+                                let ptr_val =
+                                    if self.builder.is_memory_address(val) && !is_aliased_ptr {
+                                        self.builder.load(
+                                            val.into(),
+                                            8,
+                                            Type::Ptr(0),
+                                            self.current_mem.into(),
+                                            None,
+                                            Origin::synthetic(),
+                                        )
+                                    } else {
+                                        val
+                                    };
                                 return Some(
                                     self.builder
                                         .ptrtoaddr(ptr_val.into(), 64, Origin::synthetic())

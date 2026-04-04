@@ -437,7 +437,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                 if operand_is_stack {
                                                     let src_place = match rvalue {
                                                         Rvalue::Cast(
-                                                            _,
+                                                            mir::CastKind::PointerCoercion(
+                                                                ty::adjustment::PointerCoercion::Unsize,
+                                                                _,
+                                                            ),
                                                             Operand::Copy(p) | Operand::Move(p),
                                                             _,
                                                         ) => Some(p),
