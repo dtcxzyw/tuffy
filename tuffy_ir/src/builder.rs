@@ -154,7 +154,7 @@ impl<'a> Builder<'a> {
         }
         match self.func.inst_pool.get(v.index()) {
             Some(node) => match &node.inst.op {
-                Op::StackSlot(bytes) => Some(*bytes),
+                Op::StackSlot(bytes, _align) => Some(*bytes),
                 _ => None,
             },
             None => None,
@@ -170,7 +170,7 @@ impl<'a> Builder<'a> {
         }
         match self.func.inst_pool.get(v.index()) {
             Some(node) => match &node.inst.op {
-                Op::StackSlot(_) | Op::SymbolAddr(_) | Op::TlsSymbolAddr(_) => true,
+                Op::StackSlot(_, _) | Op::SymbolAddr(_) | Op::TlsSymbolAddr(_) => true,
                 // Only treat PtrAdd as a memory address when its base is
                 // itself a local memory address (StackSlot / SymbolAddr).
                 // A PtrAdd rooted at a call result, load, or param is
@@ -204,7 +204,7 @@ impl<'a> Builder<'a> {
         }
         match self.func.inst_pool.get(v.index()) {
             Some(node) => match &node.inst.op {
-                Op::StackSlot(_) | Op::SymbolAddr(_) | Op::TlsSymbolAddr(_) => true,
+                Op::StackSlot(_, _) | Op::SymbolAddr(_) | Op::TlsSymbolAddr(_) => true,
                 Op::PtrAdd(base, _) => self.is_local_memory_address(base.0.value),
                 _ => false,
             },
@@ -212,7 +212,6 @@ impl<'a> Builder<'a> {
         }
     }
 
-    /// Add a block argument and return its ValueRef.
     pub fn add_block_arg(
         &mut self,
         block: BlockRef,
@@ -1136,9 +1135,16 @@ impl<'a> Builder<'a> {
 
     /// Load from pointer. `bytes` is the access width in bytes. Takes mem token input.
     /// Load is a MemoryUse — it does not produce a new mem token.
-    /// Allocate stack slot of n bytes.
-    pub fn stack_slot(&mut self, bytes: u32, origin: Origin) -> ValueRef {
-        self.push_inst(Op::StackSlot(bytes), Type::Ptr(0), None, origin, None)
+    /// Allocate stack slot of n bytes with the given alignment.
+    /// Align of 0 means "use natural alignment" (max(bytes, 8)).
+    pub fn stack_slot(&mut self, bytes: u32, align: u32, origin: Origin) -> ValueRef {
+        self.push_inst(
+            Op::StackSlot(bytes, align),
+            Type::Ptr(0),
+            None,
+            origin,
+            None,
+        )
     }
 
     /// Memory copy (non-overlapping): memcpy semantics.

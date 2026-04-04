@@ -343,7 +343,8 @@ pub enum Op {
     /// Store value to pointer: store val, ptr. Third field is byte count. Fourth is mem token input.
     Store(Operand, PtrOperand, u32, MemOperand),
     /// Allocate n bytes on stack, returns pointer.
-    StackSlot(u32),
+    /// Stack allocation: (bytes, align). Align of 0 means "use natural alignment".
+    StackSlot(u32, u32),
     /// Memory copy (non-overlapping): memcpy semantics.
     /// Args: (dst_ptr, src_ptr, byte_count, mem_token)
     MemCopy(PtrOperand, PtrOperand, IntOperand, MemOperand),
@@ -476,8 +477,16 @@ impl Op {
         use Op::*;
         match self {
             // No operands
-            Param(_) | Const(_) | BConst(_) | FConst(_) | StackSlot(_) | SymbolAddr(_)
-            | TlsSymbolAddr(_) | Unreachable | Trap | LandingPad => {}
+            Param(_)
+            | Const(_)
+            | BConst(_)
+            | FConst(_)
+            | StackSlot(_, _)
+            | SymbolAddr(_)
+            | TlsSymbolAddr(_)
+            | Unreachable
+            | Trap
+            | LandingPad => {}
 
             // One typed operand
             CountOnes(a)
@@ -687,8 +696,16 @@ impl Op {
     pub fn for_each_value_ref_mut(&mut self, f: &mut impl FnMut(&mut ValueRef)) {
         use Op::*;
         match self {
-            Param(_) | Const(_) | BConst(_) | FConst(_) | StackSlot(_) | SymbolAddr(_)
-            | TlsSymbolAddr(_) | Unreachable | Trap | LandingPad => {}
+            Param(_)
+            | Const(_)
+            | BConst(_)
+            | FConst(_)
+            | StackSlot(_, _)
+            | SymbolAddr(_)
+            | TlsSymbolAddr(_)
+            | Unreachable
+            | Trap
+            | LandingPad => {}
 
             CountOnes(a)
             | CountLeadingZeros(a, _)

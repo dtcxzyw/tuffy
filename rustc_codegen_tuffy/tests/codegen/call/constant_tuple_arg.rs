@@ -11,7 +11,7 @@
 // CHECK: func @consume_tuple(int:i32) -> int:s32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:i32 = param 0
-// CHECK:     v2: ptr = stack_slot 4
+// CHECK:     v2: ptr = stack_slot 4 align 4
 // CHECK:     v3: mem = store.4 v1, v2, v0
 // CHECK:     v4: int:i32 = load.4 v2, v3
 // CHECK:     ret v4, v3

@@ -398,7 +398,10 @@ pub fn translate_function<'tcx>(
         // a separate local keeps the return memcopy correct regardless
         // of translation order.
         let ret_local = mir::Local::from_usize(0);
-        let local_slot = ctx.builder.stack_slot(ret_size as u32, Origin::synthetic());
+        let ret_align = type_align(ctx.tcx, ret_mir_ty).unwrap_or(8) as u32;
+        let local_slot = ctx
+            .builder
+            .stack_slot(ret_size as u32, ret_align, Origin::synthetic());
         ctx.locals.set(ret_local, local_slot);
         ctx.stack_locals.mark(ret_local);
     }
@@ -440,7 +443,8 @@ pub fn translate_function<'tcx>(
                     }
                     if let Some(prev_bb) = assign_bb[local.as_usize()] {
                         if prev_bb != bb && !ctx.stack_locals.is_stack(local) {
-                            ctx.promote_local_to_stack(local, size);
+                            let align = type_align(ctx.tcx, ty).unwrap_or(8) as u32;
+                            ctx.promote_local_to_stack(local, size, align);
                         }
                     } else {
                         assign_bb[local.as_usize()] = Some(bb);
@@ -461,7 +465,8 @@ pub fn translate_function<'tcx>(
                     if size > 0 {
                         if let Some(prev_bb) = assign_bb[local.as_usize()] {
                             if prev_bb != bb && !ctx.stack_locals.is_stack(local) {
-                                ctx.promote_local_to_stack(local, size);
+                                let align = type_align(ctx.tcx, ty).unwrap_or(8) as u32;
+                                ctx.promote_local_to_stack(local, size, align);
                             }
                         } else {
                             assign_bb[local.as_usize()] = Some(bb);
@@ -491,7 +496,8 @@ pub fn translate_function<'tcx>(
                     let ty = ctx.monomorphize(mir.local_decls[local].ty);
                     let size = type_size(ctx.tcx, ty).unwrap_or(0);
                     if size > 0 {
-                        ctx.promote_local_to_stack(local, size);
+                        let align = type_align(ctx.tcx, ty).unwrap_or(8) as u32;
+                        ctx.promote_local_to_stack(local, size, align);
                     }
                 }
             };
@@ -517,7 +523,8 @@ pub fn translate_function<'tcx>(
                 let ty = ctx.monomorphize(mir.local_decls[local].ty);
                 let size = type_size(ctx.tcx, ty).unwrap_or(0);
                 if size > 8 && matches!(ty.kind(), ty::Array(..) | ty::Adt(..)) {
-                    ctx.promote_local_to_stack(local, size);
+                    let align = type_align(ctx.tcx, ty).unwrap_or(8) as u32;
+                    ctx.promote_local_to_stack(local, size, align);
                 }
             }
         }
@@ -596,7 +603,10 @@ pub fn translate_function<'tcx>(
                     let size = type_size(ctx.tcx, ty).unwrap_or(0);
                     if size > 0 {
                         let slot_size = (size as u32).max(1);
-                        let slot = ctx.builder.stack_slot(slot_size, Origin::synthetic());
+                        let align = type_align(ctx.tcx, ty).unwrap_or(8) as u32;
+                        let slot = ctx
+                            .builder
+                            .stack_slot(slot_size, align, Origin::synthetic());
                         ctx.locals.set(local, slot);
                         ctx.stack_locals.mark(local);
                     }
@@ -623,7 +633,18 @@ pub fn translate_function<'tcx>(
                         }
                         let ty = ctx.monomorphize(mir.local_decls[local].ty);
                         let size = type_size(ctx.tcx, ty).unwrap_or(0);
+                        let ty_align = type_align(ctx.tcx, ty).unwrap_or(1);
+                        if size == 0 && ty_align <= 1 {
+                            continue;
+                        }
+                        // ZSTs with alignment > 1 (e.g. #[repr(align(64))])
+                        // need a stack slot so &val produces an aligned address.
                         if size == 0 {
+                            let slot =
+                                ctx.builder
+                                    .stack_slot(0, ty_align as u32, Origin::synthetic());
+                            ctx.locals.set(local, slot);
+                            ctx.stack_locals.mark(local);
                             continue;
                         }
                         // Large params (size > 16 bytes) are passed by hidden pointer in
@@ -639,9 +660,12 @@ pub fn translate_function<'tcx>(
                             ctx.stack_locals.mark(local);
                             continue;
                         }
-                        let slot = ctx
-                            .builder
-                            .stack_slot((size as u32).max(1), Origin::synthetic());
+                        let align = type_align(ctx.tcx, ty).unwrap_or(8) as u32;
+                        let slot = ctx.builder.stack_slot(
+                            (size as u32).max(1),
+                            align,
+                            Origin::synthetic(),
+                        );
                         if let Some(prev) = ctx.locals.get(local) {
                             // For fat pointer ScalarPairs (&str, &[T], &dyn Trait), only
                             // store the first word (data pointer); the second word
@@ -745,7 +769,8 @@ pub fn translate_function<'tcx>(
                             let dest_ty = ctx.monomorphize(mir.local_decls[dest.local].ty);
                             let dest_sz = type_size(ctx.tcx, dest_ty).unwrap_or(8) as u32;
                             let new_slot =
-                                ctx.builder.stack_slot(dest_sz.max(8), Origin::synthetic());
+                                ctx.builder
+                                    .stack_slot(dest_sz.max(8), 0, Origin::synthetic());
                             ctx.current_mem = ctx
                                 .builder
                                 .store(
@@ -805,7 +830,10 @@ pub fn translate_function<'tcx>(
             && !matches!(ret_repr, ReprKind::Scalar if ret_size <= 8))
             || (matches!(ret_repr, ReprKind::ScalarPair) && ret_size > 0 && ret_size <= 8);
         if needs_slot && !ctx.stack_locals.is_stack(ret_local) {
-            let slot = ctx.builder.stack_slot(ret_size as u32, Origin::synthetic());
+            let ret_align = type_align(ctx.tcx, ret_ty).unwrap_or(8) as u32;
+            let slot = ctx
+                .builder
+                .stack_slot(ret_size as u32, ret_align, Origin::synthetic());
             ctx.locals.set(ret_local, slot);
             ctx.stack_locals.mark(ret_local);
         }
@@ -830,7 +858,7 @@ pub fn translate_function<'tcx>(
             }
         });
         if has_cleanup {
-            let slot = ctx.builder.stack_slot(8, Origin::synthetic());
+            let slot = ctx.builder.stack_slot(8, 0, Origin::synthetic());
             ctx.exc_ptr_slot = Some(slot);
         }
     }

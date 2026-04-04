@@ -36,6 +36,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             } else if matches!(self.builder.value_type(val), Some(Type::Ptr(_)))
                                 && bytes > 8
                                 && !self.builder.is_memory_address(val)
+                                && is_fat_ptr(self.tcx, dest_ty)
                             {
                                 // Fat pointer value (e.g. &[u8]): val is the data
                                 // pointer, metadata lives in fat_locals / extract_fat_component.
@@ -1148,9 +1149,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     let dest_ty =
                                         self.monomorphize(self.mir.local_decls[place.local].ty);
                                     let sz = type_size(self.tcx, dest_ty).unwrap_or(8) as u32;
-                                    let new_slot = self
-                                        .builder
-                                        .stack_slot(std::cmp::max(sz, 1), Origin::synthetic());
+                                    let new_slot = self.builder.stack_slot(
+                                        std::cmp::max(sz, 1),
+                                        0,
+                                        Origin::synthetic(),
+                                    );
                                     let num_words = (sz as u64).div_ceil(8);
                                     for i in 0..num_words {
                                         let off = i * 8;

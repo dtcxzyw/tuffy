@@ -167,13 +167,13 @@
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
 // CHECK:     v2: int:i8 = param 1
-// CHECK:     v3: ptr = stack_slot 1
+// CHECK:     v3: ptr = stack_slot 1 align 1
 // CHECK:     v4: mem = store.1 v2, v3, v0
-// CHECK:     v5: ptr = stack_slot 4
-// CHECK:     v6: ptr = stack_slot 16
-// CHECK:     v7: ptr = stack_slot 16
-// CHECK:     v8: ptr = stack_slot 16
-// CHECK:     v9: ptr = stack_slot 16
+// CHECK:     v5: ptr = stack_slot 4 align 4
+// CHECK:     v6: ptr = stack_slot 16 align 8
+// CHECK:     v7: ptr = stack_slot 16 align 8
+// CHECK:     v8: ptr = stack_slot 16 align 8
+// CHECK:     v9: ptr = stack_slot 16 align 8
 // CHECK:     v10: int:i8 = load.1 v3, v4
 // CHECK:     v11: int:i64 = iconst 0
 // CHECK:     v12: bool = icmp.eq v10, v11
@@ -494,12 +494,12 @@
 // CHECK:     v1: ptr = param 0
 // CHECK:     v2: int:u32 = param 1
 // CHECK:     v3: int:i8 = param 2
-// CHECK:     v4: ptr = stack_slot 1
+// CHECK:     v4: ptr = stack_slot 1 align 1
 // CHECK:     v5: mem = store.1 v3, v4, v0
-// CHECK:     v6: ptr = stack_slot 16
-// CHECK:     v7: ptr = stack_slot 16
-// CHECK:     v8: ptr = stack_slot 16
-// CHECK:     v9: ptr = stack_slot 16
+// CHECK:     v6: ptr = stack_slot 16 align 8
+// CHECK:     v7: ptr = stack_slot 16 align 8
+// CHECK:     v8: ptr = stack_slot 16 align 8
+// CHECK:     v9: ptr = stack_slot 16 align 8
 // CHECK:     v10: int:i8 = load.1 v4, v5
 // CHECK:     v11: int:i64 = iconst 0
 // CHECK:     v12: bool = icmp.eq v10, v11
@@ -929,17 +929,17 @@
 // CHECK:     v2: int:u32 = param 1
 // CHECK:     v3: int:u32 = param 2
 // CHECK:     v4: int:i8 = param 3
-// CHECK:     v5: ptr = stack_slot 1
+// CHECK:     v5: ptr = stack_slot 1 align 1
 // CHECK:     v6: int:i8 = param 4
-// CHECK:     v7: ptr = stack_slot 1
+// CHECK:     v7: ptr = stack_slot 1 align 1
 // CHECK:     v8: mem = store.1 v4, v5, v0
 // CHECK:     v9: mem = store.1 v6, v7, v8
-// CHECK:     v10: ptr = stack_slot 8
-// CHECK:     v11: ptr = stack_slot 8
-// CHECK:     v12: ptr = stack_slot 16
-// CHECK:     v13: ptr = stack_slot 16
-// CHECK:     v14: ptr = stack_slot 16
-// CHECK:     v15: ptr = stack_slot 16
+// CHECK:     v10: ptr = stack_slot 8 align 4
+// CHECK:     v11: ptr = stack_slot 8 align 4
+// CHECK:     v12: ptr = stack_slot 16 align 8
+// CHECK:     v13: ptr = stack_slot 16 align 8
+// CHECK:     v14: ptr = stack_slot 16 align 8
+// CHECK:     v15: ptr = stack_slot 16 align 8
 // CHECK:     v16: int:i8 = load.1 v5, v9
 // CHECK:     v17: int:i64 = iconst 0
 // CHECK:     v18: bool = icmp.eq v16, v17
@@ -1369,9 +1369,9 @@
 // CHECK:     v1: ptr = param 0
 // CHECK:     v2: int:u32 = param 1
 // CHECK:     v3: int:u32 = param 2
-// CHECK:     v4: ptr = stack_slot 8
+// CHECK:     v4: ptr = stack_slot 8 align 8
 // CHECK:     v5: mem = store.8 v1, v4, v0
-// CHECK:     v6: ptr = stack_slot 8
+// CHECK:     v6: ptr = stack_slot 8 align 4
 // CHECK:     v7: ptr = load.8 v4, v5
 // CHECK:     v8: int:i8 = iconst 4
 // CHECK:     v9: int:i8 = iconst 4
@@ -1423,7 +1423,7 @@
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
 // CHECK:     v2: int:u32 = param 1
-// CHECK:     v3: ptr = stack_slot 8
+// CHECK:     v3: ptr = stack_slot 8 align 8
 // CHECK:     v4: mem = store.8 v1, v3, v0
 // CHECK:     v5: ptr = load.8 v3, v4
 // CHECK:     v6: mem, v7: int:i32 = rmw.add.seqcst v5, v2, v4
@@ -1460,7 +1460,7 @@
 // CHECK: func @atomic_load_relaxed(ptr) -> int:u32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
-// CHECK:     v2: ptr = stack_slot 8
+// CHECK:     v2: ptr = stack_slot 8 align 8
 // CHECK:     v3: mem = store.8 v1, v2, v0
 // CHECK:     v4: ptr = load.8 v2, v3
 // CHECK:     v5: int:i8 = iconst 0
@@ -1502,7 +1502,7 @@
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
 // CHECK:     v2: int:u32 = param 1
-// CHECK:     v3: ptr = stack_slot 8
+// CHECK:     v3: ptr = stack_slot 8 align 8
 // CHECK:     v4: mem = store.8 v1, v3, v0
 // CHECK:     v5: ptr = load.8 v3, v4
 // CHECK:     v6: int:i8 = iconst 1
@@ -1546,7 +1546,7 @@
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
 // CHECK:     v2: int:u32 = param 1
-// CHECK:     v3: ptr = stack_slot 8
+// CHECK:     v3: ptr = stack_slot 8 align 8
 // CHECK:     v4: mem = store.8 v1, v3, v0
 // CHECK:     v5: ptr = load.8 v3, v4
 // CHECK:     v6: mem, v7: int:i32 = rmw.xchg.seqcst v5, v2, v4

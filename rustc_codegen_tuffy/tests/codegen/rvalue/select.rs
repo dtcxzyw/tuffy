@@ -28,7 +28,7 @@
 // CHECK:     v1: bool = param 0
 // CHECK:     v2: int:s64 = param 1
 // CHECK:     v3: int:s64 = param 2
-// CHECK:     v4: ptr = stack_slot 8
+// CHECK:     v4: ptr = stack_slot 8 align 8
 // CHECK:     v5: int:u64 = iconst 1
 // CHECK:     v6: int:u64 = iconst 0
 // CHECK:     v7: int:u64 = select v1, v5, v6
@@ -80,7 +80,7 @@
 // CHECK:     v1: bool = param 0
 // CHECK:     v2: int:u32 = param 1
 // CHECK:     v3: int:u32 = param 2
-// CHECK:     v4: ptr = stack_slot 4
+// CHECK:     v4: ptr = stack_slot 4 align 4
 // CHECK:     v5: int:u64 = iconst 1
 // CHECK:     v6: int:u64 = iconst 0
 // CHECK:     v7: int:u64 = select v1, v5, v6

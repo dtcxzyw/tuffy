@@ -11,7 +11,7 @@
 // CHECK: func @neg_i128(int:s128) -> int:s128 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:s128 = param 0
-// CHECK:     v2: ptr = stack_slot 16
+// CHECK:     v2: ptr = stack_slot 16 align 16
 // CHECK:     v3: int:i64 = iconst 0
 // CHECK:     v4: int:i128 = sub v3, v1
 // CHECK:     v5: int:s128 = sext v4, 128
@@ -72,7 +72,7 @@
 // CHECK: func @not_i128(int:s128) -> int:s128 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:s128 = param 0
-// CHECK:     v2: ptr = stack_slot 16
+// CHECK:     v2: ptr = stack_slot 16 align 16
 // CHECK:     v3: int:i128 = iconst -1
 // CHECK:     v4: int:i128 = xor v1, v3
 // CHECK:     v5: int:s128 = sext v4, 128
@@ -93,7 +93,7 @@
 // CHECK: func @not_u128(int:u128) -> int:u128 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u128 = param 0
-// CHECK:     v2: ptr = stack_slot 16
+// CHECK:     v2: ptr = stack_slot 16 align 16
 // CHECK:     v3: int:i128 = iconst -1
 // CHECK:     v4: int:i128 = xor v1, v3
 // CHECK:     v5: int:u128 = zext v4, 128

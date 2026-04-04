@@ -278,9 +278,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     /// Creates a slot of `max(size, 1)` bytes, optionally stores the current
     /// value of `local` into it (if already assigned), then updates the local
     /// to point at the slot and marks it as stack-allocated.
-    pub(super) fn promote_local_to_stack(&mut self, local: mir::Local, size: u64) {
+    pub(super) fn promote_local_to_stack(&mut self, local: mir::Local, size: u64, align: u32) {
         let slot_size = (size as u32).max(1);
-        let slot = self.builder.stack_slot(slot_size, Origin::synthetic());
+        let slot = self
+            .builder
+            .stack_slot(slot_size, align, Origin::synthetic());
         if let Some(old_val) = self.locals.get(local) {
             let is_fat = self.fat_locals.get(local).is_some();
             if is_fat && slot_size == 16 {
@@ -488,7 +490,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         Origin::synthetic(),
                     );
                     param_idx += 1;
-                    let local_slot = self.builder.stack_slot(sz as u32, Origin::synthetic());
+                    let ty_align = type_align(self.tcx, ty).unwrap_or(8) as u32;
+                    let local_slot =
+                        self.builder
+                            .stack_slot(sz as u32, ty_align, Origin::synthetic());
                     deferred.push(Deferred::TwoReg {
                         lo,
                         hi,
@@ -503,7 +508,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         self.builder
                             .param(param_idx, Type::Ptr(0), None, Origin::synthetic());
                     param_idx += 1;
-                    let local_slot = self.builder.stack_slot(sz as u32, Origin::synthetic());
+                    let local_slot = self.builder.stack_slot(
+                        sz as u32,
+                        type_align(self.tcx, ty).unwrap_or(8) as u32,
+                        Origin::synthetic(),
+                    );
                     deferred.push(Deferred::LargeCopy {
                         ptr,
                         slot: local_slot,
@@ -520,7 +529,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         Origin::synthetic(),
                     );
                     param_idx += 1;
-                    let local_slot = self.builder.stack_slot(sz as u32, Origin::synthetic());
+                    let local_slot = self.builder.stack_slot(
+                        sz as u32,
+                        type_align(self.tcx, ty).unwrap_or(8) as u32,
+                        Origin::synthetic(),
+                    );
                     deferred.push(Deferred::OneReg {
                         val,
                         slot: local_slot,
@@ -576,7 +589,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             .param(param_idx, Type::Ptr(0), None, Origin::synthetic());
 
                     // Allocate local stack space
-                    let local_slot = self.builder.stack_slot(sz as u32, Origin::synthetic());
+                    let local_slot = self.builder.stack_slot(
+                        sz as u32,
+                        type_align(self.tcx, ty).unwrap_or(8) as u32,
+                        Origin::synthetic(),
+                    );
                     deferred.push(Deferred::LargeCopy {
                         ptr,
                         slot: local_slot,

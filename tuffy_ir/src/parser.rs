@@ -1667,8 +1667,14 @@ impl<'a> Parser<'a> {
 
             "stack_slot" => {
                 let bytes = self.expect_u32()?;
+                let align = if self.current == Token::Ident("align".into()) {
+                    self.advance();
+                    self.expect_u32()?
+                } else {
+                    0
+                };
                 Ok(single(
-                    Op::StackSlot(bytes),
+                    Op::StackSlot(bytes, align),
                     primary_ty.clone(),
                     *primary_ann,
                 ))

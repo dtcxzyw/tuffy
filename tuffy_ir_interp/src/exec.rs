@@ -1011,7 +1011,7 @@ pub fn execute_instruction(
         }
 
         // ── Memory ──
-        Op::StackSlot(bytes) => {
+        Op::StackSlot(bytes, _align) => {
             let id = alloc_stack_slot(*bytes as usize);
             Ok(ExecResult::Value(Value::Ptr(Pointer {
                 alloc_id: id,

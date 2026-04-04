@@ -540,7 +540,13 @@ fn fmt_inst(
                 ctx.fmt_operand(&mem.clone().raw())
             )
         }
-        Op::StackSlot(bytes) => format!("{v} = stack_slot {bytes}"),
+        Op::StackSlot(bytes, align) => {
+            if *align > 0 {
+                format!("{v} = stack_slot {bytes} align {align}")
+            } else {
+                format!("{v} = stack_slot {bytes}")
+            }
+        }
         Op::MemCopy(dst, src, count, mem) => {
             format!(
                 "{v} = memcopy {}, {}, {}, {}",

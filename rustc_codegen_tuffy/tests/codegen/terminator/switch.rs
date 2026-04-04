@@ -29,7 +29,7 @@
 // CHECK: func @switch_three(int:u32) -> int:u32 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u32 = param 0
-// CHECK:     v2: ptr = stack_slot 4
+// CHECK:     v2: ptr = stack_slot 4 align 4
 // CHECK:     v3: int:i64 = iconst 4294967295
 // CHECK:     v4: int:u64 = and v1, v3
 // CHECK:     v5: int:i32 = iconst 0

@@ -32,7 +32,7 @@
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u128 = param 0
 // CHECK:     v2: int:u128 = param 1
-// CHECK:     v3: ptr = stack_slot 16
+// CHECK:     v3: ptr = stack_slot 16 align 16
 // CHECK:     v4: int:i128 = add v1, v2
 // CHECK:     v5: mem = store.16 v4, v3, v0
 // CHECK:     v6: int:u128 = load.16 v3, v5

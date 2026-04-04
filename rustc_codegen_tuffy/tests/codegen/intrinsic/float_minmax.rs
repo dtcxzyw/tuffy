@@ -126,7 +126,7 @@
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: f32 = param 0
 // CHECK:     v2: f32 = param 1
-// CHECK:     v3: ptr = stack_slot 4
+// CHECK:     v3: ptr = stack_slot 4 align 4
 // CHECK:     v4: bool = fcmp.ogt v1, v2
 // CHECK:     v5: int:u64 = iconst 1
 // CHECK:     v6: int:u64 = iconst 0
@@ -360,7 +360,7 @@
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: f64 = param 0
 // CHECK:     v2: f64 = param 1
-// CHECK:     v3: ptr = stack_slot 8
+// CHECK:     v3: ptr = stack_slot 8 align 8
 // CHECK:     v4: bool = fcmp.ogt v1, v2
 // CHECK:     v5: int:u64 = iconst 1
 // CHECK:     v6: int:u64 = iconst 0
@@ -592,7 +592,7 @@
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: f32 = param 0
 // CHECK:     v2: f32 = param 1
-// CHECK:     v3: ptr = stack_slot 4
+// CHECK:     v3: ptr = stack_slot 4 align 4
 // CHECK:     v4: bool = fcmp.olt v1, v2
 // CHECK:     v5: int:u64 = iconst 1
 // CHECK:     v6: int:u64 = iconst 0
@@ -826,7 +826,7 @@
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: f64 = param 0
 // CHECK:     v2: f64 = param 1
-// CHECK:     v3: ptr = stack_slot 8
+// CHECK:     v3: ptr = stack_slot 8 align 8
 // CHECK:     v4: bool = fcmp.olt v1, v2
 // CHECK:     v5: int:u64 = iconst 1
 // CHECK:     v6: int:u64 = iconst 0

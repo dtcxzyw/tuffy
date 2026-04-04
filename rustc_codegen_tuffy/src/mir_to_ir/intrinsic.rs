@@ -971,7 +971,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         // Store full result (lo|hi) into a stack slot.
                         // The lower `elem_bytes` of `full` is lo, the lower
                         // `elem_bytes` of `hi_wide` is hi.
-                        let slot = self.builder.stack_slot(elem_bytes * 2, Origin::synthetic());
+                        let slot = self
+                            .builder
+                            .stack_slot(elem_bytes * 2, 0, Origin::synthetic());
                         self.current_mem = self
                             .builder
                             .store(
@@ -1302,7 +1304,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             int_ann,
                             Origin::synthetic(),
                         );
-                        let slot = self.builder.stack_slot(16, Origin::synthetic());
+                        let slot = self.builder.stack_slot(16, 0, Origin::synthetic());
                         self.current_mem = self
                             .builder
                             .store(
@@ -1732,7 +1734,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     if simd_bytes <= 8 {
                         self.locals.set(destination_local, splat_word.raw());
                     } else {
-                        let slot = self.builder.stack_slot(simd_bytes, o!());
+                        let slot = self.builder.stack_slot(simd_bytes, 0, o!());
                         let n_words = simd_bytes.div_ceil(8);
                         for w in 0..n_words {
                             let dst: ValueRef = if w == 0 {
@@ -1762,7 +1764,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 } else {
                     // Non-byte element (f32, f64, etc.): store element at each
                     // lane position.
-                    let slot = self.builder.stack_slot(simd_bytes, o!());
+                    let slot = self.builder.stack_slot(simd_bytes, 0, o!());
                     let n_lanes = simd_bytes / elem_size;
                     for i in 0..n_lanes {
                         let dst: ValueRef = if i == 0 {
@@ -1979,7 +1981,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
                 // Place both input vectors on the stack contiguously.
                 let concat_bytes = input_simd_bytes * 2;
-                let concat_slot = self.builder.stack_slot(concat_bytes, o!());
+                let concat_slot = self.builder.stack_slot(concat_bytes, 0, o!());
                 if ir_args.len() >= 2 {
                     let a_ptr = self.ensure_simd_on_stack(ir_args[0], input_simd_bytes);
                     let b_ptr = self.ensure_simd_on_stack(ir_args[1], input_simd_bytes);
@@ -2076,7 +2078,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 }
 
                 // Read indices from the third argument and build output.
-                let out_slot = self.builder.stack_slot(output_bytes.max(8), o!());
+                let out_slot = self.builder.stack_slot(output_bytes.max(8), 0, o!());
                 if ir_args.len() >= 3 {
                     let idx_ptr = self.ensure_simd_on_stack(ir_args[2], output_lanes * 4);
                     for i in 0..output_lanes {
@@ -2243,7 +2245,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             val
         } else {
             let store_size = if size <= 8 { 8 } else { size };
-            let slot = self.builder.stack_slot(store_size, o!());
+            let slot = self.builder.stack_slot(store_size, 0, o!());
             self.current_mem = self
                 .builder
                 .store(
@@ -2306,7 +2308,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             };
         }
 
-        let slot = self.builder.stack_slot(simd_bytes.max(8), o!());
+        let slot = self.builder.stack_slot(simd_bytes.max(8), 0, o!());
 
         for i in 0..simd_bytes {
             let a_addr: ValueRef = if i == 0 {
@@ -2400,7 +2402,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             };
         }
 
-        let slot = self.builder.stack_slot(simd_bytes.max(8), o!());
+        let slot = self.builder.stack_slot(simd_bytes.max(8), 0, o!());
         let n_words = simd_bytes.div_ceil(8);
 
         for half in 0..n_words {
@@ -2489,7 +2491,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             };
         }
 
-        let slot = self.builder.stack_slot(simd_bytes.max(8), o!());
+        let slot = self.builder.stack_slot(simd_bytes.max(8), 0, o!());
         let n_words = simd_bytes.div_ceil(8);
         let mask_7f = self.builder.iconst(
             0x7F7F_7F7F_7F7F_7F7Fu64 as i64,
@@ -2592,7 +2594,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let (elem_size, float_ty) = elem_info;
         let a_ptr = self.ensure_simd_on_stack(ir_args[0], simd_bytes);
         let b_ptr = self.ensure_simd_on_stack(ir_args[1], simd_bytes);
-        let slot = self.builder.stack_slot(simd_bytes.max(8), o!());
+        let slot = self.builder.stack_slot(simd_bytes.max(8), 0, o!());
         let n_lanes = simd_bytes / elem_size;
 
         for i in 0..n_lanes {
@@ -2730,7 +2732,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         }
         let (elem_size, float_ty) = elem_info;
         let a_ptr = self.ensure_simd_on_stack(ir_args[0], simd_bytes);
-        let slot = self.builder.stack_slot(simd_bytes.max(8), o!());
+        let slot = self.builder.stack_slot(simd_bytes.max(8), 0, o!());
         let n_lanes = simd_bytes / elem_size;
 
         for i in 0..n_lanes {
@@ -3467,9 +3469,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     Some(current_mem)
                 } else if elem_size > 8 {
                     // Large type: allocate stack slot and mem_copy into it.
-                    let slot = self
-                        .builder
-                        .stack_slot(elem_size.max(8) as u32, Origin::synthetic());
+                    let slot =
+                        self.builder
+                            .stack_slot(elem_size.max(8) as u32, 0, Origin::synthetic());
                     let sz = self.builder.iconst(
                         elem_size as i64,
                         64,
@@ -3551,7 +3553,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
         // Split each 128-bit arg into (lo64, hi64) via stack
         let split_128 = |this: &mut Self, val: ValueRef| -> (ValueRef, ValueRef) {
-            let slot = this.builder.stack_slot(16, o());
+            let slot = this.builder.stack_slot(16, 0, o());
             this.current_mem = this
                 .builder
                 .store(val.into(), slot.into(), 16, this.current_mem.into(), o())
@@ -3884,7 +3886,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         };
 
         // Store result: lo_128 = (r0, r1), hi_128 = (r2, r3)
-        let slot = self.builder.stack_slot(32, o());
+        let slot = self.builder.stack_slot(32, 0, o());
         self.current_mem = self
             .builder
             .store(r0.into(), slot.into(), 8, self.current_mem.into(), o())

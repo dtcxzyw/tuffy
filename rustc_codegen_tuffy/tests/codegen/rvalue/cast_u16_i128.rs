@@ -11,7 +11,7 @@
 // CHECK: func @u16_to_i128(int:u16) -> int:s128 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u16 = param 0
-// CHECK:     v2: ptr = stack_slot 16
+// CHECK:     v2: ptr = stack_slot 16 align 16
 // CHECK:     v3: int:u64 = zext v1, 64
 // CHECK:     v4: int:u128 = zext v3, 128
 // CHECK:     v5: mem = store.16 v4, v2, v0

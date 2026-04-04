@@ -356,7 +356,7 @@ impl<'a> Interpreter<'a> {
     /// defined in blocks that haven't been visited yet on the current path.
     fn preallocate_stack_slots(&mut self, frame: &mut CallFrame<'a>) {
         for (idx, inst) in frame.func.inst_pool.iter_insts() {
-            if let Op::StackSlot(bytes) = &inst.op {
+            if let Op::StackSlot(bytes, _align) = &inst.op {
                 let id = self.memory.allocate(*bytes as usize, "stack_slot");
                 frame.stack_allocs.push(id);
                 let vref = ValueRef::inst_result(idx);
@@ -797,7 +797,7 @@ impl<'a> Interpreter<'a> {
 
             // Handle StackSlot specially to avoid borrow conflicts.
             // Pre-allocated by preallocate_stack_slots — just skip.
-            if let Op::StackSlot(_) = &inst_op {
+            if let Op::StackSlot(_, _) = &inst_op {
                 continue;
             }
 

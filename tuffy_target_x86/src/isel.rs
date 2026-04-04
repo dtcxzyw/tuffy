@@ -48,7 +48,7 @@ impl IselCtx {
         if let Some(vreg) = self.regs.get(val) {
             return Some(vreg);
         }
-        if let Some(offset) = self.stack.get(val) {
+        if let Some((offset, align)) = self.stack.get_with_align(val) {
             let rbp = self.alloc.alloc_fixed(Gpr::Rbp.to_preg());
             let dst = self.alloc.alloc();
             self.out.push(MInst::Lea {
@@ -56,6 +56,16 @@ impl IselCtx {
                 base: rbp,
                 offset,
             });
+            // For alignment > 16 (exceeding ABI stack alignment), the
+            // RBP-relative address is not guaranteed to be aligned because
+            // RBP is only 16-aligned. Emit AND to dynamically align.
+            if align > 16 {
+                self.out.push(MInst::AndRI {
+                    size: OpSize::S64,
+                    dst,
+                    imm: -(align as i64),
+                });
+            }
             return Some(dst);
         }
         if let Some(symbol) = self.sym_addrs.get(&val.index()).cloned() {
@@ -1115,7 +1125,7 @@ fn select_inst(
                     ctx.regs.assign(vref, dst);
                 } else {
                     // i128 constant: allocate stack slot (16 bytes for i128)
-                    let offset = ctx.stack.alloc(vref, 16);
+                    let offset = ctx.stack.alloc(vref, 16, 16);
                     let rbp = ctx.alloc.alloc_fixed(Gpr::Rbp.to_preg());
 
                     // Convert to two's complement u128 representation
@@ -1354,8 +1364,8 @@ fn select_inst(
             )?;
         }
 
-        Op::StackSlot(bytes) => {
-            let _offset = ctx.stack.alloc(vref, *bytes);
+        Op::StackSlot(bytes, align) => {
+            let _offset = ctx.stack.alloc(vref, *bytes, *align);
         }
 
         Op::Load(ptr, bytes, _mem) => {
@@ -1374,7 +1384,15 @@ fn select_inst(
                 let lo_dst = ctx.alloc.alloc();
                 let hi_dst = ctx.alloc.alloc();
                 let hi_bytes = *bytes - 8;
-                if let Some(offset) = ctx.stack.get(ptr.clone().raw().value) {
+                // For high-alignment slots (align > 16), skip the raw-offset
+                // fast path and go through ensure_in_reg which applies LEA+AND.
+                let use_fast = match ctx.stack.get_with_align(ptr.clone().raw().value) {
+                    Some((_, align)) if align > 16 => false,
+                    Some(_) => true,
+                    None => false,
+                };
+                if use_fast {
+                    let offset = ctx.stack.get(ptr.clone().raw().value).unwrap();
                     let rbp = ctx.alloc.alloc_fixed(Gpr::Rbp.to_preg());
                     ctx.out.push(MInst::MovRM {
                         size: OpSize::S64,
@@ -1398,12 +1416,15 @@ fn select_inst(
                     .assign(ValueRef::inst_secondary_result(vref.index()), hi_dst);
             } else {
                 let dst = ctx.alloc.alloc();
-                if let Some(offset) = ctx.stack.get(ptr.clone().raw().value) {
-                    let rbp = ctx.alloc.alloc_fixed(Gpr::Rbp.to_preg());
-                    emit_partial_load(ctx, rbp, offset, dst, *bytes);
-                } else {
-                    let ptr_vreg = ctx.ensure_in_reg(ptr.clone().raw().value)?;
-                    emit_partial_load(ctx, ptr_vreg, 0, dst, *bytes);
+                match ctx.stack.get_with_align(ptr.clone().raw().value) {
+                    Some((offset, align)) if align <= 16 => {
+                        let rbp = ctx.alloc.alloc_fixed(Gpr::Rbp.to_preg());
+                        emit_partial_load(ctx, rbp, offset, dst, *bytes);
+                    }
+                    _ => {
+                        let ptr_vreg = ctx.ensure_in_reg(ptr.clone().raw().value)?;
+                        emit_partial_load(ctx, ptr_vreg, 0, dst, *bytes);
+                    }
                 }
                 ctx.regs.assign(vref, dst);
             }
@@ -1417,13 +1438,13 @@ fn select_inst(
             } else {
                 let val_vreg = ctx.ensure_in_reg(val.value)?;
                 // Determine the base register and base offset for the target address.
-                let (base, base_offset) =
-                    if let Some(offset) = ctx.stack.get(ptr.clone().raw().value) {
+                let (base, base_offset) = match ctx.stack.get_with_align(ptr.clone().raw().value) {
+                    Some((offset, align)) if align <= 16 => {
                         let rbp = ctx.alloc.alloc_fixed(Gpr::Rbp.to_preg());
                         (rbp, offset)
-                    } else {
-                        (ctx.ensure_in_reg(ptr.clone().raw().value)?, 0i32)
-                    };
+                    }
+                    _ => (ctx.ensure_in_reg(ptr.clone().raw().value)?, 0i32),
+                };
                 if *bytes >= 9 {
                     // 9-16 byte store: lo 8 bytes + remaining from hi half.
                     ctx.out.push(MInst::MovMR {

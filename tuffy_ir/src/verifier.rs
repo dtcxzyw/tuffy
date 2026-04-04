@@ -678,7 +678,7 @@ impl FuncVerifier<'_> {
                     );
                 }
             }
-            Op::StackSlot(_) => {
+            Op::StackSlot(_, _) => {
                 if !matches!(inst.ty, Type::Ptr(_)) {
                     self.result.error(
                         loc.clone(),

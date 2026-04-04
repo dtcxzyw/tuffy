@@ -35,7 +35,7 @@
 // CHECK: func @use_large(ptr) -> int:u64 {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
-// CHECK:     v2: ptr = stack_slot 24
+// CHECK:     v2: ptr = stack_slot 24 align 8
 // CHECK:     v3: int:i64 = iconst 24
 // CHECK:     v4: mem = memcopy v2:align8, v1:align8, v3, v0
 // CHECK:     v5: int:i64 = load.8 v2, v4

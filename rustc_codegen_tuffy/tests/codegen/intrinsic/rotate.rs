@@ -313,7 +313,7 @@
 // CHECK:     v1: int:u32 = param 0
 // CHECK:     v2: int:u32 = param 1
 // CHECK:     v3: int:u32 = param 2
-// CHECK:     v4: ptr = stack_slot 4
+// CHECK:     v4: ptr = stack_slot 4 align 4
 // CHECK:     v5: int:i32 = iconst 32
 // CHECK:     v6: bool = icmp.lt v3, v5:u32
 // CHECK:     v7: int:i64 = iconst 4294967295
@@ -398,7 +398,7 @@
 // CHECK:     v1: int:u32 = param 0
 // CHECK:     v2: int:u32 = param 1
 // CHECK:     v3: int:u32 = param 2
-// CHECK:     v4: ptr = stack_slot 4
+// CHECK:     v4: ptr = stack_slot 4 align 4
 // CHECK:     v5: int:i32 = iconst 32
 // CHECK:     v6: bool = icmp.lt v3, v5:u32
 // CHECK:     v7: int:i64 = iconst 4294967295

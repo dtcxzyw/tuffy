@@ -52,10 +52,10 @@ impl VRegMap {
 
 /// Tracks stack slot allocations (offset from frame pointer).
 pub struct StackMap {
-    /// Maps IR value index → offset from frame pointer (negative).
-    slots: Vec<Option<i32>>,
+    /// Maps IR value index → (offset from frame pointer, alignment).
+    slots: Vec<Option<(i32, u32)>>,
     /// Block argument stack slots (separate namespace).
-    block_arg_slots: Vec<Option<i32>>,
+    block_arg_slots: Vec<Option<(i32, u32)>>,
     /// Current stack frame size (grows downward).
     pub frame_size: i32,
 }
@@ -69,23 +69,71 @@ impl StackMap {
         }
     }
 
-    pub fn alloc(&mut self, val: ValueRef, bytes: u32) -> i32 {
+    pub fn alloc(&mut self, val: ValueRef, bytes: u32, align: u32) -> i32 {
+        // Explicit alignment from the caller (the actual type alignment).
+        // When 0, default to 8 (natural register size).
+        let stored_align = if align > 0 {
+            std::cmp::max(align, 8) as i32
+        } else {
+            8
+        };
+        // For frame layout padding, use at least max(bytes, 8) to keep
+        // the historical over-alignment for naturally-sized slots.
+        let padding_align = std::cmp::max(stored_align, std::cmp::max(bytes as i32, 8));
         // Reserve at least 1 byte so ZST allocations still advance
         // frame_size (offset 0 conflicts with saved rbp).
-        self.frame_size += std::cmp::max(bytes as i32, 1);
-        // Align to natural alignment (at least 8 bytes for pointers).
-        let align = std::cmp::max(bytes as i32, 8);
-        self.frame_size = (self.frame_size + align - 1) & !(align - 1);
-        let offset = -self.frame_size;
-        if val.is_block_arg() {
-            self.block_arg_slots[val.index() as usize] = Some(offset);
+        let actual_bytes = std::cmp::max(bytes as i32, 1);
+
+        let offset;
+        if stored_align > 16 {
+            // High-alignment slot (align > 16, exceeding ABI stack alignment).
+            // RBP is only 16-aligned, so RBP-relative addresses aren't
+            // guaranteed to be stored_align-aligned.  We use LEA + AND:
+            //   lea dst, [rbp + offset]
+            //   and dst, -align        ; round DOWN to aligned boundary
+            //
+            // The AND can shift at most (align-1) bytes downward, so we
+            // reserve (align-1) extra bytes BELOW the data region.
+            //
+            // Layout in frame (growing downward from RBP):
+            //   [RBP - old_frame ... RBP - old_frame - actual_bytes]  ← data
+            //   [RBP - old_frame - actual_bytes ... -frame_size]      ← padding
+            //
+            // The LEA offset points to the TOP of the data region.
+            // After AND, the address is within the (data + padding) range.
+            offset = -(self.frame_size + actual_bytes);
+            let extra_padding = stored_align - 1;
+            self.frame_size += actual_bytes + extra_padding;
+            self.frame_size = (self.frame_size + padding_align - 1) & !(padding_align - 1);
         } else {
-            self.slots[val.index() as usize] = Some(offset);
+            // Normal slot: placed at the bottom, no AND needed.
+            self.frame_size += actual_bytes;
+            self.frame_size = (self.frame_size + padding_align - 1) & !(padding_align - 1);
+            offset = -self.frame_size;
+        }
+
+        let slot = (offset, stored_align as u32);
+        if val.is_block_arg() {
+            self.block_arg_slots[val.index() as usize] = Some(slot);
+        } else {
+            self.slots[val.index() as usize] = Some(slot);
         }
         offset
     }
 
+    /// Get the offset for a stack slot.
     pub fn get(&self, val: ValueRef) -> Option<i32> {
+        if val.is_block_arg() {
+            self.block_arg_slots
+                .get(val.index() as usize)?
+                .map(|(o, _)| o)
+        } else {
+            self.slots.get(val.index() as usize)?.map(|(o, _)| o)
+        }
+    }
+
+    /// Get the (offset, alignment) for a stack slot.
+    pub fn get_with_align(&self, val: ValueRef) -> Option<(i32, u32)> {
         if val.is_block_arg() {
             *self.block_arg_slots.get(val.index() as usize)?
         } else {

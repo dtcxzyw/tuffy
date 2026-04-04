@@ -318,7 +318,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     if saved.is_none() && !dest_is_deref_projection {
                         let dest_ty = self.monomorphize(self.mir.local_decls[destination.local].ty);
                         let size = type_size(self.tcx, dest_ty).unwrap_or(8) as u32;
-                        let slot = self.builder.stack_slot(size, Origin::synthetic());
+                        let slot = self.builder.stack_slot(size, 0, Origin::synthetic());
                         self.locals.set(destination.local, slot);
                     }
                     let info = if dest_is_deref_projection {
@@ -878,7 +878,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 Some(existing)
             } else {
                 let sz = dest_size.unwrap() as u32;
-                Some(self.builder.stack_slot(sz, Origin::synthetic()))
+                Some(self.builder.stack_slot(sz, 0, Origin::synthetic()))
             }
         } else {
             None
@@ -900,7 +900,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             if self.locals.get(destination.local).is_none() && !call_dest_is_deref {
                 let dest_ty = self.monomorphize(self.mir.local_decls[destination.local].ty);
                 let size = type_size(self.tcx, dest_ty).unwrap_or(8) as u32;
-                let slot = self.builder.stack_slot(size, Origin::synthetic());
+                let slot = self.builder.stack_slot(size, 0, Origin::synthetic());
                 self.locals.set(destination.local, slot);
             }
             let info = if call_dest_is_deref {
@@ -1279,7 +1279,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         let align = type_align(self.tcx, arg_ty).unwrap_or(1) as u32;
                         let tmp = self
                             .builder
-                            .stack_slot(arg_size as u32, Origin::synthetic());
+                            .stack_slot(arg_size as u32, 0, Origin::synthetic());
                         let count = self.builder.iconst(
                             arg_size as i64,
                             64,
@@ -1456,7 +1456,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 // Store primary + overflow flag into a stack slot and
                                 // pass its address.
                                 let full_size = type_size(self.tcx, local_ty).unwrap_or(32) as u32;
-                                let slot = self.builder.stack_slot(full_size, Origin::synthetic());
+                                let slot =
+                                    self.builder.stack_slot(full_size, 0, Origin::synthetic());
                                 // Store the primary value (u128).
                                 let prev_arg = ir_args.pop().unwrap();
                                 self.current_mem = self
@@ -1811,10 +1812,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 if self.stack_locals.is_stack(destination.local) {
                     existing
                 } else {
-                    self.builder.stack_slot(size as u32, Origin::synthetic())
+                    self.builder.stack_slot(size as u32, 0, Origin::synthetic())
                 }
             } else {
-                self.builder.stack_slot(size as u32, Origin::synthetic())
+                self.builder.stack_slot(size as u32, 0, Origin::synthetic())
             };
             self.current_mem = self
                 .builder
@@ -1842,10 +1843,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 if self.stack_locals.is_stack(destination.local) {
                     existing
                 } else {
-                    self.builder.stack_slot(size as u32, Origin::synthetic())
+                    self.builder.stack_slot(size as u32, 0, Origin::synthetic())
                 }
             } else {
-                self.builder.stack_slot(size as u32, Origin::synthetic())
+                self.builder.stack_slot(size as u32, 0, Origin::synthetic())
             };
             // Store RAX (primary return / first scalar) at offset 0.
             self.current_mem = self
@@ -1928,7 +1929,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     _ => unreachable!(),
                 };
                 let size = type_size(self.tcx, inner_ty).unwrap_or(8) as u32;
-                let slot = self.builder.stack_slot(size.max(1), Origin::synthetic());
+                let slot = self.builder.stack_slot(size.max(1), 0, Origin::synthetic());
                 self.current_mem = self
                     .builder
                     .store(

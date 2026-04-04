@@ -516,7 +516,34 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         // value, we need to spill to a stack slot so
                                         // drop_in_place gets a valid &mut T.
                                         let ty_size = type_size(self.tcx, drop_ty).unwrap_or(8);
-                                        if let Some(fat_val) = self.fat_locals.get(place.local) {
+                                        if ty_size == 0 {
+                                            // ZST with a dummy register value —
+                                            // use a dangling aligned pointer so
+                                            // drop_in_place receives a well-aligned &mut T.
+                                            let align = self
+                                                .tcx
+                                                .layout_of(
+                                                    ty::TypingEnv::fully_monomorphized()
+                                                        .as_query_input(drop_ty),
+                                                )
+                                                .map(|l| l.align.abi.bytes())
+                                                .unwrap_or(1);
+                                            (
+                                                Some(
+                                                    self.builder
+                                                        .iconst(
+                                                            align as i64,
+                                                            64,
+                                                            IntSignedness::DontCare,
+                                                            Origin::synthetic(),
+                                                        )
+                                                        .raw(),
+                                                ),
+                                                None,
+                                            )
+                                        } else if let Some(fat_val) =
+                                            self.fat_locals.get(place.local)
+                                        {
                                             // Fat pointer: drop_in_place<[T]> / drop_in_place<dyn Trait>
                                             // takes the fat pointer components as separate register
                                             // arguments (data_ptr in rdi, metadata in rsi).
@@ -529,9 +556,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                         {
                                             (Some(v), None)
                                         } else {
-                                            let slot = self
-                                                .builder
-                                                .stack_slot(ty_size as u32, Origin::synthetic());
+                                            let slot = self.builder.stack_slot(
+                                                ty_size as u32,
+                                                0,
+                                                Origin::synthetic(),
+                                            );
                                             self.current_mem = self
                                                 .builder
                                                 .store(

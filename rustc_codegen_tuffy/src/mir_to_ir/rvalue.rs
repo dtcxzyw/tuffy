@@ -76,7 +76,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             && !matches!(place.projection[0], PlaceElem::Deref)
         {
             let size = type_size(self.tcx, cur_ty).unwrap_or(8) as u32;
-            let slot = self.builder.stack_slot(size, Origin::synthetic());
+            let slot = self.builder.stack_slot(size, 0, Origin::synthetic());
             // For fat pointer locals (e.g. &[T] parameters), the value in
             // `addr` is just the data pointer (8 bytes) while the metadata
             // (length / vtable) lives in fat_locals.  Reconstruct the full
@@ -556,7 +556,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         // Scalar local — spill to a temporary stack slot.
                         let val = self.locals.get(place.local)?;
                         let size = layout.size.bytes() as u32;
-                        let slot = self.builder.stack_slot(size, Origin::synthetic());
+                        let slot = self.builder.stack_slot(size, 0, Origin::synthetic());
                         self.current_mem = self
                             .builder
                             .store(
@@ -2987,7 +2987,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         {
                             let size = type_size(self.tcx, target_ty_mono).unwrap_or(0) as u32;
                             if size > 0 && size <= 16 {
-                                let slot = self.builder.stack_slot(size, Origin::synthetic());
+                                let slot = self.builder.stack_slot(size, 0, Origin::synthetic());
                                 self.current_mem = self
                                     .builder
                                     .store(
@@ -3017,7 +3017,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         {
                             let size = type_size(self.tcx, target_ty_mono).unwrap_or(0) as u32;
                             if size > 0 && size <= 16 {
-                                let slot = self.builder.stack_slot(size, Origin::synthetic());
+                                let slot = self.builder.stack_slot(size, 0, Origin::synthetic());
                                 self.current_mem = self
                                     .builder
                                     .store(
@@ -3137,7 +3137,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             // Find the metadata from the source fat pointer.
                             let meta = self.find_fat_metadata_for_place(place);
                             if let Some(meta_val) = meta {
-                                let slot = self.builder.stack_slot(16, Origin::synthetic());
+                                let slot = self.builder.stack_slot(16, 0, Origin::synthetic());
                                 self.current_mem = self
                                     .builder
                                     .store(
@@ -3181,7 +3181,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     if let Some(val) = self.locals.get(place.local) {
                         let local_ty = self.monomorphize(self.mir.local_decls[place.local].ty);
                         let size = type_size(self.tcx, local_ty).unwrap_or(8) as u32;
-                        let slot = self.builder.stack_slot(size.max(8), Origin::synthetic());
+                        let slot = self.builder.stack_slot(size.max(8), 0, Origin::synthetic());
                         self.current_mem = self
                             .builder
                             .store(
@@ -3222,7 +3222,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     } else {
                         let local_ty = self.monomorphize(self.mir.local_decls[place.local].ty);
                         let size = type_size(self.tcx, local_ty).unwrap_or(1) as u32;
-                        let slot = self.builder.stack_slot(size.max(1), Origin::synthetic());
+                        let slot = self.builder.stack_slot(size.max(1), 0, Origin::synthetic());
                         self.locals.set(place.local, slot);
                         self.stack_locals.mark(place.local);
                         Some(slot)
@@ -3290,21 +3290,24 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             existing
                         } else {
                             self.builder
-                                .stack_slot(total_size as u32, Origin::synthetic())
+                                .stack_slot(total_size as u32, 0, Origin::synthetic())
                         }
                     } else {
                         self.builder
-                            .stack_slot(total_size as u32, Origin::synthetic())
+                            .stack_slot(total_size as u32, 0, Origin::synthetic())
                     }
                 } else {
                     self.builder
-                        .stack_slot(total_size as u32, Origin::synthetic())
+                        .stack_slot(total_size as u32, 0, Origin::synthetic())
                 };
 
-                // Zero-initialize the aggregate slot for enum variants or
-                // non-enum aggregates with no operands (e.g. coroutines whose
-                // initial state discriminant must be 0 / Unresumed).
-                if (enum_variant_idx.is_some() || operands.is_empty()) && total_size > 0 {
+                // Zero-initialize the aggregate slot for enum variants,
+                // coroutines (whose initial state discriminant must be 0),
+                // or non-enum aggregates with no operands.
+                let is_coroutine = matches!(kind.as_ref(), mir::AggregateKind::Coroutine(..));
+                if (enum_variant_idx.is_some() || operands.is_empty() || is_coroutine)
+                    && total_size > 0
+                {
                     let zero =
                         self.builder
                             .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
@@ -3837,13 +3840,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         if matches!(self.builder.value_type(existing), Some(Type::Ptr(_))) {
                             existing
                         } else {
-                            self.builder.stack_slot(total, Origin::synthetic())
+                            self.builder.stack_slot(total, 0, Origin::synthetic())
                         }
                     } else {
-                        self.builder.stack_slot(total, Origin::synthetic())
+                        self.builder.stack_slot(total, 0, Origin::synthetic())
                     }
                 } else {
-                    self.builder.stack_slot(total, Origin::synthetic())
+                    self.builder.stack_slot(total, 0, Origin::synthetic())
                 };
                 let store_size = elem_size as u32;
                 for i in 0..n {

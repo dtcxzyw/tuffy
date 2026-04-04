@@ -58,7 +58,7 @@
 // CHECK:     v1: ptr = param 0
 // CHECK:     v2: int:u8 = param 1
 // CHECK:     v3: int:u64 = param 2
-// CHECK:     v4: ptr = stack_slot 1
+// CHECK:     v4: ptr = stack_slot 1 align 1
 // CHECK:     v5: int:i64 = iconst 0
 // CHECK:     v6: int:i64 = iconst 0
 // CHECK:     v7: bool = icmp.eq v5, v6
@@ -225,7 +225,7 @@
 // CHECK:     v1: ptr = param 0
 // CHECK:     v2: ptr = param 1
 // CHECK:     v3: int:u64 = param 2
-// CHECK:     v4: ptr = stack_slot 1
+// CHECK:     v4: ptr = stack_slot 1 align 1
 // CHECK:     v5: int:i64 = iconst 0
 // CHECK:     v6: int:i64 = iconst 0
 // CHECK:     v7: bool = icmp.eq v5, v6
@@ -387,8 +387,8 @@
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
 // CHECK:     v2: int:u64 = param 1
-// CHECK:     v3: ptr = stack_slot 16
-// CHECK:     v4: ptr = stack_slot 16
+// CHECK:     v3: ptr = stack_slot 16 align 8
+// CHECK:     v4: ptr = stack_slot 16 align 8
 // CHECK:     v5: int:u64 = count_ones v2
 // CHECK:     br bb1(v0)
 // CHECK:
@@ -634,8 +634,8 @@
 // CHECK:     v2: int:u64 = param 1
 // CHECK:     v3: bool = param 2
 // CHECK:     v4: ptr = param 3
-// CHECK:     v5: ptr = stack_slot 16
-// CHECK:     v6: ptr = stack_slot 16
+// CHECK:     v5: ptr = stack_slot 16 align 8
+// CHECK:     v6: ptr = stack_slot 16 align 8
 // CHECK:     v7: ptr = symbol_addr @_RNvMNtNtC$HASH_4core3ptr9const_ptrPu13is_aligned_toC$HASH_6memops
 // CHECK:     v8: mem, v9: bool = call v7(v1, v2), v0 -> bool
 // CHECK:     br bb1(v8)
@@ -1025,9 +1025,9 @@
 // CHECK:     v4: int:u64 = param 3
 // CHECK:     v5: int:u64 = param 4
 // CHECK:     v6: ptr = param 5
-// CHECK:     v7: ptr = stack_slot 1
-// CHECK:     v8: ptr = stack_slot 16
-// CHECK:     v9: ptr = stack_slot 16
+// CHECK:     v7: ptr = stack_slot 1 align 1
+// CHECK:     v8: ptr = stack_slot 16 align 8
+// CHECK:     v9: ptr = stack_slot 16 align 8
 // CHECK:     v10: int:i64 = iconst 0
 // CHECK:     v11: bool = icmp.eq v5, v10
 // CHECK:     brif v11, bb2(v0), bb1(v0)
@@ -1467,11 +1467,11 @@
 // CHECK:     v3: int:u64 = param 2
 // CHECK:     v4: bool = param 3
 // CHECK:     v5: ptr = param 4
-// CHECK:     v6: ptr = stack_slot 8
-// CHECK:     v7: ptr = stack_slot 8
-// CHECK:     v8: ptr = stack_slot 1
-// CHECK:     v9: ptr = stack_slot 16
-// CHECK:     v10: ptr = stack_slot 16
+// CHECK:     v6: ptr = stack_slot 8 align 8
+// CHECK:     v7: ptr = stack_slot 8 align 8
+// CHECK:     v8: ptr = stack_slot 1 align 1
+// CHECK:     v9: ptr = stack_slot 16 align 8
+// CHECK:     v10: ptr = stack_slot 16 align 8
 // CHECK:     v11: ptr = symbol_addr @_RNvMNtNtC$HASH_4core3ptr9const_ptrPu13is_aligned_toC$HASH_6memops
 // CHECK:     v12: mem, v13: bool = call v11(v1, v3), v0 -> bool
 // CHECK:     br bb1(v12)
@@ -1801,8 +1801,8 @@
 // CHECK:     v2: ptr = param 1
 // CHECK:     v3: int:u64 = param 2
 // CHECK:     v4: int:u64 = param 3
-// CHECK:     v5: ptr = stack_slot 8
-// CHECK:     v6: ptr = stack_slot 16
+// CHECK:     v5: ptr = stack_slot 8 align 8
+// CHECK:     v6: ptr = stack_slot 16 align 8
 // CHECK:     v7: int:u64 = ptrtoaddr v1
 // CHECK:     v8: int:u64 = ptrtoaddr v2
 // CHECK:     v9: int:u64, v10: bool = umul_overflow.64 v3, v4

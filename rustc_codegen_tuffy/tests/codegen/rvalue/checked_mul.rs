@@ -29,7 +29,7 @@
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u32 = param 0
 // CHECK:     v2: int:u32 = param 1
-// CHECK:     v3: ptr = stack_slot 16
+// CHECK:     v3: ptr = stack_slot 16 align 8
 // CHECK:     v4: int:u32, v5: bool = umul_overflow.32 v1, v2
 // CHECK:     v6: int:u64 = zext v4, 64
 // CHECK:     v7: mem = store.8 v6, v3, v0
@@ -61,7 +61,7 @@
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: int:u64 = param 0
 // CHECK:     v2: int:u64 = param 1
-// CHECK:     v3: ptr = stack_slot 16
+// CHECK:     v3: ptr = stack_slot 16 align 8
 // CHECK:     v4: int:u64, v5: bool = umul_overflow.64 v1, v2
 // CHECK:     v6: mem = store.8 v4, v3, v0
 // CHECK:     v7: int:i64 = iconst 8

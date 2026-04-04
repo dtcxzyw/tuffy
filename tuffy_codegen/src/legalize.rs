@@ -1730,7 +1730,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
                 o(),
             )
             .raw(),
-        Op::StackSlot(bytes) => b.stack_slot(*bytes, o()),
+        Op::StackSlot(bytes, align) => b.stack_slot(*bytes, *align, o()),
         Op::MemCopy(dst, src, count, mem) => b
             .mem_copy(
                 remap_op(s, &dst.clone().raw()).into(),
