@@ -3241,14 +3241,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     _ => None,
                 };
 
-                // For non-enum aggregates with no operands, return zero.
-                if operands.is_empty() && enum_variant_idx.is_none() {
-                    return Some(
-                        self.builder
-                            .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
-                            .raw(),
-                    );
-                }
+                // NOTE: do NOT early-return 0 for empty operands — coroutines
+                // (async blocks) can be non-ZST even with no captured upvars.
+                // The total_size == 0 check below handles true ZSTs.
 
                 // Determine the aggregate type for layout queries.
                 let agg_ty = match kind.as_ref() {
@@ -3306,8 +3301,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         .stack_slot(total_size as u32, Origin::synthetic())
                 };
 
-                // Zero-initialize the aggregate slot for enum variants.
-                if enum_variant_idx.is_some() && total_size > 0 {
+                // Zero-initialize the aggregate slot for enum variants or
+                // non-enum aggregates with no operands (e.g. coroutines whose
+                // initial state discriminant must be 0 / Unresumed).
+                if (enum_variant_idx.is_some() || operands.is_empty()) && total_size > 0 {
                     let zero =
                         self.builder
                             .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
