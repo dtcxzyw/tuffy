@@ -2,10 +2,12 @@
 
 use std::collections::HashMap;
 
-use object::write::{Object, Relocation as ObjRelocation, Symbol, SymbolId, SymbolSection};
+use object::write::{
+    Comdat, Object, Relocation as ObjRelocation, SectionId, Symbol, SymbolId, SymbolSection,
+};
 use object::{
-    Architecture, BinaryFormat, Endianness, RelocationEncoding, RelocationFlags, RelocationKind,
-    SectionFlags, SectionKind, SymbolFlags, SymbolKind, SymbolScope,
+    Architecture, BinaryFormat, ComdatKind, Endianness, RelocationEncoding, RelocationFlags,
+    RelocationKind, SectionFlags, SectionKind, SymbolFlags, SymbolKind, SymbolScope,
 };
 
 use tuffy_target::reloc::{RelocKind, Relocation};
@@ -29,6 +31,17 @@ pub fn emit_elf(name: &str, code: &[u8], relocations: &[Relocation]) -> Vec<u8> 
 /// Emit multiple functions as a single ELF object file.
 pub fn emit_elf_multi(functions: &[CompiledFunction]) -> Vec<u8> {
     emit_elf_with_data(functions, &[])
+}
+
+// ELF section flags needed for COMDAT group member sections.
+const SHF_ALLOC: u64 = 0x2;
+const SHF_EXECINSTR: u64 = 0x4;
+const SHF_GROUP: u64 = 0x200;
+
+/// Override a section's ELF flags. Used to set SHF_GROUP on COMDAT member
+/// sections, which the `object` crate does not do automatically.
+fn set_shf_group(obj: &mut Object, section: SectionId, flags: u64) {
+    obj.section_mut(section).flags = SectionFlags::Elf { sh_flags: flags };
 }
 
 /// Emit multiple functions and static data as a single ELF object file.
@@ -204,10 +217,27 @@ pub fn emit_elf_with_data(functions: &[CompiledFunction], statics: &[StaticData]
     // before processing relocations so that local (STB_LOCAL) symbols are
     // already in sym_map when another function in the same object file
     // references them.
+    //
+    // Weak functions (generic/monomorphized) get their own `.text.func_name`
+    // section so they can be placed in COMDAT groups. This lets the linker
+    // discard duplicate copies along with their FDEs and LSDAs, preventing
+    // overlapping .eh_frame entries that confuse the unwinder.
     let mut code_offsets: Vec<u64> = Vec::with_capacity(functions.len());
+    let mut func_text_sections: Vec<SectionId> = Vec::with_capacity(functions.len());
     for func in functions {
-        let code_offset = obj.append_section_data(text, &func.code, 16);
+        let section = if func.weak {
+            let sec_name = format!(".text.{}", func.name);
+            let sid = obj.add_section(vec![], sec_name.into_bytes(), SectionKind::Text);
+            // SHF_GROUP is required by the ELF spec for COMDAT member sections
+            // but the `object` crate doesn't set it automatically.
+            set_shf_group(&mut obj, sid, SHF_ALLOC | SHF_EXECINSTR | SHF_GROUP);
+            sid
+        } else {
+            text
+        };
+        let code_offset = obj.append_section_data(section, &func.code, 16);
         code_offsets.push(code_offset);
+        func_text_sections.push(section);
 
         let func_sid = obj.add_symbol(Symbol {
             name: func.name.as_bytes().to_vec(),
@@ -220,14 +250,15 @@ pub fn emit_elf_with_data(functions: &[CompiledFunction], statics: &[StaticData]
                 SymbolScope::Linkage
             },
             weak: func.weak,
-            section: SymbolSection::Section(text),
+            section: SymbolSection::Section(section),
             flags: SymbolFlags::None,
         });
         sym_map.insert(func.name.clone(), func_sid);
     }
 
     // Pass 2: Add relocations now that all symbols are defined.
-    for (func, &code_offset) in functions.iter().zip(code_offsets.iter()) {
+    for (i, (func, &code_offset)) in functions.iter().zip(code_offsets.iter()).enumerate() {
+        let section = func_text_sections[i];
         for reloc in &func.relocations {
             // Reuse the symbol ID if the target is already defined in this
             // object file (e.g. a .Lconst or .Lstr data blob, or another
@@ -274,7 +305,7 @@ pub fn emit_elf_with_data(functions: &[CompiledFunction], statics: &[StaticData]
                 _ => -4,
             };
             obj.add_relocation(
-                text,
+                section,
                 ObjRelocation {
                     offset: code_offset + reloc.offset as u64,
                     symbol: sym_id,
@@ -288,7 +319,13 @@ pub fn emit_elf_with_data(functions: &[CompiledFunction], statics: &[StaticData]
 
     // Generate .eh_frame unwind information so that libunwind can traverse
     // tuffy-compiled frames (required for panic unwinding / catch_unwind).
-    emit_eh_frame(&mut obj, functions, &mut sym_map);
+    emit_eh_frame(
+        &mut obj,
+        functions,
+        &mut sym_map,
+        &func_text_sections,
+        &code_offsets,
+    );
 
     let mut buf = Vec::new();
     obj.emit(&mut buf).expect("failed to emit ELF object");
@@ -621,10 +658,20 @@ fn emit_personality_ref(obj: &mut Object, sym_map: &mut HashMap<String, SymbolId
 
 /// Generate `.eh_frame` (and optionally `.gcc_except_table`) for all
 /// functions in the object file.
+///
+/// Weak (generic/monomorphized) functions get per-function `.text.func_name`
+/// and `.gcc_except_table.func_name` sections placed in COMDAT groups.
+/// The shared `.eh_frame` section is NOT in any COMDAT group; instead,
+/// FDE initial_location relocations use **section symbols** so the linker
+/// can determine FDE liveness: when a COMDAT group is discarded the
+/// section symbol dies, causing the linker to discard the FDE and skip
+/// its LSDA relocation.  This matches GCC/LLVM's approach.
 fn emit_eh_frame(
     obj: &mut Object,
     functions: &[CompiledFunction],
     sym_map: &mut HashMap<String, SymbolId>,
+    func_text_sections: &[SectionId],
+    code_offsets: &[u64],
 ) {
     if functions.is_empty() {
         return;
@@ -639,44 +686,79 @@ fn emit_eh_frame(
         None
     };
 
-    // ── .gcc_except_table (LSDAs) ───────────────────────────────────────
-    // Build LSDA bytes for each function with cleanup entries.
-    // lsda_info[i] = Some((offset_in_section, lsda_bytes_len)) or None.
-    let mut except_table_data = Vec::new();
-    let mut lsda_info: Vec<Option<usize>> = Vec::with_capacity(functions.len());
-    for func in functions {
-        if func.call_site_table.is_empty() {
-            lsda_info.push(None);
-        } else {
-            let offset = except_table_data.len();
-            let lsda = build_lsda(&func.call_site_table);
-            except_table_data.extend_from_slice(&lsda);
-            lsda_info.push(Some(offset));
+    struct EhReloc {
+        offset_in_section: usize,
+        symbol: SymbolId,
+        addend: i64,
+    }
+
+    let pcrel_32_flags = RelocationFlags::Generic {
+        kind: RelocationKind::Relative,
+        encoding: RelocationEncoding::Generic,
+        size: 32,
+    };
+
+    // ── Per-function .gcc_except_table for weak functions (COMDAT) ───────
+    // Each weak function with LSDA gets its own section in the COMDAT group.
+    let mut per_func_except: Vec<Option<SectionId>> = vec![None; functions.len()];
+    for (i, func) in functions.iter().enumerate() {
+        if !func.weak || func.call_site_table.is_empty() {
+            continue;
+        }
+        let lsda = build_lsda(&func.call_site_table);
+        let sec_name = format!(".gcc_except_table.{}", func.name);
+        let sid = obj.add_section(vec![], sec_name.into_bytes(), SectionKind::ReadOnlyData);
+        set_shf_group(obj, sid, SHF_ALLOC | SHF_GROUP);
+        obj.set_section_data(sid, lsda, 4);
+        per_func_except[i] = Some(sid);
+    }
+
+    // Create COMDAT groups: .text.func_name [+ .gcc_except_table.func_name]
+    for (i, func) in functions.iter().enumerate() {
+        if !func.weak {
+            continue;
+        }
+        let mut comdat_sections = vec![func_text_sections[i]];
+        if let Some(except_sid) = per_func_except[i] {
+            comdat_sections.push(except_sid);
+        }
+        if let Some(&func_sid) = sym_map.get(&func.name) {
+            obj.add_comdat(Comdat {
+                kind: ComdatKind::Any,
+                symbol: func_sid,
+                sections: comdat_sections,
+            });
         }
     }
 
-    let except_section_id = if !except_table_data.is_empty() {
+    // ── Shared .gcc_except_table for non-weak functions ─────────────────
+    let mut shared_except_data = Vec::new();
+    let mut shared_lsda_offsets: Vec<Option<usize>> = vec![None; functions.len()];
+    for (i, func) in functions.iter().enumerate() {
+        if func.weak || func.call_site_table.is_empty() {
+            continue;
+        }
+        shared_lsda_offsets[i] = Some(shared_except_data.len());
+        shared_except_data.extend_from_slice(&build_lsda(&func.call_site_table));
+    }
+    let shared_except_section = if !shared_except_data.is_empty() {
         let sid = obj.add_section(
             vec![],
             b".gcc_except_table".to_vec(),
             SectionKind::ReadOnlyData,
         );
-        obj.set_section_data(sid, except_table_data, 4);
+        obj.set_section_data(sid, shared_except_data, 4);
         Some(sid)
     } else {
         None
     };
 
-    // ── .eh_frame ───────────────────────────────────────────────────────
-    // Two CIEs: "zR" for functions without cleanup, "zPLR" for functions
-    // with cleanup. Each FDE references the appropriate CIE so the
-    // personality function is only invoked for frames that actually have
-    // LSDA data.
+    // ── Single shared .eh_frame for ALL functions ───────────────────────
+    // FDE initial_location uses SECTION symbols so the linker can detect
+    // dead FDEs when their COMDAT text section is discarded.
     let mut eh = Vec::new();
-
     let zr_cie_start = emit_cie_zr(&mut eh);
 
-    // Emit "zPLR" CIE only when at least one function needs it.
     let zplr_cie = if needs_personality {
         let (start, pers_off) = emit_cie_zplr(&mut eh);
         Some((start, pers_off))
@@ -684,14 +766,7 @@ fn emit_eh_frame(
         None
     };
 
-    struct EhReloc {
-        offset_in_section: usize,
-        symbol: SymbolId,
-        addend: i64,
-    }
     let mut eh_relocs: Vec<EhReloc> = Vec::new();
-
-    // CIE personality pointer relocation
     if let (Some((_, pers_off)), Some(pers_sid)) = (zplr_cie, personality_ref_sid) {
         eh_relocs.push(EhReloc {
             offset_in_section: pers_off,
@@ -700,14 +775,11 @@ fn emit_eh_frame(
         });
     }
 
-    // Emit FDE for each function
     for (i, func) in functions.iter().enumerate() {
         let func_has_cleanup = !func.call_site_table.is_empty();
         let (cie_start, has_lsda) = if func_has_cleanup {
-            // Must have zPLR CIE when function has cleanup
             (zplr_cie.unwrap().0, true)
         } else {
-            // Use simple "zR" CIE — no personality invoked for this frame
             (zr_cie_start, false)
         };
 
@@ -721,49 +793,56 @@ fn emit_eh_frame(
             func.sub_amount,
         );
 
-        // initial_location relocation → function symbol
-        if let Some(&sym_id) = sym_map.get(&func.name) {
-            eh_relocs.push(EhReloc {
-                offset_in_section: initial_loc_offset,
-                symbol: sym_id,
-                addend: 0,
-            });
-        }
+        // Use SECTION symbol + offset for initial_location so the linker
+        // can determine FDE liveness when COMDAT groups are discarded.
+        let text_section = func_text_sections[i];
+        let section_sym = obj.section_symbol(text_section);
+        eh_relocs.push(EhReloc {
+            offset_in_section: initial_loc_offset,
+            symbol: section_sym,
+            addend: code_offsets[i] as i64,
+        });
 
-        // LSDA pointer relocation → .gcc_except_table + offset
-        if let (Some(lsda_off), Some(Some(lsda_offset_in_section))) =
-            (lsda_ptr_offset, lsda_info.get(i))
-            && let Some(except_sid) = except_section_id
-        {
-            let section_sym = obj.section_symbol(except_sid);
-            eh_relocs.push(EhReloc {
-                offset_in_section: lsda_off,
-                symbol: section_sym,
-                addend: *lsda_offset_in_section as i64,
-            });
+        // LSDA pointer relocation
+        if let Some(lsda_off) = lsda_ptr_offset {
+            if func.weak {
+                // Weak: per-function .gcc_except_table section (in COMDAT group)
+                if let Some(except_sid) = per_func_except[i] {
+                    let lsda_sym = obj.section_symbol(except_sid);
+                    eh_relocs.push(EhReloc {
+                        offset_in_section: lsda_off,
+                        symbol: lsda_sym,
+                        addend: 0,
+                    });
+                }
+            } else {
+                // Non-weak: shared .gcc_except_table + offset
+                if let (Some(Some(offset)), Some(except_sid)) =
+                    (shared_lsda_offsets.get(i), shared_except_section)
+                {
+                    let lsda_sym = obj.section_symbol(except_sid);
+                    eh_relocs.push(EhReloc {
+                        offset_in_section: lsda_off,
+                        symbol: lsda_sym,
+                        addend: *offset as i64,
+                    });
+                }
+            }
         }
     }
 
-    // Terminator: zero-length entry
-    eh.extend_from_slice(&0u32.to_ne_bytes());
+    eh.extend_from_slice(&0u32.to_ne_bytes()); // terminator
 
-    // Add .eh_frame section
-    let eh_section_id = obj.add_section(vec![], b".eh_frame".to_vec(), SectionKind::ReadOnlyData);
-    obj.set_section_data(eh_section_id, eh, PTR_SIZE as u64);
-
-    // Add relocations
+    let eh_section = obj.add_section(vec![], b".eh_frame".to_vec(), SectionKind::ReadOnlyData);
+    obj.set_section_data(eh_section, eh, PTR_SIZE as u64);
     for reloc in eh_relocs {
         obj.add_relocation(
-            eh_section_id,
+            eh_section,
             ObjRelocation {
                 offset: reloc.offset_in_section as u64,
                 symbol: reloc.symbol,
                 addend: reloc.addend,
-                flags: RelocationFlags::Generic {
-                    kind: RelocationKind::Relative,
-                    encoding: RelocationEncoding::Generic,
-                    size: 32,
-                },
+                flags: pcrel_32_flags,
             },
         )
         .expect("failed to add .eh_frame relocation");
