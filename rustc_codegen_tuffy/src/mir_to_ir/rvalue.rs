@@ -4,9 +4,50 @@ use tuffy_ir::instruction::{FCmpOp, ICmpOp, Operand as IrOperand, Origin};
 use tuffy_ir::types::{Annotation, FloatType, FpRewriteFlags, IntAnnotation, IntSignedness, Type};
 use tuffy_ir::value::ValueRef;
 
+use rustc_middle::ty::TyCtxt;
+
 use super::constant::*;
 use super::ctx::TranslationCtx;
 use super::types::*;
+
+/// Recursively peel through ADT wrapper layers (Rc, Arc, NonNull, etc.) to
+/// find the inner pointer pointees for an unsizing coercion.
+///
+/// For example, `Rc<[u8; 3]>` → `Rc<[u8]>` peels through:
+///   Rc → NonNull<RcBox<T>> → *const RcBox<T> → pointees RcBox<[u8;3]>, RcBox<[u8]>
+///
+/// This matches codegen_ssa::base::unsize_ptr's recursive ADT field walking.
+fn peel_adt_to_pointees<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    src: ty::Ty<'tcx>,
+    dst: ty::Ty<'tcx>,
+    typing_env: ty::TypingEnv<'tcx>,
+) -> (ty::Ty<'tcx>, ty::Ty<'tcx>) {
+    match (src.kind(), dst.kind()) {
+        (ty::Ref(_, a, _), ty::Ref(_, b, _))
+        | (ty::Ref(_, a, _), ty::RawPtr(b, _))
+        | (ty::RawPtr(a, _), ty::Ref(_, b, _))
+        | (ty::RawPtr(a, _), ty::RawPtr(b, _)) => (*a, *b),
+        _ if src.is_box() && dst.is_box() => {
+            let a = src.boxed_ty().unwrap();
+            let b = dst.boxed_ty().unwrap();
+            (a, b)
+        }
+        (ty::Adt(def_a, args_a), ty::Adt(def_b, args_b)) if def_a == def_b => {
+            // Find the first field whose type differs between source and target.
+            for field in def_a.non_enum_variant().fields.iter() {
+                let fa = tcx.normalize_erasing_regions(typing_env, field.ty(tcx, args_a));
+                let fb = tcx.normalize_erasing_regions(typing_env, field.ty(tcx, args_b));
+                if fa != fb {
+                    return peel_adt_to_pointees(tcx, fa, fb, typing_env);
+                }
+            }
+            // No differing field found; fall back to the types themselves.
+            (src, dst)
+        }
+        _ => (src, dst),
+    }
+}
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     pub(super) fn translate_place_to_addr(
@@ -1139,14 +1180,19 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
                     // Fallback for ADT types (Rc, Arc, etc.) where target_inner
                     // is None because the type is not Ref/RawPtr/Box.
-                    // Use struct_lockstep_tails_for_codegen on the raw source and
-                    // target types to find the unsizing boundary.
+                    // Recursively peel through ADT fields to find the inner
+                    // pointer types, then use struct_lockstep_tails_for_codegen
+                    // on the pointees (matching codegen_ssa::base::unsize_ptr).
                     if target_inner.is_none() {
                         let src_ty = self.operand_ty_mono(op)?;
                         let typing_env = ty::TypingEnv::fully_monomorphized();
-                        let (src_tail, dst_tail) = self
-                            .tcx
-                            .struct_lockstep_tails_for_codegen(src_ty, target_ty, typing_env);
+                        let (src_pointee, dst_pointee) =
+                            peel_adt_to_pointees(self.tcx, src_ty, target_ty, typing_env);
+                        let (src_tail, dst_tail) = self.tcx.struct_lockstep_tails_for_codegen(
+                            src_pointee,
+                            dst_pointee,
+                            typing_env,
+                        );
                         match dst_tail.kind() {
                             ty::Slice(_) => {
                                 if let ty::Array(_, len) = src_tail.kind()

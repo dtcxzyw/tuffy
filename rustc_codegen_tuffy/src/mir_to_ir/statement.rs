@@ -429,6 +429,90 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                                         Origin::synthetic(),
                                                     )
                                                     .raw();
+                                                // For ADT Unsize casts (e.g. RefMut<[T; N]> →
+                                                // RefMut<[T]>), the first field grows from 8→16
+                                                // bytes (thin→fat pointer), shifting subsequent
+                                                // fields. Copy remaining bytes from the source
+                                                // after the first 8 bytes to dest after 16 bytes.
+                                                if operand_is_stack {
+                                                    let src_place = match rvalue {
+                                                        Rvalue::Cast(
+                                                            _,
+                                                            Operand::Copy(p) | Operand::Move(p),
+                                                            _,
+                                                        ) => Some(p),
+                                                        _ => None,
+                                                    };
+                                                    if let Some(src_place) = src_place {
+                                                        let src_ty = self.monomorphize(
+                                                            self.mir.local_decls[src_place.local]
+                                                                .ty,
+                                                        );
+                                                        let src_size = type_size(self.tcx, src_ty)
+                                                            .unwrap_or(0);
+                                                        // If source > 8, there are trailing fields
+                                                        // after the first pointer that must move.
+                                                        if src_size > 8 {
+                                                            let trailing = src_size - 8;
+                                                            let src_slot = self
+                                                                .locals
+                                                                .get(src_place.local)
+                                                                .unwrap_or(val);
+                                                            let num_words = trailing.div_ceil(8);
+                                                            for i in 0..num_words {
+                                                                let chunk = std::cmp::min(
+                                                                    8,
+                                                                    trailing - i * 8,
+                                                                )
+                                                                    as u32;
+                                                                let src_off = (8 + i * 8) as i64;
+                                                                let dst_off = (16 + i * 8) as i64;
+                                                                let soff = self.builder.iconst(
+                                                                    src_off,
+                                                                    64,
+                                                                    IntSignedness::DontCare,
+                                                                    Origin::synthetic(),
+                                                                );
+                                                                let sa = self.builder.ptradd(
+                                                                    src_slot.into(),
+                                                                    soff.into(),
+                                                                    0,
+                                                                    Origin::synthetic(),
+                                                                );
+                                                                let word = self.builder.load(
+                                                                    sa.into(),
+                                                                    chunk,
+                                                                    Type::Int,
+                                                                    self.current_mem.into(),
+                                                                    int_annotation_for_bytes(chunk),
+                                                                    Origin::synthetic(),
+                                                                );
+                                                                let doff = self.builder.iconst(
+                                                                    dst_off,
+                                                                    64,
+                                                                    IntSignedness::DontCare,
+                                                                    Origin::synthetic(),
+                                                                );
+                                                                let da = self.builder.ptradd(
+                                                                    slot.into(),
+                                                                    doff.into(),
+                                                                    0,
+                                                                    Origin::synthetic(),
+                                                                );
+                                                                self.current_mem = self
+                                                                    .builder
+                                                                    .store(
+                                                                        word.into(),
+                                                                        da.into(),
+                                                                        chunk,
+                                                                        self.current_mem.into(),
+                                                                        Origin::synthetic(),
+                                                                    )
+                                                                    .raw();
+                                                            }
+                                                        }
+                                                    }
+                                                }
                                             } else {
                                                 // For word-by-word copy we need a SOURCE ADDRESS
                                                 // to load from. When the rvalue is Use(Copy/Move)

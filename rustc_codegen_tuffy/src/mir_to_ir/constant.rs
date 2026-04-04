@@ -604,6 +604,11 @@ pub(super) fn translate_scalar(
                     .raw(),
             )
         }
+        ty::Pat(base, _) => {
+            // Patterned/ranged types like `(u32) is 1..` — the scalar value
+            // is the same as the base type; delegate to it.
+            translate_scalar(scalar, *base, builder)
+        }
         _ => None,
     }
 }
