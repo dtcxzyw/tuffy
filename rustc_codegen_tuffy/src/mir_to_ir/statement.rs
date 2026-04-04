@@ -1611,7 +1611,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 .builtin_deref(true)
                                 .and_then(|t| type_size(self.tcx, t))
                                 .unwrap_or(1);
-                            let byte_count = if pointee_size <= 1 {
+                            let byte_count = if pointee_size == 0 {
+                                // ZST: no bytes to copy regardless of count.
+                                self.builder
+                                    .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
+                                    .raw()
+                            } else if pointee_size == 1 {
                                 count_v
                             } else {
                                 let sz = self.builder.iconst(

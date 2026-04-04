@@ -2869,7 +2869,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let dst = ir_args[0];
                 let val = ir_args[1];
                 let count = ir_args[2];
-                let byte_count = if elem_size == 1 {
+                let byte_count = if elem_size == 0 {
+                    self.builder
+                        .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
+                        .raw()
+                } else if elem_size == 1 {
                     count
                 } else {
                     let sz = self.builder.iconst(
@@ -2901,7 +2905,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let src = ir_args[0];
                 let dst = ir_args[1];
                 let count = ir_args[2];
-                let byte_count = if elem_size == 1 {
+                let byte_count = if elem_size == 0 {
+                    self.builder
+                        .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
+                        .raw()
+                } else if elem_size == 1 {
                     count
                 } else {
                     let sz = self.builder.iconst(
@@ -2934,7 +2942,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let src = ir_args[0];
                 let dst = ir_args[1];
                 let count = ir_args[2];
-                let byte_count = if elem_size == 1 {
+                let byte_count = if elem_size == 0 {
+                    self.builder
+                        .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
+                        .raw()
+                } else if elem_size == 1 {
                     count
                 } else {
                     let sz = self.builder.iconst(
