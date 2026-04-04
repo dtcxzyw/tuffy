@@ -5,7 +5,7 @@ use rustc_middle::ty::{self, Instance, TyCtxt, TypeVisitableExt};
 use rustc_span::Spanned;
 
 use tuffy_ir::instruction::{Operand as IrOperand, Origin};
-use tuffy_ir::types::{Annotation, IntAnnotation, IntSignedness, Type};
+use tuffy_ir::types::{Annotation, FloatType, IntAnnotation, IntSignedness, Type};
 use tuffy_ir::value::ValueRef;
 
 use super::ctx::TranslationCtx;
@@ -1724,6 +1724,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         } else {
             None
         };
+        let is_f128_ret = matches!(call_ret_ty, Type::Float(FloatType::F128));
         let (call_mem, call_data) = self.builder.call(
             callee_val.into(),
             ir_args,
@@ -1739,6 +1740,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         if let Some(Annotation::Int(ia)) = call_ret_ann
             && ia.bit_width == 128
         {
+            self.abi_metadata.mark_wide_return_call(call_mem.index());
+        }
+        if is_f128_ret {
             self.abi_metadata.mark_wide_return_call(call_mem.index());
         }
 

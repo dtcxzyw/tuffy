@@ -177,6 +177,9 @@ fn has_wide_values<M: AbiMetadata>(
         if is_wide_width(type_width(ty), legality) {
             return true;
         }
+        if matches!(ty, Type::Float(FloatType::F128)) {
+            return true;
+        }
         // Check annotation for integer bit width
         if matches!(ty, Type::Int)
             && let Some(Annotation::Int(ia)) = ann
@@ -189,6 +192,9 @@ fn has_wide_values<M: AbiMetadata>(
     // Check for wide return type
     if let Some(ref ty) = func.ret_ty {
         if is_wide_width(type_width(ty), legality) {
+            return true;
+        }
+        if matches!(ty, Type::Float(FloatType::F128)) {
             return true;
         }
         // Check annotation for integer bit width
@@ -205,6 +211,9 @@ fn has_wide_values<M: AbiMetadata>(
         if is_wide_width(type_width(&inst.ty), legality) {
             return true;
         }
+        if matches!(inst.ty, Type::Float(FloatType::F128)) {
+            return true;
+        }
         // Check primary result annotation
         if matches!(inst.ty, Type::Int)
             && let Some(Annotation::Int(ia)) = &inst.result_annotation
@@ -215,6 +224,9 @@ fn has_wide_values<M: AbiMetadata>(
         // Check secondary result annotation
         if let Some(ref ty) = inst.secondary_ty {
             if is_wide_width(type_width(ty), legality) {
+                return true;
+            }
+            if matches!(ty, Type::Float(FloatType::F128)) {
                 return true;
             }
             if matches!(ty, Type::Int)
@@ -262,6 +274,7 @@ fn has_wide_values<M: AbiMetadata>(
                 return true;
             }
             Op::Const(v) if needs_wide_const(v) => return true,
+            Op::FConst(fc) if fc.float_type() == FloatType::F128 => return true,
             // FMaxNum/FMinNum always need legalization for IEEE NaN handling
             Op::FMaxNum(..) | Op::FMinNum(..) => return true,
             // A call with any 128-bit annotated argument needs legalization to
@@ -386,8 +399,9 @@ fn build_new_func<M: AbiMetadata + Clone>(
     for (i, ty) in old.params.iter().enumerate() {
         let name = old.param_names.get(i).and_then(|n| *n);
         let ann = old.param_annotations.get(i).cloned().flatten();
-        let param_is_wide =
-            is_wide_width(type_width(ty), legality) || is_128_bit_int_with_annotation(ty, &ann);
+        let param_is_wide = is_wide_width(type_width(ty), legality)
+            || is_128_bit_int_with_annotation(ty, &ann)
+            || matches!(ty, Type::Float(FloatType::F128));
         if param_is_wide {
             let lo_idx = params.len() as u32;
             params.push(Type::Int);
@@ -417,6 +431,7 @@ fn build_new_func<M: AbiMetadata + Clone>(
     let ret_ann = if let Some(ref ty) = ret_ty {
         if is_wide_width(type_width(ty), legality)
             || is_128_bit_int_with_annotation(ty, &old.ret_annotation)
+            || matches!(ty, Type::Float(FloatType::F128))
         {
             None
         } else {
@@ -457,6 +472,7 @@ fn collect_wide_values<M: AbiMetadata>(
         let vref = ValueRef::inst_result(i);
         if is_wide_width(type_width(&inst.ty), legality)
             || is_128_bit_int_with_annotation(&inst.ty, &inst.result_annotation)
+            || matches!(inst.ty, Type::Float(FloatType::F128))
         {
             wide.insert(vref.raw());
             continue;
@@ -506,6 +522,9 @@ fn collect_wide_values<M: AbiMetadata>(
                 wide.insert(vref.raw());
             }
             Op::Shr(a, _) if is_128_bit_value(old, a.clone().raw().value) => {
+                wide.insert(vref.raw());
+            }
+            Op::FConst(fc) if fc.float_type() == FloatType::F128 => {
                 wide.insert(vref.raw());
             }
             _ => {}
@@ -722,6 +741,17 @@ fn legalize_inst<M: AbiMetadata + Clone>(
         }
         Op::Const(val) if needs_wide_const(val) || is_wide(s, old_vref) => {
             leg_wide_const(s, b, old_vref, val);
+        }
+        Op::FConst(fc) if fc.float_type() == FloatType::F128 => {
+            let bits = fc.to_bits();
+            let lo = b.iconst(BigInt::from(bits as u64), 64, IntSignedness::Unsigned, o());
+            let hi = b.iconst(
+                BigInt::from((bits >> 64) as u64),
+                64,
+                IntSignedness::Unsigned,
+                o(),
+            );
+            s.vmap.set(old_vref, Mapped::Pair(lo.raw(), hi.raw()));
         }
         Op::Add(a, op_b) if wide_result => {
             leg_add(old, s, b, old_vref, &a.clone().raw(), &op_b.clone().raw());
@@ -1079,10 +1109,10 @@ fn legalize_inst<M: AbiMetadata + Clone>(
             leg_select_128(old, s, b, old_vref, &cond.clone().raw(), tv, fv);
         }
         Op::Ret(val, mem)
-            if old
-                .ret_ty
-                .as_ref()
-                .is_some_and(|t| is_128_bit_int_with_annotation(t, &old.ret_annotation)) =>
+            if old.ret_ty.as_ref().is_some_and(|t| {
+                is_128_bit_int_with_annotation(t, &old.ret_annotation)
+                    || matches!(t, Type::Float(FloatType::F128))
+            }) =>
         {
             leg_ret(s, b, old_vref, val, &mem.clone().raw());
         }
@@ -3809,7 +3839,11 @@ fn leg_call<M: AbiMetadata + Clone>(
     let wide_ret = is_128_bit_int_with_annotation(
         inst.secondary_ty.as_ref().unwrap_or(&Type::Unit),
         &inst.secondary_result_annotation,
-    ) || s.old_meta.is_wide_return_call(old_vref.index());
+    ) || s.old_meta.is_wide_return_call(old_vref.index())
+        || matches!(
+            inst.secondary_ty.as_ref(),
+            Some(Type::Float(FloatType::F128))
+        );
     let ret_ty = if wide_ret {
         I64_TYPE
     } else {
