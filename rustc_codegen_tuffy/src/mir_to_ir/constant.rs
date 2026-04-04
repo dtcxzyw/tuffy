@@ -312,11 +312,19 @@ pub(super) fn translate_const<'tcx>(
                         }
                     }
                 }
-                rustc_middle::mir::interpret::GlobalAlloc::TypeId { .. } => Some(
-                    builder
-                        .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
-                        .raw(),
-                ),
+                rustc_middle::mir::interpret::GlobalAlloc::TypeId { .. } => {
+                    // TypeId constants encode the type hash in the pointer offset.
+                    Some(
+                        builder
+                            .iconst(
+                                ptr_offset.bytes() as i64,
+                                64,
+                                IntSignedness::DontCare,
+                                Origin::synthetic(),
+                            )
+                            .raw(),
+                    )
+                }
             }
         }
         mir::ConstValue::Scalar(scalar) => translate_scalar(scalar, ty, builder),
