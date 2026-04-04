@@ -1517,22 +1517,59 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // first argument (self) — the actual method only takes the data ptr.
                     // Use pre_args_count to account for any SRET slot pushed before the loop.
                     let skip_fat = is_virtual && ir_args.len() == pre_args_count + 1;
-                    if !skip_fat
-                        && let Operand::Copy(place) | Operand::Move(place) = &arg.node
-                        && let Some(fat_v) = self.fat_locals.get(place.local)
-                    {
-                        // Only push the fat component when the local's
-                        // type is actually a fat pointer.  Aggregates
-                        // (structs) with 2+ fields also set fat_locals
-                        // but their second field is not ABI metadata.
+                    if !skip_fat && let Operand::Copy(place) | Operand::Move(place) = &arg.node {
                         let local_ty = self.monomorphize(self.mir.local_decls[place.local].ty);
-                        let needs_fat = is_fat_ptr(self.tcx, local_ty)
-                            || (local_ty.is_box()
-                                && local_ty.boxed_ty().is_some_and(|bt| {
-                                    matches!(bt.kind(), ty::Str | ty::Slice(..) | ty::Dynamic(..))
-                                }));
-                        if needs_fat {
-                            ir_args.push(fat_v.into());
+                        if place.projection.is_empty() {
+                            // Non-projected place: use fat_locals for the metadata.
+                            if let Some(fat_v) = self.fat_locals.get(place.local) {
+                                // Only push the fat component when the local's
+                                // type is actually a fat pointer.  Aggregates
+                                // (structs) with 2+ fields also set fat_locals
+                                // but their second field is not ABI metadata.
+                                let needs_fat = is_fat_ptr(self.tcx, local_ty)
+                                    || (local_ty.is_box()
+                                        && local_ty.boxed_ty().is_some_and(|bt| {
+                                            matches!(
+                                                bt.kind(),
+                                                ty::Str | ty::Slice(..) | ty::Dynamic(..)
+                                            )
+                                        }));
+                                if needs_fat {
+                                    ir_args.push(fat_v.into());
+                                }
+                            }
+                        } else {
+                            // Projected place: the projected type may be a fat
+                            // pointer even if the base local is a struct.  Load
+                            // the metadata from the projected address + 8.
+                            let projected_ty = place.ty(&self.mir.local_decls, self.tcx).ty;
+                            let projected_ty = self.monomorphize(projected_ty);
+                            if is_fat_ptr(self.tcx, projected_ty)
+                                && let Some((addr, _)) = self.translate_place_to_addr(place)
+                            {
+                                let addr = self.coerce_to_ptr(addr);
+                                let off8 = self.builder.iconst(
+                                    8,
+                                    64,
+                                    IntSignedness::DontCare,
+                                    Origin::synthetic(),
+                                );
+                                let meta_addr = self.builder.ptradd(
+                                    addr.into(),
+                                    off8.into(),
+                                    0,
+                                    Origin::synthetic(),
+                                );
+                                let meta = self.builder.load(
+                                    meta_addr.into(),
+                                    8,
+                                    Type::Int,
+                                    self.current_mem.into(),
+                                    int_annotation_for_bytes(8),
+                                    Origin::synthetic(),
+                                );
+                                ir_args.push(meta.into());
+                            }
                         }
                     }
                     // If this arg is a constant fat pointer, pass the length.

@@ -1275,6 +1275,41 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         }
     }
 
+    /// Extract fat pointer metadata from a MIR operand.
+    /// For place operands, delegates to `find_fat_metadata_for_place`.
+    /// Returns `None` for non-fat operands and constants.
+    fn find_fat_metadata_for_operand(&mut self, operand: &Operand<'tcx>) -> Option<ValueRef> {
+        match operand {
+            Operand::Copy(place) | Operand::Move(place) => self.find_fat_metadata_for_place(place),
+            _ => None,
+        }
+    }
+
+    /// Load the data pointer from a fat pointer operand.
+    /// `translate_operand` returns the stack slot address for fat pointer
+    /// stack locals; this helper loads the first 8 bytes (the data pointer)
+    /// so that comparisons operate on values rather than addresses.
+    fn load_fat_data_for_operand(&mut self, operand: &Operand<'tcx>, raw: ValueRef) -> ValueRef {
+        if let Operand::Copy(place) | Operand::Move(place) = operand
+            && place.projection.is_empty()
+            && self.stack_locals.is_stack(place.local)
+            && matches!(self.builder.value_type(raw), Some(Type::Ptr(_)))
+        {
+            let ty = self.monomorphize(self.mir.local_decls[place.local].ty);
+            if is_fat_ptr(self.tcx, ty) {
+                return self.builder.load(
+                    raw.into(),
+                    8,
+                    Type::Ptr(0),
+                    self.current_mem.into(),
+                    None,
+                    Origin::synthetic(),
+                );
+            }
+        }
+        raw
+    }
+
     /// Extract fat pointer metadata (length for slices, vtable for dyn)
     /// from the base local of a place.  Checks stack locals first (they
     /// may have been updated by assignments), then falls back to fat_locals.
@@ -1701,6 +1736,63 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             self.builder
                                 .fcmp(FCmpOp::OEq, l_raw.into(), r_raw.into(), Origin::synthetic())
                                 .raw()
+                        } else if is_fat_ptr(self.tcx, lhs_mir_ty) {
+                            // Fat pointer equality: compare data AND metadata.
+                            // For stack-local fat pointers, l_raw/r_raw hold
+                            // slot addresses — load the actual data pointers.
+                            let l_data = self.load_fat_data_for_operand(lhs, l_raw);
+                            let l_data = self.coerce_to_int(l_data);
+                            let r_data = self.load_fat_data_for_operand(rhs, r_raw);
+                            let r_data = self.coerce_to_int(r_data);
+                            let data_eq = self.builder.icmp(
+                                ICmpOp::Eq,
+                                IrOperand {
+                                    value: l_data,
+                                    annotation: int_annotation_for_bytes(8),
+                                }
+                                .into(),
+                                IrOperand {
+                                    value: r_data,
+                                    annotation: int_annotation_for_bytes(8),
+                                }
+                                .into(),
+                                Origin::synthetic(),
+                            );
+                            let l_meta = self.find_fat_metadata_for_operand(lhs);
+                            let r_meta = self.find_fat_metadata_for_operand(rhs);
+                            if let (Some(lm), Some(rm)) = (l_meta, r_meta) {
+                                let lm_int = self.coerce_to_int(lm);
+                                let rm_int = self.coerce_to_int(rm);
+                                let meta_eq = self.builder.icmp(
+                                    ICmpOp::Eq,
+                                    IrOperand {
+                                        value: lm_int,
+                                        annotation: int_annotation_for_bytes(8),
+                                    }
+                                    .into(),
+                                    IrOperand {
+                                        value: rm_int,
+                                        annotation: int_annotation_for_bytes(8),
+                                    }
+                                    .into(),
+                                    Origin::synthetic(),
+                                );
+                                let d = self.coerce_to_int(data_eq.raw());
+                                let m = self.coerce_to_int(meta_eq.raw());
+                                self.builder
+                                    .and(
+                                        d.into(),
+                                        m.into(),
+                                        IntAnnotation {
+                                            bit_width: 64,
+                                            signedness: IntSignedness::Unsigned,
+                                        },
+                                        Origin::synthetic(),
+                                    )
+                                    .raw()
+                            } else {
+                                data_eq.raw()
+                            }
                         } else {
                             self.builder
                                 .icmp(ICmpOp::Eq, l_op.into(), r_op.into(), Origin::synthetic())
@@ -1712,6 +1804,61 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             self.builder
                                 .fcmp(FCmpOp::UNe, l_raw.into(), r_raw.into(), Origin::synthetic())
                                 .raw()
+                        } else if is_fat_ptr(self.tcx, lhs_mir_ty) {
+                            // Fat pointer inequality: data OR metadata differs.
+                            let l_data = self.load_fat_data_for_operand(lhs, l_raw);
+                            let l_data = self.coerce_to_int(l_data);
+                            let r_data = self.load_fat_data_for_operand(rhs, r_raw);
+                            let r_data = self.coerce_to_int(r_data);
+                            let data_ne = self.builder.icmp(
+                                ICmpOp::Ne,
+                                IrOperand {
+                                    value: l_data,
+                                    annotation: int_annotation_for_bytes(8),
+                                }
+                                .into(),
+                                IrOperand {
+                                    value: r_data,
+                                    annotation: int_annotation_for_bytes(8),
+                                }
+                                .into(),
+                                Origin::synthetic(),
+                            );
+                            let l_meta = self.find_fat_metadata_for_operand(lhs);
+                            let r_meta = self.find_fat_metadata_for_operand(rhs);
+                            if let (Some(lm), Some(rm)) = (l_meta, r_meta) {
+                                let lm_int = self.coerce_to_int(lm);
+                                let rm_int = self.coerce_to_int(rm);
+                                let meta_ne = self.builder.icmp(
+                                    ICmpOp::Ne,
+                                    IrOperand {
+                                        value: lm_int,
+                                        annotation: int_annotation_for_bytes(8),
+                                    }
+                                    .into(),
+                                    IrOperand {
+                                        value: rm_int,
+                                        annotation: int_annotation_for_bytes(8),
+                                    }
+                                    .into(),
+                                    Origin::synthetic(),
+                                );
+                                let d = self.coerce_to_int(data_ne.raw());
+                                let m = self.coerce_to_int(meta_ne.raw());
+                                self.builder
+                                    .or(
+                                        d.into(),
+                                        m.into(),
+                                        IntAnnotation {
+                                            bit_width: 64,
+                                            signedness: IntSignedness::Unsigned,
+                                        },
+                                        Origin::synthetic(),
+                                    )
+                                    .raw()
+                            } else {
+                                data_ne.raw()
+                            }
                         } else {
                             self.builder
                                 .icmp(ICmpOp::Ne, l_op.into(), r_op.into(), Origin::synthetic())

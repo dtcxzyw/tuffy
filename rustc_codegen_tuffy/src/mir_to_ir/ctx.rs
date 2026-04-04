@@ -333,7 +333,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     /// If `val` is a Ptr or Bool, coerce it to Int.
     pub(super) fn coerce_to_int(&mut self, val: ValueRef) -> ValueRef {
         let ptr_width = self.ptr_width();
-        match self.builder.value_type(val) {
+        let vtype = self.builder.value_type(val).cloned();
+        match vtype.as_ref() {
             Some(Type::Ptr(_)) => self
                 .builder
                 .ptrtoaddr(val.into(), ptr_width, Origin::synthetic())
