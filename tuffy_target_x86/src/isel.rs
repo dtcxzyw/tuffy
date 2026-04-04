@@ -4012,9 +4012,12 @@ fn select_divrem(
 ) -> Option<()> {
     let lhs_vreg = ctx.ensure_in_reg(lhs.value)?;
     let rhs_vreg = ctx.ensure_in_reg(rhs.value)?;
-    let lhs_ann = get_int_annotation(func, lhs.value);
+    // Use the Div/Rem instruction's own annotation (which carries the
+    // correct signedness from the frontend), not the LHS operand's
+    // defining instruction (which may have DontCare or Unsigned).
+    let inst_ann = get_int_annotation(func, vref);
     let signed = matches!(
-        lhs_ann,
+        inst_ann,
         Some(IntAnnotation {
             signedness: IntSignedness::Signed,
             ..
