@@ -38,6 +38,11 @@ type StaticDataVec = Vec<(SymbolId, Vec<u8>, Vec<(usize, String)>, u64)>;
 /// Prevents duplicate vtable emissions for the same (type, trait) pair.
 pub type VtableCache = std::collections::HashMap<rustc_middle::mir::interpret::AllocId, String>;
 
+/// Cache mapping rustc memory `AllocId` → emitted symbol name.
+/// Prevents duplicate data emissions for the same allocation, ensuring
+/// pointers to the same const allocation share the same address.
+pub type AllocCache = std::collections::HashMap<rustc_middle::mir::interpret::AllocId, String>;
+
 /// Result of MIR → IR translation.
 pub struct TranslationResult<'tcx> {
     pub func: Function,
@@ -61,6 +66,7 @@ pub fn translate_function<'tcx>(
     session: &CodegenSession,
     data_counter: &mut u64,
     vtable_cache: &mut VtableCache,
+    alloc_cache: &mut AllocCache,
 ) -> Option<TranslationResult<'tcx>> {
     // Skip partially substituted polymorphic instances — the symbol mangler
     // will panic if generic parameters are still present.
@@ -368,6 +374,7 @@ pub fn translate_function<'tcx>(
         referenced_instances: Vec::new(),
         data_counter,
         vtable_cache,
+        alloc_cache,
         sret_ptr: None,
         weak_undefined_symbols: std::collections::HashSet::new(),
         caller_location_param: None,

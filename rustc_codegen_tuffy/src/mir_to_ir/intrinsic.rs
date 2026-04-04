@@ -1575,6 +1575,26 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 true
             }
 
+            "simd_mul" | "simd_sub" | "simd_div" => {
+                let simd_bytes = self.simd_size_from_substs(substs).unwrap_or(16);
+                let elem_info = self.simd_elem_info_from_substs(substs);
+                self.emit_simd_elementwise_binop(
+                    ir_args,
+                    destination_local,
+                    name,
+                    simd_bytes,
+                    elem_info,
+                );
+                true
+            }
+
+            "simd_neg" | "simd_fabs" => {
+                let simd_bytes = self.simd_size_from_substs(substs).unwrap_or(16);
+                let elem_info = self.simd_elem_info_from_substs(substs);
+                self.emit_simd_unary_op(ir_args, destination_local, name, simd_bytes, elem_info);
+                true
+            }
+
             "simd_reduce_or" => {
                 macro_rules! o {
                     () => {
@@ -2136,6 +2156,50 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             .map(|sz| sz as u32)
     }
 
+    /// Extract SIMD element info: (elem_size_bytes, Option<FloatType>).
+    /// Returns None if the element type cannot be determined.
+    fn simd_elem_info_from_substs(
+        &self,
+        substs: &'tcx ty::List<ty::GenericArg<'tcx>>,
+    ) -> (u32, Option<FloatType>) {
+        let simd_ty = substs.first().and_then(|a| a.as_type());
+        if let Some(simd_ty) = simd_ty
+            && let ty::Adt(def, adt_substs) = simd_ty.kind()
+        {
+            // Simd<T, N> — the element type is the first generic arg.
+            if let Some(elem_ty) = adt_substs.first().and_then(|a| a.as_type()) {
+                let elem_size = type_size(self.tcx, elem_ty).unwrap_or(1) as u32;
+                let float_ty = match elem_ty.kind() {
+                    ty::Float(ty::FloatTy::F16) => Some(FloatType::F16),
+                    ty::Float(ty::FloatTy::F32) => Some(FloatType::F32),
+                    ty::Float(ty::FloatTy::F64) => Some(FloatType::F64),
+                    ty::Float(ty::FloatTy::F128) => Some(FloatType::F128),
+                    _ => None,
+                };
+                return (elem_size, float_ty);
+            }
+            // Fallback: look at the first field (may be [T; N]).
+            let variant = def.non_enum_variant();
+            if let Some(field) = variant.fields.iter().next() {
+                let field_ty = field.ty(self.tcx, adt_substs);
+                let inner_ty = match field_ty.kind() {
+                    ty::Array(elem, _) => *elem,
+                    _ => field_ty,
+                };
+                let elem_size = type_size(self.tcx, inner_ty).unwrap_or(1) as u32;
+                let float_ty = match inner_ty.kind() {
+                    ty::Float(ty::FloatTy::F16) => Some(FloatType::F16),
+                    ty::Float(ty::FloatTy::F32) => Some(FloatType::F32),
+                    ty::Float(ty::FloatTy::F64) => Some(FloatType::F64),
+                    ty::Float(ty::FloatTy::F128) => Some(FloatType::F128),
+                    _ => None,
+                };
+                return (elem_size, float_ty);
+            }
+        }
+        (1, None) // default: byte-sized integer
+    }
+
     /// Ensure a SIMD value is on the stack.  If the value is already
     /// a Ptr (16-byte SIMD), return it.  If it's an Int (≤8 byte SIMD),
     /// spill to a temporary stack slot.
@@ -2475,6 +2539,270 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     o!(),
                 )
                 .raw();
+        }
+
+        let result = self.simd_result_from_stack(slot, simd_bytes);
+        self.locals.set(destination_local, result);
+    }
+
+    /// Emit a per-element binary operation (mul, sub, div) on two SIMD vectors.
+    fn emit_simd_elementwise_binop(
+        &mut self,
+        ir_args: &[ValueRef],
+        destination_local: mir::Local,
+        op_name: &str,
+        simd_bytes: u32,
+        elem_info: (u32, Option<FloatType>),
+    ) {
+        macro_rules! o {
+            () => {
+                Origin::synthetic()
+            };
+        }
+        let (elem_size, float_ty) = elem_info;
+        let a_ptr = self.ensure_simd_on_stack(ir_args[0], simd_bytes);
+        let b_ptr = self.ensure_simd_on_stack(ir_args[1], simd_bytes);
+        let slot = self.builder.stack_slot(simd_bytes.max(8), o!());
+        let n_lanes = simd_bytes / elem_size;
+
+        for i in 0..n_lanes {
+            let byte_off = (i * elem_size) as i64;
+            let a_addr = if i == 0 {
+                a_ptr
+            } else {
+                let off = self
+                    .builder
+                    .iconst(byte_off, 64, IntSignedness::Unsigned, o!());
+                self.builder.ptradd(a_ptr.into(), off.into(), 0, o!()).raw()
+            };
+            let b_addr = if i == 0 {
+                b_ptr
+            } else {
+                let off = self
+                    .builder
+                    .iconst(byte_off, 64, IntSignedness::Unsigned, o!());
+                self.builder.ptradd(b_ptr.into(), off.into(), 0, o!()).raw()
+            };
+            let dst_addr = if i == 0 {
+                slot
+            } else {
+                let off = self
+                    .builder
+                    .iconst(byte_off, 64, IntSignedness::Unsigned, o!());
+                self.builder.ptradd(slot.into(), off.into(), 0, o!()).raw()
+            };
+
+            if let Some(fty) = float_ty {
+                let load_ty = Type::Float(fty);
+                let a_val = self.builder.load(
+                    a_addr.into(),
+                    elem_size,
+                    load_ty.clone(),
+                    self.current_mem.into(),
+                    None,
+                    o!(),
+                );
+                let b_val = self.builder.load(
+                    b_addr.into(),
+                    elem_size,
+                    load_ty.clone(),
+                    self.current_mem.into(),
+                    None,
+                    o!(),
+                );
+                let flags = FpRewriteFlags::default();
+                let result = match op_name {
+                    "simd_mul" => {
+                        self.builder
+                            .fmul(a_val.into(), b_val.into(), flags, load_ty.clone(), o!())
+                    }
+                    "simd_sub" => {
+                        self.builder
+                            .fsub(a_val.into(), b_val.into(), flags, load_ty.clone(), o!())
+                    }
+                    "simd_div" => {
+                        self.builder
+                            .fdiv(a_val.into(), b_val.into(), flags, load_ty.clone(), o!())
+                    }
+                    _ => {
+                        self.builder
+                            .fmul(a_val.into(), b_val.into(), flags, load_ty.clone(), o!())
+                    }
+                };
+                self.current_mem = self
+                    .builder
+                    .store(
+                        result.raw().into(),
+                        dst_addr.into(),
+                        elem_size,
+                        self.current_mem.into(),
+                        o!(),
+                    )
+                    .raw();
+            } else {
+                // Integer element
+                let int_ann = IntAnnotation {
+                    bit_width: (elem_size * 8),
+                    signedness: IntSignedness::DontCare,
+                };
+                let ann_opt = Some(Annotation::Int(int_ann));
+                let a_val = self.builder.load(
+                    a_addr.into(),
+                    elem_size,
+                    Type::Int,
+                    self.current_mem.into(),
+                    ann_opt,
+                    o!(),
+                );
+                let b_val = self.builder.load(
+                    b_addr.into(),
+                    elem_size,
+                    Type::Int,
+                    self.current_mem.into(),
+                    ann_opt,
+                    o!(),
+                );
+                let result = match op_name {
+                    "simd_mul" => self.builder.mul(a_val.into(), b_val.into(), int_ann, o!()),
+                    "simd_sub" => self.builder.sub(a_val.into(), b_val.into(), int_ann, o!()),
+                    _ => self.builder.mul(a_val.into(), b_val.into(), int_ann, o!()),
+                };
+                self.current_mem = self
+                    .builder
+                    .store(
+                        result.raw().into(),
+                        dst_addr.into(),
+                        elem_size,
+                        self.current_mem.into(),
+                        o!(),
+                    )
+                    .raw();
+            }
+        }
+
+        let result = self.simd_result_from_stack(slot, simd_bytes);
+        self.locals.set(destination_local, result);
+    }
+
+    /// Emit a per-element unary operation (neg, fabs) on a SIMD vector.
+    fn emit_simd_unary_op(
+        &mut self,
+        ir_args: &[ValueRef],
+        destination_local: mir::Local,
+        op_name: &str,
+        simd_bytes: u32,
+        elem_info: (u32, Option<FloatType>),
+    ) {
+        macro_rules! o {
+            () => {
+                Origin::synthetic()
+            };
+        }
+        let (elem_size, float_ty) = elem_info;
+        let a_ptr = self.ensure_simd_on_stack(ir_args[0], simd_bytes);
+        let slot = self.builder.stack_slot(simd_bytes.max(8), o!());
+        let n_lanes = simd_bytes / elem_size;
+
+        for i in 0..n_lanes {
+            let byte_off = (i * elem_size) as i64;
+            let a_addr = if i == 0 {
+                a_ptr
+            } else {
+                let off = self
+                    .builder
+                    .iconst(byte_off, 64, IntSignedness::Unsigned, o!());
+                self.builder.ptradd(a_ptr.into(), off.into(), 0, o!()).raw()
+            };
+            let dst_addr = if i == 0 {
+                slot
+            } else {
+                let off = self
+                    .builder
+                    .iconst(byte_off, 64, IntSignedness::Unsigned, o!());
+                self.builder.ptradd(slot.into(), off.into(), 0, o!()).raw()
+            };
+
+            if let Some(fty) = float_ty {
+                let load_ty = Type::Float(fty);
+                let a_val = self.builder.load(
+                    a_addr.into(),
+                    elem_size,
+                    load_ty.clone(),
+                    self.current_mem.into(),
+                    None,
+                    o!(),
+                );
+                let result = match op_name {
+                    "simd_neg" => self.builder.fneg(a_val.into(), load_ty.clone(), o!()).raw(),
+                    "simd_fabs" => {
+                        // fabs via: bitcast to int, clear sign bit, bitcast back
+                        let int_ann = IntAnnotation {
+                            bit_width: (elem_size * 8),
+                            signedness: IntSignedness::Unsigned,
+                        };
+                        let mask = match elem_size {
+                            4 => 0x7FFF_FFFFi64,
+                            8 => 0x7FFF_FFFF_FFFF_FFFFi64,
+                            2 => 0x7FFFi64,
+                            _ => 0x7FFF_FFFFi64,
+                        };
+                        let mask_val =
+                            self.builder
+                                .iconst(mask, elem_size * 8, IntSignedness::Unsigned, o!());
+                        let as_int = self.builder.bitcast(
+                            a_val.into(),
+                            Type::Int,
+                            Some(Annotation::Int(int_ann)),
+                            o!(),
+                        );
+                        let cleared =
+                            self.builder
+                                .and(as_int.into(), mask_val.into(), int_ann, o!());
+                        self.builder
+                            .bitcast(cleared.raw().into(), load_ty.clone(), None, o!())
+                    }
+                    _ => self.builder.fneg(a_val.into(), load_ty.clone(), o!()).raw(),
+                };
+                self.current_mem = self
+                    .builder
+                    .store(
+                        result.into(),
+                        dst_addr.into(),
+                        elem_size,
+                        self.current_mem.into(),
+                        o!(),
+                    )
+                    .raw();
+            } else {
+                // Integer neg: 0 - x
+                let int_ann = IntAnnotation {
+                    bit_width: (elem_size * 8),
+                    signedness: IntSignedness::DontCare,
+                };
+                let ann_opt = Some(Annotation::Int(int_ann));
+                let a_val = self.builder.load(
+                    a_addr.into(),
+                    elem_size,
+                    Type::Int,
+                    self.current_mem.into(),
+                    ann_opt,
+                    o!(),
+                );
+                let zero = self
+                    .builder
+                    .iconst(0, elem_size * 8, IntSignedness::DontCare, o!());
+                let result = self.builder.sub(zero.into(), a_val.into(), int_ann, o!());
+                self.current_mem = self
+                    .builder
+                    .store(
+                        result.raw().into(),
+                        dst_addr.into(),
+                        elem_size,
+                        self.current_mem.into(),
+                        o!(),
+                    )
+                    .raw();
+            }
         }
 
         let result = self.simd_result_from_stack(slot, simd_bytes);

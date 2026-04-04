@@ -182,6 +182,9 @@ pub(super) struct TranslationCtx<'a, 'tcx> {
     /// Cache mapping rustc vtable AllocId → emitted symbol name, shared across
     /// all functions in the CGU to ensure vtable deduplication.
     pub(super) vtable_cache: &'a mut super::VtableCache,
+    /// Cache mapping rustc memory AllocId → emitted symbol name, shared across
+    /// all functions in the CGU so that identical allocations get the same address.
+    pub(super) alloc_cache: &'a mut super::AllocCache,
     /// SRET pointer for functions returning large structs (>16 bytes).
     /// When set, param indices are shifted by 1 (param 0 = hidden SRET ptr).
     pub(super) sret_ptr: Option<ValueRef>,
@@ -240,6 +243,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 &mut self.referenced_instances,
                 self.data_counter,
                 self.vtable_cache,
+                self.alloc_cache,
             );
             self.static_data
                 .push((sym_id, bytes, relocs, inner_alloc.align.bytes()));

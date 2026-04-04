@@ -105,6 +105,7 @@ impl CodegenBackend for TuffyCodegenBackend {
             let mut compiled_funcs: Vec<CompiledFunction> = Vec::new();
             let mut all_static_data: Vec<StaticData> = Vec::new();
             let mut vtable_cache: mir_to_ir::VtableCache = std::collections::HashMap::new();
+            let mut alloc_cache: mir_to_ir::AllocCache = std::collections::HashMap::new();
 
             for (mono_item, item_data) in &mono_items {
                 if let MonoItem::Fn(instance) = mono_item {
@@ -141,6 +142,7 @@ impl CodegenBackend for TuffyCodegenBackend {
                         &session,
                         &mut data_counter,
                         &mut vtable_cache,
+                        &mut alloc_cache,
                     );
                     if let Some(mut result) = result_opt {
                         pending_instances.extend(result.referenced_instances.iter().copied());
@@ -456,6 +458,7 @@ impl CodegenBackend for TuffyCodegenBackend {
         let mut inline_static_data: Vec<StaticData> = Vec::new();
         let mut inline_data_counter: u64 = data_counter; // continues from main loop
         let mut inline_vtable_cache: mir_to_ir::VtableCache = std::collections::HashMap::new();
+        let mut inline_alloc_cache: mir_to_ir::AllocCache = std::collections::HashMap::new();
         loop {
             let batch: Vec<Instance<'tcx>> = pending_instances
                 .drain(..)
@@ -483,6 +486,7 @@ impl CodegenBackend for TuffyCodegenBackend {
                     &session,
                     &mut inline_data_counter,
                     &mut inline_vtable_cache,
+                    &mut inline_alloc_cache,
                 ) {
                     Some(r) => r,
                     None => {

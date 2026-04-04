@@ -3844,6 +3844,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 self.data_counter,
                 &mut self.weak_undefined_symbols,
                 self.vtable_cache,
+                self.alloc_cache,
             ),
             Operand::RuntimeChecks(_) => {
                 // UbChecks / ContractChecks / OverflowChecks: emit false (0)
