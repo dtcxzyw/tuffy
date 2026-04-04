@@ -99,6 +99,12 @@ jobs:
           BACKEND=rustc_codegen_tuffy/target/release/librustc_codegen_tuffy.so \
             rustc_codegen_tuffy/tests/run-build-std-tests.sh
 
+      - name: Run stdlib tests (coretests + alloctests)
+        run: |
+          chmod +x rustc_codegen_tuffy/tests/run-stdlib-tests.sh
+          BACKEND=rustc_codegen_tuffy/target/release/librustc_codegen_tuffy.so \
+            rustc_codegen_tuffy/tests/run-stdlib-tests.sh
+
   lean:
     name: Lean 4 CI
     runs-on: ubuntu-latest
