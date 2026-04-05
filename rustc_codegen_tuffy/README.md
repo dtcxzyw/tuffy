@@ -27,17 +27,24 @@ Implements `CodegenBackend` for `TuffyCodegenBackend`:
 
 The core translation layer, organized into submodules by concern:
 
-| Module           | Purpose                                              |
-|------------------|------------------------------------------------------|
-| `mod.rs`         | Top-level function translation and block traversal   |
-| `ctx.rs`         | Translation context (value maps, type caches, state) |
-| `types.rs`       | Rust type → tuffy IR type mapping                    |
-| `rvalue.rs`      | Rvalue translation (binops, unops, casts, aggregates)|
-| `statement.rs`   | Statement translation (assign, storage, intrinsics)  |
-| `terminator.rs`  | Terminator translation (return, branch, switch, call)|
-| `call.rs`        | Function call ABI handling and argument passing      |
-| `constant.rs`    | Constant evaluation and literal translation          |
-| `intrinsic.rs`   | Rust intrinsic function lowering                     |
+| Module             | Purpose                                              |
+|--------------------|------------------------------------------------------|
+| `mod.rs`           | Top-level function translation and block traversal   |
+| `ctx.rs`           | Translation context (value maps, type caches, state) |
+| `types.rs`         | Rust type → tuffy IR type mapping                    |
+| `local_analysis.rs`| Stack promotion pre-scan and local variable analysis |
+| `place.rs`         | MIR Place → IR address/value translation             |
+| `operand.rs`       | MIR Operand → IR value translation                   |
+| `fat_ptr.rs`       | Fat pointer metadata extraction and handling         |
+| `discriminant.rs`  | Enum discriminant read/write operations              |
+| `rvalue.rs`        | Rvalue translation (binops, unops, casts, aggregates)|
+| `statement.rs`     | Statement translation (assign, storage, intrinsics)  |
+| `terminator.rs`    | Terminator translation (return, branch, switch, call)|
+| `call.rs`          | Function call ABI handling and argument passing      |
+| `constant.rs`      | Constant evaluation and literal translation          |
+| `intrinsic.rs`     | Scalar intrinsic function lowering                   |
+| `simd.rs`          | SIMD intrinsic lowering                              |
+| `wide_arith.rs`    | 128-bit wide arithmetic helpers                      |
 
 ## Boundary Rule
 
