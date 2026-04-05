@@ -6,8 +6,12 @@
 # Usage: normalize_ir <input >output  (as a filter)
 #    or: source normalize-ir.sh; normalize_ir < file
 
+# Canonical repo root for path normalization.
+_TUFFY_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)"
+
 normalize_ir() {
     sed \
+        -e "s|${_TUFFY_REPO_ROOT}|/tuffy|g" \
         -e 's|/rustc/[0-9a-f]\{40\}/library/|\$SYSROOT/library/|g' \
         -e 's|/.*/lib/rustlib/src/rust/library/|\$SYSROOT/library/|g' \
         -e 's|^\(data @\.Lloc\.[0-9]* = \)"[^"]*"\( relocs .*\)|\1"..."\2|' \
