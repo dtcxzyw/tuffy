@@ -1,7 +1,7 @@
 #!/bin/bash
-# Run the Rust standard library unit tests (coretests, alloctests) compiled
-# with the tuffy codegen backend.  Tests are sourced from the rustc nightly
-# toolchain's rust-src component.
+# Run the Rust standard library unit tests (coretests, alloctests, libtest)
+# compiled with the tuffy codegen backend.  Tests are sourced from the rustc
+# nightly toolchain's rust-src component.
 #
 # Usage:
 #   # Local (auto-discovers backend):
@@ -143,12 +143,72 @@ if [ $alloc_rc -ne 0 ]; then
 fi
 echo ""
 
+# ── Run libtest (library/test unit tests) ─────────────────────────────────
+# library/test (the Rust test framework) has inline #[cfg(test)] unit tests.
+# It cannot be tested directly via `cargo test` on its Cargo.toml because its
+# path dependencies to std/core conflict with the sysroot's copies.  Instead,
+# we copy the source to a temp directory with a standalone Cargo.toml and use
+# -Z build-std to build std from source.
+
+echo "--- libtest ---"
+
+LIBTEST_WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/tuffy_libtest_test.XXXXXX")
+trap 'rm -rf "$LIBTEST_WORK_DIR"' EXIT
+
+cp -r "$LIBRARY_DIR/test/src" "$LIBTEST_WORK_DIR/src"
+cp "$LIBRARY_DIR/test/build.rs" "$LIBTEST_WORK_DIR/"
+
+cat > "$LIBTEST_WORK_DIR/Cargo.toml" <<'TOML'
+[package]
+name = "test"
+version = "0.0.0"
+edition = "2024"
+
+[dependencies]
+getopts = { version = "0.2.24", default-features = false, features = ['rustc-dep-of-std'] }
+
+[target.'cfg(not(all(windows, target_env = "msvc")))'.dependencies]
+libc = { version = "0.2.150", default-features = false }
+TOML
+
+mkdir -p "$LIBTEST_WORK_DIR/.cargo"
+cat > "$LIBTEST_WORK_DIR/.cargo/config.toml" <<CFGEOF
+[build]
+target = "x86_64-unknown-linux-gnu"
+
+[unstable]
+build-std = ["core", "alloc", "std", "panic_unwind", "panic_abort"]
+CFGEOF
+
+set +e
+libtest_output=$(
+    cargo "+$TOOLCHAIN" test \
+        --manifest-path "$LIBTEST_WORK_DIR/Cargo.toml" \
+        --target x86_64-unknown-linux-gnu \
+        --lib \
+        2>&1
+)
+libtest_rc=$?
+set -e
+
+libtest_result=$(echo "$libtest_output" | grep '^test result:' | tail -1)
+if [ $libtest_rc -ne 0 ]; then
+    echo "$libtest_output" | tail -30
+    echo ""
+    echo "libtest: FAILED (exit code $libtest_rc)"
+    overall_rc=1
+else
+    echo "$libtest_result"
+fi
+echo ""
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 
 echo "=== Stdlib Tests Summary ==="
 echo "  coretests:               ${core_result:-FAILED}"
 echo "  alloctests (lib):        ${alloclib_result:-FAILED}"
 echo "  alloctests (integration):${alloc_result:-FAILED}"
+echo "  libtest:                 ${libtest_result:-FAILED}"
 
 if [ $overall_rc -ne 0 ]; then
     echo ""
