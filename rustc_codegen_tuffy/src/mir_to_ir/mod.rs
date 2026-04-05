@@ -7,6 +7,7 @@ mod call;
 mod constant;
 mod ctx;
 mod intrinsic;
+mod place;
 mod rvalue;
 mod statement;
 mod terminator;
