@@ -21,333 +21,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     pub(super) fn translate_terminator(&mut self, term: &mir::Terminator<'tcx>) {
         match &term.kind {
             TerminatorKind::Return => {
-                // SRET: copy the constructed return value from local stack slot
-                // to the SRET pointer, then return the pointer.
-                if let Some(sret) = self.sret_ptr {
-                    let ret_local = mir::Local::from_usize(0);
-                    let local_slot = self.locals.get(ret_local).expect("sret local must be set");
-
-                    // Safety check: if _0 already IS sret, skip the copy.
-                    if local_slot == sret {
-                        self.builder.ret(
-                            Some(sret.into()),
-                            self.current_mem.into(),
-                            Origin::synthetic(),
-                        );
-                        return;
-                    }
-
-                    let ret_mir_ty = self.monomorphize(self.mir.local_decls[ret_local].ty);
-                    let ret_size = type_size(self.tcx, ret_mir_ty).unwrap_or(0);
-
-                    // Copy from local slot to SRET pointer
-                    let size_val = self.builder.iconst(
-                        ret_size as i64,
-                        64,
-                        IntSignedness::DontCare,
-                        Origin::synthetic(),
-                    );
-                    let align = 8; // TODO: compute proper alignment
-                    let sret_annotated =
-                        tuffy_ir::instruction::Operand::annotated(sret, Annotation::Align(align));
-                    let local_annotated = tuffy_ir::instruction::Operand::annotated(
-                        local_slot,
-                        Annotation::Align(align),
-                    );
-                    let new_mem = self.builder.mem_copy(
-                        sret_annotated.into(),
-                        local_annotated.into(),
-                        size_val.into(),
-                        self.current_mem.into(),
-                        Origin::synthetic(),
-                    );
-
-                    self.builder
-                        .ret(Some(sret.into()), new_mem.into(), Origin::synthetic());
-                    return;
-                }
-
-                let ret_local = mir::Local::from_usize(0);
-                let ret_mir_ty = self.monomorphize(self.mir.local_decls[ret_local].ty);
-                let ret_size = type_size(self.tcx, ret_mir_ty).unwrap_or(0);
-
-                if matches!(translate_ty(self.tcx, ret_mir_ty), Some(Type::Unit))
-                    || (translate_ty(self.tcx, ret_mir_ty).is_none() && ret_size == 0)
-                {
-                    // Unit-returning or zero-sized untranslatable return type: bare ret, no value.
-                    self.builder
-                        .ret(None, self.current_mem.into(), Origin::synthetic());
-                } else if ret_size == 0 {
-                    // Zero-sized return type: return a dummy value to satisfy the
-                    // function signature (translate_ty maps ADTs to Int).
-                    let dummy =
-                        self.builder
-                            .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
-                    self.builder.ret(
-                        Some(dummy.into()),
-                        self.current_mem.into(),
-                        Origin::synthetic(),
-                    );
-                } else if self.stack_locals.is_stack(ret_local)
-                    && matches!(
-                        self.locals
-                            .get(ret_local)
-                            .and_then(|v| self.builder.value_type(v).cloned()),
-                        Some(Type::Ptr(_))
-                    )
-                {
-                    // Stack-allocated return (e.g., 16-byte struct built via Aggregate).
-                    // Load the actual data from the stack slot instead of returning
-                    // the slot address (which would be a dangling pointer).
-                    let slot = self
-                        .locals
-                        .get(ret_local)
-                        .expect("return local _0 must be set");
-                    let ret_ty = self.monomorphize(self.mir.local_decls[ret_local].ty);
-                    let size = type_size(self.tcx, ret_ty).unwrap_or(8);
-                    let ret_repr = repr_kind(self.tcx, ret_ty);
-                    let is_scalar_pair = matches!(ret_repr, ReprKind::ScalarPair);
-
-                    // Load size: for Scalar returns load the full type width
-                    // (legalizer splits wide loads); for ScalarPair load only
-                    // the first scalar.
-                    let sp_info = if is_scalar_pair {
-                        scalar_pair_info(self.tcx, ret_ty)
-                    } else {
-                        None
-                    };
-                    let load_size = if let Some((a_sz, _, _)) = sp_info {
-                        a_sz as u32
-                    } else {
-                        size as u32
-                    };
-                    let load_ty = translate_ty(self.tcx, ret_mir_ty).unwrap_or(Type::Int);
-                    // For ScalarPair returns (e.g. fat pointers), use a
-                    // register-width annotation for the low-half load — but
-                    // only when the type is Int (not Ptr).
-                    let ann = if is_scalar_pair {
-                        if matches!(load_ty, Type::Ptr(_)) {
-                            None
-                        } else {
-                            int_annotation_for_bytes(load_size)
-                        }
-                    } else {
-                        translate_annotation(ret_mir_ty).or_else(|| {
-                            if matches!(load_ty, Type::Int) {
-                                int_annotation_for_bytes(load_size)
-                            } else {
-                                None
-                            }
-                        })
-                    };
-                    let word0 = self.builder.load(
-                        slot.into(),
-                        load_size,
-                        load_ty,
-                        self.current_mem.into(),
-                        ann,
-                        Origin::synthetic(),
-                    );
-
-                    // Coerce to match declared return type (e.g., Ptr for &T returns).
-                    let ret_ir_ty = translate_ty(self.tcx, ret_mir_ty);
-                    let coerced_word0 = match ret_ir_ty {
-                        Some(Type::Ptr(_)) => self.coerce_to_ptr(word0),
-                        _ => word0,
-                    };
-
-                    if is_scalar_pair {
-                        // Two-register return (ScalarPair): load second scalar
-                        // and mark it for RDX via ABI metadata.
-                        let (_, b_sz, b_off) =
-                            sp_info.unwrap_or((size.min(8), size.saturating_sub(8), 8));
-                        let off_val = self.builder.iconst(
-                            b_off as i64,
-                            64,
-                            IntSignedness::DontCare,
-                            Origin::synthetic(),
-                        );
-                        let hi_addr = self.builder.ptradd(
-                            slot.into(),
-                            off_val.into(),
-                            0,
-                            Origin::synthetic(),
-                        );
-                        let word1 = self.builder.load(
-                            hi_addr.into(),
-                            b_sz as u32,
-                            Type::Int,
-                            self.current_mem.into(),
-                            int_annotation_for_bytes(b_sz as u32),
-                            Origin::synthetic(),
-                        );
-                        let ret_inst = self.builder.ret(
-                            Some(coerced_word0.into()),
-                            self.current_mem.into(),
-                            Origin::synthetic(),
-                        );
-                        self.abi_metadata
-                            .mark_secondary_return_move(ret_inst.index(), word1.index());
-                    } else {
-                        self.builder.ret(
-                            Some(coerced_word0.into()),
-                            self.current_mem.into(),
-                            Origin::synthetic(),
-                        );
-                    }
-                } else if let Some(fat_meta) = self.fat_locals.get(ret_local)
-                    && is_fat_ptr(self.tcx, ret_mir_ty)
-                {
-                    // Non-stack fat pointer return (e.g. from an intrinsic
-                    // that set both locals and fat_locals directly).  Return
-                    // the data pointer in RAX and the metadata in RDX.
-                    let v = self
-                        .locals
-                        .get(ret_local)
-                        .expect("fat pointer return must have data_ptr");
-                    let coerced = self.coerce_to_ptr(v);
-                    let ret_inst = self.builder.ret(
-                        Some(coerced.into()),
-                        self.current_mem.into(),
-                        Origin::synthetic(),
-                    );
-                    self.abi_metadata
-                        .mark_secondary_return_move(ret_inst.index(), fat_meta.index());
-                } else {
-                    // Normal scalar return.
-                    let val = self.locals.values[ret_local.as_usize()];
-                    if let Some(v) = val {
-                        // Coerce to match the declared return type.
-                        // Fall back to Type::Int for small aggregates (e.g.
-                        // [i8; 1]) that translate_ty maps to None — this
-                        // matches the function-signature logic in mod.rs.
-                        let ret_ir_ty = translate_ty(self.tcx, ret_mir_ty).or(
-                            if ret_size > 0 && ret_size <= 8 {
-                                Some(Type::Int)
-                            } else {
-                                None
-                            },
-                        );
-                        let coerced = match (ret_ir_ty, self.builder.value_type(v).cloned()) {
-                            (Some(Type::Int), Some(Type::Ptr(_)))
-                                if self.builder.is_memory_address(v) =>
-                            {
-                                // v is a pointer to data (e.g. symbol_addr for an
-                                // indirect constant).  Load the actual value instead
-                                // of converting the address to an integer.
-                                let ret_size =
-                                    type_size(self.tcx, ret_mir_ty).unwrap_or(8).min(8) as u32;
-
-                                self.builder.load(
-                                    v.into(),
-                                    ret_size,
-                                    Type::Int,
-                                    self.current_mem.into(),
-                                    int_annotation_for_bytes(ret_size),
-                                    Origin::synthetic(),
-                                )
-                            }
-                            // Aggregate type (tuple/struct) that translate_ty
-                            // maps to None but fits in ≤8 bytes.  The function
-                            // signature declares Int return; load the value from
-                            // the constant/stack pointer.
-                            (None, Some(Type::Ptr(_)))
-                                if self.builder.is_memory_address(v)
-                                    && ret_size > 0
-                                    && ret_size <= 8 =>
-                            {
-                                let sz = ret_size.min(8) as u32;
-                                self.builder.load(
-                                    v.into(),
-                                    sz,
-                                    Type::Int,
-                                    self.current_mem.into(),
-                                    int_annotation_for_bytes(sz),
-                                    Origin::synthetic(),
-                                )
-                            }
-                            (Some(Type::Int), Some(Type::Float(_))) => {
-                                // Float returned as integer bits (e.g. to_le_bytes).
-                                let sz = ret_size.min(8) as u32;
-                                self.builder.bitcast(
-                                    v.into(),
-                                    Type::Int,
-                                    int_annotation_for_bytes(sz),
-                                    Origin::synthetic(),
-                                )
-                            }
-                            (Some(Type::Int), _) => self.coerce_to_int(v),
-                            (Some(Type::Ptr(_)), _) => self.coerce_to_ptr(v),
-                            (Some(Type::Bool), Some(Type::Int)) => {
-                                let zero = self.builder.iconst(
-                                    0,
-                                    64,
-                                    IntSignedness::DontCare,
-                                    Origin::synthetic(),
-                                );
-                                self.builder
-                                    .icmp(ICmpOp::Ne, v.into(), zero.into(), Origin::synthetic())
-                                    .raw()
-                            }
-                            (Some(Type::Float(ft)), Some(Type::Int)) => {
-                                // Float value was carried as Int bits — reinterpret.
-                                self.builder.bitcast(
-                                    v.into(),
-                                    Type::Float(ft),
-                                    None,
-                                    Origin::synthetic(),
-                                )
-                            }
-                            _ => v,
-                        };
-                        self.builder.ret(
-                            Some(coerced.into()),
-                            self.current_mem.into(),
-                            Origin::synthetic(),
-                        );
-                    } else {
-                        // Return local was never assigned — return a dummy
-                        // value.  This can happen in custom MIR where the
-                        // return place is left uninitialised (the value is
-                        // garbage but the function must still return).
-                        let ret_ir_ty = translate_ty(self.tcx, ret_mir_ty);
-                        let dummy = if matches!(ret_ir_ty, Some(Type::Ptr(_))) {
-                            let zero = self.builder.iconst(
-                                0,
-                                64,
-                                IntSignedness::DontCare,
-                                Origin::synthetic(),
-                            );
-                            self.builder
-                                .inttoptr(zero.into(), 0, Origin::synthetic())
-                                .raw()
-                        } else if let Some(Type::Float(ft)) = ret_ir_ty {
-                            let zero = self.builder.iconst(
-                                0,
-                                64,
-                                IntSignedness::DontCare,
-                                Origin::synthetic(),
-                            );
-                            self.builder.bitcast(
-                                zero.into(),
-                                Type::Float(ft),
-                                None,
-                                Origin::synthetic(),
-                            )
-                        } else if matches!(ret_ir_ty, Some(Type::Bool)) {
-                            self.builder.bconst(false, Origin::synthetic()).raw()
-                        } else {
-                            self.builder
-                                .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
-                                .raw()
-                        };
-                        self.builder.ret(
-                            Some(dummy.into()),
-                            self.current_mem.into(),
-                            Origin::synthetic(),
-                        );
-                    }
-                }
+                self.translate_return();
             }
             TerminatorKind::Goto { target } => {
                 let target_block = self.block_map.get(*target);
@@ -415,240 +89,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 unwind,
                 ..
             } => {
-                let drop_ty = place.ty(&self.mir.local_decls, self.tcx).ty;
-                let drop_ty = self.monomorphize(drop_ty);
-                let target_block = self.block_map.get(*target);
-                self.last_call_vref = None;
-
-                // Only emit drop glue when the type actually needs dropping.
-                if drop_ty.needs_drop(self.tcx, ty::TypingEnv::fully_monomorphized()) {
-                    // Trait object drops: dispatch through vtable[0] instead of
-                    // calling drop_in_place directly (which would recurse).
-                    if matches!(drop_ty.kind(), ty::Dynamic(..)) {
-                        // The place is `*local` where local is a fat pointer
-                        // (data ptr + vtable ptr). Get both components.
-                        let base_local = place.local;
-                        let data_ptr = self.locals.get(base_local);
-                        let vtable_ptr = self.fat_locals.get(base_local);
-                        if let (Some(data), Some(vtable)) = (data_ptr, vtable_ptr) {
-                            // Load drop function pointer from vtable[0].
-                            // It may be NULL for types with no drop glue.
-                            let drop_fn = self.builder.load(
-                                vtable.into(),
-                                8,
-                                Type::Ptr(0),
-                                self.current_mem.into(),
-                                None,
-                                Origin::synthetic(),
-                            );
-                            // Null check: vtable drop can be null for
-                            // trivially-droppable concrete types.
-                            let drop_as_int =
-                                self.builder
-                                    .ptrtoint(drop_fn.into(), 64, Origin::synthetic());
-                            let zero = self.builder.iconst(
-                                0,
-                                64,
-                                IntSignedness::Unsigned,
-                                Origin::synthetic(),
-                            );
-                            let is_nonnull = self.builder.icmp(
-                                ICmpOp::Ne,
-                                drop_as_int.into(),
-                                zero.into(),
-                                Origin::synthetic(),
-                            );
-                            let call_block = self.builder.create_block();
-                            let call_mem_arg =
-                                self.builder.add_block_arg(call_block, Type::Mem, None);
-                            let merge_block = self.builder.create_block();
-                            let merge_mem_arg =
-                                self.builder.add_block_arg(merge_block, Type::Mem, None);
-
-                            self.builder.brif(
-                                is_nonnull.into(),
-                                call_block,
-                                vec![self.current_mem.into()],
-                                merge_block,
-                                vec![self.current_mem.into()],
-                                Origin::synthetic(),
-                            );
-
-                            // call_block: invoke the drop function
-                            self.builder.switch_to_block(call_block);
-                            let (call_mem, _) = self.builder.call(
-                                drop_fn.into(),
-                                vec![data.into()],
-                                Type::Unit,
-                                call_mem_arg.into(),
-                                None,
-                                Origin::synthetic(),
-                            );
-                            self.last_call_vref = Some(call_mem.index());
-                            self.builder.br(
-                                merge_block,
-                                vec![call_mem.into()],
-                                Origin::synthetic(),
-                            );
-
-                            // Continue from merge_block
-                            self.builder.switch_to_block(merge_block);
-                            self.current_mem = merge_mem_arg;
-                        }
-                    } else {
-                        let drop_instance = ty::Instance::resolve_drop_in_place(self.tcx, drop_ty);
-                        self.referenced_instances.push(drop_instance);
-                        if !drop_instance.args.has_non_region_param() {
-                            let sym_name = self.tcx.symbol_name(drop_instance).name.to_string();
-                            let sym_id = self.symbols.intern(&sym_name);
-                            let callee = self.builder.symbol_addr(sym_id, Origin::synthetic());
-
-                            // Get a pointer to the place being dropped, plus
-                            // optional metadata for unsized drops (*mut [T] etc.).
-                            let (drop_ptr, drop_meta): (Option<ValueRef>, Option<ValueRef>) =
-                                if place.projection.is_empty() {
-                                    if self.stack_locals.is_stack(place.local) {
-                                        (self.locals.get(place.local), None)
-                                    } else if let Some(v) = self.locals.get(place.local) {
-                                        // Non-stack local: the value IS the pointer
-                                        // (e.g. a Box or reference).  For types that
-                                        // need dropping and are stored as a register
-                                        // value, we need to spill to a stack slot so
-                                        // drop_in_place gets a valid &mut T.
-                                        let ty_size = type_size(self.tcx, drop_ty).unwrap_or(8);
-                                        if ty_size == 0 {
-                                            // ZST with a dummy register value —
-                                            // use a dangling aligned pointer so
-                                            // drop_in_place receives a well-aligned &mut T.
-                                            let align = self
-                                                .tcx
-                                                .layout_of(
-                                                    ty::TypingEnv::fully_monomorphized()
-                                                        .as_query_input(drop_ty),
-                                                )
-                                                .map(|l| l.align.abi.bytes())
-                                                .unwrap_or(1);
-                                            (
-                                                Some(
-                                                    self.builder
-                                                        .iconst(
-                                                            align as i64,
-                                                            64,
-                                                            IntSignedness::DontCare,
-                                                            Origin::synthetic(),
-                                                        )
-                                                        .raw(),
-                                                ),
-                                                None,
-                                            )
-                                        } else if let Some(fat_val) =
-                                            self.fat_locals.get(place.local)
-                                        {
-                                            // Fat pointer: drop_in_place<[T]> / drop_in_place<dyn Trait>
-                                            // takes the fat pointer components as separate register
-                                            // arguments (data_ptr in rdi, metadata in rsi).
-                                            (Some(v), Some(fat_val))
-                                        } else if ty_size > 8
-                                            || matches!(
-                                                self.builder.value_type(v),
-                                                Some(Type::Ptr(_))
-                                            )
-                                        {
-                                            (Some(v), None)
-                                        } else {
-                                            let slot = self.builder.stack_slot(
-                                                ty_size as u32,
-                                                0,
-                                                Origin::synthetic(),
-                                            );
-                                            self.current_mem = self
-                                                .builder
-                                                .store(
-                                                    v.into(),
-                                                    slot.into(),
-                                                    ty_size as u32,
-                                                    self.current_mem.into(),
-                                                    Origin::synthetic(),
-                                                )
-                                                .raw();
-                                            (Some(slot), None)
-                                        }
-                                    } else {
-                                        // ZST with no stored value — use a
-                                        // dangling aligned pointer so
-                                        // drop_in_place is still called.
-                                        let align = self
-                                            .tcx
-                                            .layout_of(
-                                                ty::TypingEnv::fully_monomorphized()
-                                                    .as_query_input(drop_ty),
-                                            )
-                                            .map(|l| l.align.abi.bytes())
-                                            .unwrap_or(1);
-                                        (
-                                            Some(
-                                                self.builder
-                                                    .iconst(
-                                                        align as i64,
-                                                        64,
-                                                        IntSignedness::DontCare,
-                                                        Origin::synthetic(),
-                                                    )
-                                                    .raw(),
-                                            ),
-                                            None,
-                                        )
-                                    }
-                                } else {
-                                    let addr = self
-                                        .translate_place_to_addr(place)
-                                        .map(|(a, _)| self.coerce_to_ptr(a));
-                                    // For unsized drops through a Deref of a fat pointer
-                                    // (e.g. `(*_6)` where `_6: *const [T]`), the metadata
-                                    // (slice length / vtable ptr) lives in fat_locals and
-                                    // must be passed as the second register argument.
-                                    let meta = if !place.projection.is_empty()
-                                        && matches!(place.projection[0], mir::PlaceElem::Deref)
-                                    {
-                                        self.fat_locals.get(place.local)
-                                    } else {
-                                        None
-                                    };
-                                    (addr, meta)
-                                };
-
-                            if let Some(ptr) = drop_ptr {
-                                let mut args = vec![ptr.into()];
-                                if let Some(meta) = drop_meta {
-                                    args.push(meta.into());
-                                }
-                                let (call_mem, _) = self.builder.call(
-                                    callee.into(),
-                                    args,
-                                    Type::Unit,
-                                    self.current_mem.into(),
-                                    None,
-                                    Origin::synthetic(),
-                                );
-                                self.last_call_vref = Some(call_mem.index());
-                                self.current_mem = call_mem.raw();
-                            }
-                        }
-                    }
-                }
-
-                self.builder.br(
-                    target_block,
-                    vec![self.current_mem.into()],
-                    Origin::synthetic(),
-                );
-                // If the drop has an unwind cleanup target, register a
-                // landing-pad wrapper so the unwinder can invoke cleanup.
-                if let mir::UnwindAction::Cleanup(cleanup_bb) = unwind
-                    && let Some(call_idx) = self.last_call_vref
-                {
-                    self.setup_cleanup_landing_pad(call_idx, *cleanup_bb);
-                }
+                self.translate_drop(place, *target, unwind);
             }
             TerminatorKind::FalseEdge { real_target, .. } => {
                 let target_block = self.block_map.get(*real_target);
@@ -950,6 +391,538 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     )
                     .raw();
             }
+        }
+    }
+
+    fn translate_return(&mut self) {
+        // SRET: copy the constructed return value from local stack slot
+        // to the SRET pointer, then return the pointer.
+        if let Some(sret) = self.sret_ptr {
+            let ret_local = mir::Local::from_usize(0);
+            let local_slot = self.locals.get(ret_local).expect("sret local must be set");
+
+            // Safety check: if _0 already IS sret, skip the copy.
+            if local_slot == sret {
+                self.builder.ret(
+                    Some(sret.into()),
+                    self.current_mem.into(),
+                    Origin::synthetic(),
+                );
+                return;
+            }
+
+            let ret_mir_ty = self.monomorphize(self.mir.local_decls[ret_local].ty);
+            let ret_size = type_size(self.tcx, ret_mir_ty).unwrap_or(0);
+
+            // Copy from local slot to SRET pointer
+            let size_val = self.builder.iconst(
+                ret_size as i64,
+                64,
+                IntSignedness::DontCare,
+                Origin::synthetic(),
+            );
+            let align = 8; // TODO: compute proper alignment
+            let sret_annotated =
+                tuffy_ir::instruction::Operand::annotated(sret, Annotation::Align(align));
+            let local_annotated =
+                tuffy_ir::instruction::Operand::annotated(local_slot, Annotation::Align(align));
+            let new_mem = self.builder.mem_copy(
+                sret_annotated.into(),
+                local_annotated.into(),
+                size_val.into(),
+                self.current_mem.into(),
+                Origin::synthetic(),
+            );
+
+            self.builder
+                .ret(Some(sret.into()), new_mem.into(), Origin::synthetic());
+            return;
+        }
+
+        let ret_local = mir::Local::from_usize(0);
+        let ret_mir_ty = self.monomorphize(self.mir.local_decls[ret_local].ty);
+        let ret_size = type_size(self.tcx, ret_mir_ty).unwrap_or(0);
+
+        if matches!(translate_ty(self.tcx, ret_mir_ty), Some(Type::Unit))
+            || (translate_ty(self.tcx, ret_mir_ty).is_none() && ret_size == 0)
+        {
+            // Unit-returning or zero-sized untranslatable return type: bare ret, no value.
+            self.builder
+                .ret(None, self.current_mem.into(), Origin::synthetic());
+        } else if ret_size == 0 {
+            // Zero-sized return type: return a dummy value to satisfy the
+            // function signature (translate_ty maps ADTs to Int).
+            let dummy = self
+                .builder
+                .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
+            self.builder.ret(
+                Some(dummy.into()),
+                self.current_mem.into(),
+                Origin::synthetic(),
+            );
+        } else if self.stack_locals.is_stack(ret_local)
+            && matches!(
+                self.locals
+                    .get(ret_local)
+                    .and_then(|v| self.builder.value_type(v).cloned()),
+                Some(Type::Ptr(_))
+            )
+        {
+            // Stack-allocated return (e.g., 16-byte struct built via Aggregate).
+            // Load the actual data from the stack slot instead of returning
+            // the slot address (which would be a dangling pointer).
+            let slot = self
+                .locals
+                .get(ret_local)
+                .expect("return local _0 must be set");
+            let ret_ty = self.monomorphize(self.mir.local_decls[ret_local].ty);
+            let size = type_size(self.tcx, ret_ty).unwrap_or(8);
+            let ret_repr = repr_kind(self.tcx, ret_ty);
+            let is_scalar_pair = matches!(ret_repr, ReprKind::ScalarPair);
+
+            // Load size: for Scalar returns load the full type width
+            // (legalizer splits wide loads); for ScalarPair load only
+            // the first scalar.
+            let sp_info = if is_scalar_pair {
+                scalar_pair_info(self.tcx, ret_ty)
+            } else {
+                None
+            };
+            let load_size = if let Some((a_sz, _, _)) = sp_info {
+                a_sz as u32
+            } else {
+                size as u32
+            };
+            let load_ty = translate_ty(self.tcx, ret_mir_ty).unwrap_or(Type::Int);
+            // For ScalarPair returns (e.g. fat pointers), use a
+            // register-width annotation for the low-half load — but
+            // only when the type is Int (not Ptr).
+            let ann = if is_scalar_pair {
+                if matches!(load_ty, Type::Ptr(_)) {
+                    None
+                } else {
+                    int_annotation_for_bytes(load_size)
+                }
+            } else {
+                translate_annotation(ret_mir_ty).or_else(|| {
+                    if matches!(load_ty, Type::Int) {
+                        int_annotation_for_bytes(load_size)
+                    } else {
+                        None
+                    }
+                })
+            };
+            let word0 = self.builder.load(
+                slot.into(),
+                load_size,
+                load_ty,
+                self.current_mem.into(),
+                ann,
+                Origin::synthetic(),
+            );
+
+            // Coerce to match declared return type (e.g., Ptr for &T returns).
+            let ret_ir_ty = translate_ty(self.tcx, ret_mir_ty);
+            let coerced_word0 = match ret_ir_ty {
+                Some(Type::Ptr(_)) => self.coerce_to_ptr(word0),
+                _ => word0,
+            };
+
+            if is_scalar_pair {
+                // Two-register return (ScalarPair): load second scalar
+                // and mark it for RDX via ABI metadata.
+                let (_, b_sz, b_off) = sp_info.unwrap_or((size.min(8), size.saturating_sub(8), 8));
+                let off_val = self.builder.iconst(
+                    b_off as i64,
+                    64,
+                    IntSignedness::DontCare,
+                    Origin::synthetic(),
+                );
+                let hi_addr =
+                    self.builder
+                        .ptradd(slot.into(), off_val.into(), 0, Origin::synthetic());
+                let word1 = self.builder.load(
+                    hi_addr.into(),
+                    b_sz as u32,
+                    Type::Int,
+                    self.current_mem.into(),
+                    int_annotation_for_bytes(b_sz as u32),
+                    Origin::synthetic(),
+                );
+                let ret_inst = self.builder.ret(
+                    Some(coerced_word0.into()),
+                    self.current_mem.into(),
+                    Origin::synthetic(),
+                );
+                self.abi_metadata
+                    .mark_secondary_return_move(ret_inst.index(), word1.index());
+            } else {
+                self.builder.ret(
+                    Some(coerced_word0.into()),
+                    self.current_mem.into(),
+                    Origin::synthetic(),
+                );
+            }
+        } else if let Some(fat_meta) = self.fat_locals.get(ret_local)
+            && is_fat_ptr(self.tcx, ret_mir_ty)
+        {
+            // Non-stack fat pointer return (e.g. from an intrinsic
+            // that set both locals and fat_locals directly).  Return
+            // the data pointer in RAX and the metadata in RDX.
+            let v = self
+                .locals
+                .get(ret_local)
+                .expect("fat pointer return must have data_ptr");
+            let coerced = self.coerce_to_ptr(v);
+            let ret_inst = self.builder.ret(
+                Some(coerced.into()),
+                self.current_mem.into(),
+                Origin::synthetic(),
+            );
+            self.abi_metadata
+                .mark_secondary_return_move(ret_inst.index(), fat_meta.index());
+        } else {
+            // Normal scalar return.
+            let val = self.locals.values[ret_local.as_usize()];
+            if let Some(v) = val {
+                // Coerce to match the declared return type.
+                // Fall back to Type::Int for small aggregates (e.g.
+                // [i8; 1]) that translate_ty maps to None — this
+                // matches the function-signature logic in mod.rs.
+                let ret_ir_ty =
+                    translate_ty(self.tcx, ret_mir_ty).or(if ret_size > 0 && ret_size <= 8 {
+                        Some(Type::Int)
+                    } else {
+                        None
+                    });
+                let coerced = match (ret_ir_ty, self.builder.value_type(v).cloned()) {
+                    (Some(Type::Int), Some(Type::Ptr(_))) if self.builder.is_memory_address(v) => {
+                        // v is a pointer to data (e.g. symbol_addr for an
+                        // indirect constant).  Load the actual value instead
+                        // of converting the address to an integer.
+                        let ret_size = type_size(self.tcx, ret_mir_ty).unwrap_or(8).min(8) as u32;
+
+                        self.builder.load(
+                            v.into(),
+                            ret_size,
+                            Type::Int,
+                            self.current_mem.into(),
+                            int_annotation_for_bytes(ret_size),
+                            Origin::synthetic(),
+                        )
+                    }
+                    // Aggregate type (tuple/struct) that translate_ty
+                    // maps to None but fits in ≤8 bytes.  The function
+                    // signature declares Int return; load the value from
+                    // the constant/stack pointer.
+                    (None, Some(Type::Ptr(_)))
+                        if self.builder.is_memory_address(v) && ret_size > 0 && ret_size <= 8 =>
+                    {
+                        let sz = ret_size.min(8) as u32;
+                        self.builder.load(
+                            v.into(),
+                            sz,
+                            Type::Int,
+                            self.current_mem.into(),
+                            int_annotation_for_bytes(sz),
+                            Origin::synthetic(),
+                        )
+                    }
+                    (Some(Type::Int), Some(Type::Float(_))) => {
+                        // Float returned as integer bits (e.g. to_le_bytes).
+                        let sz = ret_size.min(8) as u32;
+                        self.builder.bitcast(
+                            v.into(),
+                            Type::Int,
+                            int_annotation_for_bytes(sz),
+                            Origin::synthetic(),
+                        )
+                    }
+                    (Some(Type::Int), _) => self.coerce_to_int(v),
+                    (Some(Type::Ptr(_)), _) => self.coerce_to_ptr(v),
+                    (Some(Type::Bool), Some(Type::Int)) => {
+                        let zero = self.builder.iconst(
+                            0,
+                            64,
+                            IntSignedness::DontCare,
+                            Origin::synthetic(),
+                        );
+                        self.builder
+                            .icmp(ICmpOp::Ne, v.into(), zero.into(), Origin::synthetic())
+                            .raw()
+                    }
+                    (Some(Type::Float(ft)), Some(Type::Int)) => {
+                        // Float value was carried as Int bits — reinterpret.
+                        self.builder
+                            .bitcast(v.into(), Type::Float(ft), None, Origin::synthetic())
+                    }
+                    _ => v,
+                };
+                self.builder.ret(
+                    Some(coerced.into()),
+                    self.current_mem.into(),
+                    Origin::synthetic(),
+                );
+            } else {
+                // Return local was never assigned — return a dummy
+                // value.  This can happen in custom MIR where the
+                // return place is left uninitialised (the value is
+                // garbage but the function must still return).
+                let ret_ir_ty = translate_ty(self.tcx, ret_mir_ty);
+                let dummy = if matches!(ret_ir_ty, Some(Type::Ptr(_))) {
+                    let zero =
+                        self.builder
+                            .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
+                    self.builder
+                        .inttoptr(zero.into(), 0, Origin::synthetic())
+                        .raw()
+                } else if let Some(Type::Float(ft)) = ret_ir_ty {
+                    let zero =
+                        self.builder
+                            .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
+                    self.builder
+                        .bitcast(zero.into(), Type::Float(ft), None, Origin::synthetic())
+                } else if matches!(ret_ir_ty, Some(Type::Bool)) {
+                    self.builder.bconst(false, Origin::synthetic()).raw()
+                } else {
+                    self.builder
+                        .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
+                        .raw()
+                };
+                self.builder.ret(
+                    Some(dummy.into()),
+                    self.current_mem.into(),
+                    Origin::synthetic(),
+                );
+            }
+        }
+    }
+
+    fn translate_drop(
+        &mut self,
+        place: &mir::Place<'tcx>,
+        target: mir::BasicBlock,
+        unwind: &mir::UnwindAction,
+    ) {
+        let drop_ty = place.ty(&self.mir.local_decls, self.tcx).ty;
+        let drop_ty = self.monomorphize(drop_ty);
+        let target_block = self.block_map.get(target);
+        self.last_call_vref = None;
+
+        // Only emit drop glue when the type actually needs dropping.
+        if drop_ty.needs_drop(self.tcx, ty::TypingEnv::fully_monomorphized()) {
+            // Trait object drops: dispatch through vtable[0] instead of
+            // calling drop_in_place directly (which would recurse).
+            if matches!(drop_ty.kind(), ty::Dynamic(..)) {
+                // The place is `*local` where local is a fat pointer
+                // (data ptr + vtable ptr). Get both components.
+                let base_local = place.local;
+                let data_ptr = self.locals.get(base_local);
+                let vtable_ptr = self.fat_locals.get(base_local);
+                if let (Some(data), Some(vtable)) = (data_ptr, vtable_ptr) {
+                    // Load drop function pointer from vtable[0].
+                    // It may be NULL for types with no drop glue.
+                    let drop_fn = self.builder.load(
+                        vtable.into(),
+                        8,
+                        Type::Ptr(0),
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
+                    );
+                    // Null check: vtable drop can be null for
+                    // trivially-droppable concrete types.
+                    let drop_as_int =
+                        self.builder
+                            .ptrtoint(drop_fn.into(), 64, Origin::synthetic());
+                    let zero =
+                        self.builder
+                            .iconst(0, 64, IntSignedness::Unsigned, Origin::synthetic());
+                    let is_nonnull = self.builder.icmp(
+                        ICmpOp::Ne,
+                        drop_as_int.into(),
+                        zero.into(),
+                        Origin::synthetic(),
+                    );
+                    let call_block = self.builder.create_block();
+                    let call_mem_arg = self.builder.add_block_arg(call_block, Type::Mem, None);
+                    let merge_block = self.builder.create_block();
+                    let merge_mem_arg = self.builder.add_block_arg(merge_block, Type::Mem, None);
+
+                    self.builder.brif(
+                        is_nonnull.into(),
+                        call_block,
+                        vec![self.current_mem.into()],
+                        merge_block,
+                        vec![self.current_mem.into()],
+                        Origin::synthetic(),
+                    );
+
+                    // call_block: invoke the drop function
+                    self.builder.switch_to_block(call_block);
+                    let (call_mem, _) = self.builder.call(
+                        drop_fn.into(),
+                        vec![data.into()],
+                        Type::Unit,
+                        call_mem_arg.into(),
+                        None,
+                        Origin::synthetic(),
+                    );
+                    self.last_call_vref = Some(call_mem.index());
+                    self.builder
+                        .br(merge_block, vec![call_mem.into()], Origin::synthetic());
+
+                    // Continue from merge_block
+                    self.builder.switch_to_block(merge_block);
+                    self.current_mem = merge_mem_arg;
+                }
+            } else {
+                let drop_instance = ty::Instance::resolve_drop_in_place(self.tcx, drop_ty);
+                self.referenced_instances.push(drop_instance);
+                if !drop_instance.args.has_non_region_param() {
+                    let sym_name = self.tcx.symbol_name(drop_instance).name.to_string();
+                    let sym_id = self.symbols.intern(&sym_name);
+                    let callee = self.builder.symbol_addr(sym_id, Origin::synthetic());
+
+                    // Get a pointer to the place being dropped, plus
+                    // optional metadata for unsized drops (*mut [T] etc.).
+                    let (drop_ptr, drop_meta): (Option<ValueRef>, Option<ValueRef>) = if place
+                        .projection
+                        .is_empty()
+                    {
+                        if self.stack_locals.is_stack(place.local) {
+                            (self.locals.get(place.local), None)
+                        } else if let Some(v) = self.locals.get(place.local) {
+                            // Non-stack local: the value IS the pointer
+                            // (e.g. a Box or reference).  For types that
+                            // need dropping and are stored as a register
+                            // value, we need to spill to a stack slot so
+                            // drop_in_place gets a valid &mut T.
+                            let ty_size = type_size(self.tcx, drop_ty).unwrap_or(8);
+                            if ty_size == 0 {
+                                // ZST with a dummy register value —
+                                // use a dangling aligned pointer so
+                                // drop_in_place receives a well-aligned &mut T.
+                                let align = self
+                                    .tcx
+                                    .layout_of(
+                                        ty::TypingEnv::fully_monomorphized()
+                                            .as_query_input(drop_ty),
+                                    )
+                                    .map(|l| l.align.abi.bytes())
+                                    .unwrap_or(1);
+                                (
+                                    Some(
+                                        self.builder
+                                            .iconst(
+                                                align as i64,
+                                                64,
+                                                IntSignedness::DontCare,
+                                                Origin::synthetic(),
+                                            )
+                                            .raw(),
+                                    ),
+                                    None,
+                                )
+                            } else if let Some(fat_val) = self.fat_locals.get(place.local) {
+                                // Fat pointer: drop_in_place<[T]> / drop_in_place<dyn Trait>
+                                // takes the fat pointer components as separate register
+                                // arguments (data_ptr in rdi, metadata in rsi).
+                                (Some(v), Some(fat_val))
+                            } else if ty_size > 8
+                                || matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
+                            {
+                                (Some(v), None)
+                            } else {
+                                let slot =
+                                    self.builder
+                                        .stack_slot(ty_size as u32, 0, Origin::synthetic());
+                                self.current_mem = self
+                                    .builder
+                                    .store(
+                                        v.into(),
+                                        slot.into(),
+                                        ty_size as u32,
+                                        self.current_mem.into(),
+                                        Origin::synthetic(),
+                                    )
+                                    .raw();
+                                (Some(slot), None)
+                            }
+                        } else {
+                            // ZST with no stored value — use a
+                            // dangling aligned pointer so
+                            // drop_in_place is still called.
+                            let align = self
+                                .tcx
+                                .layout_of(
+                                    ty::TypingEnv::fully_monomorphized().as_query_input(drop_ty),
+                                )
+                                .map(|l| l.align.abi.bytes())
+                                .unwrap_or(1);
+                            (
+                                Some(
+                                    self.builder
+                                        .iconst(
+                                            align as i64,
+                                            64,
+                                            IntSignedness::DontCare,
+                                            Origin::synthetic(),
+                                        )
+                                        .raw(),
+                                ),
+                                None,
+                            )
+                        }
+                    } else {
+                        let addr = self
+                            .translate_place_to_addr(place)
+                            .map(|(a, _)| self.coerce_to_ptr(a));
+                        // For unsized drops through a Deref of a fat pointer
+                        // (e.g. `(*_6)` where `_6: *const [T]`), the metadata
+                        // (slice length / vtable ptr) lives in fat_locals and
+                        // must be passed as the second register argument.
+                        let meta = if !place.projection.is_empty()
+                            && matches!(place.projection[0], mir::PlaceElem::Deref)
+                        {
+                            self.fat_locals.get(place.local)
+                        } else {
+                            None
+                        };
+                        (addr, meta)
+                    };
+
+                    if let Some(ptr) = drop_ptr {
+                        let mut args = vec![ptr.into()];
+                        if let Some(meta) = drop_meta {
+                            args.push(meta.into());
+                        }
+                        let (call_mem, _) = self.builder.call(
+                            callee.into(),
+                            args,
+                            Type::Unit,
+                            self.current_mem.into(),
+                            None,
+                            Origin::synthetic(),
+                        );
+                        self.last_call_vref = Some(call_mem.index());
+                        self.current_mem = call_mem.raw();
+                    }
+                }
+            }
+        }
+
+        self.builder.br(
+            target_block,
+            vec![self.current_mem.into()],
+            Origin::synthetic(),
+        );
+        // If the drop has an unwind cleanup target, register a
+        // landing-pad wrapper so the unwinder can invoke cleanup.
+        if let mir::UnwindAction::Cleanup(cleanup_bb) = unwind
+            && let Some(call_idx) = self.last_call_vref
+        {
+            self.setup_cleanup_landing_pad(call_idx, *cleanup_bb);
         }
     }
 
