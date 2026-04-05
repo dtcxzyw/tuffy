@@ -380,9 +380,8 @@
 // CHECK:     0x20 │ 77 65 72 2d 6f 66 2d 74 77 6f                   │ wer-of-two
 // CHECK: }
 // CHECK: data @.Lstr.0 = "is_aligned_to: align is not a power-of-two"
-// CHECK: data @.Lstr.1 = "is_aligned_to: align is not a power-of-two"
-// CHECK: data @.Lloc_file.2 = "$SYSROOT/library/core/src/panic.rs"
-// CHECK: data @.Lloc.3 = "..." relocs [0: @.Lloc_file.2]
+// CHECK: data @.Lloc_file.1 = "$SYSROOT/library/core/src/panic.rs"
+// CHECK: data @.Lloc.2 = "..." relocs [0: @.Lloc_file.1]
 // CHECK: func @_RNvMNtNtC$HASH_4core3ptr9const_ptrPu13is_aligned_toC$HASH_6memops(ptr, int:u64) -> bool {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
@@ -426,7 +425,7 @@
 // CHECK:     v37: ptr = ptradd v28, v36
 // CHECK:     v38: mem = store.8 v35, v37, v32
 // CHECK:     v39: ptr = load.8 v28, v38
-// CHECK:     v40: ptr = symbol_addr @.Lstr.1
+// CHECK:     v40: ptr = symbol_addr @.Lstr.0
 // CHECK:     v41: int:i64 = iconst 42
 // CHECK:     v42: int:i32 = iconst 1
 // CHECK:     v43: int:i64 = iconst 63
@@ -444,7 +443,7 @@
 // CHECK:     v55: int:i64 = iconst 8
 // CHECK:     v56: ptr = ptradd v3, v55
 // CHECK:     v57: int:i64 = load.8 v56, v53
-// CHECK:     v58: ptr = symbol_addr @.Lloc.3
+// CHECK:     v58: ptr = symbol_addr @.Lloc.2
 // CHECK:     v59: ptr = symbol_addr @_RNvNtC$HASH_4core9panicking9panic_fmt
 // CHECK:     v60: mem = call v59(v54, v57, v58), v53
 // CHECK:     v61: int:i64 = iconst 0
@@ -624,10 +623,9 @@
 // CHECK:     0xd0 │ 65 6c 69 65 64 20 6f 6e 20 66 6f 72 20 73 61 66 │ elied on for saf
 // CHECK:     0xe0 │ 65 74 79 2e                                     │ ety.
 // CHECK: }
-// CHECK: data @.Lstr.4 = "unsafe precondition(s) violated: ptr::write_bytes requires that the destination pointer is aligned and non-null\n\nThis indicates a bug in the program. This Undefined Behavior check is optional, and cannot be relied on for safety."
-// CHECK: data @.Lstr.5 = "unsafe precondition(s) violated: ptr::write_bytes requires that the destination pointer is aligned and non-null\n\nThis indicates a bug in the program. This Undefined Behavior check is optional, and cannot be relied on for safety."
-// CHECK: data @.Lloc_file.6 = "$SYSROOT/library/core/src/ub_checks.rs"
-// CHECK: data @.Lloc.7 = "..." relocs [0: @.Lloc_file.6]
+// CHECK: data @.Lstr.3 = "unsafe precondition(s) violated: ptr::write_bytes requires that the destination pointer is aligned and non-null\n\nThis indicates a bug in the program. This Undefined Behavior check is optional, and cannot be relied on for safety."
+// CHECK: data @.Lloc_file.4 = "$SYSROOT/library/core/src/ub_checks.rs"
+// CHECK: data @.Lloc.5 = "..." relocs [0: @.Lloc_file.4]
 // CHECK: func @_RNvNvNtC$HASH_4core3ptr11write_bytes18precondition_checkC$HASH_6memops(ptr, int:u64, bool, ptr) {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
@@ -685,7 +683,7 @@
 // CHECK:     br bb7(v47)
 // CHECK:
 // CHECK:   bb7(v49: mem):
-// CHECK:     v50: ptr = symbol_addr @.Lstr.4
+// CHECK:     v50: ptr = symbol_addr @.Lstr.3
 // CHECK:     v51: int:i64 = iconst 228
 // CHECK:     v52: mem = store.8 v50, v6, v49
 // CHECK:     v53: int:i64 = iconst 8
@@ -711,7 +709,7 @@
 // CHECK:     v73: ptr = ptradd v64, v72
 // CHECK:     v74: mem = store.8 v71, v73, v68
 // CHECK:     v75: ptr = load.8 v64, v74
-// CHECK:     v76: ptr = symbol_addr @.Lstr.5
+// CHECK:     v76: ptr = symbol_addr @.Lstr.3
 // CHECK:     v77: int:i64 = iconst 228
 // CHECK:     v78: int:i32 = iconst 1
 // CHECK:     v79: int:i64 = iconst 63
@@ -730,7 +728,7 @@
 // CHECK:     v92: ptr = ptradd v5, v91
 // CHECK:     v93: int:i64 = load.8 v92, v89
 // CHECK:     v94: bool = bconst false
-// CHECK:     v95: ptr = symbol_addr @.Lloc.7
+// CHECK:     v95: ptr = symbol_addr @.Lloc.5
 // CHECK:     v96: ptr = symbol_addr @_RNvNtC$HASH_4core9panicking18panic_nounwind_fmt
 // CHECK:     v97: mem = call v96(v90, v93, v94, v95), v89
 // CHECK:     v98: int:i64 = iconst 0
@@ -1013,10 +1011,9 @@
 // CHECK:     0x100 │ 6f 74 20 62 65 20 72 65 6c 69 65 64 20 6f 6e 20 │ ot be relied on
 // CHECK:     0x110 │ 66 6f 72 20 73 61 66 65 74 79 2e                │ for safety.
 // CHECK: }
-// CHECK: data @.Lstr.8 = "unsafe precondition(s) violated: ptr::copy_nonoverlapping requires that both pointer arguments are aligned and non-null and the specified memory ranges do not overlap\n\nThis indicates a bug in the program. This Undefined Behavior check is optional, and cannot be relied on for safety."
-// CHECK: data @.Lstr.9 = "unsafe precondition(s) violated: ptr::copy_nonoverlapping requires that both pointer arguments are aligned and non-null and the specified memory ranges do not overlap\n\nThis indicates a bug in the program. This Undefined Behavior check is optional, and cannot be relied on for safety."
-// CHECK: data @.Lloc_file.10 = "$SYSROOT/library/core/src/ub_checks.rs"
-// CHECK: data @.Lloc.11 = "..." relocs [0: @.Lloc_file.10]
+// CHECK: data @.Lstr.6 = "unsafe precondition(s) violated: ptr::copy_nonoverlapping requires that both pointer arguments are aligned and non-null and the specified memory ranges do not overlap\n\nThis indicates a bug in the program. This Undefined Behavior check is optional, and cannot be relied on for safety."
+// CHECK: data @.Lloc_file.7 = "$SYSROOT/library/core/src/ub_checks.rs"
+// CHECK: data @.Lloc.8 = "..." relocs [0: @.Lloc_file.7]
 // CHECK: func @_RNvNvNtC$HASH_4core3ptr19copy_nonoverlapping18precondition_checkC$HASH_6memops(ptr, ptr, int:u64, int:u64, int:u64, ptr) {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
@@ -1165,7 +1162,7 @@
 // CHECK:     br bb21(v126)
 // CHECK:
 // CHECK:   bb21(v128: mem):
-// CHECK:     v129: ptr = symbol_addr @.Lstr.8
+// CHECK:     v129: ptr = symbol_addr @.Lstr.6
 // CHECK:     v130: int:i64 = iconst 283
 // CHECK:     v131: mem = store.8 v129, v9, v128
 // CHECK:     v132: int:i64 = iconst 8
@@ -1191,7 +1188,7 @@
 // CHECK:     v152: ptr = ptradd v143, v151
 // CHECK:     v153: mem = store.8 v150, v152, v147
 // CHECK:     v154: ptr = load.8 v143, v153
-// CHECK:     v155: ptr = symbol_addr @.Lstr.9
+// CHECK:     v155: ptr = symbol_addr @.Lstr.6
 // CHECK:     v156: int:i64 = iconst 283
 // CHECK:     v157: int:i32 = iconst 1
 // CHECK:     v158: int:i64 = iconst 63
@@ -1210,7 +1207,7 @@
 // CHECK:     v171: ptr = ptradd v8, v170
 // CHECK:     v172: int:i64 = load.8 v171, v168
 // CHECK:     v173: bool = bconst false
-// CHECK:     v174: ptr = symbol_addr @.Lloc.11
+// CHECK:     v174: ptr = symbol_addr @.Lloc.8
 // CHECK:     v175: ptr = symbol_addr @_RNvNtC$HASH_4core9panicking18panic_nounwind_fmt
 // CHECK:     v176: mem = call v175(v169, v172, v173, v174), v168
 // CHECK:     v177: int:i64 = iconst 0
@@ -1456,10 +1453,9 @@
 // CHECK:     0xc0 │ 6e 6e 6f 74 20 62 65 20 72 65 6c 69 65 64 20 6f │ nnot be relied o
 // CHECK:     0xd0 │ 6e 20 66 6f 72 20 73 61 66 65 74 79 2e          │ n for safety.
 // CHECK: }
-// CHECK: data @.Lstr.12 = "unsafe precondition(s) violated: ptr::copy requires that both pointer arguments are aligned and non-null\n\nThis indicates a bug in the program. This Undefined Behavior check is optional, and cannot be relied on for safety."
-// CHECK: data @.Lstr.13 = "unsafe precondition(s) violated: ptr::copy requires that both pointer arguments are aligned and non-null\n\nThis indicates a bug in the program. This Undefined Behavior check is optional, and cannot be relied on for safety."
-// CHECK: data @.Lloc_file.14 = "$SYSROOT/library/core/src/ub_checks.rs"
-// CHECK: data @.Lloc.15 = "..." relocs [0: @.Lloc_file.14]
+// CHECK: data @.Lstr.9 = "unsafe precondition(s) violated: ptr::copy requires that both pointer arguments are aligned and non-null\n\nThis indicates a bug in the program. This Undefined Behavior check is optional, and cannot be relied on for safety."
+// CHECK: data @.Lloc_file.10 = "$SYSROOT/library/core/src/ub_checks.rs"
+// CHECK: data @.Lloc.11 = "..." relocs [0: @.Lloc_file.10]
 // CHECK: func @_RNvNvNtC$HASH_4core3ptr4copy18precondition_checkC$HASH_6memops(ptr, ptr, int:u64, bool, ptr) {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
@@ -1585,7 +1581,7 @@
 // CHECK:     br bb15(v109)
 // CHECK:
 // CHECK:   bb15(v111: mem):
-// CHECK:     v112: ptr = symbol_addr @.Lstr.12
+// CHECK:     v112: ptr = symbol_addr @.Lstr.9
 // CHECK:     v113: int:i64 = iconst 221
 // CHECK:     v114: mem = store.8 v112, v10, v111
 // CHECK:     v115: int:i64 = iconst 8
@@ -1611,7 +1607,7 @@
 // CHECK:     v135: ptr = ptradd v126, v134
 // CHECK:     v136: mem = store.8 v133, v135, v130
 // CHECK:     v137: ptr = load.8 v126, v136
-// CHECK:     v138: ptr = symbol_addr @.Lstr.13
+// CHECK:     v138: ptr = symbol_addr @.Lstr.9
 // CHECK:     v139: int:i64 = iconst 221
 // CHECK:     v140: int:i32 = iconst 1
 // CHECK:     v141: int:i64 = iconst 63
@@ -1630,7 +1626,7 @@
 // CHECK:     v154: ptr = ptradd v9, v153
 // CHECK:     v155: int:i64 = load.8 v154, v151
 // CHECK:     v156: bool = bconst false
-// CHECK:     v157: ptr = symbol_addr @.Lloc.15
+// CHECK:     v157: ptr = symbol_addr @.Lloc.11
 // CHECK:     v158: ptr = symbol_addr @_RNvNtC$HASH_4core9panicking18panic_nounwind_fmt
 // CHECK:     v159: mem = call v158(v152, v155, v156, v157), v151
 // CHECK:     v160: int:i64 = iconst 0
@@ -1794,7 +1790,7 @@
 // CHECK:     0x20 │ 28 29 20 2a 20 63 6f 75 6e 74 60 20 6f 76 65 72 │ () * count` over
 // CHECK:     0x30 │ 66 6c 6f 77 73 20 61 20 75 73 69 7a 65          │ flows a usize
 // CHECK: }
-// CHECK: data @.Lstr.16 = "is_nonoverlapping: `size_of::<T>() * count` overflows a usize"
+// CHECK: data @.Lstr.12 = "is_nonoverlapping: `size_of::<T>() * count` overflows a usize"
 // CHECK: func @_RNvNvNtC$HASH_4core9ub_checks23maybe_is_nonoverlapping7runtimeC$HASH_6memops(ptr, ptr, int:u64, int:u64) -> bool {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
@@ -1819,7 +1815,7 @@
 // CHECK:     br bb2(v19)
 // CHECK:
 // CHECK:   bb2(v21: mem):
-// CHECK:     v22: ptr = symbol_addr @.Lstr.16
+// CHECK:     v22: ptr = symbol_addr @.Lstr.12
 // CHECK:     v23: int:i64 = iconst 61
 // CHECK:     v24: ptr = symbol_addr @_RNvNtC$HASH_4core9panicking14panic_nounwind
 // CHECK:     v25: mem = call v24(v22, v23), v21

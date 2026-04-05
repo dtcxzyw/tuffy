@@ -4048,6 +4048,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 &mut self.weak_undefined_symbols,
                 self.vtable_cache,
                 self.alloc_cache,
+                self.content_cache,
             ),
             Operand::RuntimeChecks(_) => {
                 // UbChecks / ContractChecks / OverflowChecks: emit false (0)

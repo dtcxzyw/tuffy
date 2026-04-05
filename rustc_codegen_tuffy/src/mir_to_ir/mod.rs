@@ -43,6 +43,11 @@ pub type VtableCache = std::collections::HashMap<rustc_middle::mir::interpret::A
 /// pointers to the same const allocation share the same address.
 pub type AllocCache = std::collections::HashMap<rustc_middle::mir::interpret::AllocId, String>;
 
+/// Cache mapping allocation content → emitted symbol name.
+/// Catches duplicate const allocations that have different `AllocId`s but
+/// identical bytes (e.g., the same const promoted independently after inlining).
+pub type ContentCache = std::collections::HashMap<(Vec<u8>, Vec<(usize, String)>, u64), String>;
+
 /// Result of MIR → IR translation.
 pub struct TranslationResult<'tcx> {
     pub func: Function,
@@ -67,6 +72,7 @@ pub fn translate_function<'tcx>(
     data_counter: &mut u64,
     vtable_cache: &mut VtableCache,
     alloc_cache: &mut AllocCache,
+    content_cache: &mut ContentCache,
 ) -> Option<TranslationResult<'tcx>> {
     // Skip partially substituted polymorphic instances — the symbol mangler
     // will panic if generic parameters are still present.
@@ -383,6 +389,7 @@ pub fn translate_function<'tcx>(
         data_counter,
         vtable_cache,
         alloc_cache,
+        content_cache,
         sret_ptr: None,
         weak_undefined_symbols: std::collections::HashSet::new(),
         caller_location_param: None,

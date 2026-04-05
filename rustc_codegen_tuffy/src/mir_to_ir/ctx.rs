@@ -185,6 +185,10 @@ pub(super) struct TranslationCtx<'a, 'tcx> {
     /// Cache mapping rustc memory AllocId → emitted symbol name, shared across
     /// all functions in the CGU so that identical allocations get the same address.
     pub(super) alloc_cache: &'a mut super::AllocCache,
+    /// Content-based dedup cache, shared across all functions in the CGU.
+    /// Catches identical allocations with different AllocIds (e.g., const
+    /// promotions duplicated by inlining).
+    pub(super) content_cache: &'a mut super::ContentCache,
     /// SRET pointer for functions returning large structs (>16 bytes).
     /// When set, param indices are shifted by 1 (param 0 = hidden SRET ptr).
     pub(super) sret_ptr: Option<ValueRef>,
@@ -244,6 +248,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 self.data_counter,
                 self.vtable_cache,
                 self.alloc_cache,
+                self.content_cache,
             );
             self.static_data
                 .push((sym_id, bytes, relocs, inner_alloc.align.bytes()));

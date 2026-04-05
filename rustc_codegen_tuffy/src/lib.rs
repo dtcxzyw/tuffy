@@ -106,6 +106,7 @@ impl CodegenBackend for TuffyCodegenBackend {
             let mut all_static_data: Vec<StaticData> = Vec::new();
             let mut vtable_cache: mir_to_ir::VtableCache = std::collections::HashMap::new();
             let mut alloc_cache: mir_to_ir::AllocCache = std::collections::HashMap::new();
+            let mut content_cache: mir_to_ir::ContentCache = std::collections::HashMap::new();
 
             for (mono_item, item_data) in &mono_items {
                 if let MonoItem::Fn(instance) = mono_item {
@@ -150,6 +151,7 @@ impl CodegenBackend for TuffyCodegenBackend {
                         &mut data_counter,
                         &mut vtable_cache,
                         &mut alloc_cache,
+                        &mut content_cache,
                     );
                     if let Some(mut result) = result_opt {
                         pending_instances.extend(result.referenced_instances.iter().copied());
@@ -466,6 +468,9 @@ impl CodegenBackend for TuffyCodegenBackend {
         let mut inline_data_counter: u64 = data_counter; // continues from main loop
         let mut inline_vtable_cache: mir_to_ir::VtableCache = std::collections::HashMap::new();
         let mut inline_alloc_cache: mir_to_ir::AllocCache = std::collections::HashMap::new();
+        // Share content_cache with the main loop so identical const allocations
+        // are deduplicated across mono-item and inline function compilation.
+        let mut inline_content_cache: mir_to_ir::ContentCache = std::collections::HashMap::new();
         loop {
             let batch: Vec<Instance<'tcx>> = pending_instances
                 .drain(..)
@@ -494,6 +499,7 @@ impl CodegenBackend for TuffyCodegenBackend {
                     &mut inline_data_counter,
                     &mut inline_vtable_cache,
                     &mut inline_alloc_cache,
+                    &mut inline_content_cache,
                 ) {
                     Some(r) => r,
                     None => {

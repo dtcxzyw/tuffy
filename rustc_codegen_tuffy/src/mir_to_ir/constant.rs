@@ -118,6 +118,7 @@ pub(super) fn translate_const<'tcx>(
     weak_undefined_symbols: &mut std::collections::HashSet<String>,
     vtable_cache: &mut super::VtableCache,
     alloc_cache: &mut super::AllocCache,
+    content_cache: &mut super::ContentCache,
 ) -> Option<ValueRef> {
     // Monomorphize the constant using the instance's substitutions so that
     // associated type projections (e.g. <B as Flags>::Bits) are resolved
@@ -154,12 +155,6 @@ pub(super) fn translate_const<'tcx>(
                         let full_bytes: Vec<u8> = alloc
                             .inspect_with_uninit_and_ptr_outside_interpreter(0..alloc.len())
                             .to_vec();
-                        let sym = format!(".Lconst.{}", {
-                            let id = *data_counter;
-                            *data_counter += 1;
-                            id
-                        });
-                        let sym_id = symbols.intern(&sym);
                         let relocs = extract_alloc_relocs(
                             tcx,
                             alloc,
@@ -171,10 +166,27 @@ pub(super) fn translate_const<'tcx>(
                             data_counter,
                             vtable_cache,
                             alloc_cache,
+                            content_cache,
                         );
-                        static_data.push((sym_id, full_bytes, relocs, alloc.align.bytes()));
-                        alloc_cache.insert(alloc_id, sym.clone());
-                        sym
+                        // Content-based dedup: reuse an existing symbol if
+                        // another AllocId already emitted identical data.
+                        let content_key = (full_bytes.clone(), relocs.clone(), alloc.align.bytes());
+                        if let Some(existing) = content_cache.get(&content_key) {
+                            let s = existing.clone();
+                            alloc_cache.insert(alloc_id, s.clone());
+                            s
+                        } else {
+                            let sym = format!(".Lconst.{}", {
+                                let id = *data_counter;
+                                *data_counter += 1;
+                                id
+                            });
+                            let sym_id = symbols.intern(&sym);
+                            static_data.push((sym_id, full_bytes, relocs, alloc.align.bytes()));
+                            alloc_cache.insert(alloc_id, sym.clone());
+                            content_cache.insert(content_key, sym.clone());
+                            sym
+                        }
                     };
                     let sym_id = symbols.intern(&sym);
                     let base = builder.symbol_addr(sym_id, Origin::synthetic());
@@ -298,6 +310,7 @@ pub(super) fn translate_const<'tcx>(
                                 data_counter,
                                 vtable_cache,
                                 alloc_cache,
+                                content_cache,
                             );
 
                             static_data.push((sym_id, bytes, relocs, inner.align.bytes()));
@@ -341,6 +354,8 @@ pub(super) fn translate_const<'tcx>(
             symbols,
             static_data,
             data_counter,
+            alloc_cache,
+            content_cache,
         ),
         mir::ConstValue::Indirect { alloc_id, offset } => {
             // Multi-byte constant stored in an allocation (e.g. Option::<&str>::None).
@@ -359,12 +374,6 @@ pub(super) fn translate_const<'tcx>(
                         byte_offset..byte_offset + size,
                     )
                     .to_vec();
-                let sym = format!(".Lconst.{}", {
-                    let id = *data_counter;
-                    *data_counter += 1;
-                    id
-                });
-                let sym_id = symbols.intern(&sym);
                 let relocs = extract_alloc_relocs(
                     tcx,
                     inner,
@@ -376,8 +385,26 @@ pub(super) fn translate_const<'tcx>(
                     data_counter,
                     vtable_cache,
                     alloc_cache,
+                    content_cache,
                 );
-                static_data.push((sym_id, bytes, relocs, inner.align.bytes()));
+                // Content-based dedup for Indirect allocations.
+                let content_key = (bytes.clone(), relocs.clone(), inner.align.bytes());
+                let (sym, sym_id) = if let Some(existing) = content_cache.get(&content_key) {
+                    let s = existing.clone();
+                    let sid = symbols.intern(&s);
+                    (s, sid)
+                } else {
+                    let s = format!(".Lconst.{}", {
+                        let id = *data_counter;
+                        *data_counter += 1;
+                        id
+                    });
+                    let sid = symbols.intern(&s);
+                    static_data.push((sid, bytes, relocs, inner.align.bytes()));
+                    content_cache.insert(content_key, s.clone());
+                    (s, sid)
+                };
+                alloc_cache.insert(alloc_id, sym);
                 let base = builder.symbol_addr(sym_id, Origin::synthetic());
 
                 // For reference/pointer types, the Indirect constant contains
@@ -424,6 +451,7 @@ pub(super) fn extract_alloc_relocs<'tcx>(
     data_counter: &mut u64,
     vtable_cache: &mut super::VtableCache,
     alloc_cache: &mut super::AllocCache,
+    content_cache: &mut super::ContentCache,
 ) -> Vec<(usize, String)> {
     let mut relocs = Vec::new();
     for (offset, prov) in alloc.provenance().ptrs().iter() {
@@ -453,13 +481,6 @@ pub(super) fn extract_alloc_relocs<'tcx>(
                     let bytes = inner
                         .inspect_with_uninit_and_ptr_outside_interpreter(0..inner.len())
                         .to_vec();
-                    let sym = format!(".Lconst.{}", {
-                        let id = *data_counter;
-                        *data_counter += 1;
-                        id
-                    });
-                    alloc_cache.insert(target_alloc_id, sym.clone());
-                    let sym_id = symbols.intern(&sym);
                     let nested_relocs = extract_alloc_relocs(
                         tcx,
                         inner,
@@ -471,9 +492,27 @@ pub(super) fn extract_alloc_relocs<'tcx>(
                         data_counter,
                         vtable_cache,
                         alloc_cache,
+                        content_cache,
                     );
-                    static_data.push((sym_id, bytes, nested_relocs, inner.align.bytes()));
-                    relocs.push((rel_offset, symbols.resolve(sym_id).to_string()));
+                    // Content-based dedup for nested allocations.
+                    let content_key = (bytes.clone(), nested_relocs.clone(), inner.align.bytes());
+                    let sym = if let Some(existing) = content_cache.get(&content_key) {
+                        let s = existing.clone();
+                        alloc_cache.insert(target_alloc_id, s.clone());
+                        s
+                    } else {
+                        let sym = format!(".Lconst.{}", {
+                            let id = *data_counter;
+                            *data_counter += 1;
+                            id
+                        });
+                        alloc_cache.insert(target_alloc_id, sym.clone());
+                        let sym_id = symbols.intern(&sym);
+                        static_data.push((sym_id, bytes, nested_relocs, inner.align.bytes()));
+                        content_cache.insert(content_key, sym.clone());
+                        sym
+                    };
+                    relocs.push((rel_offset, sym));
                 }
             }
             rustc_middle::mir::interpret::GlobalAlloc::VTable(vtable_ty, vtable_trait_ref) => {
@@ -509,6 +548,7 @@ pub(super) fn extract_alloc_relocs<'tcx>(
                             data_counter,
                             vtable_cache,
                             alloc_cache,
+                            content_cache,
                         );
                         static_data.push((sym_id, bytes, nested_relocs, inner.align.bytes()));
                         relocs.push((rel_offset, symbols.resolve(sym_id).to_string()));
@@ -625,6 +665,7 @@ pub(super) fn translate_scalar(
 ///
 /// Emits the data bytes to .rodata and returns an IR constant whose index
 /// is recorded in `symbols` so that isel emits a RIP-relative LEA.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn translate_const_slice<'tcx>(
     tcx: TyCtxt<'tcx>,
     alloc_id: rustc_middle::mir::interpret::AllocId,
@@ -633,24 +674,42 @@ pub(super) fn translate_const_slice<'tcx>(
     symbols: &mut SymbolTable,
     static_data: &mut StaticDataVec,
     data_counter: &mut u64,
+    alloc_cache: &mut super::AllocCache,
+    content_cache: &mut super::ContentCache,
 ) -> Option<ValueRef> {
     let rustc_middle::mir::interpret::GlobalAlloc::Memory(alloc) = tcx.global_alloc(alloc_id)
     else {
         return None;
     };
     let alloc = alloc.inner();
-    let bytes: Vec<u8> = alloc
-        .inspect_with_uninit_and_ptr_outside_interpreter(0..alloc.len())
-        .to_vec();
 
-    let sym = format!(".Lstr.{}", {
-        let id = *data_counter;
-        *data_counter += 1;
-        id
-    });
+    // AllocId-based dedup first.
+    let sym = if let Some(existing) = alloc_cache.get(&alloc_id) {
+        existing.clone()
+    } else {
+        let bytes: Vec<u8> = alloc
+            .inspect_with_uninit_and_ptr_outside_interpreter(0..alloc.len())
+            .to_vec();
+        // Content-based dedup.
+        let content_key = (bytes.clone(), vec![], alloc.align.bytes());
+        if let Some(existing) = content_cache.get(&content_key) {
+            let s = existing.clone();
+            alloc_cache.insert(alloc_id, s.clone());
+            s
+        } else {
+            let sym = format!(".Lstr.{}", {
+                let id = *data_counter;
+                *data_counter += 1;
+                id
+            });
+            let sym_id = symbols.intern(&sym);
+            static_data.push((sym_id, bytes, vec![], alloc.align.bytes()));
+            alloc_cache.insert(alloc_id, sym.clone());
+            content_cache.insert(content_key, sym.clone());
+            sym
+        }
+    };
     let sym_id = symbols.intern(&sym);
-    static_data.push((sym_id, bytes, vec![], alloc.align.bytes()));
-
     let ptr_val = builder.symbol_addr(sym_id, Origin::synthetic());
 
     Some(ptr_val.raw())
