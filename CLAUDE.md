@@ -66,7 +66,7 @@ Investigate root causes, not symptoms. Persist through debugging — no workarou
 
 ## Task Workflow
 
-Before starting a task, check `docs/SOPs/` for a matching procedure. Read relevant component READMEs. Understand the problem fully before writing code.
+Before starting a task, check `docs/SOPs/` for a matching procedure. Read relevant component READMEs and `docs/spec/`. Understand the problem fully before writing code. Do not assume you already know the design details — if unsure, ask the user rather than guessing.
 
 ## Detailed References
 
