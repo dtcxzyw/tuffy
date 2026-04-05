@@ -44,7 +44,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         destination_local: mir::Local,
         _dest_override: Option<ValueRef>,
     ) -> bool {
-        let current_mem = self.current_mem;
         let tcx = self.tcx;
 
         match name {
@@ -191,217 +190,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             }
 
             // ctpop: population count (count set bits).
-            "ctpop" => {
-                if let Some(&v) = ir_args.first() {
-                    let bits = substs
-                        .first()
-                        .and_then(|a| a.as_type())
-                        .and_then(|t| type_size(tcx, t))
-                        .map(|sz| (sz as u32) * 8)
-                        .unwrap_or(64);
-                    // For sub-64-bit types, mask to type width before popcount
-                    // to ignore garbage in upper register bits (e.g. after NOT).
-                    let operand = if bits < 64 {
-                        let mask_ann = IntAnnotation {
-                            bit_width: 64,
-                            signedness: IntSignedness::Unsigned,
-                        };
-                        let mask = self.builder.iconst(
-                            (1i64 << bits) - 1,
-                            64,
-                            IntSignedness::Unsigned,
-                            Origin::synthetic(),
-                        );
-                        self.builder
-                            .and(v.into(), mask.into(), mask_ann, Origin::synthetic())
-                            .raw()
-                    } else {
-                        v
-                    };
-                    let result = self
-                        .builder
-                        .count_ones(operand.into(), 64, Origin::synthetic());
-                    self.locals.set(destination_local, result.raw());
-                }
-                true
-            }
-
-            // ctlz / ctlz_nonzero: count leading zeros.
-            // Always emit a 64-bit CLZ and adjust in the frontend for sub-64-bit
-            // types, because the legalization pass only runs when the function
-            // has 128-bit values.
-            "ctlz" | "ctlz_nonzero" => {
-                if let Some(&v) = ir_args.first() {
-                    let bits = substs
-                        .first()
-                        .and_then(|a| a.as_type())
-                        .and_then(|t| type_size(tcx, t))
-                        .map(|sz| (sz * 8) as u32)
-                        .unwrap_or(64);
-                    if bits <= 64 {
-                        // For sub-64-bit types, mask the value to clear any
-                        // sign-extended upper bits. Without this, lzcnt64 on
-                        // e.g. 0xFFFFFFFFFFFFFF80 (-128i8 as u8) returns 0
-                        // instead of 56.
-                        let masked = if bits < 64 {
-                            let mask = self.builder.iconst(
-                                (1i64 << bits) - 1,
-                                64,
-                                IntSignedness::Unsigned,
-                                Origin::synthetic(),
-                            );
-                            self.builder
-                                .and(v.into(), mask.into(), I64, Origin::synthetic())
-                                .raw()
-                        } else {
-                            v
-                        };
-                        // Emit lzcnt64 and adjust for sub-64-bit types.
-                        let clz = self.builder.count_leading_zeros(
-                            masked.into(),
-                            64,
-                            64,
-                            Origin::synthetic(),
-                        );
-                        if bits < 64 {
-                            let adjust = self.builder.iconst(
-                                (64 - bits) as i64,
-                                64,
-                                IntSignedness::Unsigned,
-                                Origin::synthetic(),
-                            );
-                            let result = self.builder.sub(
-                                clz.into(),
-                                adjust.into(),
-                                I64,
-                                Origin::synthetic(),
-                            );
-                            self.locals.set(destination_local, result.raw());
-                        } else {
-                            self.locals.set(destination_local, clz.raw());
-                        }
-                    } else {
-                        // 128-bit: emit with 128-bit operand width; legalization splits it.
-                        // Result is at most 128 and fits in 64 bits, so use 64-bit result
-                        // annotation to avoid the value being marked as "wide".
-                        let result = self.builder.count_leading_zeros(
-                            v.into(),
-                            bits,
-                            64,
-                            Origin::synthetic(),
-                        );
-                        self.locals.set(destination_local, result.raw());
-                    }
-                }
-                true
-            }
-
-            // cttz / cttz_nonzero: count trailing zeros.
-            // For sub-64-bit types, set bit at position `bits` so tzcnt64
-            // stops at the type boundary (tzcnt64(0) = 64, but cttz::<u32>(0) = 32).
-            "cttz" | "cttz_nonzero" => {
-                if let Some(&v) = ir_args.first() {
-                    let bits = substs
-                        .first()
-                        .and_then(|a| a.as_type())
-                        .and_then(|t| type_size(tcx, t))
-                        .map(|sz| (sz * 8) as u32)
-                        .unwrap_or(64);
-                    if bits < 64 {
-                        // OR with (1 << bits) to cap at type width.
-                        let sentinel = self.builder.iconst(
-                            1i64 << bits,
-                            64,
-                            IntSignedness::Unsigned,
-                            Origin::synthetic(),
-                        );
-                        let capped =
-                            self.builder
-                                .or(v.into(), sentinel.into(), I64, Origin::synthetic());
-                        let result = self.builder.count_trailing_zeros(
-                            capped.into(),
-                            64,
-                            Origin::synthetic(),
-                        );
-                        self.locals.set(destination_local, result.raw());
-                    } else if bits <= 64 {
-                        let result =
-                            self.builder
-                                .count_trailing_zeros(v.into(), 64, Origin::synthetic());
-                        self.locals.set(destination_local, result.raw());
-                    } else {
-                        // 128-bit: emit with 64-bit width; legalization splits it.
-                        let result =
-                            self.builder
-                                .count_trailing_zeros(v.into(), 64, Origin::synthetic());
-                        self.locals.set(destination_local, result.raw());
-                    }
-                }
-                true
-            }
-
-            // bswap: byte-swap an integer value.
-            "bswap" => {
-                if let Some(&v) = ir_args.first() {
-                    let byte_size = substs
-                        .first()
-                        .and_then(|a| a.as_type())
-                        .and_then(|t| type_size(tcx, t))
-                        .unwrap_or(8);
-                    if byte_size <= 1 {
-                        self.locals.set(destination_local, v);
-                    } else {
-                        let result =
-                            self.builder
-                                .bswap(v.into(), byte_size as u32, Origin::synthetic());
-                        self.locals.set(destination_local, result.raw());
-                    }
-                }
-                true
-            }
-
-            // bitreverse: reverse bit order of an integer value.
-            "bitreverse" => {
-                if let Some(&v) = ir_args.first() {
-                    let bit_size = substs
-                        .first()
-                        .and_then(|a| a.as_type())
-                        .and_then(|t| type_size(tcx, t))
-                        .map(|sz| (sz * 8) as u32)
-                        .unwrap_or(64);
-                    if bit_size <= 1 {
-                        self.locals.set(destination_local, v);
-                    } else {
-                        let result =
-                            self.builder
-                                .bit_reverse(v.into(), bit_size, Origin::synthetic());
-                        self.locals.set(destination_local, result.raw());
-                    }
-                }
-                true
-            }
-
-            // rotate_left / rotate_right: bitwise rotation.
-            "rotate_left" | "rotate_right" => {
-                if ir_args.len() >= 2 {
-                    let x = ir_args[0];
-                    let n = ir_args[1];
-                    let bits = substs
-                        .first()
-                        .and_then(|a| a.as_type())
-                        .and_then(|t| type_size(tcx, t))
-                        .map(|sz| (sz * 8) as u32)
-                        .unwrap_or(64);
-                    let result = if name == "rotate_left" {
-                        self.builder
-                            .rotate_left(x.into(), n.into(), bits, Origin::synthetic())
-                    } else {
-                        self.builder
-                            .rotate_right(x.into(), n.into(), bits, Origin::synthetic())
-                    };
-                    self.locals.set(destination_local, result.raw());
-                }
-                true
+            // Bit manipulation intrinsics (ctpop, ctlz, cttz, bswap, bitreverse, rotate).
+            "ctpop" | "ctlz" | "ctlz_nonzero" | "cttz" | "cttz_nonzero" | "bswap"
+            | "bitreverse" | "rotate_left" | "rotate_right"
+                if let Some(result) =
+                    self.translate_bit_intrinsic(name, substs, ir_args, destination_local) =>
+            {
+                result
             }
 
             // is_val_statically_known: always false in a non-optimizing backend.
@@ -666,835 +461,56 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             }
 
             // arith_offset<T>(ptr, offset) → ptr + offset * sizeof(T)
-            "arith_offset" => {
-                if ir_args.len() >= 2 {
-                    let ptr = self.coerce_to_ptr(ir_args[0]);
-                    let offset = ir_args[1];
-                    let elem_size = substs
-                        .first()
-                        .and_then(|a| a.as_type())
-                        .and_then(|t| type_size(tcx, t))
-                        .unwrap_or(1);
-                    let byte_offset = if elem_size == 1 {
-                        offset
-                    } else {
-                        let sz = self.builder.iconst(
-                            elem_size as i64,
-                            64,
-                            IntSignedness::DontCare,
-                            Origin::synthetic(),
-                        );
-                        self.builder
-                            .mul(offset.into(), sz.into(), I64, Origin::synthetic())
-                            .raw()
-                    };
-                    let result =
-                        self.builder
-                            .ptradd(ptr.into(), byte_offset.into(), 0, Origin::synthetic());
-                    self.locals.set(destination_local, result.raw());
-                }
-                true
+            // Arithmetic intrinsics (saturating, unchecked, offset, carrying_mul, exact_div, funnel shift).
+            "arith_offset"
+            | "ptr_offset_from_unsigned"
+            | "ptr_offset_from"
+            | "saturating_add"
+            | "saturating_sub"
+            | "abort"
+            | "catch_unwind"
+            | "r#try"
+            | "try"
+            | "unchecked_add"
+            | "unchecked_sub"
+            | "unchecked_mul"
+            | "carrying_mul_add"
+            | "exact_div"
+            | "unchecked_shl"
+            | "unchecked_shr"
+            | "unchecked_funnel_shl"
+            | "unchecked_funnel_shr"
+                if let Some(result) = self.translate_arithmetic_intrinsic(
+                    name,
+                    substs,
+                    ir_args,
+                    destination_local,
+                ) =>
+            {
+                result
             }
-
-            // ptr_offset_from<T>(ptr1, ptr2) → (ptr1 - ptr2) / sizeof(T) (signed)
-            // ptr_offset_from_unsigned<T>(ptr1, ptr2) → (ptr1 - ptr2) / sizeof(T) (unsigned)
-            "ptr_offset_from_unsigned" | "ptr_offset_from" => {
-                if ir_args.len() >= 2 {
-                    let is_signed = name == "ptr_offset_from";
-                    let ptr1 = self.coerce_to_ptr(ir_args[0]);
-                    let ptr2 = self.coerce_to_ptr(ir_args[1]);
-                    let diff =
-                        self.builder
-                            .ptrdiff(ptr1.into(), ptr2.into(), 64, Origin::synthetic());
-                    let elem_size = substs
-                        .first()
-                        .and_then(|a| a.as_type())
-                        .and_then(|t| type_size(tcx, t))
-                        .unwrap_or(1);
-                    let result = if elem_size <= 1 {
-                        diff
-                    } else {
-                        let div_ann = IntAnnotation {
-                            bit_width: 64,
-                            signedness: if is_signed {
-                                IntSignedness::Signed
-                            } else {
-                                IntSignedness::Unsigned
-                            },
-                        };
-                        let sz = self.builder.iconst(
-                            elem_size as i64,
-                            64,
-                            IntSignedness::DontCare,
-                            Origin::synthetic(),
-                        );
-                        self.builder
-                            .div(diff.into(), sz.into(), div_ann, Origin::synthetic())
-                    };
-                    self.locals.set(destination_local, result.raw());
-                }
-                true
-            }
-
-            // saturating_add<T>(a, b): add with saturation at max value.
-            "saturating_add" => {
-                if ir_args.len() >= 2 {
-                    let ty = substs.first().and_then(|a| a.as_type());
-                    let bits = ty
-                        .and_then(|t| type_size(tcx, t))
-                        .map(|sz| (sz * 8) as u32)
-                        .unwrap_or(64);
-                    let is_signed =
-                        ty.is_some_and(|t| matches!(t.kind(), rustc_middle::ty::Int(_)));
-                    let result = if is_signed {
-                        self.builder.signed_saturating_add(
-                            ir_args[0].into(),
-                            ir_args[1].into(),
-                            bits,
-                            Origin::synthetic(),
-                        )
-                    } else {
-                        self.builder.saturating_add(
-                            ir_args[0].into(),
-                            ir_args[1].into(),
-                            bits,
-                            Origin::synthetic(),
-                        )
-                    };
-                    self.locals.set(destination_local, result.raw());
-                }
-                true
-            }
-
-            // saturating_sub<T>(a, b): subtract with saturation at zero.
-            "saturating_sub" => {
-                if ir_args.len() >= 2 {
-                    let ty = substs.first().and_then(|a| a.as_type());
-                    let bits = ty
-                        .and_then(|t| type_size(tcx, t))
-                        .map(|sz| (sz * 8) as u32)
-                        .unwrap_or(64);
-                    let is_signed =
-                        ty.is_some_and(|t| matches!(t.kind(), rustc_middle::ty::Int(_)));
-                    let result = if is_signed {
-                        self.builder.signed_saturating_sub(
-                            ir_args[0].into(),
-                            ir_args[1].into(),
-                            bits,
-                            Origin::synthetic(),
-                        )
-                    } else {
-                        self.builder.saturating_sub(
-                            ir_args[0].into(),
-                            ir_args[1].into(),
-                            bits,
-                            Origin::synthetic(),
-                        )
-                    };
-                    self.locals.set(destination_local, result.raw());
-                }
-                true
-            }
-
-            // abort: call libc abort().
-            "abort" => {
-                let sym_id = self.symbols.intern("abort");
-                let callee = self.builder.symbol_addr(sym_id, Origin::synthetic());
-                self.builder.call(
-                    callee.into(),
-                    vec![],
-                    Type::Unit,
-                    current_mem.into(),
-                    None,
-                    Origin::synthetic(),
-                );
-                true
-            }
-
-            // try intrinsic: used by catch_unwind / panicking::try.
-            // Lowers to a call to __rust_try(try_fn, data, catch_fn) -> i32.
-            "catch_unwind" | "r#try" | "try" => {
-                if ir_args.len() >= 3 {
-                    let sym_id = self.symbols.intern("__rust_try");
-                    let callee = self.builder.symbol_addr(sym_id, Origin::synthetic());
-                    let (mem_out, data) = self.builder.call(
-                        callee.into(),
-                        vec![ir_args[0].into(), ir_args[1].into(), ir_args[2].into()],
-                        Type::Int,
-                        current_mem.into(),
-                        int_annotation_for_bytes(4),
-                        Origin::synthetic(),
-                    );
-                    self.current_mem = mem_out.raw();
-                    if let Some(result) = data {
-                        self.locals.set(destination_local, result);
-                    }
-                }
-                true
-            }
-
-            // unchecked arithmetic: same as wrapping ops (no overflow check).
-            "unchecked_add" => {
-                if ir_args.len() >= 2 {
-                    let result = self.builder.add(
-                        ir_args[0].into(),
-                        ir_args[1].into(),
-                        I64,
-                        Origin::synthetic(),
-                    );
-                    self.locals.set(destination_local, result.raw());
-                }
-                true
-            }
-            "unchecked_sub" => {
-                if ir_args.len() >= 2 {
-                    let result = self.builder.sub(
-                        ir_args[0].into(),
-                        ir_args[1].into(),
-                        I64,
-                        Origin::synthetic(),
-                    );
-                    self.locals.set(destination_local, result.raw());
-                }
-                true
-            }
-            "unchecked_mul" => {
-                if ir_args.len() >= 2 {
-                    let result = self.builder.mul(
-                        ir_args[0].into(),
-                        ir_args[1].into(),
-                        I64,
-                        Origin::synthetic(),
-                    );
-                    self.locals.set(destination_local, result.raw());
-                }
-                true
-            }
-            // carrying_mul_add(a, b, carry, add) -> (lo, hi)
-            // Computes a*b + carry + add as a widened result.
-            "carrying_mul_add" => {
-                if ir_args.len() >= 4 {
-                    let elem_ty = substs.first().and_then(|a| a.as_type());
-                    let elem_bytes = elem_ty.and_then(|t| type_size(tcx, t)).unwrap_or(8) as u32;
-                    let is_signed = elem_ty.is_some_and(|t| is_signed_int(t));
-                    let narrow_bits = elem_bytes * 8;
-
-                    if narrow_bits == 128 {
-                        // 128-bit: compute 256-bit product using 64-bit partial products
-                        self.emit_carrying_mul_add_128(ir_args, destination_local, is_signed);
-                    } else {
-                        let wide_bits = elem_bytes * 8 * 2;
-                        let wide_ann = IntAnnotation {
-                            bit_width: wide_bits,
-                            signedness: if is_signed {
-                                IntSignedness::Signed
-                            } else {
-                                IntSignedness::Unsigned
-                            },
-                        };
-
-                        let a_wide = if is_signed {
-                            self.builder
-                                .sext(ir_args[0].into(), wide_bits, Origin::synthetic())
-                        } else {
-                            self.builder
-                                .zext(ir_args[0].into(), wide_bits, Origin::synthetic())
-                        };
-                        let b_wide = if is_signed {
-                            self.builder
-                                .sext(ir_args[1].into(), wide_bits, Origin::synthetic())
-                        } else {
-                            self.builder
-                                .zext(ir_args[1].into(), wide_bits, Origin::synthetic())
-                        };
-                        let product = self.builder.mul(
-                            a_wide.into(),
-                            b_wide.into(),
-                            wide_ann,
-                            Origin::synthetic(),
-                        );
-
-                        let carry_wide = if is_signed {
-                            self.builder
-                                .sext(ir_args[2].into(), wide_bits, Origin::synthetic())
-                        } else {
-                            self.builder
-                                .zext(ir_args[2].into(), wide_bits, Origin::synthetic())
-                        };
-                        let add_wide = if is_signed {
-                            self.builder
-                                .sext(ir_args[3].into(), wide_bits, Origin::synthetic())
-                        } else {
-                            self.builder
-                                .zext(ir_args[3].into(), wide_bits, Origin::synthetic())
-                        };
-                        let sum1 = self.builder.add(
-                            product.into(),
-                            carry_wide.into(),
-                            wide_ann,
-                            Origin::synthetic(),
-                        );
-                        let full = self.builder.add(
-                            sum1.into(),
-                            add_wide.into(),
-                            wide_ann,
-                            Origin::synthetic(),
-                        );
-
-                        let shift_amt = self.builder.iconst(
-                            narrow_bits as i64,
-                            narrow_bits,
-                            IntSignedness::Unsigned,
-                            Origin::synthetic(),
-                        );
-                        let shift_wide =
-                            self.builder
-                                .zext(shift_amt.into(), wide_bits, Origin::synthetic());
-                        // For signed types use arithmetic right shift to
-                        // preserve the sign of the high half.
-                        let shift_ann = IntAnnotation {
-                            bit_width: wide_bits,
-                            signedness: if is_signed {
-                                IntSignedness::Signed
-                            } else {
-                                IntSignedness::Unsigned
-                            },
-                        };
-                        let hi_wide = self.builder.shr(
-                            full.into(),
-                            shift_wide.into(),
-                            shift_ann,
-                            Origin::synthetic(),
-                        );
-
-                        // Store full result (lo|hi) into a stack slot.
-                        // The lower `elem_bytes` of `full` is lo, the lower
-                        // `elem_bytes` of `hi_wide` is hi.
-                        let slot = self
-                            .builder
-                            .stack_slot(elem_bytes * 2, 0, Origin::synthetic());
-                        self.current_mem = self
-                            .builder
-                            .store(
-                                full.raw().into(),
-                                slot.into(),
-                                elem_bytes,
-                                self.current_mem.into(),
-                                Origin::synthetic(),
-                            )
-                            .raw();
-                        let hi_offset = self.builder.iconst(
-                            elem_bytes as i64,
-                            64,
-                            IntSignedness::Unsigned,
-                            Origin::synthetic(),
-                        );
-                        let hi_addr = self.builder.ptradd(
-                            slot.into(),
-                            hi_offset.into(),
-                            0,
-                            Origin::synthetic(),
-                        );
-                        self.current_mem = self
-                            .builder
-                            .store(
-                                hi_wide.raw().into(),
-                                hi_addr.raw().into(),
-                                elem_bytes,
-                                self.current_mem.into(),
-                                Origin::synthetic(),
-                            )
-                            .raw();
-                        self.locals.set(destination_local, slot);
-                        self.stack_locals.mark(destination_local);
-                    }
-                }
-                true
-            }
-            // exact_div: division where the remainder is guaranteed to be zero.
-            "exact_div" => {
-                if ir_args.len() >= 2 {
-                    let ty = substs.first().and_then(|a| a.as_type());
-                    let signed = ty.map(|t| is_signed_int(t)).unwrap_or(false);
-                    let ann = ty
-                        .and_then(|t| type_size(tcx, t))
-                        .map(|sz| {
-                            let bits = (sz as u32) * 8;
-                            IntAnnotation {
-                                bit_width: bits,
-                                signedness: if signed {
-                                    IntSignedness::Signed
-                                } else {
-                                    IntSignedness::Unsigned
-                                },
-                            }
-                        })
-                        .unwrap_or(I64);
-                    // Annotate operands so legalization picks the correct
-                    // library call (signed vs unsigned) for 128-bit types.
-                    let full_ann = Annotation::Int(ann);
-                    let a_op = tuffy_ir::instruction::Operand::annotated(ir_args[0], full_ann);
-                    let b_op = tuffy_ir::instruction::Operand::annotated(ir_args[1], full_ann);
-                    let result =
-                        self.builder
-                            .div(a_op.into(), b_op.into(), ann, Origin::synthetic());
-                    self.locals.set(destination_local, result.raw());
-                }
-                true
-            }
-            "unchecked_shl" => {
-                if ir_args.len() >= 2 {
-                    let ann = substs
-                        .first()
-                        .and_then(|a| a.as_type())
-                        .and_then(|t| type_size(tcx, t))
-                        .map(|sz| int_ann_for_bytes(sz as u32))
-                        .unwrap_or_else(|| int_ann_for_bytes(8));
-                    let result = self.builder.shl(
-                        ir_args[0].into(),
-                        ir_args[1].into(),
-                        ann,
-                        Origin::synthetic(),
-                    );
-                    self.locals.set(destination_local, result.raw());
-                }
-                true
-            }
-            "unchecked_shr" => {
-                if ir_args.len() >= 2 {
-                    let ann = substs
-                        .first()
-                        .and_then(|a| a.as_type())
-                        .and_then(|t| type_size(tcx, t))
-                        .map(|sz| int_ann_for_bytes(sz as u32))
-                        .unwrap_or_else(|| int_ann_for_bytes(8));
-                    let result = self.builder.shr(
-                        ir_args[0].into(),
-                        ir_args[1].into(),
-                        ann,
-                        Origin::synthetic(),
-                    );
-                    self.locals.set(destination_local, result.raw());
-                }
-                true
-            }
-
-            // Funnel shifts: fshl(a, b, c) = (a << c) | (b >> (bits - c))
-            //                fshr(a, b, c) = (a << (bits - c)) | (b >> c)
-            // For sub-64-bit types, use a combined 64-bit value to avoid
-            // x86 shift masking issues (shr r32, 32 is a no-op on x86).
-            "unchecked_funnel_shl" | "unchecked_funnel_shr" => {
-                if ir_args.len() >= 3 {
-                    let a = ir_args[0];
-                    let b = ir_args[1];
-                    let c = ir_args[2];
-                    let ty = substs.first().and_then(|arg| arg.as_type());
-                    let bits = ty
-                        .and_then(|t| type_size(tcx, t))
-                        .map(|sz| (sz * 8) as u32)
-                        .unwrap_or(64);
-
-                    if bits < 64 {
-                        // Sub-64-bit: pack into a 64-bit combined value.
-                        // fshl(a,b,c): combined = (a << bits) | (b & mask)
-                        //              result = (combined >> (bits - c)) & mask
-                        // fshr(a,b,c): combined = (a << bits) | (b & mask)
-                        //              result = (combined >> c) & mask
-                        let mask_val = self.builder.iconst(
-                            (1i64 << bits) - 1,
-                            64,
-                            IntSignedness::Unsigned,
-                            Origin::synthetic(),
-                        );
-                        let b_masked =
-                            self.builder
-                                .and(b.into(), mask_val.into(), I64, Origin::synthetic());
-                        let bits_val = self.builder.iconst(
-                            bits as i64,
-                            64,
-                            IntSignedness::Unsigned,
-                            Origin::synthetic(),
-                        );
-                        let a_shifted =
-                            self.builder
-                                .shl(a.into(), bits_val.into(), I64, Origin::synthetic());
-                        let combined = self.builder.or(
-                            a_shifted.into(),
-                            b_masked.into(),
-                            I64,
-                            Origin::synthetic(),
-                        );
-                        let shift_amt: tuffy_ir::typed::IntOperand =
-                            if name == "unchecked_funnel_shl" {
-                                self.builder
-                                    .sub(bits_val.into(), c.into(), I64, Origin::synthetic())
-                                    .into()
-                            } else {
-                                c.into()
-                            };
-                        let shifted =
-                            self.builder
-                                .shr(combined.into(), shift_amt, I64, Origin::synthetic());
-                        let result = self.builder.and(
-                            shifted.into(),
-                            mask_val.into(),
-                            I64,
-                            Origin::synthetic(),
-                        );
-                        self.locals.set(destination_local, result.raw());
-                    } else if bits == 64 {
-                        let int_ann = IntAnnotation {
-                            bit_width: 64,
-                            signedness: IntSignedness::Unsigned,
-                        };
-                        let bits_val = self.builder.iconst(
-                            64,
-                            64,
-                            IntSignedness::DontCare,
-                            Origin::synthetic(),
-                        );
-                        let complement =
-                            self.builder
-                                .sub(bits_val.into(), c.into(), I64, Origin::synthetic());
-                        let zero = self.builder.iconst(
-                            0,
-                            64,
-                            IntSignedness::Unsigned,
-                            Origin::synthetic(),
-                        );
-                        let (hi, lo, is_shl) = if name == "unchecked_funnel_shl" {
-                            (
-                                self.builder
-                                    .shl(a.into(), c.into(), int_ann, Origin::synthetic()),
-                                self.builder.shr(
-                                    b.into(),
-                                    complement.into(),
-                                    int_ann,
-                                    Origin::synthetic(),
-                                ),
-                                true,
-                            )
-                        } else {
-                            (
-                                self.builder.shl(
-                                    a.into(),
-                                    complement.into(),
-                                    int_ann,
-                                    Origin::synthetic(),
-                                ),
-                                self.builder
-                                    .shr(b.into(), c.into(), int_ann, Origin::synthetic()),
-                                false,
-                            )
-                        };
-                        let c_is_zero = self.builder.icmp(
-                            tuffy_ir::instruction::ICmpOp::Eq,
-                            c.into(),
-                            zero.into(),
-                            Origin::synthetic(),
-                        );
-                        let ann64 = Some(Annotation::Int(I64));
-                        let (final_hi, final_lo) = if is_shl {
-                            let lo_fixed = self.builder.select(
-                                c_is_zero.into(),
-                                zero.into(),
-                                lo.raw().into(),
-                                Type::Int,
-                                ann64,
-                                Origin::synthetic(),
-                            );
-                            (hi.raw(), lo_fixed)
-                        } else {
-                            let hi_fixed = self.builder.select(
-                                c_is_zero.into(),
-                                zero.into(),
-                                hi.raw().into(),
-                                Type::Int,
-                                ann64,
-                                Origin::synthetic(),
-                            );
-                            (hi_fixed, lo.raw())
-                        };
-                        let result = self.builder.or(
-                            final_hi.into(),
-                            final_lo.into(),
-                            I64,
-                            Origin::synthetic(),
-                        );
-                        self.locals.set(destination_local, result.raw());
-                    } else {
-                        // 128-bit funnel shift: use 128-bit IR ops, store
-                        // result in a stack slot.
-                        let int_ann = IntAnnotation {
-                            bit_width: 128,
-                            signedness: IntSignedness::Unsigned,
-                        };
-                        let bits_val = self.builder.iconst(
-                            128,
-                            64,
-                            IntSignedness::DontCare,
-                            Origin::synthetic(),
-                        );
-                        let complement =
-                            self.builder
-                                .sub(bits_val.into(), c.into(), I64, Origin::synthetic());
-                        let zero = self.builder.iconst(
-                            0,
-                            64,
-                            IntSignedness::Unsigned,
-                            Origin::synthetic(),
-                        );
-                        let (hi, lo, is_shl) = if name == "unchecked_funnel_shl" {
-                            (
-                                self.builder
-                                    .shl(a.into(), c.into(), int_ann, Origin::synthetic()),
-                                self.builder.shr(
-                                    b.into(),
-                                    complement.into(),
-                                    int_ann,
-                                    Origin::synthetic(),
-                                ),
-                                true,
-                            )
-                        } else {
-                            (
-                                self.builder.shl(
-                                    a.into(),
-                                    complement.into(),
-                                    int_ann,
-                                    Origin::synthetic(),
-                                ),
-                                self.builder
-                                    .shr(b.into(), c.into(), int_ann, Origin::synthetic()),
-                                false,
-                            )
-                        };
-                        let c_is_zero = self.builder.icmp(
-                            tuffy_ir::instruction::ICmpOp::Eq,
-                            c.into(),
-                            zero.into(),
-                            Origin::synthetic(),
-                        );
-                        let ann128 = Some(Annotation::Int(int_ann));
-                        let (final_hi, final_lo) = if is_shl {
-                            let lo_fixed = self.builder.select(
-                                c_is_zero.into(),
-                                zero.into(),
-                                lo.raw().into(),
-                                Type::Int,
-                                ann128,
-                                Origin::synthetic(),
-                            );
-                            (hi.raw(), lo_fixed)
-                        } else {
-                            let hi_fixed = self.builder.select(
-                                c_is_zero.into(),
-                                zero.into(),
-                                hi.raw().into(),
-                                Type::Int,
-                                ann128,
-                                Origin::synthetic(),
-                            );
-                            (hi_fixed, lo.raw())
-                        };
-                        let result = self.builder.or(
-                            final_hi.into(),
-                            final_lo.into(),
-                            int_ann,
-                            Origin::synthetic(),
-                        );
-                        let slot = self.builder.stack_slot(16, 0, Origin::synthetic());
-                        self.current_mem = self
-                            .builder
-                            .store(
-                                result.raw().into(),
-                                slot.into(),
-                                16,
-                                self.current_mem.into(),
-                                Origin::synthetic(),
-                            )
-                            .raw();
-                        self.locals.set(destination_local, slot);
-                        self.stack_locals.mark(destination_local);
-                    }
-                }
-                true
-            }
-
-            // Algebraic float intrinsics: same as regular ops but compiler may reassociate.
-            "fadd_algebraic" | "fsub_algebraic" | "fmul_algebraic" | "fdiv_algebraic"
-            | "frem_algebraic" => {
-                let a = ir_args[0];
-                let b = ir_args[1];
-                let ty = self
-                    .builder
-                    .value_type(a)
-                    .cloned()
-                    .unwrap_or(Type::Float(FloatType::F64));
-                let flags = FpRewriteFlags {
-                    reassoc: true,
-                    contract: true,
-                };
-                let o = Origin::synthetic();
-                let result = match name {
-                    "fadd_algebraic" => self.builder.fadd(a.into(), b.into(), flags, ty, o),
-                    "fsub_algebraic" => self.builder.fsub(a.into(), b.into(), flags, ty, o),
-                    "fmul_algebraic" => self.builder.fmul(a.into(), b.into(), flags, ty, o),
-                    "fdiv_algebraic" => self.builder.fdiv(a.into(), b.into(), flags, ty, o),
-                    "frem_algebraic" => self.builder.frem(a.into(), b.into(), flags, ty, o),
-                    _ => unreachable!(),
-                };
-                self.locals.set(destination_local, result.raw());
-                true
-            }
-
-            // Float min/max intrinsics.
-            // minnumf32/minnumf64: legacy IEEE 754-2008 minNum.
-            // minimumf32/minimumf64: IEEE 754-2019 minimum (NaN-propagating, -0 < +0).
-            "minimumf32" | "minimumf64" => {
-                let a = ir_args[0];
-                let b = ir_args[1];
-                let ty = self
-                    .builder
-                    .value_type(a)
-                    .cloned()
-                    .unwrap_or(Type::Float(FloatType::F64));
-                let o = || Origin::synthetic();
-                let int_bits = match &ty {
-                    Type::Float(FloatType::F32) => 32u32,
-                    _ => 64u32,
-                };
-                let iann = IntAnnotation {
-                    bit_width: int_bits,
-                    signedness: IntSignedness::Unsigned,
-                };
-                let int_ann = Some(Annotation::Int(iann));
-                let fp_flags = tuffy_ir::types::FpRewriteFlags {
-                    reassoc: false,
-                    contract: false,
-                };
-                // NaN check
-                let a_nan = self.builder.fcmp(FCmpOp::Uno, a.into(), a.into(), o());
-                let b_nan = self.builder.fcmp(FCmpOp::Uno, b.into(), b.into(), o());
-                let either_nan = self.builder.bor(a_nan.into(), b_nan.into(), o());
-                let nan_val = self
-                    .builder
-                    .fadd(a.into(), b.into(), fp_flags, ty.clone(), o());
-                // Ordered comparison
-                let a_lt = self.builder.fcmp(FCmpOp::OLt, a.into(), b.into(), o());
-                let a_gt = self.builder.fcmp(FCmpOp::OGt, a.into(), b.into(), o());
-                // Tie-break for ±0: minimum → pick -0 → OR of bit patterns
-                let a_bits = self.builder.bitcast(a.into(), Type::Int, int_ann, o());
-                let b_bits = self.builder.bitcast(b.into(), Type::Int, int_ann, o());
-                let or_bits = self.builder.or(a_bits.into(), b_bits.into(), iann, o());
-                let tie = self
-                    .builder
-                    .bitcast(or_bits.raw().into(), ty.clone(), None, o());
-                let r1 =
-                    self.builder
-                        .select(a_gt.into(), b.into(), tie.into(), ty.clone(), None, o());
-                let r2 =
-                    self.builder
-                        .select(a_lt.into(), a.into(), r1.into(), ty.clone(), None, o());
-                let result = self.builder.select(
-                    either_nan.into(),
-                    nan_val.raw().into(),
-                    r2.into(),
-                    ty,
-                    None,
-                    o(),
-                );
-                self.locals.set(destination_local, result);
-                true
-            }
-            // minnumf32/minnumf64: legacy IEEE 754-2008 minNum (NaN-suppressing).
-            // minimum_number_nsz: like minNum (no signed zero → ±0 equal).
-            "minnumf32" | "minnumf64" | "minimum_number_nsz_f32" | "minimum_number_nsz_f64" => {
-                let a = ir_args[0];
-                let b = ir_args[1];
-                let ty = self
-                    .builder
-                    .value_type(a)
-                    .cloned()
-                    .unwrap_or(Type::Float(FloatType::F64));
-                let result = self
-                    .builder
-                    .fminnum(a.into(), b.into(), ty, Origin::synthetic());
-                self.locals.set(destination_local, result.raw());
-                true
-            }
-            // maximumf32/maximumf64: IEEE 754-2019 maximum (NaN-propagating, -0 < +0).
-            "maximumf32" | "maximumf64" => {
-                let a = ir_args[0];
-                let b = ir_args[1];
-                let ty = self
-                    .builder
-                    .value_type(a)
-                    .cloned()
-                    .unwrap_or(Type::Float(FloatType::F64));
-                let o = || Origin::synthetic();
-                let int_bits = match &ty {
-                    Type::Float(FloatType::F32) => 32u32,
-                    _ => 64u32,
-                };
-                let iann = IntAnnotation {
-                    bit_width: int_bits,
-                    signedness: IntSignedness::Unsigned,
-                };
-                let int_ann = Some(Annotation::Int(iann));
-                let fp_flags = tuffy_ir::types::FpRewriteFlags {
-                    reassoc: false,
-                    contract: false,
-                };
-                // NaN check
-                let a_nan = self.builder.fcmp(FCmpOp::Uno, a.into(), a.into(), o());
-                let b_nan = self.builder.fcmp(FCmpOp::Uno, b.into(), b.into(), o());
-                let either_nan = self.builder.bor(a_nan.into(), b_nan.into(), o());
-                let nan_val = self
-                    .builder
-                    .fadd(a.into(), b.into(), fp_flags, ty.clone(), o());
-                // Ordered comparison
-                let a_gt = self.builder.fcmp(FCmpOp::OGt, a.into(), b.into(), o());
-                let a_lt = self.builder.fcmp(FCmpOp::OLt, a.into(), b.into(), o());
-                // Tie-break for ±0: maximum → pick +0 → AND of bit patterns
-                let a_bits = self.builder.bitcast(a.into(), Type::Int, int_ann, o());
-                let b_bits = self.builder.bitcast(b.into(), Type::Int, int_ann, o());
-                let and_bits = self.builder.and(a_bits.into(), b_bits.into(), iann, o());
-                let tie = self
-                    .builder
-                    .bitcast(and_bits.raw().into(), ty.clone(), None, o());
-                let r1 =
-                    self.builder
-                        .select(a_lt.into(), b.into(), tie.into(), ty.clone(), None, o());
-                let r2 =
-                    self.builder
-                        .select(a_gt.into(), a.into(), r1.into(), ty.clone(), None, o());
-                let result = self.builder.select(
-                    either_nan.into(),
-                    nan_val.raw().into(),
-                    r2.into(),
-                    ty,
-                    None,
-                    o(),
-                );
-                self.locals.set(destination_local, result);
-                true
-            }
-            // maxnumf32/maxnumf64: legacy IEEE 754-2008 maxNum (NaN-suppressing).
-            // maximum_number_nsz: like maxNum (no signed zero → ±0 equal).
-            "maxnumf32" | "maxnumf64" | "maximum_number_nsz_f32" | "maximum_number_nsz_f64" => {
-                let a = ir_args[0];
-                let b = ir_args[1];
-                let ty = self
-                    .builder
-                    .value_type(a)
-                    .cloned()
-                    .unwrap_or(Type::Float(FloatType::F64));
-                let result = self
-                    .builder
-                    .fmaxnum(a.into(), b.into(), ty, Origin::synthetic());
-                self.locals.set(destination_local, result.raw());
-                true
+            // Float intrinsics (algebraic ops, min/max).
+            "fadd_algebraic"
+            | "fsub_algebraic"
+            | "fmul_algebraic"
+            | "fdiv_algebraic"
+            | "frem_algebraic"
+            | "minimumf32"
+            | "minimumf64"
+            | "minnumf32"
+            | "minnumf64"
+            | "minimum_number_nsz_f32"
+            | "minimum_number_nsz_f64"
+            | "maximumf32"
+            | "maximumf64"
+            | "maxnumf32"
+            | "maxnumf64"
+            | "maximum_number_nsz_f32"
+            | "maximum_number_nsz_f64"
+                if let Some(result) =
+                    self.translate_float_intrinsic(name, substs, ir_args, destination_local) =>
+            {
+                result
             }
             // ── SIMD platform intrinsics ──────────────────────────────────
             _ if name.starts_with("simd_") => self
@@ -2171,6 +1187,1087 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
             _ => None,
         }
+    }
+
+    fn translate_bit_intrinsic(
+        &mut self,
+        name: &str,
+        substs: &'tcx ty::List<ty::GenericArg<'tcx>>,
+        ir_args: &[ValueRef],
+        destination_local: mir::Local,
+    ) -> Option<bool> {
+        let tcx = self.tcx;
+
+        Some(match name {
+            "ctpop" => {
+                if let Some(&v) = ir_args.first() {
+                    let bits = substs
+                        .first()
+                        .and_then(|a| a.as_type())
+                        .and_then(|t| type_size(tcx, t))
+                        .map(|sz| (sz as u32) * 8)
+                        .unwrap_or(64);
+                    // For sub-64-bit types, mask to type width before popcount
+                    // to ignore garbage in upper register bits (e.g. after NOT).
+                    let operand = if bits < 64 {
+                        let mask_ann = IntAnnotation {
+                            bit_width: 64,
+                            signedness: IntSignedness::Unsigned,
+                        };
+                        let mask = self.builder.iconst(
+                            (1i64 << bits) - 1,
+                            64,
+                            IntSignedness::Unsigned,
+                            Origin::synthetic(),
+                        );
+                        self.builder
+                            .and(v.into(), mask.into(), mask_ann, Origin::synthetic())
+                            .raw()
+                    } else {
+                        v
+                    };
+                    let result = self
+                        .builder
+                        .count_ones(operand.into(), 64, Origin::synthetic());
+                    self.locals.set(destination_local, result.raw());
+                }
+                true
+            }
+
+            // ctlz / ctlz_nonzero: count leading zeros.
+            // Always emit a 64-bit CLZ and adjust in the frontend for sub-64-bit
+            // types, because the legalization pass only runs when the function
+            // has 128-bit values.
+            "ctlz" | "ctlz_nonzero" => {
+                if let Some(&v) = ir_args.first() {
+                    let bits = substs
+                        .first()
+                        .and_then(|a| a.as_type())
+                        .and_then(|t| type_size(tcx, t))
+                        .map(|sz| (sz * 8) as u32)
+                        .unwrap_or(64);
+                    if bits <= 64 {
+                        // For sub-64-bit types, mask the value to clear any
+                        // sign-extended upper bits. Without this, lzcnt64 on
+                        // e.g. 0xFFFFFFFFFFFFFF80 (-128i8 as u8) returns 0
+                        // instead of 56.
+                        let masked = if bits < 64 {
+                            let mask = self.builder.iconst(
+                                (1i64 << bits) - 1,
+                                64,
+                                IntSignedness::Unsigned,
+                                Origin::synthetic(),
+                            );
+                            self.builder
+                                .and(v.into(), mask.into(), I64, Origin::synthetic())
+                                .raw()
+                        } else {
+                            v
+                        };
+                        // Emit lzcnt64 and adjust for sub-64-bit types.
+                        let clz = self.builder.count_leading_zeros(
+                            masked.into(),
+                            64,
+                            64,
+                            Origin::synthetic(),
+                        );
+                        if bits < 64 {
+                            let adjust = self.builder.iconst(
+                                (64 - bits) as i64,
+                                64,
+                                IntSignedness::Unsigned,
+                                Origin::synthetic(),
+                            );
+                            let result = self.builder.sub(
+                                clz.into(),
+                                adjust.into(),
+                                I64,
+                                Origin::synthetic(),
+                            );
+                            self.locals.set(destination_local, result.raw());
+                        } else {
+                            self.locals.set(destination_local, clz.raw());
+                        }
+                    } else {
+                        // 128-bit: emit with 128-bit operand width; legalization splits it.
+                        // Result is at most 128 and fits in 64 bits, so use 64-bit result
+                        // annotation to avoid the value being marked as "wide".
+                        let result = self.builder.count_leading_zeros(
+                            v.into(),
+                            bits,
+                            64,
+                            Origin::synthetic(),
+                        );
+                        self.locals.set(destination_local, result.raw());
+                    }
+                }
+                true
+            }
+
+            // cttz / cttz_nonzero: count trailing zeros.
+            // For sub-64-bit types, set bit at position `bits` so tzcnt64
+            // stops at the type boundary (tzcnt64(0) = 64, but cttz::<u32>(0) = 32).
+            "cttz" | "cttz_nonzero" => {
+                if let Some(&v) = ir_args.first() {
+                    let bits = substs
+                        .first()
+                        .and_then(|a| a.as_type())
+                        .and_then(|t| type_size(tcx, t))
+                        .map(|sz| (sz * 8) as u32)
+                        .unwrap_or(64);
+                    if bits < 64 {
+                        // OR with (1 << bits) to cap at type width.
+                        let sentinel = self.builder.iconst(
+                            1i64 << bits,
+                            64,
+                            IntSignedness::Unsigned,
+                            Origin::synthetic(),
+                        );
+                        let capped =
+                            self.builder
+                                .or(v.into(), sentinel.into(), I64, Origin::synthetic());
+                        let result = self.builder.count_trailing_zeros(
+                            capped.into(),
+                            64,
+                            Origin::synthetic(),
+                        );
+                        self.locals.set(destination_local, result.raw());
+                    } else if bits <= 64 {
+                        let result =
+                            self.builder
+                                .count_trailing_zeros(v.into(), 64, Origin::synthetic());
+                        self.locals.set(destination_local, result.raw());
+                    } else {
+                        // 128-bit: emit with 64-bit width; legalization splits it.
+                        let result =
+                            self.builder
+                                .count_trailing_zeros(v.into(), 64, Origin::synthetic());
+                        self.locals.set(destination_local, result.raw());
+                    }
+                }
+                true
+            }
+
+            // bswap: byte-swap an integer value.
+            "bswap" => {
+                if let Some(&v) = ir_args.first() {
+                    let byte_size = substs
+                        .first()
+                        .and_then(|a| a.as_type())
+                        .and_then(|t| type_size(tcx, t))
+                        .unwrap_or(8);
+                    if byte_size <= 1 {
+                        self.locals.set(destination_local, v);
+                    } else {
+                        let result =
+                            self.builder
+                                .bswap(v.into(), byte_size as u32, Origin::synthetic());
+                        self.locals.set(destination_local, result.raw());
+                    }
+                }
+                true
+            }
+
+            // bitreverse: reverse bit order of an integer value.
+            "bitreverse" => {
+                if let Some(&v) = ir_args.first() {
+                    let bit_size = substs
+                        .first()
+                        .and_then(|a| a.as_type())
+                        .and_then(|t| type_size(tcx, t))
+                        .map(|sz| (sz * 8) as u32)
+                        .unwrap_or(64);
+                    if bit_size <= 1 {
+                        self.locals.set(destination_local, v);
+                    } else {
+                        let result =
+                            self.builder
+                                .bit_reverse(v.into(), bit_size, Origin::synthetic());
+                        self.locals.set(destination_local, result.raw());
+                    }
+                }
+                true
+            }
+
+            // rotate_left / rotate_right: bitwise rotation.
+            "rotate_left" | "rotate_right" => {
+                if ir_args.len() >= 2 {
+                    let x = ir_args[0];
+                    let n = ir_args[1];
+                    let bits = substs
+                        .first()
+                        .and_then(|a| a.as_type())
+                        .and_then(|t| type_size(tcx, t))
+                        .map(|sz| (sz * 8) as u32)
+                        .unwrap_or(64);
+                    let result = if name == "rotate_left" {
+                        self.builder
+                            .rotate_left(x.into(), n.into(), bits, Origin::synthetic())
+                    } else {
+                        self.builder
+                            .rotate_right(x.into(), n.into(), bits, Origin::synthetic())
+                    };
+                    self.locals.set(destination_local, result.raw());
+                }
+                true
+            }
+            _ => return None,
+        })
+    }
+
+    fn translate_arithmetic_intrinsic(
+        &mut self,
+        name: &str,
+        substs: &'tcx ty::List<ty::GenericArg<'tcx>>,
+        ir_args: &[ValueRef],
+        destination_local: mir::Local,
+    ) -> Option<bool> {
+        let current_mem = self.current_mem;
+        let tcx = self.tcx;
+
+        Some(match name {
+            "arith_offset" => {
+                if ir_args.len() >= 2 {
+                    let ptr = self.coerce_to_ptr(ir_args[0]);
+                    let offset = ir_args[1];
+                    let elem_size = substs
+                        .first()
+                        .and_then(|a| a.as_type())
+                        .and_then(|t| type_size(tcx, t))
+                        .unwrap_or(1);
+                    let byte_offset = if elem_size == 1 {
+                        offset
+                    } else {
+                        let sz = self.builder.iconst(
+                            elem_size as i64,
+                            64,
+                            IntSignedness::DontCare,
+                            Origin::synthetic(),
+                        );
+                        self.builder
+                            .mul(offset.into(), sz.into(), I64, Origin::synthetic())
+                            .raw()
+                    };
+                    let result =
+                        self.builder
+                            .ptradd(ptr.into(), byte_offset.into(), 0, Origin::synthetic());
+                    self.locals.set(destination_local, result.raw());
+                }
+                true
+            }
+
+            // ptr_offset_from<T>(ptr1, ptr2) → (ptr1 - ptr2) / sizeof(T) (signed)
+            // ptr_offset_from_unsigned<T>(ptr1, ptr2) → (ptr1 - ptr2) / sizeof(T) (unsigned)
+            "ptr_offset_from_unsigned" | "ptr_offset_from" => {
+                if ir_args.len() >= 2 {
+                    let is_signed = name == "ptr_offset_from";
+                    let ptr1 = self.coerce_to_ptr(ir_args[0]);
+                    let ptr2 = self.coerce_to_ptr(ir_args[1]);
+                    let diff =
+                        self.builder
+                            .ptrdiff(ptr1.into(), ptr2.into(), 64, Origin::synthetic());
+                    let elem_size = substs
+                        .first()
+                        .and_then(|a| a.as_type())
+                        .and_then(|t| type_size(tcx, t))
+                        .unwrap_or(1);
+                    let result = if elem_size <= 1 {
+                        diff
+                    } else {
+                        let div_ann = IntAnnotation {
+                            bit_width: 64,
+                            signedness: if is_signed {
+                                IntSignedness::Signed
+                            } else {
+                                IntSignedness::Unsigned
+                            },
+                        };
+                        let sz = self.builder.iconst(
+                            elem_size as i64,
+                            64,
+                            IntSignedness::DontCare,
+                            Origin::synthetic(),
+                        );
+                        self.builder
+                            .div(diff.into(), sz.into(), div_ann, Origin::synthetic())
+                    };
+                    self.locals.set(destination_local, result.raw());
+                }
+                true
+            }
+
+            // saturating_add<T>(a, b): add with saturation at max value.
+            "saturating_add" => {
+                if ir_args.len() >= 2 {
+                    let ty = substs.first().and_then(|a| a.as_type());
+                    let bits = ty
+                        .and_then(|t| type_size(tcx, t))
+                        .map(|sz| (sz * 8) as u32)
+                        .unwrap_or(64);
+                    let is_signed =
+                        ty.is_some_and(|t| matches!(t.kind(), rustc_middle::ty::Int(_)));
+                    let result = if is_signed {
+                        self.builder.signed_saturating_add(
+                            ir_args[0].into(),
+                            ir_args[1].into(),
+                            bits,
+                            Origin::synthetic(),
+                        )
+                    } else {
+                        self.builder.saturating_add(
+                            ir_args[0].into(),
+                            ir_args[1].into(),
+                            bits,
+                            Origin::synthetic(),
+                        )
+                    };
+                    self.locals.set(destination_local, result.raw());
+                }
+                true
+            }
+
+            // saturating_sub<T>(a, b): subtract with saturation at zero.
+            "saturating_sub" => {
+                if ir_args.len() >= 2 {
+                    let ty = substs.first().and_then(|a| a.as_type());
+                    let bits = ty
+                        .and_then(|t| type_size(tcx, t))
+                        .map(|sz| (sz * 8) as u32)
+                        .unwrap_or(64);
+                    let is_signed =
+                        ty.is_some_and(|t| matches!(t.kind(), rustc_middle::ty::Int(_)));
+                    let result = if is_signed {
+                        self.builder.signed_saturating_sub(
+                            ir_args[0].into(),
+                            ir_args[1].into(),
+                            bits,
+                            Origin::synthetic(),
+                        )
+                    } else {
+                        self.builder.saturating_sub(
+                            ir_args[0].into(),
+                            ir_args[1].into(),
+                            bits,
+                            Origin::synthetic(),
+                        )
+                    };
+                    self.locals.set(destination_local, result.raw());
+                }
+                true
+            }
+
+            // abort: call libc abort().
+            "abort" => {
+                let sym_id = self.symbols.intern("abort");
+                let callee = self.builder.symbol_addr(sym_id, Origin::synthetic());
+                self.builder.call(
+                    callee.into(),
+                    vec![],
+                    Type::Unit,
+                    current_mem.into(),
+                    None,
+                    Origin::synthetic(),
+                );
+                true
+            }
+
+            // try intrinsic: used by catch_unwind / panicking::try.
+            // Lowers to a call to __rust_try(try_fn, data, catch_fn) -> i32.
+            "catch_unwind" | "r#try" | "try" => {
+                if ir_args.len() >= 3 {
+                    let sym_id = self.symbols.intern("__rust_try");
+                    let callee = self.builder.symbol_addr(sym_id, Origin::synthetic());
+                    let (mem_out, data) = self.builder.call(
+                        callee.into(),
+                        vec![ir_args[0].into(), ir_args[1].into(), ir_args[2].into()],
+                        Type::Int,
+                        current_mem.into(),
+                        int_annotation_for_bytes(4),
+                        Origin::synthetic(),
+                    );
+                    self.current_mem = mem_out.raw();
+                    if let Some(result) = data {
+                        self.locals.set(destination_local, result);
+                    }
+                }
+                true
+            }
+
+            // unchecked arithmetic: same as wrapping ops (no overflow check).
+            "unchecked_add" => {
+                if ir_args.len() >= 2 {
+                    let result = self.builder.add(
+                        ir_args[0].into(),
+                        ir_args[1].into(),
+                        I64,
+                        Origin::synthetic(),
+                    );
+                    self.locals.set(destination_local, result.raw());
+                }
+                true
+            }
+            "unchecked_sub" => {
+                if ir_args.len() >= 2 {
+                    let result = self.builder.sub(
+                        ir_args[0].into(),
+                        ir_args[1].into(),
+                        I64,
+                        Origin::synthetic(),
+                    );
+                    self.locals.set(destination_local, result.raw());
+                }
+                true
+            }
+            "unchecked_mul" => {
+                if ir_args.len() >= 2 {
+                    let result = self.builder.mul(
+                        ir_args[0].into(),
+                        ir_args[1].into(),
+                        I64,
+                        Origin::synthetic(),
+                    );
+                    self.locals.set(destination_local, result.raw());
+                }
+                true
+            }
+            // carrying_mul_add(a, b, carry, add) -> (lo, hi)
+            // Computes a*b + carry + add as a widened result.
+            "carrying_mul_add" => {
+                if ir_args.len() >= 4 {
+                    let elem_ty = substs.first().and_then(|a| a.as_type());
+                    let elem_bytes = elem_ty.and_then(|t| type_size(tcx, t)).unwrap_or(8) as u32;
+                    let is_signed = elem_ty.is_some_and(|t| is_signed_int(t));
+                    let narrow_bits = elem_bytes * 8;
+
+                    if narrow_bits == 128 {
+                        // 128-bit: compute 256-bit product using 64-bit partial products
+                        self.emit_carrying_mul_add_128(ir_args, destination_local, is_signed);
+                    } else {
+                        let wide_bits = elem_bytes * 8 * 2;
+                        let wide_ann = IntAnnotation {
+                            bit_width: wide_bits,
+                            signedness: if is_signed {
+                                IntSignedness::Signed
+                            } else {
+                                IntSignedness::Unsigned
+                            },
+                        };
+
+                        let a_wide = if is_signed {
+                            self.builder
+                                .sext(ir_args[0].into(), wide_bits, Origin::synthetic())
+                        } else {
+                            self.builder
+                                .zext(ir_args[0].into(), wide_bits, Origin::synthetic())
+                        };
+                        let b_wide = if is_signed {
+                            self.builder
+                                .sext(ir_args[1].into(), wide_bits, Origin::synthetic())
+                        } else {
+                            self.builder
+                                .zext(ir_args[1].into(), wide_bits, Origin::synthetic())
+                        };
+                        let product = self.builder.mul(
+                            a_wide.into(),
+                            b_wide.into(),
+                            wide_ann,
+                            Origin::synthetic(),
+                        );
+
+                        let carry_wide = if is_signed {
+                            self.builder
+                                .sext(ir_args[2].into(), wide_bits, Origin::synthetic())
+                        } else {
+                            self.builder
+                                .zext(ir_args[2].into(), wide_bits, Origin::synthetic())
+                        };
+                        let add_wide = if is_signed {
+                            self.builder
+                                .sext(ir_args[3].into(), wide_bits, Origin::synthetic())
+                        } else {
+                            self.builder
+                                .zext(ir_args[3].into(), wide_bits, Origin::synthetic())
+                        };
+                        let sum1 = self.builder.add(
+                            product.into(),
+                            carry_wide.into(),
+                            wide_ann,
+                            Origin::synthetic(),
+                        );
+                        let full = self.builder.add(
+                            sum1.into(),
+                            add_wide.into(),
+                            wide_ann,
+                            Origin::synthetic(),
+                        );
+
+                        let shift_amt = self.builder.iconst(
+                            narrow_bits as i64,
+                            narrow_bits,
+                            IntSignedness::Unsigned,
+                            Origin::synthetic(),
+                        );
+                        let shift_wide =
+                            self.builder
+                                .zext(shift_amt.into(), wide_bits, Origin::synthetic());
+                        // For signed types use arithmetic right shift to
+                        // preserve the sign of the high half.
+                        let shift_ann = IntAnnotation {
+                            bit_width: wide_bits,
+                            signedness: if is_signed {
+                                IntSignedness::Signed
+                            } else {
+                                IntSignedness::Unsigned
+                            },
+                        };
+                        let hi_wide = self.builder.shr(
+                            full.into(),
+                            shift_wide.into(),
+                            shift_ann,
+                            Origin::synthetic(),
+                        );
+
+                        // Store full result (lo|hi) into a stack slot.
+                        // The lower `elem_bytes` of `full` is lo, the lower
+                        // `elem_bytes` of `hi_wide` is hi.
+                        let slot = self
+                            .builder
+                            .stack_slot(elem_bytes * 2, 0, Origin::synthetic());
+                        self.current_mem = self
+                            .builder
+                            .store(
+                                full.raw().into(),
+                                slot.into(),
+                                elem_bytes,
+                                self.current_mem.into(),
+                                Origin::synthetic(),
+                            )
+                            .raw();
+                        let hi_offset = self.builder.iconst(
+                            elem_bytes as i64,
+                            64,
+                            IntSignedness::Unsigned,
+                            Origin::synthetic(),
+                        );
+                        let hi_addr = self.builder.ptradd(
+                            slot.into(),
+                            hi_offset.into(),
+                            0,
+                            Origin::synthetic(),
+                        );
+                        self.current_mem = self
+                            .builder
+                            .store(
+                                hi_wide.raw().into(),
+                                hi_addr.raw().into(),
+                                elem_bytes,
+                                self.current_mem.into(),
+                                Origin::synthetic(),
+                            )
+                            .raw();
+                        self.locals.set(destination_local, slot);
+                        self.stack_locals.mark(destination_local);
+                    }
+                }
+                true
+            }
+            // exact_div: division where the remainder is guaranteed to be zero.
+            "exact_div" => {
+                if ir_args.len() >= 2 {
+                    let ty = substs.first().and_then(|a| a.as_type());
+                    let signed = ty.map(|t| is_signed_int(t)).unwrap_or(false);
+                    let ann = ty
+                        .and_then(|t| type_size(tcx, t))
+                        .map(|sz| {
+                            let bits = (sz as u32) * 8;
+                            IntAnnotation {
+                                bit_width: bits,
+                                signedness: if signed {
+                                    IntSignedness::Signed
+                                } else {
+                                    IntSignedness::Unsigned
+                                },
+                            }
+                        })
+                        .unwrap_or(I64);
+                    // Annotate operands so legalization picks the correct
+                    // library call (signed vs unsigned) for 128-bit types.
+                    let full_ann = Annotation::Int(ann);
+                    let a_op = tuffy_ir::instruction::Operand::annotated(ir_args[0], full_ann);
+                    let b_op = tuffy_ir::instruction::Operand::annotated(ir_args[1], full_ann);
+                    let result =
+                        self.builder
+                            .div(a_op.into(), b_op.into(), ann, Origin::synthetic());
+                    self.locals.set(destination_local, result.raw());
+                }
+                true
+            }
+            "unchecked_shl" => {
+                if ir_args.len() >= 2 {
+                    let ann = substs
+                        .first()
+                        .and_then(|a| a.as_type())
+                        .and_then(|t| type_size(tcx, t))
+                        .map(|sz| int_ann_for_bytes(sz as u32))
+                        .unwrap_or_else(|| int_ann_for_bytes(8));
+                    let result = self.builder.shl(
+                        ir_args[0].into(),
+                        ir_args[1].into(),
+                        ann,
+                        Origin::synthetic(),
+                    );
+                    self.locals.set(destination_local, result.raw());
+                }
+                true
+            }
+            "unchecked_shr" => {
+                if ir_args.len() >= 2 {
+                    let ann = substs
+                        .first()
+                        .and_then(|a| a.as_type())
+                        .and_then(|t| type_size(tcx, t))
+                        .map(|sz| int_ann_for_bytes(sz as u32))
+                        .unwrap_or_else(|| int_ann_for_bytes(8));
+                    let result = self.builder.shr(
+                        ir_args[0].into(),
+                        ir_args[1].into(),
+                        ann,
+                        Origin::synthetic(),
+                    );
+                    self.locals.set(destination_local, result.raw());
+                }
+                true
+            }
+
+            // Funnel shifts: fshl(a, b, c) = (a << c) | (b >> (bits - c))
+            //                fshr(a, b, c) = (a << (bits - c)) | (b >> c)
+            // For sub-64-bit types, use a combined 64-bit value to avoid
+            // x86 shift masking issues (shr r32, 32 is a no-op on x86).
+            "unchecked_funnel_shl" | "unchecked_funnel_shr" => {
+                if ir_args.len() >= 3 {
+                    let a = ir_args[0];
+                    let b = ir_args[1];
+                    let c = ir_args[2];
+                    let ty = substs.first().and_then(|arg| arg.as_type());
+                    let bits = ty
+                        .and_then(|t| type_size(tcx, t))
+                        .map(|sz| (sz * 8) as u32)
+                        .unwrap_or(64);
+
+                    if bits < 64 {
+                        // Sub-64-bit: pack into a 64-bit combined value.
+                        // fshl(a,b,c): combined = (a << bits) | (b & mask)
+                        //              result = (combined >> (bits - c)) & mask
+                        // fshr(a,b,c): combined = (a << bits) | (b & mask)
+                        //              result = (combined >> c) & mask
+                        let mask_val = self.builder.iconst(
+                            (1i64 << bits) - 1,
+                            64,
+                            IntSignedness::Unsigned,
+                            Origin::synthetic(),
+                        );
+                        let b_masked =
+                            self.builder
+                                .and(b.into(), mask_val.into(), I64, Origin::synthetic());
+                        let bits_val = self.builder.iconst(
+                            bits as i64,
+                            64,
+                            IntSignedness::Unsigned,
+                            Origin::synthetic(),
+                        );
+                        let a_shifted =
+                            self.builder
+                                .shl(a.into(), bits_val.into(), I64, Origin::synthetic());
+                        let combined = self.builder.or(
+                            a_shifted.into(),
+                            b_masked.into(),
+                            I64,
+                            Origin::synthetic(),
+                        );
+                        let shift_amt: tuffy_ir::typed::IntOperand =
+                            if name == "unchecked_funnel_shl" {
+                                self.builder
+                                    .sub(bits_val.into(), c.into(), I64, Origin::synthetic())
+                                    .into()
+                            } else {
+                                c.into()
+                            };
+                        let shifted =
+                            self.builder
+                                .shr(combined.into(), shift_amt, I64, Origin::synthetic());
+                        let result = self.builder.and(
+                            shifted.into(),
+                            mask_val.into(),
+                            I64,
+                            Origin::synthetic(),
+                        );
+                        self.locals.set(destination_local, result.raw());
+                    } else if bits == 64 {
+                        let int_ann = IntAnnotation {
+                            bit_width: 64,
+                            signedness: IntSignedness::Unsigned,
+                        };
+                        let bits_val = self.builder.iconst(
+                            64,
+                            64,
+                            IntSignedness::DontCare,
+                            Origin::synthetic(),
+                        );
+                        let complement =
+                            self.builder
+                                .sub(bits_val.into(), c.into(), I64, Origin::synthetic());
+                        let zero = self.builder.iconst(
+                            0,
+                            64,
+                            IntSignedness::Unsigned,
+                            Origin::synthetic(),
+                        );
+                        let (hi, lo, is_shl) = if name == "unchecked_funnel_shl" {
+                            (
+                                self.builder
+                                    .shl(a.into(), c.into(), int_ann, Origin::synthetic()),
+                                self.builder.shr(
+                                    b.into(),
+                                    complement.into(),
+                                    int_ann,
+                                    Origin::synthetic(),
+                                ),
+                                true,
+                            )
+                        } else {
+                            (
+                                self.builder.shl(
+                                    a.into(),
+                                    complement.into(),
+                                    int_ann,
+                                    Origin::synthetic(),
+                                ),
+                                self.builder
+                                    .shr(b.into(), c.into(), int_ann, Origin::synthetic()),
+                                false,
+                            )
+                        };
+                        let c_is_zero = self.builder.icmp(
+                            tuffy_ir::instruction::ICmpOp::Eq,
+                            c.into(),
+                            zero.into(),
+                            Origin::synthetic(),
+                        );
+                        let ann64 = Some(Annotation::Int(I64));
+                        let (final_hi, final_lo) = if is_shl {
+                            let lo_fixed = self.builder.select(
+                                c_is_zero.into(),
+                                zero.into(),
+                                lo.raw().into(),
+                                Type::Int,
+                                ann64,
+                                Origin::synthetic(),
+                            );
+                            (hi.raw(), lo_fixed)
+                        } else {
+                            let hi_fixed = self.builder.select(
+                                c_is_zero.into(),
+                                zero.into(),
+                                hi.raw().into(),
+                                Type::Int,
+                                ann64,
+                                Origin::synthetic(),
+                            );
+                            (hi_fixed, lo.raw())
+                        };
+                        let result = self.builder.or(
+                            final_hi.into(),
+                            final_lo.into(),
+                            I64,
+                            Origin::synthetic(),
+                        );
+                        self.locals.set(destination_local, result.raw());
+                    } else {
+                        // 128-bit funnel shift: use 128-bit IR ops, store
+                        // result in a stack slot.
+                        let int_ann = IntAnnotation {
+                            bit_width: 128,
+                            signedness: IntSignedness::Unsigned,
+                        };
+                        let bits_val = self.builder.iconst(
+                            128,
+                            64,
+                            IntSignedness::DontCare,
+                            Origin::synthetic(),
+                        );
+                        let complement =
+                            self.builder
+                                .sub(bits_val.into(), c.into(), I64, Origin::synthetic());
+                        let zero = self.builder.iconst(
+                            0,
+                            64,
+                            IntSignedness::Unsigned,
+                            Origin::synthetic(),
+                        );
+                        let (hi, lo, is_shl) = if name == "unchecked_funnel_shl" {
+                            (
+                                self.builder
+                                    .shl(a.into(), c.into(), int_ann, Origin::synthetic()),
+                                self.builder.shr(
+                                    b.into(),
+                                    complement.into(),
+                                    int_ann,
+                                    Origin::synthetic(),
+                                ),
+                                true,
+                            )
+                        } else {
+                            (
+                                self.builder.shl(
+                                    a.into(),
+                                    complement.into(),
+                                    int_ann,
+                                    Origin::synthetic(),
+                                ),
+                                self.builder
+                                    .shr(b.into(), c.into(), int_ann, Origin::synthetic()),
+                                false,
+                            )
+                        };
+                        let c_is_zero = self.builder.icmp(
+                            tuffy_ir::instruction::ICmpOp::Eq,
+                            c.into(),
+                            zero.into(),
+                            Origin::synthetic(),
+                        );
+                        let ann128 = Some(Annotation::Int(int_ann));
+                        let (final_hi, final_lo) = if is_shl {
+                            let lo_fixed = self.builder.select(
+                                c_is_zero.into(),
+                                zero.into(),
+                                lo.raw().into(),
+                                Type::Int,
+                                ann128,
+                                Origin::synthetic(),
+                            );
+                            (hi.raw(), lo_fixed)
+                        } else {
+                            let hi_fixed = self.builder.select(
+                                c_is_zero.into(),
+                                zero.into(),
+                                hi.raw().into(),
+                                Type::Int,
+                                ann128,
+                                Origin::synthetic(),
+                            );
+                            (hi_fixed, lo.raw())
+                        };
+                        let result = self.builder.or(
+                            final_hi.into(),
+                            final_lo.into(),
+                            int_ann,
+                            Origin::synthetic(),
+                        );
+                        let slot = self.builder.stack_slot(16, 0, Origin::synthetic());
+                        self.current_mem = self
+                            .builder
+                            .store(
+                                result.raw().into(),
+                                slot.into(),
+                                16,
+                                self.current_mem.into(),
+                                Origin::synthetic(),
+                            )
+                            .raw();
+                        self.locals.set(destination_local, slot);
+                        self.stack_locals.mark(destination_local);
+                    }
+                }
+                true
+            }
+            _ => return None,
+        })
+    }
+
+    fn translate_float_intrinsic(
+        &mut self,
+        name: &str,
+        _substs: &'tcx ty::List<ty::GenericArg<'tcx>>,
+        ir_args: &[ValueRef],
+        destination_local: mir::Local,
+    ) -> Option<bool> {
+        Some(match name {
+            "fadd_algebraic" | "fsub_algebraic" | "fmul_algebraic" | "fdiv_algebraic"
+            | "frem_algebraic" => {
+                let a = ir_args[0];
+                let b = ir_args[1];
+                let ty = self
+                    .builder
+                    .value_type(a)
+                    .cloned()
+                    .unwrap_or(Type::Float(FloatType::F64));
+                let flags = FpRewriteFlags {
+                    reassoc: true,
+                    contract: true,
+                };
+                let o = Origin::synthetic();
+                let result = match name {
+                    "fadd_algebraic" => self.builder.fadd(a.into(), b.into(), flags, ty, o),
+                    "fsub_algebraic" => self.builder.fsub(a.into(), b.into(), flags, ty, o),
+                    "fmul_algebraic" => self.builder.fmul(a.into(), b.into(), flags, ty, o),
+                    "fdiv_algebraic" => self.builder.fdiv(a.into(), b.into(), flags, ty, o),
+                    "frem_algebraic" => self.builder.frem(a.into(), b.into(), flags, ty, o),
+                    _ => unreachable!(),
+                };
+                self.locals.set(destination_local, result.raw());
+                true
+            }
+
+            // Float min/max intrinsics.
+            // minnumf32/minnumf64: legacy IEEE 754-2008 minNum.
+            // minimumf32/minimumf64: IEEE 754-2019 minimum (NaN-propagating, -0 < +0).
+            "minimumf32" | "minimumf64" => {
+                let a = ir_args[0];
+                let b = ir_args[1];
+                let ty = self
+                    .builder
+                    .value_type(a)
+                    .cloned()
+                    .unwrap_or(Type::Float(FloatType::F64));
+                let o = || Origin::synthetic();
+                let int_bits = match &ty {
+                    Type::Float(FloatType::F32) => 32u32,
+                    _ => 64u32,
+                };
+                let iann = IntAnnotation {
+                    bit_width: int_bits,
+                    signedness: IntSignedness::Unsigned,
+                };
+                let int_ann = Some(Annotation::Int(iann));
+                let fp_flags = tuffy_ir::types::FpRewriteFlags {
+                    reassoc: false,
+                    contract: false,
+                };
+                // NaN check
+                let a_nan = self.builder.fcmp(FCmpOp::Uno, a.into(), a.into(), o());
+                let b_nan = self.builder.fcmp(FCmpOp::Uno, b.into(), b.into(), o());
+                let either_nan = self.builder.bor(a_nan.into(), b_nan.into(), o());
+                let nan_val = self
+                    .builder
+                    .fadd(a.into(), b.into(), fp_flags, ty.clone(), o());
+                // Ordered comparison
+                let a_lt = self.builder.fcmp(FCmpOp::OLt, a.into(), b.into(), o());
+                let a_gt = self.builder.fcmp(FCmpOp::OGt, a.into(), b.into(), o());
+                // Tie-break for ±0: minimum → pick -0 → OR of bit patterns
+                let a_bits = self.builder.bitcast(a.into(), Type::Int, int_ann, o());
+                let b_bits = self.builder.bitcast(b.into(), Type::Int, int_ann, o());
+                let or_bits = self.builder.or(a_bits.into(), b_bits.into(), iann, o());
+                let tie = self
+                    .builder
+                    .bitcast(or_bits.raw().into(), ty.clone(), None, o());
+                let r1 =
+                    self.builder
+                        .select(a_gt.into(), b.into(), tie.into(), ty.clone(), None, o());
+                let r2 =
+                    self.builder
+                        .select(a_lt.into(), a.into(), r1.into(), ty.clone(), None, o());
+                let result = self.builder.select(
+                    either_nan.into(),
+                    nan_val.raw().into(),
+                    r2.into(),
+                    ty,
+                    None,
+                    o(),
+                );
+                self.locals.set(destination_local, result);
+                true
+            }
+            // minnumf32/minnumf64: legacy IEEE 754-2008 minNum (NaN-suppressing).
+            // minimum_number_nsz: like minNum (no signed zero → ±0 equal).
+            "minnumf32" | "minnumf64" | "minimum_number_nsz_f32" | "minimum_number_nsz_f64" => {
+                let a = ir_args[0];
+                let b = ir_args[1];
+                let ty = self
+                    .builder
+                    .value_type(a)
+                    .cloned()
+                    .unwrap_or(Type::Float(FloatType::F64));
+                let result = self
+                    .builder
+                    .fminnum(a.into(), b.into(), ty, Origin::synthetic());
+                self.locals.set(destination_local, result.raw());
+                true
+            }
+            // maximumf32/maximumf64: IEEE 754-2019 maximum (NaN-propagating, -0 < +0).
+            "maximumf32" | "maximumf64" => {
+                let a = ir_args[0];
+                let b = ir_args[1];
+                let ty = self
+                    .builder
+                    .value_type(a)
+                    .cloned()
+                    .unwrap_or(Type::Float(FloatType::F64));
+                let o = || Origin::synthetic();
+                let int_bits = match &ty {
+                    Type::Float(FloatType::F32) => 32u32,
+                    _ => 64u32,
+                };
+                let iann = IntAnnotation {
+                    bit_width: int_bits,
+                    signedness: IntSignedness::Unsigned,
+                };
+                let int_ann = Some(Annotation::Int(iann));
+                let fp_flags = tuffy_ir::types::FpRewriteFlags {
+                    reassoc: false,
+                    contract: false,
+                };
+                // NaN check
+                let a_nan = self.builder.fcmp(FCmpOp::Uno, a.into(), a.into(), o());
+                let b_nan = self.builder.fcmp(FCmpOp::Uno, b.into(), b.into(), o());
+                let either_nan = self.builder.bor(a_nan.into(), b_nan.into(), o());
+                let nan_val = self
+                    .builder
+                    .fadd(a.into(), b.into(), fp_flags, ty.clone(), o());
+                // Ordered comparison
+                let a_gt = self.builder.fcmp(FCmpOp::OGt, a.into(), b.into(), o());
+                let a_lt = self.builder.fcmp(FCmpOp::OLt, a.into(), b.into(), o());
+                // Tie-break for ±0: maximum → pick +0 → AND of bit patterns
+                let a_bits = self.builder.bitcast(a.into(), Type::Int, int_ann, o());
+                let b_bits = self.builder.bitcast(b.into(), Type::Int, int_ann, o());
+                let and_bits = self.builder.and(a_bits.into(), b_bits.into(), iann, o());
+                let tie = self
+                    .builder
+                    .bitcast(and_bits.raw().into(), ty.clone(), None, o());
+                let r1 =
+                    self.builder
+                        .select(a_lt.into(), b.into(), tie.into(), ty.clone(), None, o());
+                let r2 =
+                    self.builder
+                        .select(a_gt.into(), a.into(), r1.into(), ty.clone(), None, o());
+                let result = self.builder.select(
+                    either_nan.into(),
+                    nan_val.raw().into(),
+                    r2.into(),
+                    ty,
+                    None,
+                    o(),
+                );
+                self.locals.set(destination_local, result);
+                true
+            }
+            // maxnumf32/maxnumf64: legacy IEEE 754-2008 maxNum (NaN-suppressing).
+            // maximum_number_nsz: like maxNum (no signed zero → ±0 equal).
+            "maxnumf32" | "maxnumf64" | "maximum_number_nsz_f32" | "maximum_number_nsz_f64" => {
+                let a = ir_args[0];
+                let b = ir_args[1];
+                let ty = self
+                    .builder
+                    .value_type(a)
+                    .cloned()
+                    .unwrap_or(Type::Float(FloatType::F64));
+                let result = self
+                    .builder
+                    .fmaxnum(a.into(), b.into(), ty, Origin::synthetic());
+                self.locals.set(destination_local, result.raw());
+                true
+            }
+            _ => return None,
+        })
     }
 
     pub(super) fn detect_intrinsic(
