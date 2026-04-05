@@ -195,8 +195,17 @@ MIR statements represent actions within a basic block.
 | `Unreachable` | `unreachable` |
 | `Drop` | Call to drop glue + `br` |
 | `Assert` | `brif` + `trap` on failure |
+| `InlineAsm` | Pattern-based translation (see below) |
+| `UnwindResume` | `call _Unwind_Resume` + `unreachable` |
+| `UnwindTerminate` | `call panic_cannot_unwind` + `trap` |
 
-**Note**: `SwitchInt` (multi-way branch) is lowered to a binary decision tree using nested `brif` instructions.
+**SwitchInt**: Multi-way branch lowered to a binary decision tree using nested `brif` instructions.
+
+**InlineAsm**: Inline assembly is handled via pattern recognition, not general-purpose execution. The `select_unpredictable` pattern (`cmovnz`/`cmovne` + `cmovz`/`cmove`) is translated to `icmp` + `select`. Other patterns use identity copies or zero-initialization of outputs.
+
+**UnwindResume**: Loads the exception pointer from the landing-pad slot, calls `_Unwind_Resume` to resume stack unwinding, then emits `unreachable`.
+
+**UnwindTerminate**: Resolves and calls `core::panicking::panic_cannot_unwind`, then emits `trap` as a safety backstop.
 
 ## Type Conversions
 
@@ -205,20 +214,49 @@ MIR statements represent actions within a basic block.
 | Integer extension (signed) | `sext` |
 | Integer extension (unsigned) | `zext` |
 | Integer truncation | Annotation change |
-| Float to int | `bitcast` + annotation |
-| Int to float | `bitcast` |
+| Float to signed int | `fp_to_si` (saturating) |
+| Float to unsigned int | `fp_to_ui` (saturating) |
+| Signed int to float | `si_to_fp` |
+| Unsigned int to float | `ui_to_fp` |
+| Float to float (widen/narrow) | `fp_convert` |
 | Pointer to int | `ptrtoint` |
 | Int to pointer | `inttoptr` |
+| FnPtr to ptr | `symbol_addr` |
+| Ptr to ptr | Bitwise move |
+| Transmute | Via temporary `stack_slot` + `store`/`load` |
+
+**Float to int**: Follows Rust's saturating semantics — NaN converts to 0, out-of-range values clamp to the target type's MIN/MAX. For 128-bit targets, converts to 64-bit first then extends.
+
+**Int to float**: Narrow integers (< 64 bits) are sign/zero-extended before conversion to ensure correct results.
+
+**Transmute**: Reinterprets bit patterns via a temporary stack slot. Stores the source value, then loads it as the target type.
+
+## Aggregate Construction
+
+`Rvalue::Aggregate` constructs tuples, structs, closures, and enums.
+
+**Strategy**: Allocates a `stack_slot` with the aggregate's size, then stores each field at its computed offset via `ptradd` + `store`.
+
+- **Tuples/Structs**: Direct field-by-field storage at layout-computed offsets.
+- **Enums**: After storing variant fields, writes the discriminant via `write_enum_tag()` (a `store` to the tag field using Direct or Niche encoding).
+- **Closures/Coroutines**: Stores captured variables; initializes the state discriminant to 0.
+- **Fat pointers within aggregates**: Stores data pointer at offset 0 and metadata at offset +8.
+
+## Discriminant Reads
+
+`Rvalue::Discriminant` reads an enum's discriminant value.
+
+Three cases based on enum layout:
+
+- **Single variant** (`Variants::Single`): Returns a constant (`iconst` of the discriminant value).
+- **Direct tag** (`TagEncoding::Direct`): Loads the tag field via `ptradd` (if offset ≠ 0) + `load`.
+- **Niche encoding** (`TagEncoding::Niche`): Loads the niche field, then decodes via arithmetic (`sub` for relative index, `icmp` for range check, `select` for final discriminant). Option-like enums (1 niche variant at offset 0) use a simplified `icmp.eq` + `select`.
 
 ## Not Yet Implemented
 
 The following MIR operations are not yet translated to Tuffy IR:
 
-- **Aggregate construction**: `Rvalue::Aggregate` (tuples, structs, enums)
-- **Discriminant operations**: `Rvalue::Discriminant`, `StatementKind::SetDiscriminant`
 - **Tail calls**: `TerminatorKind::TailCall`
 - **Coroutines**: `Yield`, `CoroutineDrop`
-- **Inline assembly**: `InlineAsm`
-- **Unwind operations**: `UnwindResume`, `UnwindTerminate`
 
 These operations either require additional IR support or are Rust-specific features that don't map cleanly to a low-level IR.
