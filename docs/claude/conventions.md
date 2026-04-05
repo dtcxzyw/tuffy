@@ -18,20 +18,12 @@ Commit messages must include a body explaining what was changed and why. Do not 
 
 ## Documentation
 
-- `docs/tasks/` — task tracking documents
 - `docs/RFCs/` — design proposals and RFCs
 
-Documents are archived by year-month under their respective directories, written in Markdown. Each document must include: current status, created time, and completed time. Example path: `docs/tasks/202602/init.md`.
-
-Task documents must additionally include: title, task description, and affected modules (modules expected to be modified).
-
-When starting work on a task, update its status to `In Progress`. When the task is completed, update its status to `Completed` and fill in the completed date.
+RFCs are archived by year-month under their respective directories, written in Markdown. Each document must include: current status, created time, and completed time.
 
 Templates:
-- `docs/tasks/template.md` — task document template
 - `docs/RFCs/template.md` — RFC document template (based on Rust RFC format)
-
-To list incomplete tasks, run `docs/tasks/list.py`.
 
 When the user provides reference documents, categorize and add them to `docs/references.md`. Download a local copy to `scratch/` when possible. Each reference entry should include a brief summary of key conclusions and their relevance to tuffy.
 
@@ -64,7 +56,7 @@ For conventional build directories (e.g., Rust `target/`, Python `.venv/`, Lean 
 
 ## Code Review Mode
 
-When the user is reviewing code and providing feedback, record each piece of feedback as a task document in `docs/tasks/`. Do not modify code directly and do not enter plan mode during code review.
+When the user is reviewing code and providing feedback, do not modify code directly and do not enter plan mode during code review.
 
 ## Standard Operating Procedures
 

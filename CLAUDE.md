@@ -4,7 +4,7 @@ Guidance for AI assistants working with this repository. When the user provides 
 
 ## Project Overview
 
-Tuffy is an experimental optimizing compiler written in Rust. Short-term goals belong in `docs/tasks/`, not `README.md`.
+Tuffy is an experimental optimizing compiler written in Rust.
 
 ## Architecture
 
