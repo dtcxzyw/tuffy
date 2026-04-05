@@ -139,8 +139,7 @@ if [ $alloc_rc -ne 0 ]; then
     echo "$alloc_output" | tail -30
     echo ""
     echo "alloctests (integration): FAILED (exit code $alloc_rc)"
-    # Known failures: str::const_str_ptr, task::test_waker_will_wake_clone,
-    # task::test_local_waker_will_wake_clone — not tuffy-specific.
+    overall_rc=1
 fi
 echo ""
 
