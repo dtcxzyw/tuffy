@@ -862,6 +862,51 @@ vN = zext vA, <bits>
 Zero-extend `vA` to `bits` bits. Used during lowering to make bit widths explicit
 for instruction selection.
 
+### `fp_to_si`
+
+```
+vN = fp_to_si vA
+```
+
+Convert a floating-point value to a signed integer by truncation toward zero. The
+result carries an `:sN` annotation indicating the target bit width.
+
+### `fp_to_ui`
+
+```
+vN = fp_to_ui vA
+```
+
+Convert a floating-point value to an unsigned integer by truncation toward zero. The
+result carries a `:uN` annotation indicating the target bit width.
+
+### `si_to_fp`
+
+```
+vN = si_to_fp vA -> <float_type>
+```
+
+Convert a signed integer to a floating-point value of the specified float type.
+The integer operand is interpreted as a signed value per its annotation.
+
+### `ui_to_fp`
+
+```
+vN = ui_to_fp vA -> <float_type>
+```
+
+Convert an unsigned integer to a floating-point value of the specified float type.
+The integer operand is interpreted as an unsigned value per its annotation.
+
+### `fp_convert`
+
+```
+vN = fp_convert vA
+```
+
+Convert a floating-point value from one float type to another (widen or narrow).
+The result type is determined by the instruction's type annotation.
+
 ## Pointer Operations
 
 Pointer operations manipulate pointers with explicit provenance tracking. The formal
@@ -917,6 +962,28 @@ Create a pointer from an integer address. The resulting pointer has no valid
 provenance (wildcard provenance).
 **Semantics**: `evalIntToPtr(addr, allocId) = ptr { allocId, offset = addr }`
 
+## Aggregate Operations
+
+### `extractvalue`
+
+```
+vN = extractvalue vAgg, <index0>, <index1>, ...
+```
+
+Extract a field or element from a struct or array value at the given index path.
+The result type is the type of the addressed field/element. For example,
+`extractvalue v0, 0` extracts the first field of a struct, and `extractvalue v0, 1, 2`
+extracts a nested element.
+
+### `insertvalue`
+
+```
+vN = insertvalue vAgg, vVal, <index0>, <index1>, ...
+```
+
+Produce a new aggregate value by replacing the field/element at the given index path
+in `vAgg` with `vVal`. The result type matches the type of `vAgg`.
+
 ## Function Calls
 
 ### `symbol_addr`
@@ -933,6 +1000,16 @@ in the IR — the callee of a `call` is a value produced by `symbol_addr` rather
 than a side-channel mapping.
 
 **Semantics**: Produces a pointer to the symbol identified by `@name`.
+
+### `tls_symbol_addr`
+
+```
+vN = tls_symbol_addr @name
+```
+
+Load the thread-local address of a `#[thread_local]` static. Like `symbol_addr`,
+the `@name` refers to an entry in the module's symbol table, but the resulting
+pointer is to the thread-local instance of the symbol. The result type is `ptr`.
 
 ### `call`
 
@@ -1020,3 +1097,16 @@ trap
 Unconditionally abort execution. Used for runtime checks such as failed assertions
 (e.g., division-by-zero guards). Unlike `unreachable`, reaching a `trap` is not UB —
 it is a well-defined program abort.
+
+## Exception Handling
+
+### `landing_pad`
+
+```
+vN = landing_pad
+```
+
+Capture the exception pointer at a landing-pad entry. The unwinder deposits the
+exception object in the return-value register (`%rax` on x86-64) before transferring
+control to the landing pad. This instruction materializes that value as a `ptr` so it
+can be saved and later passed to `_Unwind_Resume`.

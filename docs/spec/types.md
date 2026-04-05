@@ -4,6 +4,11 @@ Tuffy IR has a minimal type system supporting scalar types and aggregate types (
 Aggregate types flow through the IR as single values; ABI-specific decomposition is handled by
 the backend legalize pass.
 
+## `unit`
+
+Zero-sized unit type. Represents Rust's `()`. Used as the result type for terminators
+and other instructions that do not produce a meaningful value.
+
 ## `int`
 
 Infinite precision integer. No fixed bit width, no signedness. Arithmetic on `int` is
