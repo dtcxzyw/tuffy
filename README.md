@@ -20,3 +20,5 @@ Tuffy explores several unconventional compiler design ideas:
 
 - **2026-02-08** — Project started
 - **2026-02-09** — Successfully compiled and ran "Hello, world!" via `rustc -Z codegen-backend`
+- **2026-04-02** — Compiled and tested [bitflags](https://github.com/bitflags/bitflags) (with all dependencies) using the Tuffy backend — all tests passing
+- **2026-04-05** — Passed all Rust standard library tests (coretests, alloctests, libtest) compiled with the Tuffy backend
