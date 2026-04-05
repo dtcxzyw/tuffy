@@ -12,6 +12,7 @@ mod intrinsic;
 mod operand;
 mod place;
 mod rvalue;
+mod simd;
 mod statement;
 mod terminator;
 pub(crate) mod types;
