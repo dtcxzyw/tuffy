@@ -719,17 +719,31 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 self.builder.unreachable(Origin::synthetic());
             }
             TerminatorKind::UnwindTerminate(_) => {
-                // Terminate on double-panic: call std::process::abort.
-                let abort_sym = self.symbols.intern("rust_begin_unwind");
-                let abort_addr = self.builder.symbol_addr(abort_sym, Origin::synthetic());
-                let (_, _) = self.builder.call(
-                    abort_addr.into(),
-                    vec![],
-                    Type::Unit,
-                    self.current_mem.into(),
-                    None,
-                    Origin::synthetic(),
-                );
+                // Terminate on double-panic: call core::panicking::panic_cannot_unwind.
+                let def_id = self
+                    .tcx
+                    .require_lang_item(LangItem::PanicCannotUnwind, term.source_info.span);
+                if let Some(instance) = Instance::try_resolve(
+                    self.tcx,
+                    TypingEnv::fully_monomorphized(),
+                    def_id,
+                    ty::List::empty(),
+                )
+                .ok()
+                .flatten()
+                {
+                    let sym_name = self.tcx.symbol_name(instance).name.to_string();
+                    let sym_id = self.symbols.intern(&sym_name);
+                    let callee = self.builder.symbol_addr(sym_id, Origin::synthetic()).raw();
+                    let (_, _) = self.builder.call(
+                        callee.into(),
+                        vec![],
+                        Type::Unit,
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
+                    );
+                }
                 self.builder.trap(Origin::synthetic());
             }
             _ => {
