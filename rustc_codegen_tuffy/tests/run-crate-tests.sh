@@ -1,0 +1,103 @@
+#!/bin/bash
+# Third-party crate tests for rustc_codegen_tuffy.
+# Runs: bitflags cargo test and syn cargo test (building each with the tuffy backend).
+# These are separated from run-quick-tests.sh because they are slow.
+#
+# Temporary output: scratch/rustc_codegen_tuffy_test/ (cleared before each run).
+# Abort on unset variables; propagate pipeline failures.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CRATE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$CRATE_ROOT/.." && pwd)"
+TEMP_DIR="$REPO_ROOT/scratch/rustc_codegen_tuffy_test"
+
+mkdir -p "$TEMP_DIR"
+
+overall_pass=0
+overall_fail=0
+
+# ── Build ─────────────────────────────────────────────────────────────────────
+
+if [ -n "${BACKEND:-}" ]; then
+    echo "=== Using pre-built backend ==="
+else
+    echo "=== Build ==="
+    cargo build --manifest-path "$CRATE_ROOT/Cargo.toml"
+    BACKEND="$CRATE_ROOT/target/debug/librustc_codegen_tuffy.so"
+fi
+
+if [ ! -f "$BACKEND" ]; then
+    echo "ERROR: Backend not found at $BACKEND"
+    exit 1
+fi
+
+echo "Backend: $BACKEND"
+echo ""
+
+# ── Bitflags cargo test ───────────────────────────────────────────────────────
+# Uses global RUSTFLAGS so that ALL crates — target crates, build scripts, and
+# proc-macros — are compiled with the tuffy backend.  Only the pre-built std
+# library (from the sysroot) uses LLVM.
+
+BITFLAGS_DIR="$REPO_ROOT/scratch/bitflags"
+if [ ! -d "$BITFLAGS_DIR" ]; then
+    echo "=== Cloning bitflags ==="
+    git clone --filter=blob:none https://github.com/bitflags/bitflags.git "$BITFLAGS_DIR"
+fi
+# Ensure the package has its own [workspace] so Cargo doesn't try to join
+# the parent tuffy workspace (upstream bitflags doesn't define one).
+if ! grep -q '^\[workspace\]' "$BITFLAGS_DIR/Cargo.toml"; then
+    printf '\n[workspace]\n' >> "$BITFLAGS_DIR/Cargo.toml"
+fi
+echo "=== Bitflags cargo test ==="
+
+mkdir -p "$BITFLAGS_DIR/.cargo"
+cat > "$BITFLAGS_DIR/.cargo/config.toml" <<CFGEOF
+[build]
+rustflags = ["-Z", "codegen-backend=$BACKEND"]
+CFGEOF
+
+if cargo +nightly-2026-03-28 test --manifest-path "$BITFLAGS_DIR/Cargo.toml"; then
+    overall_pass=$((overall_pass + 1))
+else
+    overall_fail=$((overall_fail + 1))
+fi
+echo ""
+
+# ── Syn cargo test ────────────────────────────────────────────────────────────
+# syn is a widely-used parser crate. Because many proc-macros depend on syn
+# from crates.io, TUFFY_SRC_DIR restricts the tuffy backend to the workspace
+# copy of syn (prevents applying tuffy to the registry copy used by proc-macros).
+
+SYN_DIR="$REPO_ROOT/scratch/syn"
+if [ ! -d "$SYN_DIR" ]; then
+    echo "=== Cloning syn ==="
+    git clone --filter=blob:none https://github.com/dtolnay/syn.git "$SYN_DIR"
+fi
+echo "=== Syn cargo test ==="
+
+WRAPPER_EXEC="$TEMP_DIR/rustc-wrapper-tuffy"
+if [ ! -f "$WRAPPER_EXEC" ]; then
+    cp "$SCRIPT_DIR/rustc-wrapper-tuffy.sh" "$WRAPPER_EXEC"
+    python3 -c "import os; os.chmod('$WRAPPER_EXEC', 0o755)"
+fi
+
+if RUSTC_WRAPPER="$WRAPPER_EXEC" \
+   TUFFY_BACKEND="$BACKEND" \
+   TUFFY_CRATE="syn" \
+   TUFFY_SRC_DIR="$SYN_DIR" \
+   cargo test --manifest-path "$SYN_DIR/Cargo.toml" --all-features; then
+    overall_pass=$((overall_pass + 1))
+else
+    overall_fail=$((overall_fail + 1))
+fi
+echo ""
+
+# ── Summary ───────────────────────────────────────────────────────────────────
+
+echo "=== Crate Tests Summary: $overall_pass sections passed, $overall_fail sections failed ==="
+if [ $overall_fail -gt 0 ]; then
+    exit 1
+fi
