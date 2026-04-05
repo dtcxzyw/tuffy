@@ -73,8 +73,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 true
             }
 
-            // assume: optimizer hint, no runtime effect. Treat as no-op.
-            "assume" => true,
+            // assume / cold_path: optimizer hints, no runtime effect. Treat as no-ops.
+            "assume" | "cold_path" => true,
 
             // disjoint_bitor: bitwise OR with the hint that operands have
             // no overlapping bits.  Semantically just OR.

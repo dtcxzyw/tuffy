@@ -73,6 +73,14 @@ pub fn translate_function<'tcx>(
     if instance.args.has_non_region_param() {
         return None;
     }
+    // Skip intrinsics that must be overridden by the backend.  These have
+    // no MIR body and `instance_mir` would ICE trying to build a shim.
+    // They are handled inline at call sites (translate_intrinsic) instead.
+    if let ty::InstanceKind::Intrinsic(def_id) = instance.def
+        && tcx.intrinsic(def_id).is_some_and(|i| i.must_be_overridden)
+    {
+        return None;
+    }
     // Skip items without MIR.  This covers:
     //  - Cross-crate non-inline functions (already compiled in the rlib)
     //  - Local extern declarations (e.g. `extern { fn panic_impl(); }` in core)

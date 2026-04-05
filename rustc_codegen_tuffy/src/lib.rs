@@ -115,6 +115,13 @@ impl CodegenBackend for TuffyCodegenBackend {
                     if Some(instance.def_id()) == tcx.lang_items().start_fn() {
                         continue;
                     }
+                    // Skip intrinsics that must be overridden — they have no
+                    // MIR body and are handled inline at call sites.
+                    if let ty::InstanceKind::Intrinsic(def_id) = instance.def
+                        && tcx.intrinsic(def_id).is_some_and(|i| i.must_be_overridden)
+                    {
+                        continue;
+                    }
                     // Skip non-local functions without MIR — they are already
                     // compiled in their rlib. Emitting a stub here would
                     // override the real implementation.
