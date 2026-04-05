@@ -16,6 +16,7 @@ mod simd;
 mod statement;
 mod terminator;
 pub(crate) mod types;
+mod wide_arith;
 
 use ctx::{
     BlockMap, FatLocalMap, LocalMap, OverflowLocalMap, StackLocalSet, TranslationCtx,
