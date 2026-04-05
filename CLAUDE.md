@@ -25,11 +25,13 @@ Match the user's language in conversation. All committed content (code, comments
 - No `static` mutable state (`AtomicU64`, `Mutex`, etc.). Session state belongs on context structs.
 - **Generated files:** Files with "DO NOT EDIT" headers must not be edited manually — modify the generator instead (e.g., `tuffy_target_x86/src/isel_gen.rs`).
 - **Component conventions:** Follow each component's `README.md`. Do not insert workarounds or special-case logic in the wrong component.
+- **Comments:** Do not add comments that the code itself explains. Only comment non-obvious logic — comments should explain *why*, not *what*. Do not delete or modify comments in code you are not otherwise changing.
 
 ## Testing Policy
 
 - Never delete or skip existing tests without explicit user authorization.
 - After fixing a bug, add a regression test. For codegen bugs: add to `rustc_codegen_tuffy/tests/codegen`, use `update-codegen-test.sh` for check lines.
+- **Bug-fix workflow:** Before fixing a bug, write tests that expose it and verify they fail. After applying the fix, verify the tests pass.
 
 ## Git Workflow
 
