@@ -6,6 +6,7 @@
 mod call;
 mod constant;
 mod ctx;
+mod discriminant;
 mod fat_ptr;
 mod intrinsic;
 mod operand;
