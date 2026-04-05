@@ -39,7 +39,7 @@ Match the user's language in conversation. All committed content (code, comments
 - Never amend commits. Always create new commits.
 - Commit logical units of work automatically — do not ask for permission.
 - Separate commits for different components. Each commit must pass `cargo test` and `cargo clippy`.
-- See [conventions.md](docs/claude/conventions.md#commit-convention) for commit message format.
+- See [conventions.md](docs/agents/conventions.md#commit-convention) for commit message format.
 
 ## Pre-commit Checks
 
@@ -70,5 +70,5 @@ Before starting a task, check `docs/SOPs/` for a matching procedure. Read releva
 
 ## Detailed References
 
-- [Build commands](docs/claude/build.md) — workspace, codegen backend, Lean
-- [Conventions](docs/claude/conventions.md) — commits, documentation, dependencies, artifacts, SOPs
+- [Build commands](docs/agents/build.md) — workspace, codegen backend, Lean
+- [Conventions](docs/agents/conventions.md) — commits, documentation, dependencies, artifacts, SOPs
