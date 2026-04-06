@@ -6606,6 +6606,50 @@ mod tests {
         (func, symbols)
     }
 
+    fn build_int_to_fp_check_func(
+        bits: u32,
+        signed: bool,
+        value: BigInt,
+        expected_bits: u128,
+    ) -> (Function, SymbolTable) {
+        let mut symbols = SymbolTable::new();
+        let name = symbols.intern("wide_int_to_fp_check");
+        let ann = IntAnnotation {
+            bit_width: bits,
+            signedness: if signed {
+                IntSignedness::Signed
+            } else {
+                IntSignedness::Unsigned
+            },
+        };
+        let mut func = Function::new(name, vec![], vec![], vec![], Some(Type::Bool), None);
+        let mut b = Builder::new(&mut func);
+        let root = b.create_region(RegionKind::Function);
+        b.enter_region(root);
+        let bb = b.create_block();
+        b.switch_to_block(bb);
+        let mem0 = b.add_block_arg(bb, Type::Mem, None);
+        let lhs = b.iconst(value, bits, ann.signedness, o());
+        let actual = if signed {
+            b.si_to_fp(
+                Operand::annotated(lhs.raw(), Annotation::Int(ann)).into(),
+                FloatType::F64,
+                o(),
+            )
+        } else {
+            b.ui_to_fp(
+                Operand::annotated(lhs.raw(), Annotation::Int(ann)).into(),
+                FloatType::F64,
+                o(),
+            )
+        };
+        let expected = b.fconst(FloatType::F64, expected_bits, o());
+        let ok = b.fcmp(FCmpOp::OEq, actual.into(), expected.into(), o());
+        b.ret(Some(ok.into()), mem0.into(), o());
+        b.exit_region();
+        (func, symbols)
+    }
+
     fn build_fp_to_int_func(bits: u32, signed: bool, float_bits: u128) -> (Function, SymbolTable) {
         let mut symbols = SymbolTable::new();
         let name = symbols.intern("wide_fp_to_int");
@@ -7023,6 +7067,36 @@ mod tests {
                 matches!(inst.op, Op::SymbolAddr(sym) if symbols.resolve(sym) == expected)
             });
             assert!(saw_helper, "expected helper symbol {expected}");
+        }
+    }
+
+    #[test]
+    fn interpret_legalized_double_width_int_to_fp_regressions() {
+        for (signed, value, expected_bits) in [
+            (
+                false,
+                BigInt::from(1u8) << 96,
+                (2f64.powi(96)).to_bits() as u128,
+            ),
+            (
+                true,
+                BigInt::from(-1) * (BigInt::from(1u8) << 120),
+                (-(2f64.powi(120))).to_bits() as u128,
+            ),
+        ] {
+            let (func, mut symbols) = build_int_to_fp_check_func(128, signed, value, expected_bits);
+            let meta = X86AbiMetadata::default();
+            let (legalized, _) =
+                legalize(&func, &meta, &X86LegalityInfo, &mut symbols).expect("legalized");
+            let mut module = Module::new("test");
+            module.symbols = symbols;
+            module.add_function(legalized);
+            let mut interp = Interpreter::new(&module, ExecMode::Strict);
+            let result = interp.run("wide_int_to_fp_check");
+            match result {
+                InterpResult::Ok(Some(Value::Bool(true))) => {}
+                other => panic!("unexpected result: {other}"),
+            }
         }
     }
 

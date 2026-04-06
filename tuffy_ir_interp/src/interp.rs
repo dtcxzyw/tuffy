@@ -9,9 +9,10 @@ use std::hash::Hasher;
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 use tuffy_ir::function::{CfgNode, Function, RegionKind};
+use tuffy_ir::instruction::FloatConst;
 use tuffy_ir::instruction::{Op, Operand};
 use tuffy_ir::module::{Module, SymbolId};
-use tuffy_ir::types::{Annotation, Type};
+use tuffy_ir::types::{Annotation, FloatType, Type};
 use tuffy_ir::value::{BlockRef, RegionRef, ValueRef};
 
 use crate::exec::{ExecResult, TerminatorAction, UbKind, UbViolation, execute_instruction};
@@ -1046,6 +1047,13 @@ impl<'a> Interpreter<'a> {
             return self.extern_fma(sym_name, &args);
         }
 
+        // compiler-rt exact-double-width int -> float helpers
+        if sym_name.starts_with("__float")
+            && let Some(result) = self.extern_int_to_fp(sym_name, &args)?
+        {
+            return Ok(Some(result));
+        }
+
         // std::io::stdio::_print / __print — format Arguments and write to stdout
         if sym_name.contains("__print") || sym_name.contains("_print") && sym_name.contains("stdio")
         {
@@ -1075,6 +1083,57 @@ impl<'a> Interpreter<'a> {
                 Ok(Some(Value::Int(num_bigint::BigInt::from(0))))
             }
         }
+    }
+
+    fn extern_int_to_fp(&self, name: &str, args: &[Value]) -> Result<Option<Value>, UbViolation> {
+        let (signed, int_bits, ft) = match name {
+            "__floattisf" => (true, 128u32, FloatType::F32),
+            "__floattidf" => (true, 128u32, FloatType::F64),
+            "__floatuntisf" => (false, 128u32, FloatType::F32),
+            "__floatuntidf" => (false, 128u32, FloatType::F64),
+            "__floatdisf" => (true, 64u32, FloatType::F32),
+            "__floatdidf" => (true, 64u32, FloatType::F64),
+            "__floatundisf" => (false, 64u32, FloatType::F32),
+            "__floatundidf" => (false, 64u32, FloatType::F64),
+            _ => return Ok(None),
+        };
+
+        if args.len() < 2 {
+            return Ok(Some(Value::Poison));
+        }
+
+        let part_bits = int_bits / 2;
+        let part_mask = (BigInt::from(1u8) << part_bits) - BigInt::from(1u8);
+        let lo = args
+            .first()
+            .and_then(|v| v.as_int())
+            .cloned()
+            .unwrap_or_else(BigInt::default);
+        let hi = args
+            .get(1)
+            .and_then(|v| v.as_int())
+            .cloned()
+            .unwrap_or_else(BigInt::default);
+        let unsigned = (&lo & &part_mask) | ((&hi & &part_mask) << part_bits);
+        let int_val = if signed {
+            let sign_bit = BigInt::from(1u8) << (int_bits - 1);
+            let modulus = BigInt::from(1u8) << int_bits;
+            if unsigned >= sign_bit {
+                unsigned - modulus
+            } else {
+                unsigned
+            }
+        } else {
+            unsigned
+        };
+
+        let f = int_val.to_f64().unwrap_or(0.0);
+        let bits = match ft {
+            FloatType::F32 => (f as f32).to_bits() as u128,
+            FloatType::F64 => f.to_bits() as u128,
+            _ => return Ok(None),
+        };
+        Ok(Some(Value::Float(FloatConst::from_bits(ft, bits))))
     }
 
     /// extern write(fd, buf, count) -> ssize_t
