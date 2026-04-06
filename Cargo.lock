@@ -355,6 +355,7 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "tuffy_ir",
+ "tuffy_ir_interp",
  "tuffy_target",
  "tuffy_target_x86",
 ]

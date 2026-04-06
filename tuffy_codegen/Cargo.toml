@@ -10,3 +10,6 @@ tuffy_target = { path = "../tuffy_target" }
 tuffy_target_x86 = { path = "../tuffy_target_x86" }
 num-bigint = "0.4"
 num-traits = "0.2"
+
+[dev-dependencies]
+tuffy_ir_interp = { path = "../tuffy_ir_interp" }
