@@ -155,16 +155,9 @@ fn int_annotation_bits(ann: Option<&Annotation>) -> Option<u32> {
     }
 }
 
-fn is_exact_double_width_int_with_signedness(
-    ann: Option<&Annotation>,
-    part_bits: u32,
-    signedness: IntSignedness,
-) -> bool {
-    matches!(
-        ann,
-        Some(Annotation::Int(ia))
-            if ia.bit_width == part_bits * 2 && ia.signedness == signedness
-    )
+fn operand_int_bits(func: &Function, op: &Operand) -> Option<u32> {
+    int_annotation_bits(op.annotation.as_ref())
+        .or_else(|| value_annotation(func, op.value).and_then(|ann| int_annotation_bits(Some(ann))))
 }
 
 fn compiler_rt_int_suffix(bits: u32) -> &'static str {
@@ -2132,32 +2125,34 @@ fn copy_inst<M: AbiMetadata + Clone>(
             .fp_to_ui(remap_op(s, &a.clone().raw()).into(), 64, o())
             .raw(),
         Op::SiToFp(a, ft) => {
-            let is_two_part_wide = s.wide.contains(&a.clone().raw().value.raw())
-                || is_exact_double_width_int_with_signedness(
-                    value_annotation(old, a.clone().raw().value),
-                    s.part_bits,
-                    IntSignedness::Signed,
-                );
-            if is_two_part_wide {
-                leg_int_to_fp_double_width(s, b, old_vref, &a.clone().raw(), *ft, true, symbols);
+            let a = a.clone().raw();
+            let src_bits = operand_int_bits(old, &a);
+            let is_wide_src =
+                s.wide.contains(&a.value.raw()) || src_bits.is_some_and(|bits| bits > s.part_bits);
+            if is_wide_src {
+                if src_bits.is_some_and(|bits| bits > s.part_bits * 2) {
+                    leg_int_to_fp_wide(old, s, b, old_vref, &a, *ft, true);
+                } else {
+                    leg_int_to_fp_double_width(s, b, old_vref, &a, *ft, true, symbols);
+                }
                 return;
             }
-            b.si_to_fp(remap_op(s, &a.clone().raw()).into(), *ft, o())
-                .raw()
+            b.si_to_fp(remap_op(s, &a).into(), *ft, o()).raw()
         }
         Op::UiToFp(a, ft) => {
-            let is_two_part_wide = s.wide.contains(&a.clone().raw().value.raw())
-                || is_exact_double_width_int_with_signedness(
-                    value_annotation(old, a.clone().raw().value),
-                    s.part_bits,
-                    IntSignedness::Unsigned,
-                );
-            if is_two_part_wide {
-                leg_int_to_fp_double_width(s, b, old_vref, &a.clone().raw(), *ft, false, symbols);
+            let a = a.clone().raw();
+            let src_bits = operand_int_bits(old, &a);
+            let is_wide_src =
+                s.wide.contains(&a.value.raw()) || src_bits.is_some_and(|bits| bits > s.part_bits);
+            if is_wide_src {
+                if src_bits.is_some_and(|bits| bits > s.part_bits * 2) {
+                    leg_int_to_fp_wide(old, s, b, old_vref, &a, *ft, false);
+                } else {
+                    leg_int_to_fp_double_width(s, b, old_vref, &a, *ft, false, symbols);
+                }
                 return;
             }
-            b.ui_to_fp(remap_op(s, &a.clone().raw()).into(), *ft, o())
-                .raw()
+            b.ui_to_fp(remap_op(s, &a).into(), *ft, o()).raw()
         }
         Op::FpConvert(a) => {
             let ft = match &inst.ty {
@@ -2659,12 +2654,37 @@ fn part_ann<M>(s: &State<M>) -> IntAnnotation {
     }
 }
 
-fn bool_to_u32<M>(
-    s: &State<M>,
-    b: &mut Builder,
-    val: tuffy_ir::typed::BoolValue,
-) -> tuffy_ir::typed::IntValue {
-    b.zext(val.raw().into(), s.limb_bits, o())
+fn bool_to_u32<M>(s: &State<M>, b: &mut Builder, val: tuffy_ir::typed::BoolValue) -> ValueRef {
+    let zero = b.iconst(0i64, s.limb_bits, IntSignedness::Unsigned, o());
+    let one = b.iconst(1i64, s.limb_bits, IntSignedness::Unsigned, o());
+    b.select(
+        val.into(),
+        one.into(),
+        zero.into(),
+        Type::Int,
+        Some(Annotation::Int(IntAnnotation {
+            bit_width: s.limb_bits,
+            signedness: IntSignedness::Unsigned,
+        })),
+        o(),
+    )
+}
+
+fn bool_to_part<M>(s: &State<M>, b: &mut Builder, val: tuffy_ir::typed::BoolValue) -> ValueRef {
+    let zero = b
+        .iconst(0i64, s.part_bits, IntSignedness::Unsigned, o())
+        .raw();
+    let one = b
+        .iconst(1i64, s.part_bits, IntSignedness::Unsigned, o())
+        .raw();
+    b.select(
+        val.into(),
+        Operand::annotated(one, Annotation::Int(part_ann(s))),
+        Operand::annotated(zero, Annotation::Int(part_ann(s))),
+        Type::Int,
+        Some(Annotation::Int(part_ann(s))),
+        o(),
+    )
 }
 
 fn add3_u32<M>(
@@ -2696,12 +2716,7 @@ fn add3_u32<M>(
     let c2 = b.icmp(ICmpOp::Lt, sum2.into(), sum1.into(), o());
     let c1 = bool_to_u32(s, b, c1);
     let c2 = bool_to_u32(s, b, c2);
-    let carry_out = b.add(
-        Operand::new(c1.raw()).into(),
-        Operand::new(c2.raw()).into(),
-        ann,
-        o(),
-    );
+    let carry_out = b.add(Operand::new(c1).into(), Operand::new(c2).into(), ann, o());
     (sum2.raw(), carry_out.raw())
 }
 
@@ -2734,12 +2749,7 @@ fn sub2_u32<M>(
     let b2 = b.icmp(ICmpOp::Gt, diff2.into(), diff1.into(), o());
     let b1 = bool_to_u32(s, b, b1);
     let b2 = bool_to_u32(s, b, b2);
-    let borrow_out = b.or(
-        Operand::new(b1.raw()).into(),
-        Operand::new(b2.raw()).into(),
-        ann,
-        o(),
-    );
+    let borrow_out = b.or(Operand::new(b1).into(), Operand::new(b2).into(), ann, o());
     (diff2.raw(), borrow_out.raw())
 }
 
@@ -4481,7 +4491,7 @@ fn leg_smul_with_overflow_wide<M>(
             overflow_acc = b
                 .or(
                     Operand::new(overflow_acc).into(),
-                    Operand::new(neq.raw()).into(),
+                    Operand::new(neq).into(),
                     limb_ann(s),
                     o(),
                 )
@@ -6044,6 +6054,370 @@ fn leg_div_rem_double_width<M: AbiMetadata + Clone>(
 }
 
 // ---------------------------------------------------------------------------
+// Wide integer to float: lower via target-derived limb rounding
+// ---------------------------------------------------------------------------
+
+fn wide_bit_length<M>(s: &State<M>, b: &mut Builder, limbs: &[ValueRef], bits: u32) -> ValueRef {
+    let widths = wide_limb_widths(s, bits);
+    let zero_part = b
+        .iconst(0i64, s.part_bits, IntSignedness::Unsigned, o())
+        .raw();
+    let zero_limb = b
+        .iconst(0i64, s.limb_bits, IntSignedness::Unsigned, o())
+        .raw();
+    let false_b = b.bconst(false, o());
+    let mut clz = zero_part;
+    let mut done = false_b;
+    for (limb, limb_bits) in limbs.iter().copied().zip(widths).rev() {
+        let limb_bits_val = b.iconst(limb_bits as i64, s.part_bits, IntSignedness::Unsigned, o());
+        let limb_zero = b.icmp(
+            ICmpOp::Eq,
+            Operand::annotated(limb, Annotation::Int(limb_ann(s))).into(),
+            Operand::annotated(zero_limb, Annotation::Int(limb_ann(s))).into(),
+            o(),
+        );
+        let limb_clz = b
+            .count_leading_zeros(
+                Operand::annotated(limb, Annotation::Int(limb_ann(s))).into(),
+                limb_bits,
+                s.part_bits,
+                o(),
+            )
+            .raw();
+        let next_zero = b
+            .add(
+                Operand::annotated(clz, Annotation::Int(part_ann(s))).into(),
+                limb_bits_val.into(),
+                part_ann(s),
+                o(),
+            )
+            .raw();
+        let next_nonzero = b
+            .add(
+                Operand::annotated(clz, Annotation::Int(part_ann(s))).into(),
+                Operand::annotated(limb_clz, Annotation::Int(part_ann(s))).into(),
+                part_ann(s),
+                o(),
+            )
+            .raw();
+        let candidate = b.select(
+            limb_zero.into(),
+            Operand::annotated(next_zero, Annotation::Int(part_ann(s))),
+            Operand::annotated(next_nonzero, Annotation::Int(part_ann(s))),
+            Type::Int,
+            Some(Annotation::Int(part_ann(s))),
+            o(),
+        );
+        clz = b.select(
+            done.into(),
+            Operand::annotated(clz, Annotation::Int(part_ann(s))),
+            Operand::annotated(candidate, Annotation::Int(part_ann(s))),
+            Type::Int,
+            Some(Annotation::Int(part_ann(s))),
+            o(),
+        );
+        let limb_nonzero = b.icmp(
+            ICmpOp::Ne,
+            Operand::annotated(limb, Annotation::Int(limb_ann(s))).into(),
+            Operand::annotated(zero_limb, Annotation::Int(limb_ann(s))).into(),
+            o(),
+        );
+        done = b.bor(done.into(), limb_nonzero.into(), o());
+    }
+    let bits_c = b.iconst(bits as i64, s.part_bits, IntSignedness::Unsigned, o());
+    b.sub(
+        bits_c.into(),
+        Operand::annotated(clz, Annotation::Int(part_ann(s))).into(),
+        part_ann(s),
+        o(),
+    )
+    .raw()
+}
+
+fn leg_int_to_fp_wide<M>(
+    old: &Function,
+    s: &mut State<M>,
+    b: &mut Builder,
+    old_vref: ValueRef,
+    a: &Operand,
+    ft: FloatType,
+    signed: bool,
+) {
+    let bits = operand_int_bits(old, a).expect("wide int-to-fp requires integer source bits");
+    let Some((src_float_bits, exp_bits, frac_bits, bias)) = fp_format_params(ft) else {
+        panic!("unsupported wide int-to-float target type: {ft:?}");
+    };
+
+    let raw_limbs = operand_limbs32(old, s, b, a, bits);
+    let value_limbs = normalize_limbs32(s, b, &raw_limbs, bits);
+    let sign = if signed {
+        u32_sign_bool(
+            s,
+            b,
+            *value_limbs
+                .last()
+                .expect("signed wide int-to-fp source limbs must not be empty"),
+        )
+    } else {
+        b.bconst(false, o())
+    };
+    let magnitude = if signed {
+        let neg = negate_limbs32(s, b, &value_limbs, bits);
+        select_limbs32(s, b, sign, &neg, &value_limbs)
+    } else {
+        value_limbs.clone()
+    };
+    let is_zero = limbs32_are_zero(s, b, &magnitude);
+    let precision = frac_bits + 1;
+
+    let bit_length = wide_bit_length(s, b, &magnitude, bits);
+    let precision_c = b.iconst(precision as i64, s.part_bits, IntSignedness::Unsigned, o());
+    let zero = b
+        .iconst(0i64, s.part_bits, IntSignedness::Unsigned, o())
+        .raw();
+    let one = b
+        .iconst(1i64, s.part_bits, IntSignedness::Unsigned, o())
+        .raw();
+
+    let needs_rounding = b.icmp(
+        ICmpOp::Gt,
+        Operand::annotated(bit_length, Annotation::Int(part_ann(s))).into(),
+        precision_c.into(),
+        o(),
+    );
+    let shift_raw = b.sub(
+        Operand::annotated(bit_length, Annotation::Int(part_ann(s))).into(),
+        precision_c.into(),
+        part_ann(s),
+        o(),
+    );
+    let shift = b.select(
+        needs_rounding.into(),
+        Operand::annotated(shift_raw.raw(), Annotation::Int(part_ann(s))),
+        Operand::annotated(zero, Annotation::Int(part_ann(s))),
+        Type::Int,
+        Some(Annotation::Int(part_ann(s))),
+        o(),
+    );
+
+    let q_limbs_raw = wide_shr_limbs(s, b, &magnitude, shift, bits, false);
+    let q_limbs = normalize_limbs32(s, b, &q_limbs_raw, bits);
+    let q_parts = limbs32_to_parts64(s, b, &q_limbs);
+    let q = q_parts[0];
+
+    let q_shifted_raw = wide_shl_limbs(s, b, &q_limbs, shift, bits);
+    let q_shifted = normalize_limbs32(s, b, &q_shifted_raw, bits);
+    let (remainder_raw, _) = sub_limbs32(s, b, &magnitude, &q_shifted);
+    let remainder = normalize_limbs32(s, b, &remainder_raw, bits);
+
+    let half_shift_raw = b.sub(
+        Operand::annotated(shift, Annotation::Int(part_ann(s))).into(),
+        Operand::annotated(one, Annotation::Int(part_ann(s))).into(),
+        part_ann(s),
+        o(),
+    );
+    let half_shift = b.select(
+        needs_rounding.into(),
+        Operand::annotated(half_shift_raw.raw(), Annotation::Int(part_ann(s))),
+        Operand::annotated(zero, Annotation::Int(part_ann(s))),
+        Type::Int,
+        Some(Annotation::Int(part_ann(s))),
+        o(),
+    );
+
+    let round_slice_raw = wide_shr_limbs(s, b, &remainder, half_shift, bits, false);
+    let round_slice = normalize_limbs32(s, b, &round_slice_raw, bits);
+    let round_slice_is_zero = limbs32_are_zero(s, b, &round_slice);
+    let round_bit = bool_not(b, round_slice_is_zero);
+    let round_bit_int = bool_to_part(s, b, round_bit);
+    let round_limb = wide_uint_from_small_value(s, b, round_bit_int, s.part_bits, bits);
+    let round_contrib_raw = wide_shl_limbs(s, b, &round_limb, half_shift, bits);
+    let round_contrib = normalize_limbs32(s, b, &round_contrib_raw, bits);
+    let (sticky_raw, _) = sub_limbs32(s, b, &remainder, &round_contrib);
+    let sticky_limbs = normalize_limbs32(s, b, &sticky_raw, bits);
+    let sticky_is_zero = limbs32_are_zero(s, b, &sticky_limbs);
+    let sticky = bool_not(b, sticky_is_zero);
+
+    let one_mask = b
+        .iconst(1i64, s.part_bits, IntSignedness::Unsigned, o())
+        .raw();
+    let q_lsb = b.and(
+        Operand::annotated(q, Annotation::Int(part_ann(s))).into(),
+        Operand::annotated(one_mask, Annotation::Int(part_ann(s))).into(),
+        part_ann(s),
+        o(),
+    );
+    let q_lsb_odd = b.icmp(
+        ICmpOp::Ne,
+        Operand::annotated(q_lsb.raw(), Annotation::Int(part_ann(s))).into(),
+        Operand::annotated(zero, Annotation::Int(part_ann(s))).into(),
+        o(),
+    );
+    let sticky_or_odd = b.bor(sticky.into(), q_lsb_odd.into(), o());
+    let round_up = b.band(round_bit.into(), sticky_or_odd.into(), o());
+    let round_up_int = bool_to_part(s, b, round_up);
+    let q_rounded = b
+        .add(
+            Operand::annotated(q, Annotation::Int(part_ann(s))).into(),
+            Operand::annotated(round_up_int, Annotation::Int(part_ann(s))).into(),
+            part_ann(s),
+            o(),
+        )
+        .raw();
+
+    let carry_value = b.iconst(
+        BigInt::from(1u8) << precision,
+        s.part_bits,
+        IntSignedness::Unsigned,
+        o(),
+    );
+    let q_overflow = b.icmp(
+        ICmpOp::Eq,
+        Operand::annotated(q_rounded, Annotation::Int(part_ann(s))).into(),
+        carry_value.into(),
+        o(),
+    );
+
+    let exponent_bias = b.iconst(bias as i64, s.part_bits, IntSignedness::Unsigned, o());
+    let exp_minus_one = b.sub(
+        Operand::annotated(bit_length, Annotation::Int(part_ann(s))).into(),
+        Operand::annotated(one, Annotation::Int(part_ann(s))).into(),
+        part_ann(s),
+        o(),
+    );
+    let q_overflow_int = bool_to_part(s, b, q_overflow);
+    let exponent_field = b
+        .add(exp_minus_one.into(), exponent_bias.into(), part_ann(s), o())
+        .raw();
+    let exponent_field = b
+        .add(
+            Operand::annotated(exponent_field, Annotation::Int(part_ann(s))).into(),
+            Operand::annotated(q_overflow_int, Annotation::Int(part_ann(s))).into(),
+            part_ann(s),
+            o(),
+        )
+        .raw();
+
+    let inf_field = b.iconst(
+        (BigInt::from(1u8) << exp_bits) - BigInt::from(1u8),
+        s.part_bits,
+        IntSignedness::Unsigned,
+        o(),
+    );
+    let exponent_overflow = b.icmp(
+        ICmpOp::Ge,
+        Operand::annotated(exponent_field, Annotation::Int(part_ann(s))).into(),
+        inf_field.into(),
+        o(),
+    );
+
+    let frac_mask = b.iconst(
+        (BigInt::from(1u8) << frac_bits) - BigInt::from(1u8),
+        s.part_bits,
+        IntSignedness::Unsigned,
+        o(),
+    );
+    let fraction = b.and(
+        Operand::annotated(q_rounded, Annotation::Int(part_ann(s))).into(),
+        frac_mask.into(),
+        part_ann(s),
+        o(),
+    );
+    let fraction = b.select(
+        q_overflow.into(),
+        Operand::annotated(zero, Annotation::Int(part_ann(s))),
+        Operand::annotated(fraction.raw(), Annotation::Int(part_ann(s))),
+        Type::Int,
+        Some(Annotation::Int(part_ann(s))),
+        o(),
+    );
+
+    let frac_shift = b.iconst(frac_bits as i64, s.part_bits, IntSignedness::Unsigned, o());
+    let exponent_bits = b
+        .shl(
+            Operand::annotated(exponent_field, Annotation::Int(part_ann(s))).into(),
+            frac_shift.into(),
+            part_ann(s),
+            o(),
+        )
+        .raw();
+    let finite_bits = b
+        .or(
+            Operand::annotated(exponent_bits, Annotation::Int(part_ann(s))).into(),
+            Operand::annotated(fraction, Annotation::Int(part_ann(s))).into(),
+            part_ann(s),
+            o(),
+        )
+        .raw();
+    let inf_bits = b
+        .shl(inf_field.into(), frac_shift.into(), part_ann(s), o())
+        .raw();
+
+    let sign_bit = b.iconst(
+        BigInt::from(1u8) << (src_float_bits - 1),
+        s.part_bits,
+        IntSignedness::Unsigned,
+        o(),
+    );
+    let sign_bits = if signed {
+        b.select(
+            sign.into(),
+            Operand::annotated(sign_bit.raw(), Annotation::Int(part_ann(s))),
+            Operand::annotated(zero, Annotation::Int(part_ann(s))),
+            Type::Int,
+            Some(Annotation::Int(part_ann(s))),
+            o(),
+        )
+    } else {
+        zero
+    };
+    let finite_signed = b
+        .or(
+            Operand::annotated(finite_bits, Annotation::Int(part_ann(s))).into(),
+            Operand::annotated(sign_bits, Annotation::Int(part_ann(s))).into(),
+            part_ann(s),
+            o(),
+        )
+        .raw();
+    let inf_signed = b
+        .or(
+            Operand::annotated(inf_bits, Annotation::Int(part_ann(s))).into(),
+            Operand::annotated(sign_bits, Annotation::Int(part_ann(s))).into(),
+            part_ann(s),
+            o(),
+        )
+        .raw();
+    let nonzero_bits = b.select(
+        exponent_overflow.into(),
+        Operand::annotated(inf_signed, Annotation::Int(part_ann(s))),
+        Operand::annotated(finite_signed, Annotation::Int(part_ann(s))),
+        Type::Int,
+        Some(Annotation::Int(part_ann(s))),
+        o(),
+    );
+    let raw_bits = b.select(
+        is_zero.into(),
+        Operand::annotated(zero, Annotation::Int(part_ann(s))),
+        Operand::annotated(nonzero_bits, Annotation::Int(part_ann(s))),
+        Type::Int,
+        Some(Annotation::Int(part_ann(s))),
+        o(),
+    );
+
+    let raw_ann = IntAnnotation {
+        bit_width: src_float_bits,
+        signedness: IntSignedness::Unsigned,
+    };
+    let out = b.bitcast(
+        Operand::annotated(raw_bits, Annotation::Int(raw_ann)),
+        Type::Float(ft),
+        None,
+        o(),
+    );
+    s.vmap.set(old_vref, Mapped::One(out));
+}
+
+// ---------------------------------------------------------------------------
 // Double-width integer to float: lower to compiler-rt libcall
 //   The exact symbol suffix is chosen from the legalized double-width bits
 //   (`si` / `di` / `ti`), e.g. `__floatdisf` or `__floatuntidf`.
@@ -6918,6 +7292,28 @@ mod tests {
     }
 
     #[test]
+    fn legalize_wide_int_to_fp_paths() {
+        for (bits, signed) in [(160, false), (192, true)] {
+            let (func, mut symbols) = build_int_to_fp_func(bits, signed);
+            let meta = X86AbiMetadata::default();
+            let legalized = legalize(&func, &meta, &X86LegalityInfo, &mut symbols)
+                .expect("expected wide int-to-fp legalization");
+            let saw_helper = legalized.0.inst_pool.iter_insts().any(|(_, inst)| {
+                matches!(inst.op, Op::SymbolAddr(sym) if symbols.resolve(sym).starts_with("__float"))
+            });
+            assert!(
+                !saw_helper,
+                "wider-than-double-width int-to-fp should not rely on compiler-rt helpers"
+            );
+            for (_, inst) in legalized.0.inst_pool.iter_insts() {
+                if let Some(Annotation::Int(ann)) = &inst.result_annotation {
+                    assert!(ann.bit_width <= 64);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn legalize_wide_fp_to_int_paths() {
         for signed in [false, true] {
             let bits = 160;
@@ -7085,6 +7481,40 @@ mod tests {
             ),
         ] {
             let (func, mut symbols) = build_int_to_fp_check_func(128, signed, value, expected_bits);
+            let meta = X86AbiMetadata::default();
+            let (legalized, _) =
+                legalize(&func, &meta, &X86LegalityInfo, &mut symbols).expect("legalized");
+            let mut module = Module::new("test");
+            module.symbols = symbols;
+            module.add_function(legalized);
+            let mut interp = Interpreter::new(&module, ExecMode::Strict);
+            let result = interp.run("wide_int_to_fp_check");
+            match result {
+                InterpResult::Ok(Some(Value::Bool(true))) => {}
+                other => panic!("unexpected result: {other}"),
+            }
+        }
+    }
+
+    #[test]
+    fn interpret_legalized_wide_int_to_fp_regressions() {
+        for (bits, signed, value, expected_bits) in [
+            (
+                160,
+                false,
+                (BigInt::from(1u8) << 140) + (BigInt::from(1u8) << 87) + BigInt::from(1u8),
+                (2f64.powi(140) + 2f64.powi(88)).to_bits() as u128,
+            ),
+            (
+                192,
+                true,
+                BigInt::from(-1)
+                    * ((BigInt::from(1u8) << 140) + (BigInt::from(1u8) << 87) + BigInt::from(1u8)),
+                (-(2f64.powi(140) + 2f64.powi(88))).to_bits() as u128,
+            ),
+        ] {
+            let (func, mut symbols) =
+                build_int_to_fp_check_func(bits, signed, value, expected_bits);
             let meta = X86AbiMetadata::default();
             let (legalized, _) =
                 legalize(&func, &meta, &X86LegalityInfo, &mut symbols).expect("legalized");
