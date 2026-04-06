@@ -99,9 +99,9 @@ pub struct X86AbiMetadata {
     pub rdx_captures: HashMap<u32, u32>,
     pub rdx_moves: HashMap<u32, u32>,
     pub call_has_ret2: HashSet<u32>,
-    /// Call instruction indices whose return value is a wide integer that
-    /// needs legalization into the backend's low/high return convention.
-    pub wide_return_calls: HashSet<u32>,
+    /// Call instruction indices whose return value is an exact double-width
+    /// integer that needs legalization into the backend's low/high return convention.
+    pub double_width_return_calls: HashSet<u32>,
     /// Map from IR call instruction index to the landing-pad wrapper block
     /// index (used as label id during isel).  Only populated for calls that
     /// have `UnwindAction::Cleanup`.
@@ -115,7 +115,7 @@ impl X86AbiMetadata {
     /// allowing wide call classification inputs to be merged centrally.
     fn call_secondary_return_set(&self) -> HashSet<u32> {
         let mut out = self.call_has_ret2.clone();
-        out.extend(self.wide_return_calls.iter().copied());
+        out.extend(self.double_width_return_calls.iter().copied());
         out
     }
 }
@@ -133,12 +133,12 @@ impl AbiMetadata for X86AbiMetadata {
         self.rdx_moves.insert(inst_idx, source_idx);
     }
 
-    fn mark_wide_return_call(&mut self, call_idx: u32) {
-        self.wide_return_calls.insert(call_idx);
+    fn mark_double_width_return_call(&mut self, call_idx: u32) {
+        self.double_width_return_calls.insert(call_idx);
     }
 
-    fn is_wide_return_call(&self, call_idx: u32) -> bool {
-        self.wide_return_calls.contains(&call_idx)
+    fn is_double_width_return_call(&self, call_idx: u32) -> bool {
+        self.double_width_return_calls.contains(&call_idx)
     }
 
     fn has_secondary_return(&self, call_idx: u32) -> bool {

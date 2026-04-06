@@ -441,7 +441,7 @@ fn isel_zext_nonstandard_unsigned_is_noop() {
 }
 
 #[test]
-fn isel_call_uses_rdx_for_wide_annotation() {
+fn isel_call_uses_rdx_for_double_width_annotation() {
     let (func, symbols) = build_annotated_wide_call_func();
     let no_rdx_captures = HashMap::new();
     let no_rdx_moves = HashMap::new();
@@ -454,7 +454,7 @@ fn isel_call_uses_rdx_for_wide_annotation() {
         &no_ret2,
         &HashMap::new(),
     )
-    .expect("isel should succeed for wide-annotated call");
+    .expect("isel should succeed for exact-double-width-annotated call");
 
     let saw_call_with_ret2 = result.insts.iter().any(|inst| {
         matches!(
@@ -469,7 +469,7 @@ fn isel_call_uses_rdx_for_wide_annotation() {
     });
     assert!(
         saw_call_with_ret2,
-        "wide-annotated call should reserve both RAX and RDX"
+        "exact-double-width-annotated call should reserve both RAX and RDX"
     );
 }
 

@@ -1270,8 +1270,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let call_ret_ann = if matches!(call_ret_ty, Type::Int) {
             translate_annotation(dest_ty).or_else(|| {
                 // For structs ≤8 bytes, use annotation based on size.
-                // For scalar returns wider than one register, use a wide
-                // annotation so legalization treats it as a wide return.
+                // For scalar returns wider than one register, use an exact
+                // double-width annotation so legalization can recover the
+                // backend's low/high return convention.
                 // For ScalarPair, use only the first scalar's byte width
                 // as the call annotation — the second scalar is captured
                 // from RDX via ABI metadata.
@@ -1314,10 +1315,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         if let Some(Annotation::Int(ia)) = call_ret_ann
             && ia.bit_width == self.target_max_int_width * 2
         {
-            self.abi_metadata.mark_wide_return_call(call_mem.index());
+            self.abi_metadata
+                .mark_double_width_return_call(call_mem.index());
         }
         if is_f128_ret {
-            self.abi_metadata.mark_wide_return_call(call_mem.index());
+            self.abi_metadata
+                .mark_double_width_return_call(call_mem.index());
         }
 
         // For non-void calls, call_data is Some(data_vref).

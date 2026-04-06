@@ -20,7 +20,7 @@ API surface:
 
 ### `AbiMetadataBox`
 
-Target-agnostic wrapper for backend-specific ABI metadata. Allows the MIR translation layer to record ABI information (secondary return registers, wide returns) without knowing the target.
+Target-agnostic wrapper for backend-specific ABI metadata. Allows the MIR translation layer to record ABI information (secondary return registers, exact double-width returns) without knowing the target.
 
 ## Dependencies
 

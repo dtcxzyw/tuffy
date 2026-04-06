@@ -264,7 +264,7 @@ fn has_wide_values<M: AbiMetadata>(
         }
     }
 
-    // Check for wide return type
+    // Check for exact-double-width return type routed through ABI metadata
     if let Some(ref ty) = func.ret_ty {
         if is_wide_width(type_width(ty), legality) {
             return true;
@@ -370,9 +370,9 @@ fn has_wide_values<M: AbiMetadata>(
         }
     }
 
-    // Check for wide-return calls
+    // Check for exact-double-width-return calls
     for (i, _) in func.inst_pool.iter_insts() {
-        if metadata.is_wide_return_call(i) {
+        if metadata.is_double_width_return_call(i) {
             return true;
         }
     }
@@ -534,8 +534,8 @@ fn collect_wide_values<M: AbiMetadata>(
             wide.insert(vref.raw());
             continue;
         }
-        // Calls returning wide values are marked in ABI metadata
-        if meta.is_wide_return_call(i) {
+        // Calls returning exact double-width values are marked in ABI metadata
+        if meta.is_double_width_return_call(i) {
             let sec = ValueRef::inst_secondary_result(i);
             wide.insert(sec.raw());
         }
@@ -5557,7 +5557,7 @@ fn leg_fp_to_int_double_width<M: AbiMetadata + Clone>(
 
     s.vmap.set(old_mem, Mapped::One(call_mem.into()));
 
-    // Record wide return: hi arrives in RDX.
+    // Record exact-double-width return: hi arrives in RDX.
     let call_idx = call_mem.index();
     s.meta.mark_call_secondary_return(call_idx);
     let hi_capture = b.iconst(0i64, s.part_bits, IntSignedness::Unsigned, o());
@@ -6106,7 +6106,7 @@ fn leg_int_to_fp_double_width<M: AbiMetadata + Clone>(
 }
 
 // ---------------------------------------------------------------------------
-// Wide return: low part → RAX, second part → RDX (via metadata)
+// Exact double-width return: low part → RAX, second part → RDX (via metadata)
 // ---------------------------------------------------------------------------
 
 fn leg_ret<M: AbiMetadata>(
@@ -6183,21 +6183,21 @@ fn leg_call<M: AbiMetadata + Clone>(
         }
     }
 
-    let wide_ret = is_exact_double_width_int_annotation(
+    let double_width_ret = is_exact_double_width_int_annotation(
         inst.secondary_result_annotation.as_ref(),
         s.part_bits,
-    ) || s.old_meta.is_wide_return_call(old_vref.index())
+    ) || s.old_meta.is_double_width_return_call(old_vref.index())
         || matches!(
             inst.secondary_ty.as_ref(),
             Some(Type::Float(FloatType::F128))
         );
-    let ret_ty = if wide_ret {
+    let ret_ty = if double_width_ret {
         I64_TYPE
     } else {
         inst.secondary_ty.clone().unwrap_or(Type::Unit)
     };
 
-    let ann = if wide_ret {
+    let ann = if double_width_ret {
         None
     } else {
         inst.result_annotation
@@ -6206,7 +6206,7 @@ fn leg_call<M: AbiMetadata + Clone>(
     let (mem_out, data_out) = b.call(c.into(), new_args, ret_ty, m.into(), ann, o());
     s.vmap.set(old_vref, Mapped::One(mem_out.into()));
 
-    if wide_ret {
+    if double_width_ret {
         if let Some(data) = data_out {
             let call_idx = mem_out.index();
             s.meta.mark_call_secondary_return(call_idx);
