@@ -155,6 +155,54 @@ fn int_annotation_bits(ann: Option<&Annotation>) -> Option<u32> {
     }
 }
 
+fn compiler_rt_int_suffix(bits: u32) -> &'static str {
+    match bits {
+        16 => "hi",
+        32 => "si",
+        64 => "di",
+        128 => "ti",
+        _ => panic!("unsupported compiler-rt integer width: {bits}"),
+    }
+}
+
+fn compiler_rt_float_suffix(ft: FloatType) -> &'static str {
+    match ft {
+        FloatType::F32 => "sf",
+        FloatType::F64 => "df",
+        _ => panic!("unsupported compiler-rt float type: {ft:?}"),
+    }
+}
+
+fn fp_to_int_double_width_libcall_name(bits: u32, signed: bool, ft: FloatType) -> String {
+    let int_suffix = compiler_rt_int_suffix(bits);
+    let float_suffix = compiler_rt_float_suffix(ft);
+    if signed {
+        format!("__fix{float_suffix}{int_suffix}")
+    } else {
+        format!("__fixuns{float_suffix}{int_suffix}")
+    }
+}
+
+fn int_to_fp_double_width_libcall_name(bits: u32, signed: bool, ft: FloatType) -> String {
+    let int_suffix = compiler_rt_int_suffix(bits);
+    let float_suffix = compiler_rt_float_suffix(ft);
+    if signed {
+        format!("__float{int_suffix}{float_suffix}")
+    } else {
+        format!("__floatun{int_suffix}{float_suffix}")
+    }
+}
+
+fn div_rem_double_width_libcall_name(bits: u32, is_div: bool, signed: bool) -> String {
+    let int_suffix = compiler_rt_int_suffix(bits);
+    match (is_div, signed) {
+        (true, true) => format!("__div{int_suffix}3"),
+        (true, false) => format!("__udiv{int_suffix}3"),
+        (false, true) => format!("__mod{int_suffix}3"),
+        (false, false) => format!("__umod{int_suffix}3"),
+    }
+}
+
 /// Check whether an operand annotation indicates a signed integer.
 fn is_signed_annotation(ann: Option<&Annotation>) -> bool {
     matches!(
@@ -5143,10 +5191,8 @@ fn get_fp_to_int_float_type(vref: ValueRef, old: &Function) -> Option<FloatType>
 
 // ---------------------------------------------------------------------------
 // float → double-width integer: lower to compiler-rt libcall
-//   f32 → unsigned double-width integer: __fixunssfti(f32)
-//   f64 → unsigned double-width integer: __fixunsdfti(f64)
-//   f32 → signed double-width integer:   __fixsfti(f32)
-//   f64 → signed double-width integer:   __fixdfti(f64)
+//   The exact symbol suffix is chosen from the legalized double-width bits
+//   (`si` / `di` / `ti`), e.g. `__fixunsdfdi` or `__fixdfti`.
 // Called from the wide Zext(fp_to_ui) and Sext(fp_to_si) handlers
 // to provide correct saturation semantics for overflow/infinity/NaN.
 // ---------------------------------------------------------------------------
@@ -5203,14 +5249,8 @@ fn leg_fp_to_int_double_width<M: AbiMetadata + Clone>(
         }
     };
 
-    let name = match (signed, ft) {
-        (false, FloatType::F32) => "__fixunssfti",
-        (false, FloatType::F64) => "__fixunsdfti",
-        (true, FloatType::F32) => "__fixsfti",
-        (true, FloatType::F64) => "__fixdfti",
-        _ => panic!("unsupported float-to-double-width-int: signed={signed} ft={ft:?}"),
-    };
-    let sym_id = symbols.intern(name);
+    let name = fp_to_int_double_width_libcall_name(s.part_bits * 2, signed, ft);
+    let sym_id = symbols.intern(&name);
     let callee = b.symbol_addr(sym_id, o()).raw();
 
     // The float value in the remapped IR.
@@ -5339,10 +5379,8 @@ fn leg_select_wide<M>(
 
 // ---------------------------------------------------------------------------
 // Double-width integer Div/Rem: lower to compiler-rt libcall
-//   signed div:   __divti3(a_lo, a_hi, b_lo, b_hi) → (lo, hi)
-//   unsigned div: __udivti3(...)
-//   signed rem:   __modti3(...)
-//   unsigned rem: __umodti3(...)
+//   The exact symbol suffix is chosen from the legalized double-width bits
+//   (`si` / `di` / `ti`), e.g. `__divdi3` or `__udivti3`.
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
@@ -5359,13 +5397,8 @@ fn leg_div_rem_double_width<M: AbiMetadata + Clone>(
 ) {
     debug_assert_eq!(result_bits(s, old, old_vref), s.part_bits * 2);
     let signed = is_signed_annotation(a.annotation.as_ref());
-    let name = match (is_div, signed) {
-        (true, true) => "__divti3",
-        (true, false) => "__udivti3",
-        (false, true) => "__modti3",
-        (false, false) => "__umodti3",
-    };
-    let sym_id = symbols.intern(name);
+    let name = div_rem_double_width_libcall_name(s.part_bits * 2, is_div, signed);
+    let sym_id = symbols.intern(&name);
     let callee = b.symbol_addr(sym_id, o()).raw();
 
     let a_parts = operand_parts64(old, s, b, a, s.part_bits * 2);
@@ -5414,10 +5447,8 @@ fn leg_div_rem_double_width<M: AbiMetadata + Clone>(
 
 // ---------------------------------------------------------------------------
 // Double-width integer to float: lower to compiler-rt libcall
-//   unsigned double-width integer -> f32: __floatuntisf(lo, hi)
-//   unsigned double-width integer -> f64: __floatuntidf(lo, hi)
-//   signed double-width integer -> f32:   __floattisf(lo, hi)
-//   signed double-width integer -> f64:   __floattidf(lo, hi)
+//   The exact symbol suffix is chosen from the legalized double-width bits
+//   (`si` / `di` / `ti`), e.g. `__floatdisf` or `__floatuntidf`.
 // ---------------------------------------------------------------------------
 
 fn leg_int_to_fp_double_width<M: AbiMetadata + Clone>(
@@ -5429,14 +5460,8 @@ fn leg_int_to_fp_double_width<M: AbiMetadata + Clone>(
     signed: bool,
     symbols: &mut SymbolTable,
 ) {
-    let name = match (signed, ft) {
-        (false, tuffy_ir::types::FloatType::F32) => "__floatuntisf",
-        (false, tuffy_ir::types::FloatType::F64) => "__floatuntidf",
-        (true, tuffy_ir::types::FloatType::F32) => "__floattisf",
-        (true, tuffy_ir::types::FloatType::F64) => "__floattidf",
-        _ => panic!("double-width int to f16/bf16 conversion not supported"),
-    };
-    let sym_id = symbols.intern(name);
+    let name = int_to_fp_double_width_libcall_name(s.part_bits * 2, signed, ft);
+    let sym_id = symbols.intern(&name);
     let callee = b.symbol_addr(sym_id, o()).raw();
 
     let (a_lo, a_hi) = if is_wide(s, a.value) {
@@ -6134,6 +6159,44 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn compiler_rt_double_width_libcall_names_follow_width() {
+        assert_eq!(
+            div_rem_double_width_libcall_name(64, true, true),
+            "__divdi3"
+        );
+        assert_eq!(
+            div_rem_double_width_libcall_name(64, false, false),
+            "__umoddi3"
+        );
+        assert_eq!(
+            div_rem_double_width_libcall_name(128, true, false),
+            "__udivti3"
+        );
+        assert_eq!(
+            div_rem_double_width_libcall_name(128, false, true),
+            "__modti3"
+        );
+
+        assert_eq!(
+            fp_to_int_double_width_libcall_name(64, false, FloatType::F32),
+            "__fixunssfdi"
+        );
+        assert_eq!(
+            fp_to_int_double_width_libcall_name(128, true, FloatType::F64),
+            "__fixdfti"
+        );
+
+        assert_eq!(
+            int_to_fp_double_width_libcall_name(64, true, FloatType::F32),
+            "__floatdisf"
+        );
+        assert_eq!(
+            int_to_fp_double_width_libcall_name(128, false, FloatType::F64),
+            "__floatuntidf"
+        );
     }
 
     #[test]

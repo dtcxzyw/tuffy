@@ -20,10 +20,10 @@ pub enum LegalizeAction {
     /// Replace with a library call to the named symbol.
     ///
     /// Examples:
-    /// - `__divti3` for signed 128-bit division
-    /// - `__udivti3` for unsigned 128-bit division
-    /// - `__modti3` for signed 128-bit remainder
-    /// - `__umodti3` for unsigned 128-bit remainder
+    /// - `__divdi3` / `__divti3` for signed exact-double-width division
+    /// - `__udivdi3` / `__udivti3` for unsigned exact-double-width division
+    /// - `__moddi3` / `__modti3` for signed exact-double-width remainder
+    /// - `__umoddi3` / `__umodti3` for unsigned exact-double-width remainder
     LibCall(&'static str),
 }
 
