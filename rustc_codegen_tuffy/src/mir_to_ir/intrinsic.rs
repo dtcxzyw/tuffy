@@ -1638,136 +1638,60 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let elem_bytes = elem_ty.and_then(|t| type_size(tcx, t)).unwrap_or(8) as u32;
                     let is_signed = elem_ty.is_some_and(|t| is_signed_int(t));
                     let narrow_bits = elem_bytes * 8;
-
-                    if narrow_bits == 128 {
-                        // 128-bit: compute 256-bit product using 64-bit partial products
-                        self.emit_carrying_mul_add_128(ir_args, destination_local, is_signed);
-                    } else {
-                        let wide_bits = elem_bytes * 8 * 2;
-                        let wide_ann = IntAnnotation {
-                            bit_width: wide_bits,
-                            signedness: if is_signed {
-                                IntSignedness::Signed
-                            } else {
-                                IntSignedness::Unsigned
-                            },
-                        };
-
-                        let a_wide = if is_signed {
-                            self.builder
-                                .sext(ir_args[0].into(), wide_bits, Origin::synthetic())
-                        } else {
-                            self.builder
-                                .zext(ir_args[0].into(), wide_bits, Origin::synthetic())
-                        };
-                        let b_wide = if is_signed {
-                            self.builder
-                                .sext(ir_args[1].into(), wide_bits, Origin::synthetic())
-                        } else {
-                            self.builder
-                                .zext(ir_args[1].into(), wide_bits, Origin::synthetic())
-                        };
-                        let product = self.builder.mul(
-                            a_wide.into(),
-                            b_wide.into(),
-                            wide_ann,
-                            Origin::synthetic(),
-                        );
-
-                        let carry_wide = if is_signed {
-                            self.builder
-                                .sext(ir_args[2].into(), wide_bits, Origin::synthetic())
-                        } else {
-                            self.builder
-                                .zext(ir_args[2].into(), wide_bits, Origin::synthetic())
-                        };
-                        let add_wide = if is_signed {
-                            self.builder
-                                .sext(ir_args[3].into(), wide_bits, Origin::synthetic())
-                        } else {
-                            self.builder
-                                .zext(ir_args[3].into(), wide_bits, Origin::synthetic())
-                        };
-                        let sum1 = self.builder.add(
-                            product.into(),
-                            carry_wide.into(),
-                            wide_ann,
-                            Origin::synthetic(),
-                        );
-                        let full = self.builder.add(
-                            sum1.into(),
-                            add_wide.into(),
-                            wide_ann,
-                            Origin::synthetic(),
-                        );
-
-                        let shift_amt = self.builder.iconst(
-                            narrow_bits as i64,
+                    let (lo, hi) = if is_signed {
+                        self.builder.s_carrying_mul_add(
+                            ir_args[0].into(),
+                            ir_args[1].into(),
+                            ir_args[2].into(),
+                            ir_args[3].into(),
                             narrow_bits,
-                            IntSignedness::Unsigned,
                             Origin::synthetic(),
-                        );
-                        let shift_wide =
-                            self.builder
-                                .zext(shift_amt.into(), wide_bits, Origin::synthetic());
-                        // For signed types use arithmetic right shift to
-                        // preserve the sign of the high half.
-                        let shift_ann = IntAnnotation {
-                            bit_width: wide_bits,
-                            signedness: if is_signed {
-                                IntSignedness::Signed
-                            } else {
-                                IntSignedness::Unsigned
-                            },
-                        };
-                        let hi_wide = self.builder.shr(
-                            full.into(),
-                            shift_wide.into(),
-                            shift_ann,
+                        )
+                    } else {
+                        self.builder.u_carrying_mul_add(
+                            ir_args[0].into(),
+                            ir_args[1].into(),
+                            ir_args[2].into(),
+                            ir_args[3].into(),
+                            narrow_bits,
                             Origin::synthetic(),
-                        );
+                        )
+                    };
 
-                        // Store full result (lo|hi) into a stack slot.
-                        // The lower `elem_bytes` of `full` is lo, the lower
-                        // `elem_bytes` of `hi_wide` is hi.
-                        let slot = self
-                            .builder
-                            .stack_slot(elem_bytes * 2, 0, Origin::synthetic());
-                        self.current_mem = self
-                            .builder
-                            .store(
-                                full.raw().into(),
-                                slot.into(),
-                                elem_bytes,
-                                self.current_mem.into(),
-                                Origin::synthetic(),
-                            )
-                            .raw();
-                        let hi_offset = self.builder.iconst(
-                            elem_bytes as i64,
-                            64,
-                            IntSignedness::Unsigned,
-                            Origin::synthetic(),
-                        );
-                        let hi_addr = self.builder.ptradd(
+                    let slot = self
+                        .builder
+                        .stack_slot(elem_bytes * 2, 0, Origin::synthetic());
+                    self.current_mem = self
+                        .builder
+                        .store(
+                            lo.raw().into(),
                             slot.into(),
-                            hi_offset.into(),
-                            0,
+                            elem_bytes,
+                            self.current_mem.into(),
                             Origin::synthetic(),
-                        );
-                        self.current_mem = self
-                            .builder
-                            .store(
-                                hi_wide.raw().into(),
-                                hi_addr.raw().into(),
-                                elem_bytes,
-                                self.current_mem.into(),
-                                Origin::synthetic(),
-                            )
-                            .raw();
-                        self.locals.set(destination_local, slot);
-                        self.stack_locals.mark(destination_local);
-                    }
+                        )
+                        .raw();
+                    let hi_offset = self.builder.iconst(
+                        elem_bytes as i64,
+                        64,
+                        IntSignedness::Unsigned,
+                        Origin::synthetic(),
+                    );
+                    let hi_addr =
+                        self.builder
+                            .ptradd(slot.into(), hi_offset.into(), 0, Origin::synthetic());
+                    self.current_mem = self
+                        .builder
+                        .store(
+                            hi.raw().into(),
+                            hi_addr.raw().into(),
+                            elem_bytes,
+                            self.current_mem.into(),
+                            Origin::synthetic(),
+                        )
+                        .raw();
+                    self.locals.set(destination_local, slot);
+                    self.stack_locals.mark(destination_local);
                 }
                 true
             }
