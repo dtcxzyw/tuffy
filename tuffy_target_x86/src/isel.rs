@@ -1010,6 +1010,138 @@ fn select_inst(
     {
         return Some(());
     }
+    match op {
+        Op::CountLeadingZeros(a, bits)
+            if *bits == 128
+                && get_int_annotation(func, a.clone().raw().value)
+                    .is_some_and(|ann| ann.bit_width == 128) =>
+        {
+            let lo = ctx.ensure_in_reg(a.clone().raw().value)?;
+            let hi = ensure_hi_in_reg(
+                ctx,
+                a.clone().raw().value,
+                get_int_annotation(func, a.clone().raw().value),
+            )?;
+            let clz_hi = ctx.alloc.alloc();
+            ctx.out.push(MInst::Lzcnt {
+                size: OpSize::S64,
+                dst: clz_hi,
+                src: hi,
+            });
+            let clz_lo = ctx.alloc.alloc();
+            ctx.out.push(MInst::Lzcnt {
+                size: OpSize::S64,
+                dst: clz_lo,
+                src: lo,
+            });
+            let plus = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst: plus,
+                src: clz_lo,
+            });
+            let sixty_four = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRI64 {
+                dst: sixty_four,
+                imm: 64,
+            });
+            ctx.out.push(MInst::AddRR {
+                size: OpSize::S64,
+                dst: plus,
+                src: sixty_four,
+            });
+            let zero = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRI {
+                size: OpSize::S32,
+                dst: zero,
+                imm: 0,
+            });
+            let result = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst: result,
+                src: clz_hi,
+            });
+            ctx.out.push(MInst::CmpRR {
+                size: OpSize::S64,
+                src1: hi,
+                src2: zero,
+            });
+            ctx.out.push(MInst::CMOVcc {
+                size: OpSize::S64,
+                cc: CondCode::E,
+                dst: result,
+                src: plus,
+            });
+            ctx.regs.assign(vref, result);
+            return Some(());
+        }
+        Op::CountTrailingZeros(a)
+            if get_int_annotation(func, a.clone().raw().value)
+                .is_some_and(|ann| ann.bit_width == 128) =>
+        {
+            let lo = ctx.ensure_in_reg(a.clone().raw().value)?;
+            let hi = ensure_hi_in_reg(
+                ctx,
+                a.clone().raw().value,
+                get_int_annotation(func, a.clone().raw().value),
+            )?;
+            let ctz_lo = ctx.alloc.alloc();
+            ctx.out.push(MInst::Tzcnt {
+                size: OpSize::S64,
+                dst: ctz_lo,
+                src: lo,
+            });
+            let ctz_hi = ctx.alloc.alloc();
+            ctx.out.push(MInst::Tzcnt {
+                size: OpSize::S64,
+                dst: ctz_hi,
+                src: hi,
+            });
+            let plus = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst: plus,
+                src: ctz_hi,
+            });
+            let sixty_four = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRI64 {
+                dst: sixty_four,
+                imm: 64,
+            });
+            ctx.out.push(MInst::AddRR {
+                size: OpSize::S64,
+                dst: plus,
+                src: sixty_four,
+            });
+            let zero = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRI {
+                size: OpSize::S32,
+                dst: zero,
+                imm: 0,
+            });
+            let result = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst: result,
+                src: ctz_lo,
+            });
+            ctx.out.push(MInst::CmpRR {
+                size: OpSize::S64,
+                src1: lo,
+                src2: zero,
+            });
+            ctx.out.push(MInst::CMOVcc {
+                size: OpSize::S64,
+                cc: CondCode::E,
+                dst: result,
+                src: plus,
+            });
+            ctx.regs.assign(vref, result);
+            return Some(());
+        }
+        _ => {}
+    }
     // Try generated rules first (covers Add, Sub, Mul, Or, And, Xor,
     // Shl, Shr, Min, Max, CountOnes, CountLeadingZeros, CountTrailingZeros,
     // ICmp, PtrAdd, PtrDiff).

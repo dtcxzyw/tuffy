@@ -1289,16 +1289,116 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             self.locals.set(destination_local, clz.raw());
                         }
                     } else {
-                        // Wide integer: emit with the full operand width; legalization lowers it.
-                        // The result still fits in 64 bits, so use a 64-bit result
-                        // annotation to avoid the value being marked as "wide".
-                        let result = self.builder.count_leading_zeros(
-                            v.into(),
-                            bits,
-                            64,
-                            Origin::synthetic(),
-                        );
-                        self.locals.set(destination_local, result.raw());
+                        if bits == self.target_direct_abi_bits() {
+                            let part_bytes = self.target_part_bytes() as u32;
+                            let slot = self.builder.stack_slot(bits / 8, 0, Origin::synthetic());
+                            self.current_mem = self
+                                .builder
+                                .store(
+                                    IrOperand::annotated(
+                                        v,
+                                        Annotation::Int(IntAnnotation {
+                                            bit_width: bits,
+                                            signedness: IntSignedness::Unsigned,
+                                        }),
+                                    ),
+                                    slot.into(),
+                                    bits / 8,
+                                    self.current_mem.into(),
+                                    Origin::synthetic(),
+                                )
+                                .raw();
+                            let lo = self.builder.load(
+                                slot.into(),
+                                part_bytes,
+                                Type::Int,
+                                self.current_mem.into(),
+                                int_annotation_for_bytes(part_bytes),
+                                Origin::synthetic(),
+                            );
+                            let off = self.builder.iconst(
+                                part_bytes as i64,
+                                64,
+                                IntSignedness::Unsigned,
+                                Origin::synthetic(),
+                            );
+                            let hi_addr = self.builder.ptradd(
+                                slot.into(),
+                                off.into(),
+                                0,
+                                Origin::synthetic(),
+                            );
+                            let hi = self.builder.load(
+                                hi_addr.into(),
+                                part_bytes,
+                                Type::Int,
+                                self.current_mem.into(),
+                                int_annotation_for_bytes(part_bytes),
+                                Origin::synthetic(),
+                            );
+                            let clz_hi = self.builder.count_leading_zeros(
+                                hi.into(),
+                                self.target_max_int_width,
+                                64,
+                                Origin::synthetic(),
+                            );
+                            let clz_lo = self.builder.count_leading_zeros(
+                                lo.into(),
+                                self.target_max_int_width,
+                                64,
+                                Origin::synthetic(),
+                            );
+                            let part_bits = self.builder.iconst(
+                                self.target_max_int_width as i64,
+                                64,
+                                IntSignedness::Unsigned,
+                                Origin::synthetic(),
+                            );
+                            let zero = self.builder.iconst(
+                                0,
+                                self.target_max_int_width,
+                                IntSignedness::Unsigned,
+                                Origin::synthetic(),
+                            );
+                            let hi_is_zero = self.builder.icmp(
+                                tuffy_ir::instruction::ICmpOp::Eq,
+                                hi.into(),
+                                zero.into(),
+                                Origin::synthetic(),
+                            );
+                            let adjusted = self.builder.add(
+                                clz_lo.into(),
+                                part_bits.into(),
+                                IntAnnotation {
+                                    bit_width: 64,
+                                    signedness: IntSignedness::Unsigned,
+                                },
+                                Origin::synthetic(),
+                            );
+                            let result = self.builder.select(
+                                hi_is_zero.into(),
+                                adjusted.into(),
+                                clz_hi.into(),
+                                Type::Int,
+                                Some(Annotation::Int(IntAnnotation {
+                                    bit_width: 64,
+                                    signedness: IntSignedness::Unsigned,
+                                })),
+                                Origin::synthetic(),
+                            );
+                            self.locals.set(destination_local, result);
+                        } else {
+                            // Wide integer: emit with the full operand width; legalization lowers it.
+                            // The result still fits in 64 bits, so use a 64-bit result
+                            // annotation to avoid the value being marked as "wide".
+                            let result = self.builder.count_leading_zeros(
+                                v.into(),
+                                bits,
+                                64,
+                                Origin::synthetic(),
+                            );
+                            self.locals.set(destination_local, result.raw());
+                        }
                     }
                 }
                 true
@@ -1338,11 +1438,111 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 .count_trailing_zeros(v.into(), 64, Origin::synthetic());
                         self.locals.set(destination_local, result.raw());
                     } else {
-                        // Wide integer: emit the scalar op and let legalization lower it.
-                        let result =
-                            self.builder
-                                .count_trailing_zeros(v.into(), 64, Origin::synthetic());
-                        self.locals.set(destination_local, result.raw());
+                        if bits == self.target_direct_abi_bits() {
+                            let part_bytes = self.target_part_bytes() as u32;
+                            let slot = self.builder.stack_slot(bits / 8, 0, Origin::synthetic());
+                            self.current_mem = self
+                                .builder
+                                .store(
+                                    IrOperand::annotated(
+                                        v,
+                                        Annotation::Int(IntAnnotation {
+                                            bit_width: bits,
+                                            signedness: IntSignedness::Unsigned,
+                                        }),
+                                    ),
+                                    slot.into(),
+                                    bits / 8,
+                                    self.current_mem.into(),
+                                    Origin::synthetic(),
+                                )
+                                .raw();
+                            let lo = self.builder.load(
+                                slot.into(),
+                                part_bytes,
+                                Type::Int,
+                                self.current_mem.into(),
+                                int_annotation_for_bytes(part_bytes),
+                                Origin::synthetic(),
+                            );
+                            let off = self.builder.iconst(
+                                part_bytes as i64,
+                                64,
+                                IntSignedness::Unsigned,
+                                Origin::synthetic(),
+                            );
+                            let hi_addr = self.builder.ptradd(
+                                slot.into(),
+                                off.into(),
+                                0,
+                                Origin::synthetic(),
+                            );
+                            let hi = self.builder.load(
+                                hi_addr.into(),
+                                part_bytes,
+                                Type::Int,
+                                self.current_mem.into(),
+                                int_annotation_for_bytes(part_bytes),
+                                Origin::synthetic(),
+                            );
+                            let ctz_lo = self.builder.count_trailing_zeros(
+                                lo.into(),
+                                64,
+                                Origin::synthetic(),
+                            );
+                            let ctz_hi = self.builder.count_trailing_zeros(
+                                hi.into(),
+                                64,
+                                Origin::synthetic(),
+                            );
+                            let part_bits = self.builder.iconst(
+                                self.target_max_int_width as i64,
+                                64,
+                                IntSignedness::Unsigned,
+                                Origin::synthetic(),
+                            );
+                            let zero = self.builder.iconst(
+                                0,
+                                self.target_max_int_width,
+                                IntSignedness::Unsigned,
+                                Origin::synthetic(),
+                            );
+                            let lo_is_zero = self.builder.icmp(
+                                tuffy_ir::instruction::ICmpOp::Eq,
+                                lo.into(),
+                                zero.into(),
+                                Origin::synthetic(),
+                            );
+                            let adjusted = self.builder.add(
+                                ctz_hi.into(),
+                                part_bits.into(),
+                                IntAnnotation {
+                                    bit_width: 64,
+                                    signedness: IntSignedness::Unsigned,
+                                },
+                                Origin::synthetic(),
+                            );
+                            let result = self.builder.select(
+                                lo_is_zero.into(),
+                                adjusted.into(),
+                                ctz_lo.into(),
+                                Type::Int,
+                                Some(Annotation::Int(IntAnnotation {
+                                    bit_width: 64,
+                                    signedness: IntSignedness::Unsigned,
+                                })),
+                                Origin::synthetic(),
+                            );
+                            self.locals.set(destination_local, result);
+                        } else {
+                            // Wide integer: emit the scalar op and let legalization lower it.
+                            let result = self.builder.count_trailing_zeros(
+                                v.into(),
+                                64,
+                                Origin::synthetic(),
+                            );
+                            self.locals.set(destination_local, result.raw());
+                        }
                     }
                 }
                 true

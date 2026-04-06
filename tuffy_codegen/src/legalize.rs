@@ -1702,6 +1702,23 @@ fn copy_inst<M: AbiMetadata + Clone>(
         Op::CountLeadingZeros(a, bits) if *bits == 64 => b
             .count_leading_zeros(remap_op(s, &a.clone().raw()).into(), 64, 64, o())
             .raw(),
+        Op::CountLeadingZeros(a, bits) if *bits == s.part_bits * 2 => {
+            let (lo, hi) = wide_pair(s, old, b, &a.clone().raw());
+            let clz_hi = b.count_leading_zeros(Operand::new(hi).into(), s.part_bits, 64, o());
+            let clz_lo = b.count_leading_zeros(Operand::new(lo).into(), s.part_bits, 64, o());
+            let part_bits = b.iconst(s.part_bits as i64, 64, IntSignedness::Unsigned, o());
+            let zero = b.iconst(0i64, s.part_bits, IntSignedness::Unsigned, o());
+            let hi_is_zero = b.icmp(ICmpOp::Eq, Operand::new(hi).into(), zero.into(), o());
+            let lo_adjusted = b.add(clz_lo.into(), part_bits.into(), I64, o());
+            b.select(
+                hi_is_zero.into(),
+                lo_adjusted.into(),
+                clz_hi.into(),
+                I64_TYPE,
+                Some(Annotation::Int(I64)),
+                o(),
+            )
+        }
         Op::CountLeadingZeros(a, bits)
             if *bits > s.part_bits && bits.is_multiple_of(s.limb_bits) =>
         {
@@ -1768,7 +1785,24 @@ fn copy_inst<M: AbiMetadata + Clone>(
         Op::CountTrailingZeros(a) => {
             let val_vref = a.clone().raw().value;
             let bits = result_bits(s, old, old_vref);
-            if is_wide(s, val_vref) && bits > s.part_bits && bits.is_multiple_of(s.limb_bits) {
+            if is_wide(s, val_vref) && bits == s.part_bits * 2 {
+                let (lo, hi) = s.vmap.pair(val_vref);
+                let ctz_lo = b.count_trailing_zeros(lo.into(), 64, o());
+                let ctz_hi = b.count_trailing_zeros(hi.into(), 64, o());
+                let part_bits = b.iconst(s.part_bits as i64, 64, IntSignedness::Unsigned, o());
+                let zero = b.iconst(0i64, s.part_bits, IntSignedness::Unsigned, o());
+                let lo_is_zero = b.icmp(ICmpOp::Eq, lo.into(), zero.into(), o());
+                let hi_adjusted = b.add(ctz_hi.into(), part_bits.into(), I64, o());
+                b.select(
+                    lo_is_zero.into(),
+                    hi_adjusted.into(),
+                    ctz_lo.into(),
+                    I64_TYPE,
+                    Some(Annotation::Int(I64)),
+                    o(),
+                )
+            } else if is_wide(s, val_vref) && bits > s.part_bits && bits.is_multiple_of(s.limb_bits)
+            {
                 let widths = wide_limb_widths(s, bits);
                 let limbs = operand_limbs32(old, s, b, &a.clone().raw(), bits);
                 let zero64 = b.iconst(0i64, 64, IntSignedness::Unsigned, o()).raw();
@@ -2925,10 +2959,15 @@ fn negate_limbs32<M>(
     normalize_limbs32(s, b, &neg, bits)
 }
 
-fn u32_sign_bool<M>(s: &State<M>, b: &mut Builder, v: ValueRef) -> tuffy_ir::typed::BoolValue {
+fn limb_sign_bool<M>(
+    s: &State<M>,
+    b: &mut Builder,
+    v: ValueRef,
+    width: u32,
+) -> tuffy_ir::typed::BoolValue {
     let zero = b.iconst(0i64, s.limb_bits, IntSignedness::Unsigned, o());
     let shift = b.iconst(
-        (s.limb_bits - 1) as i64,
+        (width - 1) as i64,
         s.limb_bits,
         IntSignedness::Unsigned,
         o(),
@@ -2940,6 +2979,10 @@ fn u32_sign_bool<M>(s: &State<M>, b: &mut Builder, v: ValueRef) -> tuffy_ir::typ
         o(),
     );
     b.icmp(ICmpOp::Ne, sign.into(), zero.into(), o())
+}
+
+fn u32_sign_bool<M>(s: &State<M>, b: &mut Builder, v: ValueRef) -> tuffy_ir::typed::BoolValue {
+    limb_sign_bool(s, b, v, s.limb_bits)
 }
 
 fn widening_mul_u32<M>(
@@ -3326,6 +3369,7 @@ fn wide_shr_limbs<M>(
     out
 }
 
+#[allow(clippy::too_many_arguments)]
 fn full_mul_add_limbs32<M>(
     s: &State<M>,
     b: &mut Builder,
@@ -3333,9 +3377,13 @@ fn full_mul_add_limbs32<M>(
     b_limbs: &[ValueRef],
     carry_limbs: &[ValueRef],
     add_limbs: &[ValueRef],
+    bits: u32,
     signed: bool,
 ) -> Vec<ValueRef> {
     let limb_count = a_limbs.len();
+    let top_width = *wide_limb_widths(s, bits)
+        .last()
+        .expect("wide mul-add requires at least one limb");
     let zero32 = b
         .iconst(0i64, s.limb_bits, IntSignedness::Unsigned, o())
         .raw();
@@ -3354,10 +3402,30 @@ fn full_mul_add_limbs32<M>(
     add_into_limbs(s, b, &mut full, 0, add_limbs);
 
     if signed {
-        let a_neg = u32_sign_bool(s, b, *a_limbs.last().expect("wide mul-add lhs limbs"));
-        let b_neg = u32_sign_bool(s, b, *b_limbs.last().expect("wide mul-add rhs limbs"));
-        let carry_neg = u32_sign_bool(s, b, *carry_limbs.last().expect("wide mul-add carry limbs"));
-        let add_neg = u32_sign_bool(s, b, *add_limbs.last().expect("wide mul-add add limbs"));
+        let a_neg = limb_sign_bool(
+            s,
+            b,
+            *a_limbs.last().expect("wide mul-add lhs limbs"),
+            top_width,
+        );
+        let b_neg = limb_sign_bool(
+            s,
+            b,
+            *b_limbs.last().expect("wide mul-add rhs limbs"),
+            top_width,
+        );
+        let carry_neg = limb_sign_bool(
+            s,
+            b,
+            *carry_limbs.last().expect("wide mul-add carry limbs"),
+            top_width,
+        );
+        let add_neg = limb_sign_bool(
+            s,
+            b,
+            *add_limbs.last().expect("wide mul-add add limbs"),
+            top_width,
+        );
 
         let mut upper = full[limb_count..].to_vec();
 
@@ -3548,6 +3616,360 @@ fn unsigned_sat_limbs32<M>(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn leg_carrying_mul_add_small<M>(
+    s: &mut State<M>,
+    b: &mut Builder,
+    old_vref: ValueRef,
+    a: &Operand,
+    op_b: &Operand,
+    carry: &Operand,
+    add: &Operand,
+    bits: u32,
+    signed: bool,
+) {
+    let src_ann = IntAnnotation {
+        bit_width: bits,
+        signedness: if signed {
+            IntSignedness::Signed
+        } else {
+            IntSignedness::Unsigned
+        },
+    };
+    let widen = |this: &mut Builder, op: &Operand| -> ValueRef {
+        if signed {
+            this.sext(
+                Operand::annotated(op.value, Annotation::Int(src_ann)).into(),
+                64,
+                o(),
+            )
+            .raw()
+        } else {
+            this.zext(
+                Operand::annotated(op.value, Annotation::Int(src_ann)).into(),
+                64,
+                o(),
+            )
+            .raw()
+        }
+    };
+
+    let a64 = widen(b, a);
+    let b64 = widen(b, op_b);
+    let carry64 = widen(b, carry);
+    let add64 = widen(b, add);
+    let full_ann = if signed { SIGNED_64_INT } else { I64 };
+    let prod = b.mul(
+        Operand::annotated(a64, Annotation::Int(full_ann)).into(),
+        Operand::annotated(b64, Annotation::Int(full_ann)).into(),
+        full_ann,
+        o(),
+    );
+    let sum = b.add(
+        prod.into(),
+        Operand::annotated(carry64, Annotation::Int(full_ann)).into(),
+        full_ann,
+        o(),
+    );
+    let sum = b.add(
+        sum.into(),
+        Operand::annotated(add64, Annotation::Int(full_ann)).into(),
+        full_ann,
+        o(),
+    );
+    let mask = b.iconst(
+        (BigInt::from(1u8) << bits) - BigInt::from(1u8),
+        64,
+        IntSignedness::Unsigned,
+        o(),
+    );
+    let low = b.and(
+        Operand::annotated(sum.raw(), Annotation::Int(I64)).into(),
+        mask.into(),
+        I64,
+        o(),
+    );
+    let shift = b.iconst(bits as i64, 64, IntSignedness::Unsigned, o());
+    let high = if signed {
+        b.shr(
+            Operand::annotated(sum.raw(), Annotation::Int(SIGNED_64_INT)).into(),
+            shift.into(),
+            SIGNED_64_INT,
+            o(),
+        )
+    } else {
+        b.shr(
+            Operand::annotated(sum.raw(), Annotation::Int(I64)).into(),
+            shift.into(),
+            UNSIGNED_64_INT,
+            o(),
+        )
+    };
+    s.vmap.set(old_vref, Mapped::One(low.raw()));
+    let old_sec = ValueRef::inst_secondary_result(old_vref.index());
+    s.vmap.set(old_sec, Mapped::One(high.raw()));
+}
+
+#[allow(clippy::too_many_arguments)]
+fn leg_carrying_mul_add_64<M>(
+    s: &mut State<M>,
+    b: &mut Builder,
+    old_vref: ValueRef,
+    a: &Operand,
+    op_b: &Operand,
+    carry: &Operand,
+    add: &Operand,
+    signed: bool,
+) {
+    let a_raw = s.vmap.one(a.value);
+    let b_raw = s.vmap.one(op_b.value);
+    let carry_raw = s.vmap.one(carry.value);
+    let add_raw = s.vmap.one(add.value);
+    let zero = b.iconst(0, 64, IntSignedness::Unsigned, o()).raw();
+
+    let (mut lo, mut hi) = widening_mul_u64(b, a_raw, b_raw);
+    if signed {
+        let c63 = b.iconst(63, 64, IntSignedness::Unsigned, o());
+        let a_sign = b.shr(
+            Operand::annotated(a_raw, Annotation::Int(SIGNED_64_INT)).into(),
+            c63.into(),
+            SIGNED_64_INT,
+            o(),
+        );
+        let b_sign = b.shr(
+            Operand::annotated(b_raw, Annotation::Int(SIGNED_64_INT)).into(),
+            c63.into(),
+            SIGNED_64_INT,
+            o(),
+        );
+        let a_neg = b.icmp(
+            ICmpOp::Ne,
+            a_sign.into(),
+            Operand::annotated(zero, Annotation::Int(I64)).into(),
+            o(),
+        );
+        let b_neg = b.icmp(
+            ICmpOp::Ne,
+            b_sign.into(),
+            Operand::annotated(zero, Annotation::Int(I64)).into(),
+            o(),
+        );
+        let sub_b = b.select(
+            a_neg.into(),
+            Operand::annotated(b_raw, Annotation::Int(I64)),
+            Operand::annotated(zero, Annotation::Int(I64)),
+            Type::Int,
+            Some(Annotation::Int(I64)),
+            o(),
+        );
+        hi = b
+            .sub(
+                Operand::annotated(hi, Annotation::Int(I64)).into(),
+                Operand::annotated(sub_b, Annotation::Int(I64)).into(),
+                I64,
+                o(),
+            )
+            .raw();
+        let sub_a = b.select(
+            b_neg.into(),
+            Operand::annotated(a_raw, Annotation::Int(I64)),
+            Operand::annotated(zero, Annotation::Int(I64)),
+            Type::Int,
+            Some(Annotation::Int(I64)),
+            o(),
+        );
+        hi = b
+            .sub(
+                Operand::annotated(hi, Annotation::Int(I64)).into(),
+                Operand::annotated(sub_a, Annotation::Int(I64)).into(),
+                I64,
+                o(),
+            )
+            .raw();
+
+        let carry_hi = b.shr(
+            Operand::annotated(carry_raw, Annotation::Int(SIGNED_64_INT)).into(),
+            c63.into(),
+            SIGNED_64_INT,
+            o(),
+        );
+        let add_hi = b.shr(
+            Operand::annotated(add_raw, Annotation::Int(SIGNED_64_INT)).into(),
+            c63.into(),
+            SIGNED_64_INT,
+            o(),
+        );
+        (lo, hi) = add_word_pair_u64(b, lo, hi, carry_raw, carry_hi.raw());
+        (lo, hi) = add_word_pair_u64(b, lo, hi, add_raw, add_hi.raw());
+    } else {
+        (lo, hi) = add_word_pair_u64(b, lo, hi, carry_raw, zero);
+        (lo, hi) = add_word_pair_u64(b, lo, hi, add_raw, zero);
+    }
+
+    s.vmap.set(old_vref, Mapped::One(lo));
+    let old_sec = ValueRef::inst_secondary_result(old_vref.index());
+    s.vmap.set(old_sec, Mapped::One(hi));
+}
+
+#[allow(clippy::too_many_arguments)]
+fn leg_carrying_mul_add_128<M>(
+    old: &Function,
+    s: &mut State<M>,
+    b: &mut Builder,
+    old_vref: ValueRef,
+    a: &Operand,
+    op_b: &Operand,
+    carry: &Operand,
+    add: &Operand,
+    signed: bool,
+) {
+    let (a_lo, a_hi) = wide_pair(s, old, b, a);
+    let (b_lo, b_hi) = wide_pair(s, old, b, op_b);
+    let (carry_lo, carry_hi) = wide_pair(s, old, b, carry);
+    let (add_lo, add_hi) = wide_pair(s, old, b, add);
+
+    let (ll_lo, ll_hi) = widening_mul_u64(b, a_lo, b_lo);
+    let (lh_lo, lh_hi) = widening_mul_u64(b, a_lo, b_hi);
+    let (hl_lo, hl_hi) = widening_mul_u64(b, a_hi, b_lo);
+    let (hh_lo, hh_hi) = widening_mul_u64(b, a_hi, b_hi);
+
+    let (w1, c1) = add3_u64(b, ll_hi, lh_lo, hl_lo);
+    let (w2_pre, c2_pre) = add3_u64(b, lh_hi, hl_hi, hh_lo);
+    let w2 = b.add(
+        Operand::annotated(w2_pre, Annotation::Int(I64)).into(),
+        Operand::annotated(c1, Annotation::Int(I64)).into(),
+        I64,
+        o(),
+    );
+    let cmp = b.icmp(
+        ICmpOp::Lt,
+        w2.into(),
+        Operand::annotated(w2_pre, Annotation::Int(I64)).into(),
+        o(),
+    );
+    let w2_carry = bool_to_u64(b, cmp);
+    let c2 = b.add(
+        Operand::annotated(c2_pre, Annotation::Int(I64)).into(),
+        Operand::annotated(w2_carry, Annotation::Int(I64)).into(),
+        I64,
+        o(),
+    );
+    let w3 = b.add(
+        hh_hi.into(),
+        Operand::annotated(c2.raw(), Annotation::Int(I64)).into(),
+        I64,
+        o(),
+    );
+    let mut full = vec![ll_lo, w1, w2.raw(), w3.raw()];
+    add_into_words64(b, &mut full, 0, &[carry_lo, carry_hi]);
+    add_into_words64(b, &mut full, 0, &[add_lo, add_hi]);
+
+    if signed {
+        let c63 = b.iconst(63, 64, IntSignedness::Unsigned, o());
+        let zero = b.iconst(0, 64, IntSignedness::Unsigned, o()).raw();
+        let a_sign = b.shr(
+            Operand::annotated(a_hi, Annotation::Int(SIGNED_64_INT)).into(),
+            c63.into(),
+            SIGNED_64_INT,
+            o(),
+        );
+        let b_sign = b.shr(
+            Operand::annotated(b_hi, Annotation::Int(SIGNED_64_INT)).into(),
+            c63.into(),
+            SIGNED_64_INT,
+            o(),
+        );
+        let carry_sign = b.shr(
+            Operand::annotated(carry_hi, Annotation::Int(SIGNED_64_INT)).into(),
+            c63.into(),
+            SIGNED_64_INT,
+            o(),
+        );
+        let add_sign = b.shr(
+            Operand::annotated(add_hi, Annotation::Int(SIGNED_64_INT)).into(),
+            c63.into(),
+            SIGNED_64_INT,
+            o(),
+        );
+        let a_neg = b.icmp(
+            ICmpOp::Ne,
+            a_sign.into(),
+            Operand::annotated(zero, Annotation::Int(I64)).into(),
+            o(),
+        );
+        let b_neg = b.icmp(
+            ICmpOp::Ne,
+            b_sign.into(),
+            Operand::annotated(zero, Annotation::Int(I64)).into(),
+            o(),
+        );
+        let carry_neg = b.icmp(
+            ICmpOp::Ne,
+            carry_sign.into(),
+            Operand::annotated(zero, Annotation::Int(I64)).into(),
+            o(),
+        );
+        let add_neg = b.icmp(
+            ICmpOp::Ne,
+            add_sign.into(),
+            Operand::annotated(zero, Annotation::Int(I64)).into(),
+            o(),
+        );
+        let select_masked =
+            |this: &mut Builder, cond: tuffy_ir::typed::BoolValue, lo: ValueRef, hi: ValueRef| {
+                [
+                    this.select(
+                        cond.into(),
+                        Operand::annotated(lo, Annotation::Int(I64)),
+                        Operand::annotated(zero, Annotation::Int(I64)),
+                        Type::Int,
+                        Some(Annotation::Int(I64)),
+                        o(),
+                    ),
+                    this.select(
+                        cond.into(),
+                        Operand::annotated(hi, Annotation::Int(I64)),
+                        Operand::annotated(zero, Annotation::Int(I64)),
+                        Type::Int,
+                        Some(Annotation::Int(I64)),
+                        o(),
+                    ),
+                ]
+            };
+
+        let mut upper = vec![full[2], full[3]];
+        let sub_b = select_masked(b, a_neg, b_lo, b_hi);
+        sub_from_words64(b, &mut upper, &sub_b);
+        let sub_a = select_masked(b, b_neg, a_lo, a_hi);
+        sub_from_words64(b, &mut upper, &sub_a);
+        let one = b.iconst(1, 64, IntSignedness::Unsigned, o()).raw();
+        let sub_one_carry = b.select(
+            carry_neg.into(),
+            Operand::annotated(one, Annotation::Int(I64)),
+            Operand::annotated(zero, Annotation::Int(I64)),
+            Type::Int,
+            Some(Annotation::Int(I64)),
+            o(),
+        );
+        sub_from_words64(b, &mut upper, &[sub_one_carry, zero]);
+        let sub_one_add = b.select(
+            add_neg.into(),
+            Operand::annotated(one, Annotation::Int(I64)),
+            Operand::annotated(zero, Annotation::Int(I64)),
+            Type::Int,
+            Some(Annotation::Int(I64)),
+            o(),
+        );
+        sub_from_words64(b, &mut upper, &[sub_one_add, zero]);
+        full[2] = upper[0];
+        full[3] = upper[1];
+    }
+
+    s.vmap.set(old_vref, Mapped::Pair(full[0], full[1]));
+    let old_sec = ValueRef::inst_secondary_result(old_vref.index());
+    s.vmap.set(old_sec, Mapped::Pair(full[2], full[3]));
+}
+
+#[allow(clippy::too_many_arguments)]
 fn leg_carrying_mul_add_wide<M>(
     old: &Function,
     s: &mut State<M>,
@@ -3560,20 +3982,39 @@ fn leg_carrying_mul_add_wide<M>(
     bits: u32,
     signed: bool,
 ) {
-    assert!(
-        bits.is_multiple_of(s.limb_bits),
-        "wide carrying_mul_add legalization currently requires a bit width divisible by 32"
-    );
+    if bits <= s.limb_bits {
+        leg_carrying_mul_add_small(s, b, old_vref, a, op_b, carry, add, bits, signed);
+        return;
+    }
+    if bits == s.part_bits {
+        leg_carrying_mul_add_64(s, b, old_vref, a, op_b, carry, add, signed);
+        return;
+    }
+    if bits == s.part_bits * 2 {
+        leg_carrying_mul_add_128(old, s, b, old_vref, a, op_b, carry, add, signed);
+        return;
+    }
 
     let limb_count = num_limbs32(bits, s.limb_bits);
     let a_limbs = operand_limbs32(old, s, b, a, bits);
     let b_limbs = operand_limbs32(old, s, b, op_b, bits);
     let carry_limbs = operand_limbs32(old, s, b, carry, bits);
     let add_limbs = operand_limbs32(old, s, b, add, bits);
-    let full = full_mul_add_limbs32(s, b, &a_limbs, &b_limbs, &carry_limbs, &add_limbs, signed);
+    let full = full_mul_add_limbs32(
+        s,
+        b,
+        &a_limbs,
+        &b_limbs,
+        &carry_limbs,
+        &add_limbs,
+        bits,
+        signed,
+    );
 
-    let low_parts = limbs32_to_parts64(s, b, &full[..limb_count]);
-    let high_parts = limbs32_to_parts64(s, b, &full[limb_count..]);
+    let low_limbs = normalize_limbs32(s, b, &full[..limb_count], bits);
+    let high_limbs = normalize_limbs32(s, b, &full[limb_count..], bits);
+    let low_parts = limbs32_to_parts64(s, b, &low_limbs);
+    let high_parts = limbs32_to_parts64(s, b, &high_limbs);
     s.vmap.set_parts(old_vref, low_parts);
     let old_sec = ValueRef::inst_secondary_result(old_vref.index());
     s.vmap.set_parts(old_sec, high_parts);
@@ -3751,11 +4192,13 @@ fn leg_mul<M>(
 fn widening_mul_u64(b: &mut Builder, x: ValueRef, y: ValueRef) -> (ValueRef, ValueRef) {
     let c32 = b.iconst(32i64, 64, IntSignedness::Unsigned, o());
     let mask32 = b.iconst(0xFFFF_FFFFi64, 64, IntSignedness::Unsigned, o());
+    let x_op = Operand::annotated(x, Annotation::Int(I64));
+    let y_op = Operand::annotated(y, Annotation::Int(I64));
 
-    let x0 = b.and(x.into(), mask32.into(), I64, o());
-    let x1 = b.shr(x.into(), c32.into(), UNSIGNED_64_INT, o());
-    let y0 = b.and(y.into(), mask32.into(), I64, o());
-    let y1 = b.shr(y.into(), c32.into(), UNSIGNED_64_INT, o());
+    let x0 = b.and(x_op.clone().into(), mask32.into(), I64, o());
+    let x1 = b.shr(x_op.into(), c32.into(), UNSIGNED_64_INT, o());
+    let y0 = b.and(y_op.clone().into(), mask32.into(), I64, o());
+    let y1 = b.shr(y_op.into(), c32.into(), UNSIGNED_64_INT, o());
 
     let p0 = b.mul(x0.into(), y0.into(), I64, o());
     let p1 = b.mul(x0.into(), y1.into(), I64, o());
@@ -3799,14 +4242,93 @@ fn bool_to_u64(b: &mut Builder, val: tuffy_ir::typed::BoolValue) -> ValueRef {
 
 /// Add three u64 values, returning `(sum, carry)` where carry fits in 2 bits.
 fn add3_u64(b: &mut Builder, x: ValueRef, y: ValueRef, z: ValueRef) -> (ValueRef, ValueRef) {
-    let t1 = b.add(x.into(), y.into(), I64, o());
-    let cmp = b.icmp(ICmpOp::Lt, t1.into(), y.into(), o());
+    let x_op = Operand::annotated(x, Annotation::Int(I64));
+    let y_op = Operand::annotated(y, Annotation::Int(I64));
+    let z_op = Operand::annotated(z, Annotation::Int(I64));
+    let t1 = b.add(x_op.into(), y_op.clone().into(), I64, o());
+    let cmp = b.icmp(ICmpOp::Lt, t1.into(), y_op.into(), o());
     let c1 = bool_to_u64(b, cmp);
-    let sum = b.add(t1.into(), z.into(), I64, o());
-    let cmp = b.icmp(ICmpOp::Lt, sum.into(), z.into(), o());
+    let sum = b.add(t1.into(), z_op.clone().into(), I64, o());
+    let cmp = b.icmp(ICmpOp::Lt, sum.into(), z_op.into(), o());
     let c2 = bool_to_u64(b, cmp);
     let carry = b.add(c1.into(), c2.into(), I64, o());
     (sum.raw(), carry.raw())
+}
+
+fn sub2_u64(b: &mut Builder, x: ValueRef, y: ValueRef, borrow: ValueRef) -> (ValueRef, ValueRef) {
+    let x_op = Operand::annotated(x, Annotation::Int(I64));
+    let y_op = Operand::annotated(y, Annotation::Int(I64));
+    let borrow_op = Operand::annotated(borrow, Annotation::Int(I64));
+    let diff1 = b.sub(x_op.into(), y_op.into(), I64, o());
+    let cmp = b.icmp(
+        ICmpOp::Gt,
+        diff1.into(),
+        Operand::annotated(x, Annotation::Int(I64)).into(),
+        o(),
+    );
+    let b1 = bool_to_u64(b, cmp);
+    let diff2 = b.sub(diff1.into(), borrow_op.into(), I64, o());
+    let cmp = b.icmp(ICmpOp::Gt, diff2.into(), diff1.into(), o());
+    let b2 = bool_to_u64(b, cmp);
+    let borrow_out = b.or(b1.into(), b2.into(), I64, o());
+    (diff2.raw(), borrow_out.raw())
+}
+
+fn add_word_pair_u64(
+    b: &mut Builder,
+    lo: ValueRef,
+    hi: ValueRef,
+    add_lo: ValueRef,
+    add_hi: ValueRef,
+) -> (ValueRef, ValueRef) {
+    let new_lo = b.add(
+        Operand::annotated(lo, Annotation::Int(I64)).into(),
+        Operand::annotated(add_lo, Annotation::Int(I64)).into(),
+        I64,
+        o(),
+    );
+    let carry = b.icmp(
+        ICmpOp::Lt,
+        new_lo.into(),
+        Operand::annotated(lo, Annotation::Int(I64)).into(),
+        o(),
+    );
+    let carry_int = bool_to_u64(b, carry);
+    let hi_sum = b.add(
+        Operand::annotated(hi, Annotation::Int(I64)).into(),
+        Operand::annotated(add_hi, Annotation::Int(I64)).into(),
+        I64,
+        o(),
+    );
+    let new_hi = b.add(
+        hi_sum.into(),
+        Operand::annotated(carry_int, Annotation::Int(I64)).into(),
+        I64,
+        o(),
+    );
+    (new_lo.raw(), new_hi.raw())
+}
+
+fn add_into_words64(b: &mut Builder, dst: &mut [ValueRef], start: usize, src: &[ValueRef]) {
+    let zero = b.iconst(0, 64, IntSignedness::Unsigned, o()).raw();
+    let mut carry = zero;
+    for (idx, slot) in dst.iter_mut().enumerate().skip(start) {
+        let addend = src.get(idx - start).copied().unwrap_or(zero);
+        let (sum, next_carry) = add3_u64(b, *slot, addend, carry);
+        *slot = sum;
+        carry = next_carry;
+    }
+}
+
+fn sub_from_words64(b: &mut Builder, dst: &mut [ValueRef], src: &[ValueRef]) {
+    let zero = b.iconst(0, 64, IntSignedness::Unsigned, o()).raw();
+    let mut borrow = zero;
+    for (idx, slot) in dst.iter_mut().enumerate() {
+        let sub = src.get(idx).copied().unwrap_or(zero);
+        let (diff, next_borrow) = sub2_u64(b, *slot, sub, borrow);
+        *slot = diff;
+        borrow = next_borrow;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -4472,7 +4994,7 @@ fn leg_smul_with_overflow_wide<M>(
         let a_limbs = operand_limbs32(old, s, b, a, bits);
         let b_limbs = operand_limbs32(old, s, b, op_b, bits);
         let zero_vec = vec![zero; limb_count];
-        let full = full_mul_add_limbs32(s, b, &a_limbs, &b_limbs, &zero_vec, &zero_vec, true);
+        let full = full_mul_add_limbs32(s, b, &a_limbs, &b_limbs, &zero_vec, &zero_vec, bits, true);
         let low = &full[..limb_count];
         let high = &full[limb_count..];
         let sign = u32_sign_bool(s, b, *low.last().expect("signed mul result limbs"));
@@ -4622,7 +5144,8 @@ fn leg_umul_with_overflow_wide<M>(
         let a_limbs = operand_limbs32(old, s, b, a, bits);
         let b_limbs = operand_limbs32(old, s, b, op_b, bits);
         let zero_vec = vec![zero; limb_count];
-        let full = full_mul_add_limbs32(s, b, &a_limbs, &b_limbs, &zero_vec, &zero_vec, false);
+        let full =
+            full_mul_add_limbs32(s, b, &a_limbs, &b_limbs, &zero_vec, &zero_vec, bits, false);
         let low = &full[..limb_count];
         let high = &full[limb_count..];
         let mut overflow_acc = zero;
@@ -5161,7 +5684,11 @@ fn leg_icmp<M>(
     let bits = operand_bits(a).max(operand_bits(op_b));
     let a_parts = operand_parts64(old, s, b, a, bits);
     let b_parts = operand_parts64(old, s, b, op_b, bits);
-    let signed = is_signed_annotation(a.annotation.as_ref());
+    let signed = is_signed_annotation(
+        a.annotation
+            .as_ref()
+            .or_else(|| value_annotation(old, a.value)),
+    );
     let unsigned_part = IntAnnotation {
         bit_width: s.part_bits,
         signedness: IntSignedness::Unsigned,
@@ -5222,6 +5749,7 @@ fn leg_icmp<M>(
             let mut acc = b
                 .bconst(matches!(cmp_op, ICmpOp::Le | ICmpOp::Ge), o())
                 .raw();
+            let mut eq_prefix = b.bconst(true, o()).raw();
             let top_idx = a_parts.len().saturating_sub(1);
             for (idx, (lhs, rhs)) in a_parts
                 .iter()
@@ -5247,7 +5775,7 @@ fn leg_icmp<M>(
                     Operand::annotated(rhs, Annotation::Int(unsigned_part)).into(),
                     o(),
                 );
-                acc = b.select(
+                let candidate = b.select(
                     part_eq.into(),
                     Operand::new(acc),
                     part_cmp.into(),
@@ -5255,6 +5783,17 @@ fn leg_icmp<M>(
                     None,
                     o(),
                 );
+                acc = b.select(
+                    Operand::new(eq_prefix).into(),
+                    Operand::new(candidate),
+                    Operand::new(acc),
+                    Type::Bool,
+                    None,
+                    o(),
+                );
+                eq_prefix = b
+                    .band(Operand::new(eq_prefix).into(), part_eq.into(), o())
+                    .raw();
             }
             acc
         }
@@ -6765,6 +7304,82 @@ mod tests {
         (func, symbols)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn build_carrying_mul_add_check_func(
+        bits: u32,
+        signed: bool,
+        a: BigInt,
+        op_b: BigInt,
+        carry: BigInt,
+        add: BigInt,
+        expected_lo: BigInt,
+        expected_hi: BigInt,
+    ) -> (Function, SymbolTable) {
+        let mut symbols = SymbolTable::new();
+        let name = symbols.intern("carrying_mul_add_check");
+        let sign = if signed {
+            IntSignedness::Signed
+        } else {
+            IntSignedness::Unsigned
+        };
+        let ann = Annotation::Int(IntAnnotation {
+            bit_width: bits,
+            signedness: sign,
+        });
+        let unsigned_ann = Annotation::Int(IntAnnotation {
+            bit_width: bits,
+            signedness: IntSignedness::Unsigned,
+        });
+        let mut func = Function::new(name, vec![], vec![], vec![], Some(Type::Bool), None);
+        let mut b = Builder::new(&mut func);
+        let root = b.create_region(RegionKind::Function);
+        b.enter_region(root);
+        let bb = b.create_block();
+        b.switch_to_block(bb);
+        let mem0 = b.add_block_arg(bb, Type::Mem, None);
+        let a = b.iconst(a, bits, sign, o());
+        let op_b = b.iconst(op_b, bits, sign, o());
+        let carry = b.iconst(carry, bits, sign, o());
+        let add = b.iconst(add, bits, sign, o());
+        let (lo, hi) = if signed {
+            b.s_carrying_mul_add(
+                Operand::annotated(a.raw(), ann).into(),
+                Operand::annotated(op_b.raw(), ann).into(),
+                Operand::annotated(carry.raw(), ann).into(),
+                Operand::annotated(add.raw(), ann).into(),
+                bits,
+                o(),
+            )
+        } else {
+            b.u_carrying_mul_add(
+                Operand::annotated(a.raw(), ann).into(),
+                Operand::annotated(op_b.raw(), ann).into(),
+                Operand::annotated(carry.raw(), ann).into(),
+                Operand::annotated(add.raw(), ann).into(),
+                bits,
+                o(),
+            )
+        };
+        let expected_lo = b.iconst(expected_lo, bits, IntSignedness::Unsigned, o());
+        let expected_hi = b.iconst(expected_hi, bits, IntSignedness::Unsigned, o());
+        let lo_ok = b.icmp(
+            ICmpOp::Eq,
+            Operand::annotated(lo.raw(), unsigned_ann).into(),
+            Operand::annotated(expected_lo.raw(), unsigned_ann).into(),
+            o(),
+        );
+        let hi_ok = b.icmp(
+            ICmpOp::Eq,
+            Operand::annotated(hi.raw(), unsigned_ann).into(),
+            Operand::annotated(expected_hi.raw(), unsigned_ann).into(),
+            o(),
+        );
+        let ok = b.band(lo_ok.into(), hi_ok.into(), o());
+        b.ret(Some(ok.into()), mem0.into(), o());
+        b.exit_region();
+        (func, symbols)
+    }
+
     fn build_add_func(bits: u32) -> (Function, SymbolTable) {
         let mut symbols = SymbolTable::new();
         let name = symbols.intern("wide_add");
@@ -7159,6 +7774,29 @@ mod tests {
         (func, symbols)
     }
 
+    fn build_clz_check_func(bits: u32, value: BigInt, expected: u64) -> (Function, SymbolTable) {
+        let mut symbols = SymbolTable::new();
+        let name = symbols.intern("wide_clz_check");
+        let ann = Annotation::Int(IntAnnotation {
+            bit_width: bits,
+            signedness: IntSignedness::Unsigned,
+        });
+        let mut func = Function::new(name, vec![], vec![], vec![], Some(Type::Bool), None);
+        let mut b = Builder::new(&mut func);
+        let root = b.create_region(RegionKind::Function);
+        b.enter_region(root);
+        let bb = b.create_block();
+        b.switch_to_block(bb);
+        let mem0 = b.add_block_arg(bb, Type::Mem, None);
+        let val = b.iconst(value, bits, IntSignedness::Unsigned, o());
+        let clz = b.count_leading_zeros(Operand::annotated(val.raw(), ann).into(), bits, 64, o());
+        let expected = b.iconst(expected as i64, 64, IntSignedness::Unsigned, o());
+        let ok = b.icmp(ICmpOp::Eq, clz.into(), expected.into(), o());
+        b.ret(Some(ok.into()), mem0.into(), o());
+        b.exit_region();
+        (func, symbols)
+    }
+
     fn assert_legalized_widths(bits: u32, signed: bool) {
         let (func, mut symbols) = build_carrying_mul_add_func(bits, signed);
         let meta = X86AbiMetadata::default();
@@ -7527,6 +8165,72 @@ mod tests {
                 InterpResult::Ok(Some(Value::Bool(true))) => {}
                 other => panic!("unexpected result: {other}"),
             }
+        }
+    }
+
+    #[test]
+    fn interpret_legalized_carrying_mul_add_small_and_double_width_regressions() {
+        for (bits, signed, a, op_b, carry, add, expected_lo, expected_hi) in [
+            (
+                8,
+                false,
+                BigInt::from(255u16),
+                BigInt::from(255u16),
+                BigInt::from(0u8),
+                BigInt::from(0u8),
+                BigInt::from(1u8),
+                BigInt::from(254u16),
+            ),
+            (
+                64,
+                false,
+                BigInt::from(u64::MAX),
+                BigInt::from(u64::MAX),
+                BigInt::from(0u8),
+                BigInt::from(0u8),
+                BigInt::from(1u8),
+                BigInt::parse_bytes(b"18446744073709551614", 10).unwrap(),
+            ),
+        ] {
+            let (func, mut symbols) = build_carrying_mul_add_check_func(
+                bits,
+                signed,
+                a,
+                op_b,
+                carry,
+                add,
+                expected_lo,
+                expected_hi,
+            );
+            let meta = X86AbiMetadata::default();
+            let (legalized, _) =
+                legalize(&func, &meta, &X86LegalityInfo, &mut symbols).expect("legalized");
+            let mut module = Module::new("test");
+            module.symbols = symbols;
+            module.add_function(legalized);
+            let mut interp = Interpreter::new(&module, ExecMode::Strict);
+            let result = interp.run("carrying_mul_add_check");
+            match result {
+                InterpResult::Ok(Some(Value::Bool(true))) => {}
+                other => panic!("unexpected result: {other}"),
+            }
+        }
+    }
+
+    #[test]
+    fn interpret_legalized_exact_double_width_clz_regression() {
+        let (func, mut symbols) = build_clz_check_func(128, BigInt::from(u128::MAX), 0);
+        let meta = X86AbiMetadata::default();
+        let (legalized, _) =
+            legalize(&func, &meta, &X86LegalityInfo, &mut symbols).expect("legalized");
+        let mut module = Module::new("test");
+        module.symbols = symbols;
+        module.add_function(legalized);
+        let mut interp = Interpreter::new(&module, ExecMode::Strict);
+        let result = interp.run("wide_clz_check");
+        match result {
+            InterpResult::Ok(Some(Value::Bool(true))) => {}
+            other => panic!("unexpected result: {other}"),
         }
     }
 
