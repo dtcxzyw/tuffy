@@ -1184,16 +1184,20 @@ fn legalize_inst<M: AbiMetadata + Clone>(
             // If the source is FpToSi, use the proper saturating compiler-rt call.
             let ft = get_fp_to_int_float_type(val.clone().raw().value, old);
             if let Some(ft) = ft {
-                leg_fp_to_int_double_width(
-                    s,
-                    b,
-                    old_vref,
-                    &val.clone().raw(),
-                    true,
-                    ft,
-                    old,
-                    symbols,
-                );
+                if *bits == s.part_bits * 2 {
+                    leg_fp_to_int_double_width(
+                        s,
+                        b,
+                        old_vref,
+                        &val.clone().raw(),
+                        true,
+                        ft,
+                        old,
+                        symbols,
+                    );
+                } else {
+                    leg_fp_to_int_wide(s, b, old_vref, &val.clone().raw(), true, ft, old);
+                }
             } else {
                 leg_sext_wide(s, b, old_vref, *bits, &val.clone().raw());
             }
@@ -1202,16 +1206,20 @@ fn legalize_inst<M: AbiMetadata + Clone>(
             // If the source is FpToUi, use the proper saturating compiler-rt call.
             let ft = get_fp_to_int_float_type(val.clone().raw().value, old);
             if let Some(ft) = ft {
-                leg_fp_to_int_double_width(
-                    s,
-                    b,
-                    old_vref,
-                    &val.clone().raw(),
-                    false,
-                    ft,
-                    old,
-                    symbols,
-                );
+                if *bits == s.part_bits * 2 {
+                    leg_fp_to_int_double_width(
+                        s,
+                        b,
+                        old_vref,
+                        &val.clone().raw(),
+                        false,
+                        ft,
+                        old,
+                        symbols,
+                    );
+                } else {
+                    leg_fp_to_int_wide(s, b, old_vref, &val.clone().raw(), false, ft, old);
+                }
             } else {
                 leg_zext_wide(s, b, old_vref, *bits, &val.clone().raw());
             }
@@ -3037,6 +3045,62 @@ fn sub_limbs32<M>(
 fn nonzero_u32<M>(s: &State<M>, b: &mut Builder, v: ValueRef) -> tuffy_ir::typed::BoolValue {
     let zero = b.iconst(0i64, s.limb_bits, IntSignedness::Unsigned, o());
     b.icmp(ICmpOp::Ne, Operand::new(v).into(), zero.into(), o())
+}
+
+fn bool_not(b: &mut Builder, val: tuffy_ir::typed::BoolValue) -> tuffy_ir::typed::BoolValue {
+    let t = b.bconst(true, o());
+    b.bxor(val.into(), t.into(), o())
+}
+
+fn fp_format_params(ft: FloatType) -> Option<(u32, u32, u32, u32)> {
+    match ft {
+        FloatType::F16 => Some((16, 5, 10, 15)),
+        FloatType::BF16 => Some((16, 8, 7, 127)),
+        FloatType::F32 => Some((32, 8, 23, 127)),
+        FloatType::F64 => Some((64, 11, 52, 1023)),
+        FloatType::F128 => None,
+    }
+}
+
+fn wide_uint_from_small_value<M>(
+    s: &State<M>,
+    b: &mut Builder,
+    val: ValueRef,
+    src_bits: u32,
+    bits: u32,
+) -> Vec<ValueRef> {
+    assert!(
+        src_bits <= s.part_bits,
+        "small-value wide expansion requires source bits <= legal part bits"
+    );
+    let lo = if src_bits < s.part_bits {
+        b.zext(
+            Operand::annotated(
+                val,
+                Annotation::Int(IntAnnotation {
+                    bit_width: src_bits,
+                    signedness: IntSignedness::Unsigned,
+                }),
+            )
+            .into(),
+            s.part_bits,
+            o(),
+        )
+        .raw()
+    } else {
+        val
+    };
+    let zero = b
+        .iconst(0i64, s.part_bits, IntSignedness::Unsigned, o())
+        .raw();
+    let parts = std::iter::once(lo)
+        .chain(std::iter::repeat_n(
+            zero,
+            num_parts64(bits, s.part_bits).saturating_sub(1),
+        ))
+        .collect::<Vec<_>>();
+    let limbs = split_parts64_to_limbs32(s, b, &parts, num_limbs32(bits, s.limb_bits));
+    normalize_limbs32(s, b, &limbs, bits)
 }
 
 fn wide_shift_amount<M>(
@@ -5503,6 +5567,268 @@ fn leg_fp_to_int_double_width<M: AbiMetadata + Clone>(
     s.vmap.set(old_vref, Mapped::Pair(data, hi_capture.into()));
 }
 
+fn leg_fp_to_int_wide<M: AbiMetadata>(
+    s: &mut State<M>,
+    b: &mut Builder,
+    old_vref: ValueRef,
+    zext_val: &Operand,
+    signed: bool,
+    ft: FloatType,
+    old: &Function,
+) {
+    let bits = result_bits(s, old, old_vref);
+    let Some((src_bits, exp_bits, frac_bits, bias)) = fp_format_params(ft) else {
+        panic!("unsupported wide float-to-int source type: {ft:?}");
+    };
+
+    let fp_input_vref = match old.inst_pool.get(zext_val.value.index()) {
+        Some(node) => match &node.inst.op {
+            Op::FpToUi(a) | Op::FpToSi(a) => a.clone().raw().value,
+            _ => {
+                if signed {
+                    leg_sext_wide(s, b, old_vref, bits, zext_val);
+                } else {
+                    leg_zext_wide(s, b, old_vref, bits, zext_val);
+                }
+                return;
+            }
+        },
+        None => {
+            if signed {
+                leg_sext_wide(s, b, old_vref, bits, zext_val);
+            } else {
+                leg_zext_wide(s, b, old_vref, bits, zext_val);
+            }
+            return;
+        }
+    };
+
+    let float_val = s.vmap.one(fp_input_vref);
+    let src_ann = IntAnnotation {
+        bit_width: src_bits,
+        signedness: IntSignedness::Unsigned,
+    };
+    let raw_bits = b.bitcast(
+        Operand::new(float_val),
+        Type::Int,
+        Some(Annotation::Int(src_ann)),
+        o(),
+    );
+    let raw_bits = if src_bits < 64 {
+        b.zext(
+            Operand::annotated(raw_bits, Annotation::Int(src_ann)).into(),
+            64,
+            o(),
+        )
+        .raw()
+    } else {
+        raw_bits
+    };
+
+    let zero64 = b.iconst(0i64, 64, IntSignedness::Unsigned, o()).raw();
+    let raw_bits_op = Operand::annotated(raw_bits, Annotation::Int(I64));
+    let frac_mask = b.iconst(
+        (BigInt::from(1u8) << frac_bits) - BigInt::from(1u8),
+        64,
+        IntSignedness::Unsigned,
+        o(),
+    );
+    let exp_mask = b.iconst(
+        (BigInt::from(1u8) << exp_bits) - BigInt::from(1u8),
+        64,
+        IntSignedness::Unsigned,
+        o(),
+    );
+    let hidden = b.iconst(
+        BigInt::from(1u8) << frac_bits,
+        64,
+        IntSignedness::Unsigned,
+        o(),
+    );
+    let bias_c = b.iconst(bias as i64, 64, IntSignedness::Unsigned, o());
+    let frac_bits_c = b.iconst(frac_bits as i64, 64, IntSignedness::Unsigned, o());
+    let sign_shift = b.iconst((src_bits - 1) as i64, 64, IntSignedness::Unsigned, o());
+
+    let frac = b
+        .and(raw_bits_op.clone().into(), frac_mask.into(), I64, o())
+        .raw();
+    let exp_shifted = b
+        .shr(raw_bits_op.clone().into(), frac_bits_c.into(), I64, o())
+        .raw();
+    let exp_raw = b
+        .and(
+            Operand::annotated(exp_shifted, Annotation::Int(I64)).into(),
+            exp_mask.into(),
+            I64,
+            o(),
+        )
+        .raw();
+    let sign_raw = b.shr(raw_bits_op.into(), sign_shift.into(), I64, o()).raw();
+    let sign = b.icmp(
+        ICmpOp::Ne,
+        Operand::annotated(sign_raw, Annotation::Int(I64)).into(),
+        Operand::annotated(zero64, Annotation::Int(I64)).into(),
+        o(),
+    );
+
+    let exp_zero = b.icmp(
+        ICmpOp::Eq,
+        Operand::annotated(exp_raw, Annotation::Int(I64)).into(),
+        Operand::annotated(zero64, Annotation::Int(I64)).into(),
+        o(),
+    );
+    let exp_all_ones = b.icmp(
+        ICmpOp::Eq,
+        Operand::annotated(exp_raw, Annotation::Int(I64)).into(),
+        exp_mask.into(),
+        o(),
+    );
+    let frac_zero = b.icmp(
+        ICmpOp::Eq,
+        Operand::annotated(frac, Annotation::Int(I64)).into(),
+        Operand::annotated(zero64, Annotation::Int(I64)).into(),
+        o(),
+    );
+    let frac_nonzero = bool_not(b, frac_zero);
+    let is_nan = b.band(exp_all_ones.into(), frac_nonzero.into(), o());
+    let exp_too_small = b.icmp(
+        ICmpOp::Lt,
+        Operand::annotated(exp_raw, Annotation::Int(I64)).into(),
+        bias_c.into(),
+        o(),
+    );
+    let exp_nonzero = bool_not(b, exp_zero);
+    let not_all_ones = bool_not(b, exp_all_ones);
+    let normal = b.band(exp_nonzero.into(), not_all_ones.into(), o());
+
+    let sig_base = b.or(
+        Operand::annotated(frac, Annotation::Int(I64)).into(),
+        hidden.into(),
+        I64,
+        o(),
+    );
+    let significand = b.select(
+        normal.into(),
+        Operand::annotated(sig_base.raw(), Annotation::Int(I64)),
+        Operand::annotated(zero64, Annotation::Int(I64)),
+        Type::Int,
+        Some(Annotation::Int(I64)),
+        o(),
+    );
+
+    let unbiased_raw = b.sub(
+        Operand::annotated(exp_raw, Annotation::Int(I64)).into(),
+        bias_c.into(),
+        I64,
+        o(),
+    );
+    let small_or_special = b.bor(exp_too_small.into(), exp_all_ones.into(), o());
+    let unbiased = b.select(
+        small_or_special.into(),
+        Operand::annotated(zero64, Annotation::Int(I64)),
+        Operand::annotated(unbiased_raw.raw(), Annotation::Int(I64)),
+        Type::Int,
+        Some(Annotation::Int(I64)),
+        o(),
+    );
+    let exp_ge_frac = b.icmp(
+        ICmpOp::Ge,
+        Operand::annotated(unbiased, Annotation::Int(I64)).into(),
+        frac_bits_c.into(),
+        o(),
+    );
+    let zero_shift = b.iconst(0i64, 64, IntSignedness::Unsigned, o()).raw();
+    let shift_left_raw = b.sub(
+        Operand::annotated(unbiased, Annotation::Int(I64)).into(),
+        frac_bits_c.into(),
+        I64,
+        o(),
+    );
+    let shift_left = b.select(
+        exp_ge_frac.into(),
+        Operand::annotated(shift_left_raw.raw(), Annotation::Int(I64)),
+        Operand::annotated(zero_shift, Annotation::Int(I64)),
+        Type::Int,
+        Some(Annotation::Int(I64)),
+        o(),
+    );
+    let shift_right_raw = b.sub(
+        frac_bits_c.into(),
+        Operand::annotated(unbiased, Annotation::Int(I64)).into(),
+        I64,
+        o(),
+    );
+    let shift_right = b.select(
+        exp_ge_frac.into(),
+        Operand::annotated(zero_shift, Annotation::Int(I64)),
+        Operand::annotated(shift_right_raw.raw(), Annotation::Int(I64)),
+        Type::Int,
+        Some(Annotation::Int(I64)),
+        o(),
+    );
+
+    let sig_wide = wide_uint_from_small_value(s, b, significand, 64, bits);
+    let left_mag_raw = wide_shl_limbs(s, b, &sig_wide, shift_left, bits);
+    let left_mag = normalize_limbs32(s, b, &left_mag_raw, bits);
+    let sig_right = b.shr(
+        Operand::annotated(significand, Annotation::Int(I64)).into(),
+        Operand::annotated(shift_right, Annotation::Int(I64)).into(),
+        I64,
+        o(),
+    );
+    let right_mag = wide_uint_from_small_value(s, b, sig_right.raw(), 64, bits);
+    let magnitude = select_limbs32(s, b, exp_ge_frac, &left_mag, &right_mag);
+
+    let zero_limbs = zero_limbs32(s, b, num_limbs32(bits, s.limb_bits));
+    let result_limbs = if signed {
+        let limit = b.iconst((bias + bits - 1) as i64, 64, IntSignedness::Unsigned, o());
+        let exp_gt_limit = b.icmp(
+            ICmpOp::Gt,
+            Operand::annotated(exp_raw, Annotation::Int(I64)).into(),
+            limit.into(),
+            o(),
+        );
+        let exp_eq_limit = b.icmp(
+            ICmpOp::Eq,
+            Operand::annotated(exp_raw, Annotation::Int(I64)).into(),
+            limit.into(),
+            o(),
+        );
+        let neg_edge_over = b.band(exp_eq_limit.into(), frac_nonzero.into(), o());
+        let exp_gt_or_edge = b.bor(exp_gt_limit.into(), neg_edge_over.into(), o());
+        let neg_over = b.band(sign.into(), exp_gt_or_edge.into(), o());
+        let not_sign = bool_not(b, sign);
+        let pos_eq_over = b.band(not_sign.into(), exp_eq_limit.into(), o());
+        let pos_gt_over = b.band(not_sign.into(), exp_gt_limit.into(), o());
+        let pos_over = b.bor(pos_eq_over.into(), pos_gt_over.into(), o());
+        let overflow = b.bor(pos_over.into(), neg_over.into(), o());
+        let neg_mag = negate_limbs32(s, b, &magnitude, bits);
+        let signed_mag = select_limbs32(s, b, sign, &neg_mag, &magnitude);
+        let sat = signed_sat_limbs32(s, b, bits, sign);
+        let saturated = select_limbs32(s, b, overflow, &sat, &signed_mag);
+        let zero_cond = b.bor(is_nan.into(), exp_too_small.into(), o());
+        select_limbs32(s, b, zero_cond, &zero_limbs, &saturated)
+    } else {
+        let limit = b.iconst((bias + bits) as i64, 64, IntSignedness::Unsigned, o());
+        let exp_over = b.icmp(
+            ICmpOp::Ge,
+            Operand::annotated(exp_raw, Annotation::Int(I64)).into(),
+            limit.into(),
+            o(),
+        );
+        let not_sign = bool_not(b, sign);
+        let pos_over = b.band(not_sign.into(), exp_over.into(), o());
+        let max = unsigned_sat_limbs32(s, b, bits, true);
+        let saturated = select_limbs32(s, b, pos_over, &max, &magnitude);
+        let sign_or_small = b.bor(sign.into(), exp_too_small.into(), o());
+        let zero_cond = b.bor(is_nan.into(), sign_or_small.into(), o());
+        select_limbs32(s, b, zero_cond, &zero_limbs, &saturated)
+    };
+
+    s.vmap
+        .set_parts(old_vref, limbs32_to_parts64(s, b, &result_limbs));
+}
+
 // ---------------------------------------------------------------------------
 // Wide bswap
 // ---------------------------------------------------------------------------
@@ -6274,6 +6600,100 @@ mod tests {
         (func, symbols)
     }
 
+    fn build_fp_to_int_func(bits: u32, signed: bool, float_bits: u128) -> (Function, SymbolTable) {
+        let mut symbols = SymbolTable::new();
+        let name = symbols.intern("wide_fp_to_int");
+        let sign = if signed {
+            IntSignedness::Signed
+        } else {
+            IntSignedness::Unsigned
+        };
+        let ann = Annotation::Int(IntAnnotation {
+            bit_width: bits,
+            signedness: sign,
+        });
+        let mut func = Function::new(name, vec![], vec![], vec![], None, None);
+        let mut b = Builder::new(&mut func);
+        let root = b.create_region(RegionKind::Function);
+        b.enter_region(root);
+        let bb = b.create_block();
+        b.switch_to_block(bb);
+        let mem0 = b.add_block_arg(bb, Type::Mem, None);
+        let f = b.fconst(FloatType::F64, float_bits, o());
+        if signed {
+            let raw = b.fp_to_si(f.into(), 64, o());
+            let _ = b.sext(raw.into(), bits, o());
+        } else {
+            let raw = b.fp_to_ui(f.into(), 64, o());
+            let _ = b.zext(raw.into(), bits, o());
+        }
+        b.ret(None, mem0.into(), o());
+        b.exit_region();
+        let _ = ann;
+        (func, symbols)
+    }
+
+    fn build_fp_to_int_check_func(
+        bits: u32,
+        signed: bool,
+        float_bits: u128,
+        expected: BigInt,
+    ) -> (Function, SymbolTable) {
+        let mut symbols = SymbolTable::new();
+        let name = symbols.intern("wide_fp_to_int_check");
+        let sign = if signed {
+            IntSignedness::Signed
+        } else {
+            IntSignedness::Unsigned
+        };
+        let ann = IntAnnotation {
+            bit_width: bits,
+            signedness: sign,
+        };
+        let unsigned_ann = IntAnnotation {
+            bit_width: bits,
+            signedness: IntSignedness::Unsigned,
+        };
+        let mut func = Function::new(name, vec![], vec![], vec![], Some(Type::Bool), None);
+        let mut b = Builder::new(&mut func);
+        let root = b.create_region(RegionKind::Function);
+        b.enter_region(root);
+        let bb = b.create_block();
+        b.switch_to_block(bb);
+        let mem0 = b.add_block_arg(bb, Type::Mem, None);
+        let f = b.fconst(FloatType::F64, float_bits, o());
+        let actual = if signed {
+            let raw = b.fp_to_si(f.into(), 64, o());
+            b.sext(raw.into(), bits, o())
+        } else {
+            let raw = b.fp_to_ui(f.into(), 64, o());
+            b.zext(raw.into(), bits, o())
+        };
+        let modulus = BigInt::from(1u8) << bits;
+        let mut expected_bits = expected % &modulus;
+        if expected_bits.sign() == num_bigint::Sign::Minus {
+            expected_bits += &modulus;
+        }
+        let expected = b.iconst(expected_bits, bits, IntSignedness::Unsigned, o());
+        let diff = b.xor(
+            Operand::annotated(actual.raw(), Annotation::Int(unsigned_ann)).into(),
+            Operand::annotated(expected.raw(), Annotation::Int(unsigned_ann)).into(),
+            unsigned_ann,
+            o(),
+        );
+        let zero = b.iconst(0i64, bits, IntSignedness::Unsigned, o());
+        let ok = b.icmp(
+            ICmpOp::Eq,
+            Operand::annotated(diff.raw(), Annotation::Int(unsigned_ann)).into(),
+            Operand::annotated(zero.raw(), Annotation::Int(unsigned_ann)).into(),
+            o(),
+        );
+        b.ret(Some(ok.into()), mem0.into(), o());
+        b.exit_region();
+        let _ = ann;
+        (func, symbols)
+    }
+
     fn build_icmp_func(bits: u32, signed: bool) -> (Function, SymbolTable) {
         let mut symbols = SymbolTable::new();
         let name = symbols.intern("wide_icmp");
@@ -6448,6 +6868,27 @@ mod tests {
     }
 
     #[test]
+    fn legalize_wide_fp_to_int_paths() {
+        for signed in [false, true] {
+            let bits = 160;
+            let f = if signed {
+                (-(2f64.powi(120))).to_bits() as u128
+            } else {
+                (2f64.powi(96)).to_bits() as u128
+            };
+            let (func, mut symbols) = build_fp_to_int_func(bits, signed, f);
+            let meta = X86AbiMetadata::default();
+            let legalized = legalize(&func, &meta, &X86LegalityInfo, &mut symbols)
+                .expect("expected fp-to-int legalization");
+            for (_, inst) in legalized.0.inst_pool.iter_insts() {
+                if let Some(Annotation::Int(ann)) = &inst.result_annotation {
+                    assert!(ann.bit_width <= 64);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn compiler_rt_double_width_libcall_names_follow_width() {
         assert_eq!(
             div_rem_double_width_libcall_name(64, true, true),
@@ -6559,6 +7000,28 @@ mod tests {
         module.add_function(legalized);
         let mut interp = Interpreter::new(&module, ExecMode::Strict);
         let result = interp.run("main");
+        match result {
+            InterpResult::Ok(Some(Value::Bool(true))) => {}
+            other => panic!("unexpected result: {other}"),
+        }
+    }
+
+    #[test]
+    fn interpret_legalized_wide_fp_to_int_regressions() {
+        let (func, mut symbols) = build_fp_to_int_check_func(
+            160,
+            false,
+            (2f64.powi(96)).to_bits() as u128,
+            BigInt::from(1u8) << 96,
+        );
+        let meta = X86AbiMetadata::default();
+        let (legalized, _) =
+            legalize(&func, &meta, &X86LegalityInfo, &mut symbols).expect("legalized");
+        let mut module = Module::new("test");
+        module.symbols = symbols;
+        module.add_function(legalized);
+        let mut interp = Interpreter::new(&module, ExecMode::Strict);
+        let result = interp.run("wide_fp_to_int_check");
         match result {
             InterpResult::Ok(Some(Value::Bool(true))) => {}
             other => panic!("unexpected result: {other}"),
