@@ -1907,14 +1907,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         );
                         self.locals.set(destination_local, result.raw());
                     } else {
-                        // Wide funnel shift: use wide IR ops, store
-                        // result in a stack slot.
+                        // Wider-than-register funnel shift: use wide IR ops
+                        // at the operand's actual bit width, then store the
+                        // result through the existing stack-slot path.
                         let int_ann = IntAnnotation {
-                            bit_width: 128,
+                            bit_width: bits,
                             signedness: IntSignedness::Unsigned,
                         };
                         let bits_val = self.builder.iconst(
-                            128,
+                            bits as i64,
                             64,
                             IntSignedness::DontCare,
                             Origin::synthetic(),

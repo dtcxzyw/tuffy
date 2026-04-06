@@ -167,6 +167,7 @@ pub(super) struct TranslationCtx<'a, 'tcx> {
     /// MemSSA block arguments: one `Type::Mem` arg per MIR basic block.
     pub(super) block_mem_args: Vec<Option<ValueRef>>,
     pub(super) abi_metadata: AbiMetadataBox,
+    pub(super) target_max_int_width: u32,
     pub(super) instance: Instance<'tcx>,
     /// Current memory token for MemSSA threading.
     pub(super) current_mem: ValueRef,

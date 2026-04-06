@@ -388,6 +388,7 @@ pub fn translate_function<'tcx>(
         block_map,
         block_mem_args,
         abi_metadata,
+        target_max_int_width: session.max_int_width(),
         instance,
         current_mem: initial_mem,
         cast_fat_meta: FatLocalMap::new(),

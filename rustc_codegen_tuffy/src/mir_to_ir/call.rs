@@ -1309,9 +1309,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         self.last_call_vref = Some(call_mem.index());
         self.current_mem = call_mem.raw();
 
-        // Mark calls with wide integer return values for legalization
+        // Mark calls whose return uses the backend's exact double-width
+        // integer return convention so legalize can recover the low/high ABI split.
         if let Some(Annotation::Int(ia)) = call_ret_ann
-            && ia.bit_width == 128
+            && ia.bit_width == self.target_max_int_width * 2
         {
             self.abi_metadata.mark_wide_return_call(call_mem.index());
         }

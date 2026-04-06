@@ -9,6 +9,7 @@ mod legalize;
 use tuffy_ir::function::Function;
 use tuffy_ir::module::SymbolTable;
 use tuffy_target::backend::{AbiMetadata, Backend};
+use tuffy_target::legality::LegalityInfo;
 use tuffy_target::types::{CompiledFunction, StaticData};
 use tuffy_target_x86::backend::{X86AbiMetadata, X86Backend};
 use tuffy_target_x86::legality::X86LegalityInfo;
@@ -52,6 +53,13 @@ impl CodegenSession {
     pub fn new_metadata(&self) -> AbiMetadataBox {
         match &self.inner {
             CodegenInner::X86(_) => AbiMetadataBox::X86(X86AbiMetadata::default()),
+        }
+    }
+
+    /// Return the maximum legal integer width for the active target.
+    pub fn max_int_width(&self) -> u32 {
+        match &self.inner {
+            CodegenInner::X86(_) => X86LegalityInfo.max_int_width(),
         }
     }
 
