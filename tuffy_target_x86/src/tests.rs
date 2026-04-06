@@ -20,9 +20,11 @@ fn gpr_names() {
 
 use tuffy_ir::builder::Builder;
 use tuffy_ir::function::{Function, RegionKind};
-use tuffy_ir::instruction::{ICmpOp, Operand, Origin};
+use tuffy_ir::instruction::{ICmpOp, Op, Operand, Origin};
 use tuffy_ir::module::SymbolTable;
 use tuffy_ir::types::{FloatType, IntAnnotation, IntSignedness, Type};
+use tuffy_ir::value::ValueRef;
+use tuffy_target::legality::{LegalityInfo, LegalizeAction};
 
 const I64: IntAnnotation = IntAnnotation {
     bit_width: 64,
@@ -34,6 +36,33 @@ use std::collections::{HashMap, HashSet};
 use crate::backend::lower_isel_result;
 use crate::encode;
 use crate::isel;
+use crate::legality::X86LegalityInfo;
+
+#[test]
+fn legality_uses_expand_for_divrem_wider_than_double_width() {
+    let lhs = Operand::new(ValueRef::inst_result(0));
+    let rhs = Operand::new(ValueRef::inst_result(1));
+    let div = Op::Div(lhs.clone().into(), rhs.clone().into());
+    let rem = Op::Rem(lhs.into(), rhs.into());
+    let legality = X86LegalityInfo;
+
+    assert_eq!(
+        legality.legalize_action(&div, Some(128)),
+        LegalizeAction::LibCall("__udivti3")
+    );
+    assert_eq!(
+        legality.legalize_action(&rem, Some(128)),
+        LegalizeAction::LibCall("__umodti3")
+    );
+    assert_eq!(
+        legality.legalize_action(&div, Some(160)),
+        LegalizeAction::Expand
+    );
+    assert_eq!(
+        legality.legalize_action(&rem, Some(160)),
+        LegalizeAction::Expand
+    );
+}
 
 #[test]
 fn isel_add_function() {

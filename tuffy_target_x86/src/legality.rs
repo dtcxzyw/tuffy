@@ -34,13 +34,20 @@ impl LegalityInfo for X86LegalityInfo {
             (Op::RotateLeft(_, _, _) | Op::RotateRight(_, _, _), _) => LegalizeAction::Legal,
             // PopCount: x86 has popcnt instruction
             (Op::CountOnes(_), _) => LegalizeAction::Legal,
-            // Division/remainder on >64 bits → libcall
-            (Op::Div(_, _), Some(w)) if w > 64 => {
-                // Determine signedness from the operation context
-                // For now, assume unsigned; the caller should provide this info
+            // Exact double-width division/remainder uses compiler-rt helpers.
+            (Op::Div(_, _), Some(w)) if w == self.max_int_width() * 2 => {
+                // Determine signedness from the operation context.
+                // The legality query only decides the broad lowering family;
+                // target-independent legalize picks the exact signed/unsigned helper.
                 LegalizeAction::LibCall("__udivti3")
             }
-            (Op::Rem(_, _), Some(w)) if w > 64 => LegalizeAction::LibCall("__umodti3"),
+            (Op::Rem(_, _), Some(w)) if w == self.max_int_width() * 2 => {
+                LegalizeAction::LibCall("__umodti3")
+            }
+            // Wider integer div/rem now expands through the generic limb path.
+            (Op::Div(_, _) | Op::Rem(_, _), Some(w)) if w > self.max_int_width() * 2 => {
+                LegalizeAction::Expand
+            }
             // Everything else on >64 bits → expand (split)
             (_, Some(w)) if w > 64 => LegalizeAction::Expand,
             // Default: legal
