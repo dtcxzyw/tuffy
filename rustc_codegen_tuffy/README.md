@@ -55,7 +55,7 @@ The downstream crates (`tuffy_ir`, `tuffy_opt`, `tuffy_target`, `tuffy_target_x8
 
 - Uses `tuffy_codegen::AbiMetadataBox` to communicate ABI details (secondary returns, wide returns) to the backend without target coupling.
 - Handles i128/u128 types through annotation-based legalization rather than type splitting at the IR level.
-- **load/store i128**: emits a single `load.16` / `store.16` IR instruction; the backend legalize pass splits it into two 8-byte operations.
+- **wide integer load/store**: emits a single wide `load` / `store` IR instruction; the backend legalize pass lowers it into legal-width operations.
 - **carrying_mul_add**: emits dedicated `scarrying_mul_add` / `ucarrying_mul_add` IR ops; the backend legalize pass lowers them into legal-width arithmetic.
 - **load/store struct**: emits a single `load` / `store` with struct type; the backend legalize pass expands into per-word operations based on ABI rules.
 - **function parameters**: struct parameters are represented as single IR values with struct type; the backend legalize pass splits them into multiple register-sized parameters according to the target ABI.

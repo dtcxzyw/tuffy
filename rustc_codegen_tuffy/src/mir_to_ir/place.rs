@@ -432,7 +432,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         }
         // Wide integral scalars (e.g. i128): load as a full-width
         // Type::Int value so downstream code sees a value, not an
-        // address.  The legalizer splits 128-bit values later.
+        // address. The legalizer lowers wide integer values later.
         if bytes > 8 && projected_ty.is_integral() {
             let ann = translate_annotation(projected_ty);
             let data = self.builder.load(

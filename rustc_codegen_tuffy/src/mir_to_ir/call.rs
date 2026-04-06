@@ -927,7 +927,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         ir_args.push(loaded.into());
                     } else {
                         // Push value with type annotation so the legalizer
-                        // can identify wide values (e.g. 128-bit integers).
+                        // can identify wide integer values.
                         if let Some(ann) = translate_annotation(arg_ty) {
                             ir_args.push(IrOperand::annotated(v, ann));
                         } else {
@@ -1270,7 +1270,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let call_ret_ann = if matches!(call_ret_ty, Type::Int) {
             translate_annotation(dest_ty).or_else(|| {
                 // For structs ≤8 bytes, use annotation based on size.
-                // For Scalar > 8 bytes (e.g. (u128,)), use 128-bit
+                // For scalar returns wider than one register, use a wide
                 // annotation so legalization treats it as a wide return.
                 // For ScalarPair, use only the first scalar's byte width
                 // as the call annotation — the second scalar is captured
@@ -1309,7 +1309,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         self.last_call_vref = Some(call_mem.index());
         self.current_mem = call_mem.raw();
 
-        // Mark calls with 128-bit return values for legalization
+        // Mark calls with wide integer return values for legalization
         if let Some(Annotation::Int(ia)) = call_ret_ann
             && ia.bit_width == 128
         {

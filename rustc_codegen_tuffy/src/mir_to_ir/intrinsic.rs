@@ -1289,8 +1289,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             self.locals.set(destination_local, clz.raw());
                         }
                     } else {
-                        // 128-bit: emit with 128-bit operand width; legalization splits it.
-                        // Result is at most 128 and fits in 64 bits, so use 64-bit result
+                        // Wide integer: emit with the full operand width; legalization lowers it.
+                        // The result still fits in 64 bits, so use a 64-bit result
                         // annotation to avoid the value being marked as "wide".
                         let result = self.builder.count_leading_zeros(
                             v.into(),
@@ -1338,7 +1338,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 .count_trailing_zeros(v.into(), 64, Origin::synthetic());
                         self.locals.set(destination_local, result.raw());
                     } else {
-                        // 128-bit: emit with 64-bit width; legalization splits it.
+                        // Wide integer: emit the scalar op and let legalization lower it.
                         let result =
                             self.builder
                                 .count_trailing_zeros(v.into(), 64, Origin::synthetic());
@@ -1715,7 +1715,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         })
                         .unwrap_or(I64);
                     // Annotate operands so legalization picks the correct
-                    // library call (signed vs unsigned) for 128-bit types.
+                    // library call (signed vs unsigned) for wide integer types.
                     let full_ann = Annotation::Int(ann);
                     let a_op = tuffy_ir::instruction::Operand::annotated(ir_args[0], full_ann);
                     let b_op = tuffy_ir::instruction::Operand::annotated(ir_args[1], full_ann);
@@ -1907,7 +1907,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         );
                         self.locals.set(destination_local, result.raw());
                     } else {
-                        // 128-bit funnel shift: use 128-bit IR ops, store
+                        // Wide funnel shift: use wide IR ops, store
                         // result in a stack slot.
                         let int_ann = IntAnnotation {
                             bit_width: 128,

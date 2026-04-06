@@ -59,7 +59,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     }
 
     /// Apply sign/zero extension based on result annotation signedness.
-    /// For 128-bit results the operation already produces a full-width value,
+    /// For wide results the operation already produces a full-width value,
     /// so we skip the redundant zext/sext to avoid legalization overhead.
     fn apply_int_extension(
         &mut self,
@@ -1331,7 +1331,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // `coerce_to_int` below would convert the address itself
                 // to an integer (ptrtoaddr), producing the wrong result.
                 // This only applies when the target type fits in 64 bits;
-                // 128-bit → 128-bit casts go through the wide_pair path.
+                // Wide → wide casts go through the wide path.
                 let target_ty_m = self.monomorphize(*target_ty);
                 let src_size = type_size(self.tcx, src_ty).unwrap_or(0);
                 let dst_size = type_size(self.tcx, target_ty_m).unwrap_or(0);
@@ -1363,7 +1363,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     && matches!(self.builder.value_type(val), Some(Type::Ptr(_)))
                 {
                     // Load the low 8 bytes (little-endian) which hold
-                    // bits [0..63] of the 128-bit integer — sufficient
+                    // the low machine word of the wide integer — sufficient
                     // for any narrowing cast to ≤64-bit targets.
                     self.builder.load(
                         val.into(),
@@ -1459,7 +1459,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 } else {
                     val
                 };
-                // For 128-bit targets, fp_to_ui/fp_to_si only produce 64-bit results.
+                // For wide integer targets, fp_to_ui/fp_to_si only produce one-part results.
                 // Convert to 64-bit first, then extend.
                 let needs_extend = bit_width > 64;
                 let raw = if signed {
@@ -1495,8 +1495,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
                 // Rust's FloatToInt is saturating: clamp to target range.
                 let result = if needs_extend {
-                    // For 128-bit types, fp_to_ui/fp_to_si produce 64-bit results.
-                    // Explicitly extend to 128 bits.
+                    // For wide integer types, fp_to_ui/fp_to_si produce one-part results.
+                    // Explicitly extend to the full destination width.
                     if signed {
                         self.builder
                             .sext(raw.into(), 128, Origin::synthetic())
@@ -1798,7 +1798,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
                 let src_size = type_size(self.tcx, src_ty).unwrap_or(8);
                 // When val is a Ptr (address of a >8-byte int like
-                // i128/u128), load the full value so the legalizer can
+                // wide integer), load the full value so the legalizer can
                 // split it.  Without this, coerce_to_int would convert
                 // the address itself into an integer via ptrtoaddr.
                 let int_val =

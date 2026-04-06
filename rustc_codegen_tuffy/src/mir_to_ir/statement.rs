@@ -323,7 +323,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 } else {
                     val
                 };
-                // For 128-bit integers (u128/i128), store the
+                // For wide integers, store the
                 // full 16 bytes; the legalizer splits into two
                 // 64-bit stores.  Other scalars cap at 8.
                 let store_bytes =
@@ -1402,7 +1402,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             } else if bytes > 8 {
                 // Wide value (e.g. i128 arithmetic result or
                 // constant). Store full width — the legalizer
-                // splits 128-bit stores into lo/hi halves.
+                // lowers wide integer stores into legal-width chunks.
                 // For checked ops, store only the primary
                 // result width, not the full tuple size.
                 let store_bytes = if let Rvalue::BinaryOp(
