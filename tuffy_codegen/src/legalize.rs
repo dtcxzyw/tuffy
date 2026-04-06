@@ -126,17 +126,15 @@ fn is_wide_width(width: Option<u32>, legality: &impl LegalityInfo) -> bool {
     }
 }
 
-fn is_128_bit_int(ty: &Type) -> bool {
-    // This function name is misleading - it's used as a type check only.
-    // The actual bit width check happens via annotations elsewhere.
-    matches!(ty, Type::Int)
-}
-
-fn is_128_bit_int_with_annotation(ty: &Type, ann: &Option<Annotation>) -> bool {
+fn is_wide_int_with_annotation_limit(
+    ty: &Type,
+    ann: &Option<Annotation>,
+    max_int_width: u32,
+) -> bool {
     matches!(ty, Type::Int)
         && ann
             .as_ref()
-            .is_some_and(|a| matches!(a, Annotation::Int(ia) if ia.bit_width > 64))
+            .is_some_and(|a| matches!(a, Annotation::Int(ia) if ia.bit_width > max_int_width))
 }
 
 fn is_wide_int_value_with_limit(func: &Function, v: ValueRef, max_int_width: u32) -> bool {
@@ -335,41 +333,6 @@ fn has_wide_values<M: AbiMetadata>(
     false
 }
 
-#[allow(dead_code)]
-fn has_128bit_values(func: &Function) -> bool {
-    if func.params.iter().any(is_128_bit_int) {
-        return true;
-    }
-    if func.ret_ty.as_ref().is_some_and(is_128_bit_int) {
-        return true;
-    }
-    for (_, inst) in func.inst_pool.iter_insts() {
-        if is_128_bit_int(&inst.ty) {
-            return true;
-        }
-        match &inst.op {
-            Op::Load(_, 16, _) | Op::Store(_, _, 16, _) => return true,
-            Op::Sext(_, 128) | Op::Zext(_, 128) => return true,
-            Op::Bswap(_, 16) => return true,
-            Op::RotateLeft(_, _, 128) | Op::RotateRight(_, _, 128) => return true,
-            Op::BitReverse(_, 128) => return true,
-            Op::SaturatingAdd(_, _, 128)
-            | Op::SaturatingSub(_, _, 128)
-            | Op::SignedSaturatingAdd(_, _, 128)
-            | Op::SignedSaturatingSub(_, _, 128) => return true,
-            Op::SAddWithOverflow(_, _, 128)
-            | Op::UAddWithOverflow(_, _, 128)
-            | Op::SSubWithOverflow(_, _, 128)
-            | Op::USubWithOverflow(_, _, 128)
-            | Op::SMulWithOverflow(_, _, 128)
-            | Op::UMulWithOverflow(_, _, 128) => return true,
-            Op::Const(v) if needs_wide_const(v) => return true,
-            _ => {}
-        }
-    }
-    false
-}
-
 // ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
@@ -441,7 +404,7 @@ fn build_new_func<M: AbiMetadata + Clone>(
         let name = old.param_names.get(i).and_then(|n| *n);
         let ann = old.param_annotations.get(i).cloned().flatten();
         let param_is_wide = is_wide_width(type_width(ty), legality)
-            || is_128_bit_int_with_annotation(ty, &ann)
+            || is_wide_int_with_annotation_limit(ty, &ann, legality.max_int_width())
             || matches!(ty, Type::Float(FloatType::F128));
         if param_is_wide {
             let lo_idx = params.len() as u32;
@@ -471,7 +434,7 @@ fn build_new_func<M: AbiMetadata + Clone>(
     let ret_ty = old.ret_ty.clone();
     let ret_ann = if let Some(ref ty) = ret_ty {
         if is_wide_width(type_width(ty), legality)
-            || is_128_bit_int_with_annotation(ty, &old.ret_annotation)
+            || is_wide_int_with_annotation_limit(ty, &old.ret_annotation, legality.max_int_width())
             || matches!(ty, Type::Float(FloatType::F128))
         {
             None
@@ -514,7 +477,11 @@ fn collect_wide_values<M: AbiMetadata>(
     for (i, inst) in old.inst_pool.iter_insts() {
         let vref = ValueRef::inst_result(i);
         if is_wide_width(type_width(&inst.ty), legality)
-            || is_128_bit_int_with_annotation(&inst.ty, &inst.result_annotation)
+            || is_wide_int_with_annotation_limit(
+                &inst.ty,
+                &inst.result_annotation,
+                legality.max_int_width(),
+            )
             || matches!(inst.ty, Type::Float(FloatType::F128))
         {
             wide.insert(vref.raw());
@@ -818,7 +785,7 @@ fn legalize_inst<M: AbiMetadata + Clone>(
             leg_mul(old, s, b, old_vref, &a.clone().raw(), &op_b.clone().raw());
         }
         Op::Div(a, op_b) if wide_result => {
-            let bits = result_bits(old, old_vref);
+            let bits = result_bits(s, old, old_vref);
             if bits == s.part_bits * 2 {
                 leg_div_rem_128(
                     old,
@@ -836,7 +803,7 @@ fn legalize_inst<M: AbiMetadata + Clone>(
             }
         }
         Op::Rem(a, op_b) if wide_result => {
-            let bits = result_bits(old, old_vref);
+            let bits = result_bits(s, old, old_vref);
             if bits == s.part_bits * 2 {
                 leg_div_rem_128(
                     old,
@@ -1220,7 +1187,7 @@ fn legalize_inst<M: AbiMetadata + Clone>(
         }
         Op::Ret(val, mem)
             if old.ret_ty.as_ref().is_some_and(|t| {
-                is_128_bit_int_with_annotation(t, &old.ret_annotation)
+                is_wide_int_with_annotation_limit(t, &old.ret_annotation, s.part_bits)
                     || matches!(t, Type::Float(FloatType::F128))
             }) =>
         {
@@ -1602,7 +1569,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
             .raw(),
         Op::CountOnes(a) => {
             let val_vref = a.clone().raw().value;
-            let bits = result_bits(old, old_vref);
+            let bits = result_bits(s, old, old_vref);
             if is_wide(s, val_vref) && bits > s.part_bits && bits.is_multiple_of(s.limb_bits) {
                 let mut total = b.iconst(0i64, 64, IntSignedness::Unsigned, o()).raw();
                 for limb in operand_limbs32(old, s, b, &a.clone().raw(), bits) {
@@ -1698,7 +1665,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
             .raw(),
         Op::CountTrailingZeros(a) => {
             let val_vref = a.clone().raw().value;
-            let bits = result_bits(old, old_vref);
+            let bits = result_bits(s, old, old_vref);
             if is_wide(s, val_vref) && bits > s.part_bits && bits.is_multiple_of(s.limb_bits) {
                 let widths = wide_limb_widths(s, bits);
                 let limbs = operand_limbs32(old, s, b, &a.clone().raw(), bits);
@@ -2768,10 +2735,10 @@ fn widening_mul_u32<M>(
     (lo.raw(), hi.raw())
 }
 
-fn result_bits(old: &Function, old_vref: ValueRef) -> u32 {
+fn result_bits<M>(s: &State<M>, old: &Function, old_vref: ValueRef) -> u32 {
     value_annotation(old, old_vref)
         .and_then(|ann| int_annotation_bits(Some(ann)))
-        .unwrap_or(128)
+        .unwrap_or(s.part_bits * 2)
 }
 
 fn chunk_widths(bits: u32, chunk_bits: u32) -> Vec<u32> {
@@ -3744,7 +3711,7 @@ fn leg_signed_saturating_addsub_128<M>(
     op_b: &Operand,
     is_add: bool,
 ) {
-    let bits = result_bits(old, old_vref);
+    let bits = result_bits(s, old, old_vref);
     if bits > s.part_bits && bits.is_multiple_of(s.limb_bits) {
         let a_limbs = operand_limbs32(old, s, b, a, bits);
         let b_limbs = operand_limbs32(old, s, b, op_b, bits);
@@ -3923,7 +3890,7 @@ fn leg_unsigned_saturating_addsub_128<M>(
     op_b: &Operand,
     is_add: bool,
 ) {
-    let bits = result_bits(old, old_vref);
+    let bits = result_bits(s, old, old_vref);
     if bits > s.part_bits && bits.is_multiple_of(s.limb_bits) {
         let (result_limbs, overflow) = if is_add {
             let a_limbs = operand_limbs32(old, s, b, a, bits);
@@ -4363,7 +4330,7 @@ fn leg_bitwise<M>(
     op_b: &Operand,
     kind: BitwiseKind,
 ) {
-    let bits = result_bits(old, old_vref);
+    let bits = result_bits(s, old, old_vref);
     if bits > s.part_bits && bits.is_multiple_of(s.limb_bits) {
         let a_limbs = operand_limbs32(old, s, b, a, bits);
         let b_limbs = operand_limbs32(old, s, b, op_b, bits);
@@ -4443,7 +4410,7 @@ fn leg_shl<M>(
     op_b: &Operand,
     _ann: Option<&Annotation>,
 ) {
-    let bits = result_bits(old, old_vref);
+    let bits = result_bits(s, old, old_vref);
     if bits > s.part_bits && bits.is_multiple_of(s.limb_bits) {
         let limbs = operand_limbs32(old, s, b, a, bits);
         let out = wide_shl_limbs(s, b, &limbs, s.vmap.one(op_b.value), bits);
@@ -4515,7 +4482,7 @@ fn leg_shr<M>(
             _ => None,
         })
         .is_some_and(|s| matches!(s, IntSignedness::Signed));
-    let bits = result_bits(old, old_vref);
+    let bits = result_bits(s, old, old_vref);
     if bits > s.part_bits && bits.is_multiple_of(s.limb_bits) {
         let limbs = operand_limbs32(old, s, b, a, bits);
         let out = wide_shr_limbs(s, b, &limbs, s.vmap.one(op_b.value), bits, signed);
@@ -4692,7 +4659,7 @@ fn leg_rotate_128<M>(
     amt_op: &Operand,
     is_left: bool,
 ) {
-    let bits = result_bits(old, old_vref);
+    let bits = result_bits(s, old, old_vref);
     if bits > s.part_bits && bits.is_multiple_of(s.limb_bits) {
         let limbs = operand_limbs32(old, s, b, a, bits);
         let amt = s.vmap.one(amt_op.value);
@@ -4773,7 +4740,7 @@ fn leg_bit_reverse_128<M>(
     old_vref: ValueRef,
     a: &Operand,
 ) {
-    let bits = result_bits(old, old_vref);
+    let bits = result_bits(s, old, old_vref);
     if bits > s.part_bits && bits.is_multiple_of(s.limb_bits) {
         let limbs = operand_limbs32(old, s, b, a, bits);
         let rev: Vec<ValueRef> = limbs
@@ -5109,7 +5076,7 @@ fn leg_fp_to_int128<M: AbiMetadata + Clone>(
     old: &Function,
     symbols: &mut SymbolTable,
 ) {
-    debug_assert_eq!(result_bits(old, old_vref), s.part_bits * 2);
+    debug_assert_eq!(result_bits(s, old, old_vref), s.part_bits * 2);
     // Retrieve the float input to the FpToUi/FpToSi instruction.
     let fp_input_vref = match old.inst_pool.get(zext_val.value.index()) {
         Some(node) => match &node.inst.op {
@@ -5118,10 +5085,24 @@ fn leg_fp_to_int128<M: AbiMetadata + Clone>(
                 // Not the expected pattern; fall back to simple extend.
                 let lo = s.vmap.one(zext_val.value);
                 let hi = if signed {
-                    let c63 = b.iconst(63i64, 64, IntSignedness::Unsigned, o());
-                    b.shr(lo.into(), c63.into(), SIGNED_64_INT, o())
+                    let shift = b.iconst(
+                        (s.part_bits - 1) as i64,
+                        s.part_bits,
+                        IntSignedness::Unsigned,
+                        o(),
+                    );
+                    let signed_part = IntAnnotation {
+                        bit_width: s.part_bits,
+                        signedness: IntSignedness::Signed,
+                    };
+                    b.shr(
+                        Operand::annotated(lo, Annotation::Int(signed_part)).into(),
+                        shift.into(),
+                        signed_part,
+                        o(),
+                    )
                 } else {
-                    b.iconst(0i64, 64, IntSignedness::Unsigned, o())
+                    b.iconst(0i64, s.part_bits, IntSignedness::Unsigned, o())
                 };
                 s.vmap.set(old_vref, Mapped::Pair(lo, hi.raw()));
                 return;
@@ -5129,7 +5110,7 @@ fn leg_fp_to_int128<M: AbiMetadata + Clone>(
         },
         None => {
             let lo = s.vmap.one(zext_val.value);
-            let hi = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
+            let hi = b.iconst(0i64, s.part_bits, IntSignedness::Unsigned, o());
             s.vmap.set(old_vref, Mapped::Pair(lo, hi.raw()));
             return;
         }
@@ -5168,7 +5149,7 @@ fn leg_fp_to_int128<M: AbiMetadata + Clone>(
     // Record wide return: hi arrives in RDX.
     let call_idx = call_mem.index();
     s.meta.mark_call_secondary_return(call_idx);
-    let hi_capture = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
+    let hi_capture = b.iconst(0i64, s.part_bits, IntSignedness::Unsigned, o());
     s.meta
         .mark_secondary_return_capture(hi_capture.index(), call_idx);
 
@@ -5224,7 +5205,7 @@ fn leg_select_128<M>(
     tv: &Operand,
     fv: &Operand,
 ) {
-    let bits = result_bits(old, old_vref);
+    let bits = result_bits(s, old, old_vref);
     if bits > s.part_bits && bits.is_multiple_of(s.limb_bits) {
         let c = s.vmap.one(cond.value);
         let t_limbs = operand_limbs32(old, s, b, tv, bits);
@@ -5289,7 +5270,7 @@ fn leg_div_rem_128<M: AbiMetadata + Clone>(
     is_div: bool,
     symbols: &mut SymbolTable,
 ) {
-    debug_assert_eq!(result_bits(old, old_vref), s.part_bits * 2);
+    debug_assert_eq!(result_bits(s, old, old_vref), s.part_bits * 2);
     let signed = is_signed_annotation(a.annotation.as_ref());
     let name = match (is_div, signed) {
         (true, true) => "__divti3",
@@ -5372,16 +5353,31 @@ fn leg_int128_to_fp<M: AbiMetadata + Clone>(
     let callee = b.symbol_addr(sym_id, o()).raw();
 
     let (a_lo, a_hi) = if is_wide(s, a.value) {
-        s.vmap.pair(a.value)
+        let parts = s.vmap.parts(a.value);
+        (parts[0], parts[1])
     } else {
         // Small 128-bit value mapped to a single 64-bit word.
         // Compute the hi word: sign-extend for i128, zero for u128.
         let lo = s.vmap.one(a.value);
         let hi = if signed {
-            let c63 = b.iconst(63i64, 64, IntSignedness::Unsigned, o());
-            b.shr(lo.into(), c63.into(), SIGNED_64_INT, o())
+            let shift = b.iconst(
+                (s.part_bits - 1) as i64,
+                s.part_bits,
+                IntSignedness::Unsigned,
+                o(),
+            );
+            let signed_part = IntAnnotation {
+                bit_width: s.part_bits,
+                signedness: IntSignedness::Signed,
+            };
+            b.shr(
+                Operand::annotated(lo, Annotation::Int(signed_part)).into(),
+                shift.into(),
+                signed_part,
+                o(),
+            )
         } else {
-            b.iconst(0i64, 64, IntSignedness::Unsigned, o())
+            b.iconst(0i64, s.part_bits, IntSignedness::Unsigned, o())
         };
         (lo, hi.raw())
     };
@@ -5475,7 +5471,7 @@ fn leg_call<M: AbiMetadata + Clone>(
                 new_args.push(Operand::new(part));
             }
         } else if is_wide_int_value_with_limit(_old, arg.value, s.part_bits) {
-            for part in operand_parts64(_old, s, b, arg, result_bits(_old, arg.value)) {
+            for part in operand_parts64(_old, s, b, arg, result_bits(s, _old, arg.value)) {
                 new_args.push(Operand::new(part));
             }
         } else {
