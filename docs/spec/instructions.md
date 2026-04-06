@@ -379,6 +379,30 @@ Unsigned multiplication with overflow detection in `width` bits. Returns two res
 the wrapped product and a boolean overflow flag. Produces `poison` if `width` is 0.
 **Semantics**: `evalUMulOverflow(a, b, width) = (wrapped_prod, overflow_flag)`
 
+### `scarrying_mul_add`
+
+```
+vLo, vHi = scarrying_mul_add.<width> vA, vB, vCarry, vAdd
+```
+
+Signed full-width multiply-add in `width` bits. Computes the exact `2*width`-bit
+two's-complement result of `a * b + carry + add`, then returns the low `width`
+bits as `vLo` and the high `width` bits as `vHi`. Produces `poison` if `width`
+is 0.
+**Semantics**: `evalSCarryingMulAdd(a, b, carry, add, width) = (lo, hi)`
+
+### `ucarrying_mul_add`
+
+```
+vLo, vHi = ucarrying_mul_add.<width> vA, vB, vCarry, vAdd
+```
+
+Unsigned full-width multiply-add in `width` bits. Computes the exact
+`2*width`-bit result of `a * b + carry + add`, then returns the low `width`
+bits as `vLo` and the high `width` bits as `vHi`. Produces `poison` if `width`
+is 0.
+**Semantics**: `evalUCarryingMulAdd(a, b, carry, add, width) = (lo, hi)`
+
 ### `min`
 
 ```

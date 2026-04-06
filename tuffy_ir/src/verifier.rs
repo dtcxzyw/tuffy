@@ -9,7 +9,7 @@ use std::fmt;
 use crate::function::{CfgNode, Function, RegionKind};
 use crate::instruction::{Instruction, Op, Operand};
 use crate::module::{Module, SymbolTable};
-use crate::types::{Annotation, MemoryOrdering, Type};
+use crate::types::{Annotation, IntAnnotation, IntSignedness, MemoryOrdering, Type};
 use crate::value::{BlockRef, RegionRef, ValueRef};
 
 // ---------------------------------------------------------------------------
@@ -564,6 +564,67 @@ impl FuncVerifier<'_> {
                         format!(
                             "overflow arith secondary result must be Bool, got {:?}",
                             inst.secondary_ty
+                        ),
+                    );
+                }
+            }
+
+            Op::SCarryingMulAdd(a, b, carry, add, bits)
+            | Op::UCarryingMulAdd(a, b, carry, add, bits) => {
+                self.check_operand(&a.clone().raw(), &loc);
+                self.check_operand(&b.clone().raw(), &loc);
+                self.check_operand(&carry.clone().raw(), &loc);
+                self.check_operand(&add.clone().raw(), &loc);
+                self.expect_int(&a.clone().raw(), "carrying mul-add lhs", &loc);
+                self.expect_int(&b.clone().raw(), "carrying mul-add rhs", &loc);
+                self.expect_int(&carry.clone().raw(), "carrying mul-add carry", &loc);
+                self.expect_int(&add.clone().raw(), "carrying mul-add add", &loc);
+                if *bits == 0 {
+                    self.result
+                        .error(loc.clone(), "carrying mul-add bit width must be > 0");
+                }
+                if inst.ty != Type::Int {
+                    self.result.error(
+                        loc.clone(),
+                        format!(
+                            "carrying mul-add primary result must be Int, got {:?}",
+                            inst.ty
+                        ),
+                    );
+                }
+                if inst.secondary_ty != Some(Type::Int) {
+                    self.result.error(
+                        loc.clone(),
+                        format!(
+                            "carrying mul-add secondary result must be Int, got {:?}",
+                            inst.secondary_ty
+                        ),
+                    );
+                }
+                let expected_sign = match inst.op {
+                    Op::SCarryingMulAdd(..) => IntSignedness::Signed,
+                    Op::UCarryingMulAdd(..) => IntSignedness::Unsigned,
+                    _ => unreachable!(),
+                };
+                let expected = Some(Annotation::Int(IntAnnotation {
+                    bit_width: *bits,
+                    signedness: expected_sign,
+                }));
+                if inst.result_annotation != expected {
+                    self.result.error(
+                        loc.clone(),
+                        format!(
+                            "carrying mul-add primary annotation must be {:?}, got {:?}",
+                            expected, inst.result_annotation
+                        ),
+                    );
+                }
+                if inst.secondary_result_annotation != expected {
+                    self.result.error(
+                        loc,
+                        format!(
+                            "carrying mul-add secondary annotation must be {:?}, got {:?}",
+                            expected, inst.secondary_result_annotation
                         ),
                     );
                 }

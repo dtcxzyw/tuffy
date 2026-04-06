@@ -919,6 +919,28 @@ pub fn execute_instruction(
             secondary_result_annotation,
             resolve_value,
         ),
+        Op::SCarryingMulAdd(a, b, carry, add, n) => exec_carrying_mul_add(
+            a,
+            b,
+            carry,
+            add,
+            *n,
+            true,
+            result_annotation,
+            secondary_result_annotation,
+            resolve_value,
+        ),
+        Op::UCarryingMulAdd(a, b, carry, add, n) => exec_carrying_mul_add(
+            a,
+            b,
+            carry,
+            add,
+            *n,
+            false,
+            result_annotation,
+            secondary_result_annotation,
+            resolve_value,
+        ),
 
         // ── Comparison ──
         Op::ICmp(cmp_op, a, b) => {
@@ -1863,6 +1885,64 @@ fn exec_mul_overflow(
             };
             let v1 = apply_result_annotation(Value::Int(wrapped), result_annotation);
             let v2 = Value::Bool(overflowed);
+            Ok(ExecResult::MultiValue(v1, v2))
+        }
+        _ => Ok(ExecResult::MultiValue(Value::Poison, Value::Poison)),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn exec_carrying_mul_add(
+    a: &tuffy_ir::typed::IntOperand,
+    b: &tuffy_ir::typed::IntOperand,
+    carry: &tuffy_ir::typed::IntOperand,
+    add: &tuffy_ir::typed::IntOperand,
+    n: u32,
+    is_signed: bool,
+    result_annotation: &Option<Annotation>,
+    secondary_result_annotation: &Option<Annotation>,
+    resolve_value: &dyn Fn(ValueRef) -> Value,
+) -> Result<ExecResult, UbViolation> {
+    fn res_op(resolve_value: &dyn Fn(ValueRef) -> Value, op: &Operand) -> Value {
+        let base = resolve_value(op.value);
+        resolve_operand(&base, &op.annotation)
+    }
+    let va = res_op(resolve_value, &a.clone().raw());
+    let vb = res_op(resolve_value, &b.clone().raw());
+    let vc = res_op(resolve_value, &carry.clone().raw());
+    let vd = res_op(resolve_value, &add.clone().raw());
+    let n = n as usize;
+    if n == 0 {
+        return Ok(ExecResult::MultiValue(Value::Poison, Value::Poison));
+    }
+    match (&va, &vb, &vc, &vd) {
+        (Value::Int(a), Value::Int(b), Value::Int(carry), Value::Int(add)) => {
+            let modulus = BigInt::one() << n;
+            let max = if is_signed {
+                (BigInt::one() << (n - 1)) - 1
+            } else {
+                modulus.clone() - 1
+            };
+            let full = a * b + carry + add;
+            let mut lo = &full % &modulus;
+            if lo < BigInt::zero() {
+                lo += &modulus;
+            }
+            let hi = (&full - &lo) / &modulus;
+            let mut hi = hi % &modulus;
+            if hi < BigInt::zero() {
+                hi += &modulus;
+            }
+            if is_signed {
+                if lo > max {
+                    lo -= &modulus;
+                }
+                if hi > max {
+                    hi -= &modulus;
+                }
+            }
+            let v1 = apply_result_annotation(Value::Int(lo), result_annotation);
+            let v2 = apply_result_annotation(Value::Int(hi), secondary_result_annotation);
             Ok(ExecResult::MultiValue(v1, v2))
         }
         _ => Ok(ExecResult::MultiValue(Value::Poison, Value::Poison)),

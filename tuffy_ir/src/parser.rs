@@ -1446,6 +1446,27 @@ impl<'a> Parser<'a> {
                 Ok(multi_result(op, multi, primary_ty.clone(), *primary_ann))
             }
 
+            "scarrying_mul_add" | "ucarrying_mul_add" => {
+                let width = self.parse_dot_u32()?;
+                let a = self.parse_operand()?;
+                self.expect(&Token::Comma)?;
+                let b = self.parse_operand()?;
+                self.expect(&Token::Comma)?;
+                let carry = self.parse_operand()?;
+                self.expect(&Token::Comma)?;
+                let add = self.parse_operand()?;
+                let op = match opcode {
+                    "scarrying_mul_add" => {
+                        Op::SCarryingMulAdd(a.into(), b.into(), carry.into(), add.into(), width)
+                    }
+                    "ucarrying_mul_add" => {
+                        Op::UCarryingMulAdd(a.into(), b.into(), carry.into(), add.into(), width)
+                    }
+                    _ => unreachable!(),
+                };
+                Ok(multi_result(op, multi, primary_ty.clone(), *primary_ann))
+            }
+
             // FP binary with optional flags: fadd [reassoc] [contract] v0, v1
             "fadd" | "fsub" | "fmul" | "fdiv" | "frem" => {
                 let flags = self.parse_fp_rewrite_flags();

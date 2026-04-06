@@ -320,6 +320,12 @@ pub enum Op {
     /// Unsigned multiplication with overflow detection in n bits. n = 0 produces poison.
     /// Multi-result: primary = wrapping product (Int), secondary = overflow flag (Bool).
     UMulWithOverflow(IntOperand, IntOperand, u32),
+    /// Signed carrying multiply-add in n bits. n = 0 produces poison.
+    /// Multi-result: primary = low n bits of (a*b + carry + add), secondary = high n bits.
+    SCarryingMulAdd(IntOperand, IntOperand, IntOperand, IntOperand, u32),
+    /// Unsigned carrying multiply-add in n bits. n = 0 produces poison.
+    /// Multi-result: primary = low n bits of (a*b + carry + add), secondary = high n bits.
+    UCarryingMulAdd(IntOperand, IntOperand, IntOperand, IntOperand, u32),
     /// Integer constant (arbitrary precision, matching Lean `Int`).
     Const(BigInt),
     /// Boolean constant: true or false.
@@ -538,6 +544,13 @@ impl Op {
                 f(b.0.value);
             }
 
+            SCarryingMulAdd(a, b, carry, add, _) | UCarryingMulAdd(a, b, carry, add, _) => {
+                f(a.0.value);
+                f(b.0.value);
+                f(carry.0.value);
+                f(add.0.value);
+            }
+
             // Two typed operands (bool)
             BAnd(a, b) | BOr(a, b) | BXor(a, b) => {
                 f(a.0.value);
@@ -753,6 +766,13 @@ impl Op {
             | UMulWithOverflow(a, b, _) => {
                 f(&mut a.0.value);
                 f(&mut b.0.value);
+            }
+
+            SCarryingMulAdd(a, b, carry, add, _) | UCarryingMulAdd(a, b, carry, add, _) => {
+                f(&mut a.0.value);
+                f(&mut b.0.value);
+                f(&mut carry.0.value);
+                f(&mut add.0.value);
             }
 
             BAnd(a, b) | BOr(a, b) | BXor(a, b) => {

@@ -1734,6 +1734,60 @@ fn build_clmul() {
 }
 
 #[test]
+fn build_ucarrying_mul_add() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("ucarrying_mul_add_test");
+    let ann = Some(Annotation::Int(IntAnnotation {
+        bit_width: 128,
+        signedness: IntSignedness::Unsigned,
+    }));
+    let mut func = Function::new(
+        name,
+        vec![Type::Int, Type::Int, Type::Int, Type::Int],
+        vec![ann, ann, ann, ann],
+        vec![],
+        Some(Type::Int),
+        ann,
+    );
+    let mut b = Builder::new(&mut func);
+
+    let root = b.create_region(RegionKind::Function);
+    b.enter_region(root);
+    let bb = b.create_block();
+    b.switch_to_block(bb);
+
+    let mem0 = b.add_block_arg(bb, Type::Mem, None);
+    let a = b.param(0, Type::Int, ann, Origin::synthetic());
+    let b_val = b.param(1, Type::Int, ann, Origin::synthetic());
+    let carry = b.param(2, Type::Int, ann, Origin::synthetic());
+    let add = b.param(3, Type::Int, ann, Origin::synthetic());
+    let (lo, hi) = b.u_carrying_mul_add(
+        a.into(),
+        b_val.into(),
+        carry.into(),
+        add.into(),
+        128,
+        Origin::synthetic(),
+    );
+
+    assert!(!lo.is_secondary_result());
+    assert!(hi.is_secondary_result());
+
+    b.ret(Some(lo.into()), mem0.into(), Origin::synthetic());
+    b.exit_region();
+
+    let inst = &func.inst(4);
+    assert!(matches!(inst.op, Op::UCarryingMulAdd(_, _, _, _, 128)));
+    assert_eq!(inst.ty, Type::Int);
+    assert_eq!(inst.secondary_ty, Some(Type::Int));
+    assert_eq!(inst.result_annotation, ann);
+    assert_eq!(inst.secondary_result_annotation, ann);
+
+    let output = format!("{}", func.display(&st));
+    assert!(output.contains("ucarrying_mul_add.128"));
+}
+
+#[test]
 fn test_struct_type_display() {
     let i64_type = Type::Int;
     let struct_ty = Type::Struct(vec![i64_type, Type::Bool, Type::Byte(4)]);

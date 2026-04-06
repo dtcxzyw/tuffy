@@ -28,6 +28,13 @@ fn assert_ub(r: InterpResult) {
     }
 }
 
+fn unwrap_bool(r: InterpResult) -> bool {
+    match r {
+        InterpResult::Ok(Some(Value::Bool(b))) => b,
+        other => panic!("expected Ok(Bool), got: {other}"),
+    }
+}
+
 // ──────────────────────────────────────────────────────────────────────
 // Basic arithmetic
 // ──────────────────────────────────────────────────────────────────────
@@ -519,6 +526,80 @@ fn test_zext() {
     ret v2, v0
 }");
     assert_eq!(unwrap_int(r), 255);
+}
+
+#[test]
+fn test_ucarrying_mul_add_u128() {
+    let r = run("func @main() -> bool {
+  bb0(v0: mem):
+    v1: int:u128 = iconst 18446744073709551616
+    v2: int:u128 = iconst 18446744073709551616
+    v3: int:u128 = iconst 0
+    v4: int:u128 = iconst 0
+    v5: int:u128, v6: int:u128 = ucarrying_mul_add.128 v1, v2, v3, v4
+    v7: int:u128 = iconst 0
+    v8: int:u128 = iconst 1
+    v9: bool = icmp.eq v5, v7
+    v10: bool = icmp.eq v6, v8
+    v11: bool = band v9, v10
+    ret v11, v0
+}");
+    assert!(unwrap_bool(r));
+}
+
+#[test]
+fn test_scarrying_mul_add_i160() {
+    let r = run("func @main() -> bool {
+  bb0(v0: mem):
+    v1: int:s160 = iconst -1
+    v2: int:s160 = iconst 2
+    v3: int:s160 = iconst -3
+    v4: int:s160 = iconst 4
+    v5: int:s160, v6: int:s160 = scarrying_mul_add.160 v1, v2, v3, v4
+    v7: int:s160 = iconst -1
+    v8: bool = icmp.eq v5, v7
+    v9: bool = icmp.eq v6, v7
+    v10: bool = band v8, v9
+    ret v10, v0
+}");
+    assert!(unwrap_bool(r));
+}
+
+#[test]
+fn test_ucarrying_mul_add_u192() {
+    let r = run("func @main() -> bool {
+  bb0(v0: mem):
+    v1: int:u192 = iconst 79228162514264337593543950336
+    v2: int:u192 = iconst 79228162514264337593543950336
+    v3: int:u192 = iconst 5
+    v4: int:u192 = iconst 7
+    v5: int:u192, v6: int:u192 = ucarrying_mul_add.192 v1, v2, v3, v4
+    v7: int:u192 = iconst 12
+    v8: int:u192 = iconst 1
+    v9: bool = icmp.eq v5, v7
+    v10: bool = icmp.eq v6, v8
+    v11: bool = band v9, v10
+    ret v11, v0
+}");
+    assert!(unwrap_bool(r));
+}
+
+#[test]
+fn test_scarrying_mul_add_i256() {
+    let r = run("func @main() -> bool {
+  bb0(v0: mem):
+    v1: int:s256 = iconst -1
+    v2: int:s256 = iconst 1
+    v3: int:s256 = iconst 0
+    v4: int:s256 = iconst 0
+    v5: int:s256, v6: int:s256 = scarrying_mul_add.256 v1, v2, v3, v4
+    v7: int:s256 = iconst -1
+    v8: bool = icmp.eq v5, v7
+    v9: bool = icmp.eq v6, v7
+    v10: bool = band v8, v9
+    ret v10, v0
+}");
+    assert!(unwrap_bool(r));
 }
 
 // ──────────────────────────────────────────────────────────────────────

@@ -1131,6 +1131,68 @@ impl<'a> Builder<'a> {
         )
     }
 
+    /// Signed carrying multiply-add. Returns
+    /// (low_n_bits(a*b + carry + add), high_n_bits(a*b + carry + add)).
+    pub fn s_carrying_mul_add(
+        &mut self,
+        a: IntOperand,
+        b: IntOperand,
+        carry: IntOperand,
+        add: IntOperand,
+        bits: u32,
+        origin: Origin,
+    ) -> (IntValue, IntValue) {
+        use crate::types::{IntAnnotation, IntSignedness};
+        let ann = Annotation::Int(IntAnnotation {
+            bit_width: bits,
+            signedness: IntSignedness::Signed,
+        });
+        let primary = self.push_inst_with_secondary(
+            Op::SCarryingMulAdd(a, b, carry, add, bits),
+            Type::Int,
+            Type::Int,
+            origin,
+            Some(ann),
+            Some(ann),
+        );
+        let secondary = ValueRef::inst_secondary_result(primary.index());
+        (
+            IntValue::new(primary, self.func),
+            IntValue::new(secondary, self.func),
+        )
+    }
+
+    /// Unsigned carrying multiply-add. Returns
+    /// (low_n_bits(a*b + carry + add), high_n_bits(a*b + carry + add)).
+    pub fn u_carrying_mul_add(
+        &mut self,
+        a: IntOperand,
+        b: IntOperand,
+        carry: IntOperand,
+        add: IntOperand,
+        bits: u32,
+        origin: Origin,
+    ) -> (IntValue, IntValue) {
+        use crate::types::{IntAnnotation, IntSignedness};
+        let ann = Annotation::Int(IntAnnotation {
+            bit_width: bits,
+            signedness: IntSignedness::Unsigned,
+        });
+        let primary = self.push_inst_with_secondary(
+            Op::UCarryingMulAdd(a, b, carry, add, bits),
+            Type::Int,
+            Type::Int,
+            origin,
+            Some(ann),
+            Some(ann),
+        );
+        let secondary = ValueRef::inst_secondary_result(primary.index());
+        (
+            IntValue::new(primary, self.func),
+            IntValue::new(secondary, self.func),
+        )
+    }
+
     // ── Memory ──
 
     /// Load from pointer. `bytes` is the access width in bytes. Takes mem token input.

@@ -884,6 +884,24 @@ fn fmt_inst(
                 ctx.fmt_operand(&b.clone().raw())
             )
         }
+        Op::SCarryingMulAdd(a, b, carry, add, bits) => {
+            format!(
+                "{multi_v} = scarrying_mul_add.{bits} {}, {}, {}, {}",
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw()),
+                ctx.fmt_operand(&carry.clone().raw()),
+                ctx.fmt_operand(&add.clone().raw())
+            )
+        }
+        Op::UCarryingMulAdd(a, b, carry, add, bits) => {
+            format!(
+                "{multi_v} = ucarrying_mul_add.{bits} {}, {}, {}, {}",
+                ctx.fmt_operand(&a.clone().raw()),
+                ctx.fmt_operand(&b.clone().raw()),
+                ctx.fmt_operand(&carry.clone().raw()),
+                ctx.fmt_operand(&add.clone().raw())
+            )
+        }
         Op::Unreachable => "unreachable".to_string(),
         Op::Trap => "trap".to_string(),
         Op::LandingPad => "landing_pad".to_string(),
