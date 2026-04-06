@@ -5666,10 +5666,10 @@ mod tests {
     fn build_add_func(bits: u32) -> (Function, SymbolTable) {
         let mut symbols = SymbolTable::new();
         let name = symbols.intern("wide_add");
-        let ann = Annotation::Int(IntAnnotation {
+        let ann = IntAnnotation {
             bit_width: bits,
             signedness: IntSignedness::Unsigned,
-        });
+        };
         let mut func = Function::new(name, vec![], vec![], vec![], None, None);
         let mut b = Builder::new(&mut func);
         let root = b.create_region(RegionKind::Function);
@@ -5685,8 +5685,8 @@ mod tests {
         );
         let rhs = b.iconst(9i64, bits, IntSignedness::Unsigned, o());
         let _ = b.add(
-            Operand::annotated(lhs.raw(), ann).into(),
-            Operand::annotated(rhs.raw(), ann).into(),
+            Operand::annotated(lhs.raw(), Annotation::Int(ann)).into(),
+            Operand::annotated(rhs.raw(), Annotation::Int(ann)).into(),
             IntAnnotation {
                 bit_width: bits,
                 signedness: IntSignedness::Unsigned,
@@ -5744,6 +5744,47 @@ mod tests {
                 bits,
                 o(),
             ),
+        };
+        b.ret(None, mem0.into(), o());
+        b.exit_region();
+        (func, symbols)
+    }
+
+    fn build_shift_func(bits: u32, rotate: bool) -> (Function, SymbolTable) {
+        let mut symbols = SymbolTable::new();
+        let name = symbols.intern("wide_shift");
+        let ann = IntAnnotation {
+            bit_width: bits,
+            signedness: IntSignedness::Unsigned,
+        };
+        let mut func = Function::new(name, vec![], vec![], vec![], None, None);
+        let mut b = Builder::new(&mut func);
+        let root = b.create_region(RegionKind::Function);
+        b.enter_region(root);
+        let bb = b.create_block();
+        b.switch_to_block(bb);
+        let mem0 = b.add_block_arg(bb, Type::Mem, None);
+        let lhs = b.iconst(
+            BigInt::parse_bytes(b"123456789abcdef0123456789abcdef0", 16).unwrap(),
+            bits,
+            IntSignedness::Unsigned,
+            o(),
+        );
+        let amt = b.iconst(17i64, 64, IntSignedness::Unsigned, o());
+        let _ = if rotate {
+            b.rotate_left(
+                Operand::annotated(lhs.raw(), Annotation::Int(ann)).into(),
+                amt.into(),
+                bits,
+                o(),
+            )
+        } else {
+            b.shl(
+                Operand::annotated(lhs.raw(), Annotation::Int(ann)).into(),
+                amt.into(),
+                ann,
+                o(),
+            )
         };
         b.ret(None, mem0.into(), o());
         b.exit_region();
@@ -5809,6 +5850,21 @@ mod tests {
             let meta = X86AbiMetadata::default();
             let legalized = legalize(&func, &meta, &X86LegalityInfo, &mut symbols)
                 .expect("expected overflow legalization");
+            for (_, inst) in legalized.0.inst_pool.iter_insts() {
+                if let Some(Annotation::Int(ann)) = &inst.result_annotation {
+                    assert!(ann.bit_width <= 64);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn legalize_wide_shift_and_rotate_widths() {
+        for rotate in [false, true] {
+            let (func, mut symbols) = build_shift_func(160, rotate);
+            let meta = X86AbiMetadata::default();
+            let legalized = legalize(&func, &meta, &X86LegalityInfo, &mut symbols)
+                .expect("expected shift/rotate legalization");
             for (_, inst) in legalized.0.inst_pool.iter_insts() {
                 if let Some(Annotation::Int(ann)) = &inst.result_annotation {
                     assert!(ann.bit_width <= 64);
