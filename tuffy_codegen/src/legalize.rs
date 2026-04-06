@@ -14,7 +14,6 @@ use tuffy_ir::builder::Builder;
 use tuffy_ir::function::{CfgNode, Function};
 use tuffy_ir::instruction::{FCmpOp, ICmpOp, Op, Operand, Origin};
 use tuffy_ir::module::SymbolTable;
-use tuffy_ir::typed::IntOperand;
 use tuffy_ir::types::{Annotation, FloatType, IntAnnotation, IntSignedness, Type};
 use tuffy_ir::value::{BlockRef, ValueRef};
 
@@ -4796,52 +4795,120 @@ fn leg_icmp<M>(
     a: &Operand,
     op_b: &Operand,
 ) {
-    let (a_lo, a_hi) = wide_pair(s, old, b, a);
-    let (b_lo, b_hi) = wide_pair(s, old, b, op_b);
+    let operand_bits = |op: &Operand| {
+        op.annotation
+            .as_ref()
+            .and_then(|ann| int_annotation_bits(Some(ann)))
+            .or_else(|| {
+                value_annotation(old, op.value).and_then(|ann| int_annotation_bits(Some(ann)))
+            })
+            .unwrap_or_else(|| {
+                if is_wide(s, op.value) {
+                    s.vmap.parts(op.value).len() as u32 * s.part_bits
+                } else {
+                    s.part_bits
+                }
+            })
+    };
+    let bits = operand_bits(a).max(operand_bits(op_b));
+    let a_parts = operand_parts64(old, s, b, a, bits);
+    let b_parts = operand_parts64(old, s, b, op_b, bits);
     let signed = is_signed_annotation(a.annotation.as_ref());
+    let unsigned_part = IntAnnotation {
+        bit_width: s.part_bits,
+        signedness: IntSignedness::Unsigned,
+    };
+    let signed_part = IntAnnotation {
+        bit_width: s.part_bits,
+        signedness: IntSignedness::Signed,
+    };
 
     let result = match cmp_op {
         ICmpOp::Eq => {
-            // XOR-based equality: avoids ISel flag-clobbering from back-to-back cmps.
-            let hi_diff = b.xor(a_hi.into(), b_hi.into(), I64, o());
-            let lo_diff = b.xor(a_lo.into(), b_lo.into(), I64, o());
-            let or_diff = b.or(hi_diff.into(), lo_diff.into(), I64, o());
-            let zero = b.iconst(0, 64, IntSignedness::DontCare, o());
+            let mut or_diff = b
+                .iconst(0i64, s.part_bits, IntSignedness::Unsigned, o())
+                .raw();
+            for (lhs, rhs) in a_parts.iter().copied().zip(b_parts.iter().copied()) {
+                let diff = b.xor(
+                    Operand::annotated(lhs, Annotation::Int(unsigned_part)).into(),
+                    Operand::annotated(rhs, Annotation::Int(unsigned_part)).into(),
+                    unsigned_part,
+                    o(),
+                );
+                or_diff = b
+                    .or(
+                        Operand::annotated(or_diff, Annotation::Int(unsigned_part)).into(),
+                        diff.into(),
+                        unsigned_part,
+                        o(),
+                    )
+                    .raw();
+            }
+            let zero = b.iconst(0, s.part_bits, IntSignedness::DontCare, o());
             b.icmp(ICmpOp::Eq, or_diff.into(), zero.into(), o()).raw()
         }
         ICmpOp::Ne => {
-            let hi_diff = b.xor(a_hi.into(), b_hi.into(), I64, o());
-            let lo_diff = b.xor(a_lo.into(), b_lo.into(), I64, o());
-            let or_diff = b.or(hi_diff.into(), lo_diff.into(), I64, o());
-            let zero = b.iconst(0, 64, IntSignedness::DontCare, o());
+            let mut or_diff = b
+                .iconst(0i64, s.part_bits, IntSignedness::Unsigned, o())
+                .raw();
+            for (lhs, rhs) in a_parts.iter().copied().zip(b_parts.iter().copied()) {
+                let diff = b.xor(
+                    Operand::annotated(lhs, Annotation::Int(unsigned_part)).into(),
+                    Operand::annotated(rhs, Annotation::Int(unsigned_part)).into(),
+                    unsigned_part,
+                    o(),
+                );
+                or_diff = b
+                    .or(
+                        Operand::annotated(or_diff, Annotation::Int(unsigned_part)).into(),
+                        diff.into(),
+                        unsigned_part,
+                        o(),
+                    )
+                    .raw();
+            }
+            let zero = b.iconst(0, s.part_bits, IntSignedness::DontCare, o());
             b.icmp(ICmpOp::Ne, or_diff.into(), zero.into(), o()).raw()
         }
         ICmpOp::Lt | ICmpOp::Le | ICmpOp::Gt | ICmpOp::Ge => {
-            // For signed wide integers: high parts carry the sign → signed comparison.
-            // Lo words are magnitude bits → always unsigned comparison.
-            // For unsigned wide integers: both halves are unsigned.
-            let (hi_a_op, hi_b_op): (IntOperand, IntOperand) = if signed {
-                let ann = Annotation::Int(SIGNED_64_INT);
-                (
-                    Operand::annotated(a_hi, ann).into(),
-                    Operand::annotated(b_hi, ann).into(),
-                )
-            } else {
-                (a_hi.into(), b_hi.into())
-            };
-            let hi_cmp = b.icmp(cmp_op, hi_a_op, hi_b_op, o());
-            let hi_eq = b.icmp(ICmpOp::Eq, a_hi.into(), b_hi.into(), o());
-            // Lo comparison is always unsigned: the low 64 bits are a
-            // non-negative magnitude regardless of the wide signedness.
-            let lo_cmp = b.icmp(cmp_op, a_lo.into(), b_lo.into(), o());
-            b.select(
-                hi_eq.into(),
-                lo_cmp.into(),
-                hi_cmp.into(),
-                Type::Bool,
-                None,
-                o(),
-            )
+            let mut acc = b
+                .bconst(matches!(cmp_op, ICmpOp::Le | ICmpOp::Ge), o())
+                .raw();
+            let top_idx = a_parts.len().saturating_sub(1);
+            for (idx, (lhs, rhs)) in a_parts
+                .iter()
+                .copied()
+                .zip(b_parts.iter().copied())
+                .enumerate()
+                .rev()
+            {
+                let ann = if signed && idx == top_idx {
+                    signed_part
+                } else {
+                    unsigned_part
+                };
+                let part_cmp = b.icmp(
+                    cmp_op,
+                    Operand::annotated(lhs, Annotation::Int(ann)).into(),
+                    Operand::annotated(rhs, Annotation::Int(ann)).into(),
+                    o(),
+                );
+                let part_eq = b.icmp(
+                    ICmpOp::Eq,
+                    Operand::annotated(lhs, Annotation::Int(unsigned_part)).into(),
+                    Operand::annotated(rhs, Annotation::Int(unsigned_part)).into(),
+                    o(),
+                );
+                acc = b.select(
+                    part_eq.into(),
+                    Operand::new(acc),
+                    part_cmp.into(),
+                    Type::Bool,
+                    None,
+                    o(),
+                );
+            }
+            acc
         }
     };
     s.vmap.set(old_vref, Mapped::One(result));
@@ -5916,6 +5983,47 @@ mod tests {
         (func, symbols)
     }
 
+    fn build_icmp_func(bits: u32, signed: bool) -> (Function, SymbolTable) {
+        let mut symbols = SymbolTable::new();
+        let name = symbols.intern("wide_icmp");
+        let ann = IntAnnotation {
+            bit_width: bits,
+            signedness: if signed {
+                IntSignedness::Signed
+            } else {
+                IntSignedness::Unsigned
+            },
+        };
+        let mut func = Function::new(name, vec![], vec![], vec![], None, None);
+        let mut b = Builder::new(&mut func);
+        let root = b.create_region(RegionKind::Function);
+        b.enter_region(root);
+        let bb = b.create_block();
+        b.switch_to_block(bb);
+        let mem0 = b.add_block_arg(bb, Type::Mem, None);
+        let lhs = b.iconst(
+            BigInt::parse_bytes(b"123456789abcdef0123456789abcdef0", 16).unwrap(),
+            bits,
+            ann.signedness,
+            o(),
+        );
+        let rhs = b.iconst(
+            BigInt::parse_bytes(b"123456789abcdef0123456789abcde00", 16).unwrap(),
+            bits,
+            ann.signedness,
+            o(),
+        );
+        let _ = b.icmp(
+            ICmpOp::Gt,
+            Operand::annotated(lhs.raw(), Annotation::Int(ann)).into(),
+            Operand::annotated(rhs.raw(), Annotation::Int(ann)).into(),
+            o(),
+        );
+        b.ret(None, mem0.into(), o());
+        b.exit_region();
+        (func, symbols)
+    }
+
     fn assert_legalized_widths(bits: u32, signed: bool) {
         let (func, mut symbols) = build_carrying_mul_add_func(bits, signed);
         let meta = X86AbiMetadata::default();
@@ -6020,6 +6128,21 @@ mod tests {
             let meta = X86AbiMetadata::default();
             let legalized = legalize(&func, &meta, &X86LegalityInfo, &mut symbols)
                 .expect("expected int-to-fp legalization");
+            for (_, inst) in legalized.0.inst_pool.iter_insts() {
+                if let Some(Annotation::Int(ann)) = &inst.result_annotation {
+                    assert!(ann.bit_width <= 64);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn legalize_wide_icmp_paths() {
+        for signed in [false, true] {
+            let (func, mut symbols) = build_icmp_func(160, signed);
+            let meta = X86AbiMetadata::default();
+            let legalized = legalize(&func, &meta, &X86LegalityInfo, &mut symbols)
+                .expect("expected icmp legalization");
             for (_, inst) in legalized.0.inst_pool.iter_insts() {
                 if let Some(Annotation::Int(ann)) = &inst.result_annotation {
                     assert!(ann.bit_width <= 64);
