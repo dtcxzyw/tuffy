@@ -49,14 +49,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 {
                     self.fat_locals.set(place.local, fat_val);
                     // For stack-allocated locals, also store the metadata to
-                    // the stack slot at offset 8 so that code loading the full
+                    // the stack slot at offset `target_part_bytes()` so that
+                    // code loading the full
                     // fat pointer from the slot (e.g. the Return terminator's
                     // stack-allocated path) sees both words.
                     if self.stack_locals.is_stack(place.local)
                         && let Some(slot) = self.locals.get(place.local)
                     {
                         let off = self.builder.iconst(
-                            8,
+                            self.target_part_bytes() as i64,
                             64,
                             IntSignedness::DontCare,
                             Origin::synthetic(),
@@ -69,7 +70,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             .store(
                                 fat_val.into(),
                                 addr.into(),
-                                8,
+                                self.target_part_bytes() as u32,
                                 self.current_mem.into(),
                                 Origin::synthetic(),
                             )

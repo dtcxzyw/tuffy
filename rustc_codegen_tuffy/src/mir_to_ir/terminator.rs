@@ -589,18 +589,22 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // Fall back to Type::Int for small aggregates (e.g.
                 // [i8; 1]) that translate_ty maps to None — this
                 // matches the function-signature logic in mod.rs.
-                let ret_ir_ty =
-                    translate_ty(self.tcx, ret_mir_ty).or(if ret_size > 0 && ret_size <= 8 {
+                let part_bytes = self.target_part_bytes();
+                let ret_ir_ty = translate_ty(self.tcx, ret_mir_ty).or(
+                    if ret_size > 0 && ret_size <= part_bytes {
                         Some(Type::Int)
                     } else {
                         None
-                    });
+                    },
+                );
                 let coerced = match (ret_ir_ty, self.builder.value_type(v).cloned()) {
                     (Some(Type::Int), Some(Type::Ptr(_))) if self.builder.is_memory_address(v) => {
                         // v is a pointer to data (e.g. symbol_addr for an
                         // indirect constant).  Load the actual value instead
                         // of converting the address to an integer.
-                        let ret_size = type_size(self.tcx, ret_mir_ty).unwrap_or(8).min(8) as u32;
+                        let ret_size = type_size(self.tcx, ret_mir_ty)
+                            .unwrap_or(part_bytes)
+                            .min(part_bytes) as u32;
 
                         self.builder.load(
                             v.into(),
@@ -612,13 +616,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         )
                     }
                     // Aggregate type (tuple/struct) that translate_ty
-                    // maps to None but fits in ≤8 bytes.  The function
+                    // maps to None but fits in one ABI part. The function
                     // signature declares Int return; load the value from
                     // the constant/stack pointer.
                     (None, Some(Type::Ptr(_)))
-                        if self.builder.is_memory_address(v) && ret_size > 0 && ret_size <= 8 =>
+                        if self.builder.is_memory_address(v)
+                            && ret_size > 0
+                            && ret_size <= part_bytes =>
                     {
-                        let sz = ret_size.min(8) as u32;
+                        let sz = ret_size.min(part_bytes) as u32;
                         self.builder.load(
                             v.into(),
                             sz,
@@ -829,7 +835,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 // takes the fat pointer components as separate register
                                 // arguments (data_ptr in rdi, metadata in rsi).
                                 (Some(v), Some(fat_val))
-                            } else if ty_size > 8
+                            } else if ty_size > self.target_part_bytes()
                                 || matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
                             {
                                 (Some(v), None)

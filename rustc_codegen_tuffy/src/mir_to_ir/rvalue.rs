@@ -2004,7 +2004,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     && let Some(Type::Float(ft)) = translate_ty(self.tcx, target_ty_mono)
                 {
                     let size = type_size(self.tcx, target_ty_mono).unwrap_or(0) as u32;
-                    if size > 0 && size <= 16 {
+                    if size > 0 && size <= self.target_direct_abi_bytes() as u32 {
                         let slot = self.builder.stack_slot(size, 0, Origin::synthetic());
                         self.current_mem = self
                             .builder
@@ -2034,7 +2034,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     && matches!(translate_ty(self.tcx, target_ty_mono), Some(Type::Int))
                 {
                     let size = type_size(self.tcx, target_ty_mono).unwrap_or(0) as u32;
-                    if size > 0 && size <= 16 {
+                    if size > 0 && size <= self.target_direct_abi_bytes() as u32 {
                         let slot = self.builder.stack_slot(size, 0, Origin::synthetic());
                         self.current_mem = self
                             .builder
