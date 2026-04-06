@@ -69,6 +69,23 @@ Investigate root causes, not symptoms. Persist through debugging — no workarou
 
 Before starting a task, check `docs/SOPs/` for a matching procedure. Read relevant component READMEs and `docs/spec/`. Understand the problem fully before writing code. Do not assume you already know the design details — if unsure, ask the user rather than guessing.
 
+## Interaction Workflow
+
+Use a short "grill-me" discovery phase whenever the task, constraints, or success criteria are not fully clear.
+
+- Ask exactly one focused question at a time.
+- Each question should help uncover blind spots, edge cases, constraints, or hidden complexity.
+- When useful, include a recommended answer and briefly explain why it is the best default.
+- After the user answers, state how that answer changes the plan or understanding before asking the next question.
+- If the needed information can be discovered from the codebase, docs, or existing artifacts, inspect those first instead of asking the user.
+- Continue the question loop until the goal, constraints, and execution plan are clear enough to act confidently.
+
+After the discovery phase is complete, stop the back-and-forth and execute autonomously until the final goal is reached or a real blocker appears.
+
+- Do not ask for incremental confirmation once execution is clear.
+- Do not send phase-by-phase progress reports during execution.
+- Only re-engage the user if a true blocker remains, requirements are still ambiguous after inspecting local context, or a decision would create meaningful product or architecture tradeoffs.
+
 ## Detailed References
 
 - [Build commands](docs/agents/build.md) — workspace, codegen backend, Lean
