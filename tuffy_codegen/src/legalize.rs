@@ -305,8 +305,8 @@ fn has_wide_values<M: AbiMetadata>(
             Op::FConst(fc) if fc.float_type() == FloatType::F128 => return true,
             // FMaxNum/FMinNum always need legalization for IEEE NaN handling
             Op::FMaxNum(..) | Op::FMinNum(..) => return true,
-            // A call with any 128-bit annotated argument needs legalization to
-            // split it into (lo, hi) even when the value fits in 64 bits.
+            // A call with any wide integer argument needs legalization to
+            // split it into legalized parts even when the value fits in one part.
             Op::Call(_, args, _)
                 if args.iter().any(|a| {
                     a.annotation
@@ -366,20 +366,20 @@ pub fn legalize<M: AbiMetadata + Clone>(
 struct State<M> {
     meta: M,
     /// Original ABI metadata from before legalization, used to transfer
-    /// non-128-bit secondary return info (e.g. 16-byte struct returns in
+    /// non-wide secondary return info (e.g. 16-byte struct returns in
     /// RAX+RDX) that would otherwise be lost when instruction indices change.
     old_meta: M,
     vmap: VMap,
     bmap: HashMap<u32, BlockRef>,
     /// Old param index → (new_lo_index, Option<new_hi_index>).
     param_map: Vec<(u32, Option<u32>)>,
-    /// Set of old ValueRef raw values that are 128-bit.
+    /// Set of old ValueRef raw values that are wider than one legal integer part.
     wide: HashSet<u32>,
     /// Old RDX-capture instruction index → new ValueRef created in leg_call.
     /// Used to avoid re-creating the capture in copy_inst.
     rdx_capture_remap: HashMap<u32, ValueRef>,
     /// The most recent mem-producing old ValueRef in the current block.
-    /// Used to thread the mem token when expanding a 128-bit Div/Rem into a
+    /// Used to thread the mem token when expanding a wide Div/Rem into a
     /// libcall (which requires a mem operand that the pure Div/Rem lacks).
     current_old_mem: Option<ValueRef>,
     part_bits: u32,
@@ -463,7 +463,7 @@ fn build_new_func<M: AbiMetadata + Clone>(
 }
 
 // ---------------------------------------------------------------------------
-// Pre-scan: identify 128-bit values in the old function
+// Pre-scan: identify wide values in the old function
 // ---------------------------------------------------------------------------
 
 fn collect_wide_values<M: AbiMetadata>(
@@ -553,7 +553,7 @@ fn collect_wide_values<M: AbiMetadata>(
         }
     }
 
-    // Scan branches to find 128-bit block args.
+    // Scan branches to find wide block args.
     for (_, inst) in old.inst_pool.iter_insts() {
         let check_args =
             |target: BlockRef, args: &[Operand], wide: &HashSet<u32>, out: &mut HashSet<u32>| {
@@ -588,13 +588,13 @@ fn is_wide<M>(s: &State<M>, v: ValueRef) -> bool {
     s.wide.contains(&v.raw()) || matches!(s.vmap.get(v), Mapped::Pair(_, _) | Mapped::Parts(_))
 }
 
-/// Returns the (lo, hi) pair for a 128-bit operand, correctly handling non-wide
+/// Returns the low/high legal-part pair for a double-width operand, correctly handling non-wide
 /// values. Unlike `vmap.pair()`, which returns `(v, v)` for a non-wide value,
 /// this derives the hi word from lo:
 ///
 /// - For `Unsigned` annotated operands, zero-extend (hi = 0).  A non-wide
 ///   value with `Unsigned(n)` annotation represents a u64 constant whose
-///   128-bit form always has the upper 64 bits equal to zero, even when the
+///   double-width form always has the upper part equal to zero, even when the
 ///   value is in `[2^63, 2^64)` (i.e., bit 63 of lo is set).  Sign-extending
 ///   such a value would incorrectly produce hi = −1.
 ///
@@ -616,11 +616,11 @@ fn wide_pair<M>(
             |ann| matches!(ann, Annotation::Int(ia) if matches!(ia.signedness, IntSignedness::Unsigned)),
         );
         let hi = if is_unsigned {
-            // Zero-extend: unsigned values always have hi = 0 in their 128-bit form.
+            // Zero-extend: unsigned values always have hi = 0 in their double-width form.
             b.iconst(0i64, 64, IntSignedness::Unsigned, o()).raw()
         } else {
             // Sign-extend: for positive values hi=0 (same as zero-extend); for negative
-            // values (e.g. iconst(-1) used as all-ones in a 128-bit XOR) hi=-1.
+            // values (e.g. iconst(-1) used as an all-ones mask) hi=-1.
             let c63 = b.iconst(63i64, 64, IntSignedness::Unsigned, o());
             b.shr(lo.into(), c63.into(), SIGNED_64_INT, o()).raw()
         };
@@ -1433,7 +1433,7 @@ fn legalize_inst<M: AbiMetadata + Clone>(
 }
 
 // ---------------------------------------------------------------------------
-// Copy non-128-bit instruction with remapped operands
+// Copy non-wide instruction with remapped operands
 // ---------------------------------------------------------------------------
 
 fn remap_op<M>(s: &State<M>, op: &Operand) -> Operand {
@@ -1598,7 +1598,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
                 }
                 total
             } else if is_wide(s, val_vref) {
-                // 128-bit popcount: popcnt64(lo) + popcnt64(hi)
+                // Two-part popcount: popcount(lo) + popcount(hi)
                 let (lo, hi) = s.vmap.pair(val_vref);
                 let pop_lo = b.count_ones(lo.into(), 64, o());
                 let pop_hi = b.count_ones(hi.into(), 64, o());
@@ -1751,7 +1751,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
                 }
                 total
             } else if is_wide(s, val_vref) {
-                // 128-bit CTZ: lo == 0 ? 64 + tzcnt64(hi) : tzcnt64(lo)
+                // Two-part CTZ: lo == 0 ? part_bits + ctz(hi) : ctz(lo)
                 let (lo, hi) = s.vmap.pair(val_vref);
                 let ctz_lo = b.count_trailing_zeros(lo.into(), 64, o());
                 let ctz_hi = b.count_trailing_zeros(hi.into(), 64, o());
@@ -2128,7 +2128,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
         Op::Ret(val, mem) => {
             let rv = val.as_ref().map(|v| remap_op(s, v));
             let new_ret = b.ret(rv, remap_op(s, &mem.clone().raw()).into(), o());
-            // Remap secondary-return move (non-i128 struct returns via RAX+RDX).
+            // Remap secondary-return move (e.g. 16-byte struct returns via RAX+RDX).
             if let Some(src_idx) = s.old_meta.get_secondary_return_move(old_vref.index()) {
                 let new_src = s.vmap.one(ValueRef::inst_result(src_idx));
                 s.meta
@@ -2336,7 +2336,7 @@ enum BitwiseKind {
 }
 
 // ---------------------------------------------------------------------------
-// 128-bit parameter
+// Wide parameter split into legal parts
 // ---------------------------------------------------------------------------
 
 fn leg_param<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, lo_idx: u32, hi_idx: u32) {
@@ -3233,8 +3233,7 @@ fn leg_carrying_mul_add_wide<M>(
 }
 
 // ---------------------------------------------------------------------------
-// 128-bit add: lo = add(a_lo, b_lo), carry = icmp.ult(lo, a_lo),
-//              hi = add(a_hi, b_hi), hi = add(hi, zext(carry))
+// Double-width add: low part add, carry into high part
 // ---------------------------------------------------------------------------
 
 fn leg_add<M>(
@@ -3277,7 +3276,7 @@ fn leg_add<M>(
 }
 
 // ---------------------------------------------------------------------------
-// 128-bit sub
+// Double-width sub
 // ---------------------------------------------------------------------------
 
 fn leg_sub<M>(
@@ -3320,7 +3319,7 @@ fn leg_sub<M>(
 }
 
 // ---------------------------------------------------------------------------
-// 128-bit multiply (schoolbook with 32-bit quarters)
+// Double-width multiply
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_lines)]
@@ -3401,8 +3400,7 @@ fn leg_mul<M>(
 // Widening 64×64→128 multiply and arithmetic helpers
 // ---------------------------------------------------------------------------
 
-/// Compute the full 128-bit unsigned product of two 64-bit values using the
-/// schoolbook 32-bit quarter method.  Returns `(lo_64, hi_64)`.
+/// Compute the full double-part product of two legal parts using quarter limbs.
 fn widening_mul_u64(b: &mut Builder, x: ValueRef, y: ValueRef) -> (ValueRef, ValueRef) {
     let c32 = b.iconst(32i64, 64, IntSignedness::Unsigned, o());
     let mask32 = b.iconst(0xFFFF_FFFFi64, 64, IntSignedness::Unsigned, o());
@@ -3465,10 +3463,10 @@ fn add3_u64(b: &mut Builder, x: ValueRef, y: ValueRef, z: ValueRef) -> (ValueRef
 }
 
 // ---------------------------------------------------------------------------
-// 128-bit add/sub with overflow detection
+// Double-width add/sub with overflow detection
 // ---------------------------------------------------------------------------
 
-/// Shared 128-bit add core: computes (lo, hi) for a + b.
+/// Shared double-width add core: computes (lo, hi) for a + b.
 /// Returns (lo, hi, a_hi, b_hi) for use in overflow detection.
 fn leg_add128_core<M>(
     old: &Function,
@@ -3718,7 +3716,7 @@ fn leg_usub_with_overflow_wide<M>(
     s.vmap.set(old_sec, Mapped::One(overflow.into()));
 }
 
-/// 128-bit signed saturating add/sub.
+/// Double-width signed saturating add/sub.
 /// `is_add == true` → saturating_add, `is_add == false` → saturating_sub.
 fn leg_signed_saturating_addsub_wide<M>(
     old: &Function,
@@ -3795,7 +3793,7 @@ fn leg_signed_saturating_addsub_wide<M>(
     let (a_lo, a_hi) = wide_pair(s, old, b, a);
     let (b_lo, b_hi) = wide_pair(s, old, b, op_b);
 
-    // Compute 128-bit wrapping result.
+    // Compute the wrapping result in the double-width decomposition.
     let (lo, hi) = if is_add {
         let lo = b.add(a_lo.into(), b_lo.into(), I64, o());
         let carry = b.icmp(ICmpOp::Lt, lo.into(), a_lo.into(), o());
@@ -3853,10 +3851,10 @@ fn leg_signed_saturating_addsub_wide<M>(
         zero_s.into(),
         o(),
     );
-    // i128::MIN = (lo=0, hi=0x8000000000000000)
+    // Signed minimum = (lo=0, hi=sign-bit only)
     let min_lo = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
     let min_hi = b.iconst(i64::MIN, 64, IntSignedness::Unsigned, o());
-    // i128::MAX = (lo=0xFFFFFFFFFFFFFFFF, hi=0x7FFFFFFFFFFFFFFF)
+    // Signed maximum = (lo=all-ones, hi=sign-bit cleared)
     let max_lo = b.iconst(-1i64, 64, IntSignedness::Unsigned, o());
     let max_hi = b.iconst(i64::MAX, 64, IntSignedness::Unsigned, o());
 
@@ -3898,7 +3896,7 @@ fn leg_signed_saturating_addsub_wide<M>(
     s.vmap.set(old_vref, Mapped::Pair(res_lo, res_hi));
 }
 
-/// 128-bit unsigned saturating add/sub.
+/// Double-width unsigned saturating add/sub.
 fn leg_unsigned_saturating_addsub_wide<M>(
     old: &Function,
     s: &mut State<M>,
@@ -3944,7 +3942,7 @@ fn leg_unsigned_saturating_addsub_wide<M>(
     let (b_lo, b_hi) = wide_pair(s, old, b, op_b);
 
     if is_add {
-        // Unsigned saturating add: clamp to u128::MAX on overflow.
+        // Unsigned saturating add: clamp to the maximum representable value on overflow.
         let lo = b.add(a_lo.into(), b_lo.into(), I64, o());
         let carry = b.icmp(ICmpOp::Lt, lo.into(), a_lo.into(), o());
         let carry_int = bool_to_u64(b, carry);
@@ -3983,7 +3981,7 @@ fn leg_unsigned_saturating_addsub_wide<M>(
         let borrow_int = bool_to_u64(b, borrow);
         let hi_diff = b.sub(a_hi.into(), b_hi.into(), I64, o());
         let hi = b.sub(hi_diff.into(), borrow_int.into(), I64, o());
-        // Underflow: b > a (unsigned 128-bit comparison)
+        // Underflow: b > a in the unsigned double-width comparison
         // b > a iff b_hi > a_hi || (b_hi == a_hi && b_lo > a_lo)
         let hi_gt = b.icmp(
             ICmpOp::Gt,
@@ -4158,13 +4156,12 @@ fn leg_smul_with_overflow_wide<M>(
         s.vmap.set(old_sec, Mapped::One(overflow.into()));
         return;
     }
-    // Compute the full 256-bit unsigned product, then adjust the high 128
-    // bits for signed semantics and check whether they match the sign
-    // extension of the low 128-bit result.
+    // Compute the full product, then adjust the upper half for signed semantics
+    // and check whether it matches sign extension of the lower half.
     let (a_lo, a_hi) = wide_pair(s, old, b, a);
     let (b_lo, b_hi) = wide_pair(s, old, b, op_b);
 
-    // Four widening 64×64→128 partial products.
+    // Four widening legal-part partial products.
     let (ll_lo, ll_hi) = widening_mul_u64(b, a_lo, b_lo);
     let (lh_lo, lh_hi) = widening_mul_u64(b, a_lo, b_hi);
     let (hl_lo, hl_hi) = widening_mul_u64(b, a_hi, b_lo);
@@ -4183,11 +4180,11 @@ fn leg_smul_with_overflow_wide<M>(
     let c2 = b.add(c2_pre.into(), w2_carry.into(), I64, o());
     let w3 = b.add(hh_hi.into(), c2.into(), I64, o());
 
-    // Low 128 bits of the product.
+    // Low half of the product.
     let prod_lo = ll_lo;
     let prod_hi = w1;
 
-    // Adjust unsigned high 128 bits → signed high 128 bits:
+    // Adjust unsigned upper half → signed upper half:
     //   signed_hi = unsigned_hi − (a<0 ? b : 0) − (b<0 ? a : 0)
     let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
     let c63 = b.iconst(63, 64, IntSignedness::Unsigned, o());
@@ -4227,14 +4224,14 @@ fn leg_smul_with_overflow_wide<M>(
     );
     let sub_a_hi = b.select(b_neg.into(), Operand::new(a_hi), z, Type::Int, ann64, o());
 
-    // 128-bit sub: (w2_sum, w3) − (sub_b_lo, sub_b_hi)
+    // Subtract the first correction vector from the upper half.
     let t_lo = b.sub(w2_sum.into(), sub_b_lo.into(), I64, o());
     let cmp = b.icmp(ICmpOp::Lt, w2_sum.into(), sub_b_lo.into(), o());
     let borrow1 = bool_to_u64(b, cmp);
     let t_hi = b.sub(w3.into(), sub_b_hi.into(), I64, o());
     let t_hi = b.sub(t_hi.into(), borrow1.into(), I64, o());
 
-    // 128-bit sub: − (sub_a_lo, sub_a_hi)
+    // Subtract the second correction vector from the upper half.
     let s_lo = b.sub(t_lo.into(), sub_a_lo.into(), I64, o());
     let cmp = b.icmp(ICmpOp::Lt, t_lo.into(), sub_a_lo.into(), o());
     let borrow2 = bool_to_u64(b, cmp);
@@ -4299,7 +4296,7 @@ fn leg_umul_with_overflow_wide<M>(
         return;
     }
     // Compute the full 256-bit unsigned product.  Overflow iff the high
-    // 128 bits are non-zero.
+    // Overflow iff the upper half is non-zero.
     let (a_lo, a_hi) = wide_pair(s, old, b, a);
     let (b_lo, b_hi) = wide_pair(s, old, b, op_b);
 
@@ -4319,7 +4316,7 @@ fn leg_umul_with_overflow_wide<M>(
     let prod_lo = ll_lo;
     let prod_hi = w1;
 
-    // Unsigned overflow: high 128 bits non-zero.
+    // Unsigned overflow: upper half non-zero.
     let zero = b.iconst(0, 64, IntSignedness::Unsigned, o());
     let ne_lo = b.icmp(ICmpOp::Ne, w2.into(), zero.into(), o());
     let ne_hi = b.icmp(ICmpOp::Ne, w3.into(), zero.into(), o());
@@ -4416,7 +4413,7 @@ fn leg_bitwise<M>(
 }
 
 // ---------------------------------------------------------------------------
-// 128-bit left shift
+// Wide left shift
 // ---------------------------------------------------------------------------
 
 fn leg_shl<M>(
@@ -4482,7 +4479,7 @@ fn leg_shl<M>(
 }
 
 // ---------------------------------------------------------------------------
-// 128-bit right shift (logical or arithmetic based on annotation)
+// Wide right shift (logical or arithmetic based on annotation)
 // ---------------------------------------------------------------------------
 
 fn leg_shr<M>(
@@ -4565,10 +4562,10 @@ fn leg_shr<M>(
 }
 
 // ---------------------------------------------------------------------------
-// 128-bit rotate (left or right)
+// Wide rotate (left or right)
 // ---------------------------------------------------------------------------
 
-/// Helper: compute 128-bit shl as a (lo, hi) pair without setting vmap.
+/// Helper: compute a two-part left shift without setting vmap.
 fn shl_128_pair(
     b: &mut Builder,
     a_lo: ValueRef,
@@ -4618,7 +4615,7 @@ fn shl_128_pair(
     (lo, hi)
 }
 
-/// Helper: compute 128-bit unsigned shr as a (lo, hi) pair without setting vmap.
+/// Helper: compute a two-part unsigned right shift without setting vmap.
 fn shr_128_pair(
     b: &mut Builder,
     a_lo: ValueRef,
@@ -4724,8 +4721,8 @@ fn leg_rotate_wide<M>(
     let c127 = b.iconst(127i64, 64, IntSignedness::Unsigned, o());
     let n_mod = b.and(n.into(), c127.into(), I64, o()).raw();
 
-    // Complement: (128 - n_mod) & 127
-    // When n_mod == 0, complement becomes 128, masked to 0 → shr by 0 = identity,
+    // Complement: (bits - n_mod) mod bits
+    // When n_mod == 0, the complement becomes 0 and the combined result is the identity.
     // then shl_result | shr_result = x | x = x, which is correct.
     let c128 = b.iconst(128i64, 64, IntSignedness::Unsigned, o());
     let comp = b.sub(c128.into(), n_mod.into(), I64, o());
@@ -4748,7 +4745,7 @@ fn leg_rotate_wide<M>(
 }
 
 // ---------------------------------------------------------------------------
-// 128-bit bit reverse
+// Wide bit reverse
 // ---------------------------------------------------------------------------
 
 fn leg_bit_reverse_wide<M>(
@@ -4771,7 +4768,7 @@ fn leg_bit_reverse_wide<M>(
     }
     let (a_lo, a_hi) = wide_pair(s, old, b, a);
 
-    // bit_reverse(128-bit x) = swap(bit_reverse(x_hi), bit_reverse(x_lo))
+    // bit_reverse on a two-part value = swap(bit_reverse(hi), bit_reverse(lo))
     // Reverse bits in each half, then swap the halves.
     let rev_lo = b.bit_reverse(a_lo.into(), 64, o());
     let rev_hi = b.bit_reverse(a_hi.into(), 64, o());
@@ -4782,7 +4779,7 @@ fn leg_bit_reverse_wide<M>(
 }
 
 // ---------------------------------------------------------------------------
-// 128-bit integer comparison
+// Two-part integer comparison
 // ---------------------------------------------------------------------------
 
 fn leg_icmp<M>(
@@ -4815,9 +4812,9 @@ fn leg_icmp<M>(
             b.icmp(ICmpOp::Ne, or_diff.into(), zero.into(), o()).raw()
         }
         ICmpOp::Lt | ICmpOp::Le | ICmpOp::Gt | ICmpOp::Ge => {
-            // For signed i128: hi words carry the sign → signed comparison.
+            // For signed wide integers: high parts carry the sign → signed comparison.
             // Lo words are magnitude bits → always unsigned comparison.
-            // For unsigned u128: both halves are unsigned (no annotation needed).
+            // For unsigned wide integers: both halves are unsigned.
             let (hi_a_op, hi_b_op): (IntOperand, IntOperand) = if signed {
                 let ann = Annotation::Int(SIGNED_64_INT);
                 (
@@ -4830,7 +4827,7 @@ fn leg_icmp<M>(
             let hi_cmp = b.icmp(cmp_op, hi_a_op, hi_b_op, o());
             let hi_eq = b.icmp(ICmpOp::Eq, a_hi.into(), b_hi.into(), o());
             // Lo comparison is always unsigned: the low 64 bits are a
-            // non-negative magnitude regardless of the 128-bit signedness.
+            // non-negative magnitude regardless of the wide signedness.
             let lo_cmp = b.icmp(cmp_op, a_lo.into(), b_lo.into(), o());
             b.select(
                 hi_eq.into(),
@@ -4846,7 +4843,7 @@ fn leg_icmp<M>(
 }
 
 // ---------------------------------------------------------------------------
-// 128-bit load: two 8-byte loads at offset 0 and 8
+// Wide load
 // ---------------------------------------------------------------------------
 
 fn leg_load_wide<M>(
@@ -4898,7 +4895,7 @@ fn leg_load_wide<M>(
 }
 
 // ---------------------------------------------------------------------------
-// 128-bit store: two 8-byte stores at offset 0 and 8
+// Wide store
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
@@ -4950,7 +4947,7 @@ fn leg_store_wide<M>(
         s.vmap.set(old_vref, Mapped::One(cur_mem));
         return;
     }
-    // Split the 128-bit stored value into (lo, hi).
+    // Split the stored wide value into legal parts.
     let (v_lo, v_hi) = if is_wide(s, val.value) {
         // Value is in the wide set: vmap holds a proper (lo, hi) pair.
         s.vmap.pair(val.value)
@@ -4981,7 +4978,7 @@ fn leg_store_wide<M>(
 }
 
 // ---------------------------------------------------------------------------
-// Sign-extend to 128: lo = original, hi = arithmetic right shift by 63
+// Sign-extend to a wider-than-legal integer
 // ---------------------------------------------------------------------------
 
 fn leg_sext_wide<M>(
@@ -5027,7 +5024,7 @@ fn leg_sext_wide<M>(
 }
 
 // ---------------------------------------------------------------------------
-// Zero-extend to 128: lo = original, hi = 0
+// Zero-extend to a wider-than-legal integer
 // ---------------------------------------------------------------------------
 
 fn leg_zext_wide<M>(
@@ -5078,7 +5075,7 @@ fn get_fp_to_int_float_type(vref: ValueRef, old: &Function) -> Option<FloatType>
 //   f64 → u128: __fixunsdfti(f64) → u128
 //   f32 → i128: __fixsfti(f32)    → i128
 //   f64 → i128: __fixdfti(f64)    → i128
-// Called from the Zext(fp_to_ui, 128) and Sext(fp_to_si, 128) handlers
+// Called from the wide Zext(fp_to_ui) and Sext(fp_to_si) handlers
 // to provide correct saturation semantics for overflow/infinity/NaN.
 // ---------------------------------------------------------------------------
 
@@ -5175,7 +5172,7 @@ fn leg_fp_to_int_double_width<M: AbiMetadata + Clone>(
 }
 
 // ---------------------------------------------------------------------------
-// 128-bit bswap: bswap each half, then swap the halves
+// Wide bswap
 // ---------------------------------------------------------------------------
 
 fn leg_bswap_wide<M>(
@@ -5211,7 +5208,7 @@ fn leg_bswap_wide<M>(
 }
 
 // ---------------------------------------------------------------------------
-// 128-bit select: select on each half independently
+// Wide select
 // ---------------------------------------------------------------------------
 
 fn leg_select_wide<M>(
@@ -5269,7 +5266,7 @@ fn leg_select_wide<M>(
 }
 
 // ---------------------------------------------------------------------------
-// 128-bit integer Div/Rem: lower to compiler-rt libcall
+// Double-width integer Div/Rem: lower to compiler-rt libcall
 //   signed div:   __divti3(a_lo, a_hi, b_lo, b_hi) → (lo, hi)
 //   unsigned div: __udivti3(...)
 //   signed rem:   __modti3(...)
@@ -5315,7 +5312,7 @@ fn leg_div_rem_double_width<M: AbiMetadata + Clone>(
     // Inject the call into the mem chain using the most recent mem token.
     let old_mem = s
         .current_old_mem
-        .expect("128-bit div/rem requires a mem token in scope");
+        .expect("wide div/rem requires a mem token in scope");
     let new_mem = s.vmap.one(old_mem);
     let (call_mem, data) = b.call(
         Operand::new(callee).into(),
@@ -5344,7 +5341,7 @@ fn leg_div_rem_double_width<M: AbiMetadata + Clone>(
 }
 
 // ---------------------------------------------------------------------------
-// 128-bit integer to float: lower to compiler-rt libcall
+// Double-width integer to float: lower to compiler-rt libcall
 //   u128 -> f32: __floatuntisf(lo, hi) -> f32
 //   u128 -> f64: __floatuntidf(lo, hi) -> f64
 //   i128 -> f32: __floattisf(lo, hi) -> f32
@@ -5365,7 +5362,7 @@ fn leg_int_to_fp_double_width<M: AbiMetadata + Clone>(
         (false, tuffy_ir::types::FloatType::F64) => "__floatuntidf",
         (true, tuffy_ir::types::FloatType::F32) => "__floattisf",
         (true, tuffy_ir::types::FloatType::F64) => "__floattidf",
-        _ => panic!("u128/i128 to f16/bf16 conversion not supported"),
+        _ => panic!("double-width int to f16/bf16 conversion not supported"),
     };
     let sym_id = symbols.intern(name);
     let callee = b.symbol_addr(sym_id, o()).raw();
@@ -5374,7 +5371,7 @@ fn leg_int_to_fp_double_width<M: AbiMetadata + Clone>(
         let parts = s.vmap.parts(a.value);
         (parts[0], parts[1])
     } else {
-        // Small 128-bit value mapped to a single 64-bit word.
+        // Small double-width value mapped to a single legal part.
         // Compute the hi word: sign-extend for i128, zero for u128.
         let lo = s.vmap.one(a.value);
         let hi = if signed {
@@ -5403,7 +5400,7 @@ fn leg_int_to_fp_double_width<M: AbiMetadata + Clone>(
 
     let old_mem = s
         .current_old_mem
-        .expect("128-bit to float requires a mem token in scope");
+        .expect("wide int-to-float requires a mem token in scope");
     let new_mem = s.vmap.one(old_mem);
     let (call_mem, data) = b.call(
         Operand::new(callee).into(),
@@ -5420,7 +5417,7 @@ fn leg_int_to_fp_double_width<M: AbiMetadata + Clone>(
 }
 
 // ---------------------------------------------------------------------------
-// 128-bit return: lo → RAX (normal return), hi → RDX (via metadata)
+// Wide return: low part → RAX, second part → RDX (via metadata)
 // ---------------------------------------------------------------------------
 
 fn leg_ret<M: AbiMetadata>(
@@ -5443,9 +5440,8 @@ fn leg_ret<M: AbiMetadata>(
         } else {
             let lo = s.vmap.one(rv.value);
             // If terminator.rs set up a secondary-return move for this ret
-            // (stack-allocated u128 return), carry it forward. Otherwise
-            // emit iconst(0) as a harmless placeholder; in practice this
-            // branch is only reached for true u128 functions.
+            // If terminator lowering set up a secondary return move, carry it
+            // forward. Otherwise emit zero as a harmless placeholder.
             let hi = if let Some(src_idx) = s.old_meta.get_secondary_return_move(old_vref.index()) {
                 s.vmap.one(ValueRef::inst_result(src_idx))
             } else {
@@ -5465,7 +5461,7 @@ fn leg_ret<M: AbiMetadata>(
 }
 
 // ---------------------------------------------------------------------------
-// Call: split 128-bit args, handle 128-bit returns
+// Call: split wide integer args, handle double-width returns
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
@@ -5558,7 +5554,7 @@ fn leg_call<M: AbiMetadata + Clone>(
 }
 
 // ---------------------------------------------------------------------------
-// Branch argument remapping: split 128-bit args into lo/hi pairs
+// Branch argument remapping: split wide integer args into legalized parts
 // ---------------------------------------------------------------------------
 
 fn remap_branch_args<M>(s: &State<M>, args: &[Operand]) -> Vec<Operand> {
