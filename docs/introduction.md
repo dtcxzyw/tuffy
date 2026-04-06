@@ -19,4 +19,3 @@ Tuffy is an experimental optimizing compiler written in Rust, developed with LLM
 - **[Initial Design](initial.md)** — Early design discussions and architectural decisions.
 - **[References](references.md)** — Curated list of reference documents and resources.
 - **[RFCs](RFCs/202602/ir-design.md)** — Design proposals for major features.
-- **[Development Tasks](tasks/202602/init.md)** — Task tracking for current milestones.
