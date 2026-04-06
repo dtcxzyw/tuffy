@@ -5824,6 +5824,93 @@ mod tests {
         (func, symbols)
     }
 
+    fn build_divrem_func(bits: u32, is_div: bool, signed: bool) -> (Function, SymbolTable) {
+        let mut symbols = SymbolTable::new();
+        let name = symbols.intern("wide_divrem");
+        let ann = IntAnnotation {
+            bit_width: bits,
+            signedness: if signed {
+                IntSignedness::Signed
+            } else {
+                IntSignedness::Unsigned
+            },
+        };
+        let mut func = Function::new(name, vec![], vec![], vec![], None, None);
+        let mut b = Builder::new(&mut func);
+        let root = b.create_region(RegionKind::Function);
+        b.enter_region(root);
+        let bb = b.create_block();
+        b.switch_to_block(bb);
+        let mem0 = b.add_block_arg(bb, Type::Mem, None);
+        let lhs = b.iconst(
+            BigInt::parse_bytes(b"123456789abcdef0123456789abcdef0", 16).unwrap(),
+            bits,
+            ann.signedness,
+            o(),
+        );
+        let rhs = b.iconst(17i64, bits, ann.signedness, o());
+        let _ = if is_div {
+            b.div(
+                Operand::annotated(lhs.raw(), Annotation::Int(ann)).into(),
+                Operand::annotated(rhs.raw(), Annotation::Int(ann)).into(),
+                ann,
+                o(),
+            )
+        } else {
+            b.rem(
+                Operand::annotated(lhs.raw(), Annotation::Int(ann)).into(),
+                Operand::annotated(rhs.raw(), Annotation::Int(ann)).into(),
+                ann,
+                o(),
+            )
+        };
+        b.ret(None, mem0.into(), o());
+        b.exit_region();
+        (func, symbols)
+    }
+
+    fn build_int_to_fp_func(bits: u32, signed: bool) -> (Function, SymbolTable) {
+        let mut symbols = SymbolTable::new();
+        let name = symbols.intern("wide_int_to_fp");
+        let ann = IntAnnotation {
+            bit_width: bits,
+            signedness: if signed {
+                IntSignedness::Signed
+            } else {
+                IntSignedness::Unsigned
+            },
+        };
+        let mut func = Function::new(name, vec![], vec![], vec![], None, None);
+        let mut b = Builder::new(&mut func);
+        let root = b.create_region(RegionKind::Function);
+        b.enter_region(root);
+        let bb = b.create_block();
+        b.switch_to_block(bb);
+        let mem0 = b.add_block_arg(bb, Type::Mem, None);
+        let lhs = b.iconst(
+            BigInt::parse_bytes(b"123456789abcdef0123456789abcdef0", 16).unwrap(),
+            bits,
+            ann.signedness,
+            o(),
+        );
+        let _ = if signed {
+            b.si_to_fp(
+                Operand::annotated(lhs.raw(), Annotation::Int(ann)).into(),
+                FloatType::F64,
+                o(),
+            )
+        } else {
+            b.ui_to_fp(
+                Operand::annotated(lhs.raw(), Annotation::Int(ann)).into(),
+                FloatType::F64,
+                o(),
+            )
+        };
+        b.ret(None, mem0.into(), o());
+        b.exit_region();
+        (func, symbols)
+    }
+
     fn assert_legalized_widths(bits: u32, signed: bool) {
         let (func, mut symbols) = build_carrying_mul_add_func(bits, signed);
         let meta = X86AbiMetadata::default();
@@ -5898,6 +5985,36 @@ mod tests {
             let meta = X86AbiMetadata::default();
             let legalized = legalize(&func, &meta, &X86LegalityInfo, &mut symbols)
                 .expect("expected shift/rotate legalization");
+            for (_, inst) in legalized.0.inst_pool.iter_insts() {
+                if let Some(Annotation::Int(ann)) = &inst.result_annotation {
+                    assert!(ann.bit_width <= 64);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn legalize_double_width_divrem_paths() {
+        for (is_div, signed) in [(true, false), (true, true), (false, false), (false, true)] {
+            let (func, mut symbols) = build_divrem_func(128, is_div, signed);
+            let meta = X86AbiMetadata::default();
+            let legalized = legalize(&func, &meta, &X86LegalityInfo, &mut symbols)
+                .expect("expected div/rem legalization");
+            for (_, inst) in legalized.0.inst_pool.iter_insts() {
+                if let Some(Annotation::Int(ann)) = &inst.result_annotation {
+                    assert!(ann.bit_width <= 64);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn legalize_double_width_int_to_fp_paths() {
+        for signed in [false, true] {
+            let (func, mut symbols) = build_int_to_fp_func(128, signed);
+            let meta = X86AbiMetadata::default();
+            let legalized = legalize(&func, &meta, &X86LegalityInfo, &mut symbols)
+                .expect("expected int-to-fp legalization");
             for (_, inst) in legalized.0.inst_pool.iter_insts() {
                 if let Some(Annotation::Int(ann)) = &inst.result_annotation {
                     assert!(ann.bit_width <= 64);
