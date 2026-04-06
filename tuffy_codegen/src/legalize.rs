@@ -787,7 +787,7 @@ fn legalize_inst<M: AbiMetadata + Clone>(
         Op::Div(a, op_b) if wide_result => {
             let bits = result_bits(s, old, old_vref);
             if bits == s.part_bits * 2 {
-                leg_div_rem_128(
+                leg_div_rem_double_width(
                     old,
                     s,
                     b,
@@ -805,7 +805,7 @@ fn legalize_inst<M: AbiMetadata + Clone>(
         Op::Rem(a, op_b) if wide_result => {
             let bits = result_bits(s, old, old_vref);
             if bits == s.part_bits * 2 {
-                leg_div_rem_128(
+                leg_div_rem_double_width(
                     old,
                     s,
                     b,
@@ -879,7 +879,7 @@ fn legalize_inst<M: AbiMetadata + Clone>(
             );
         }
         Op::RotateLeft(a, amt, bits) if wide_result && *bits > 64 => {
-            leg_rotate_128(
+            leg_rotate_wide(
                 old,
                 s,
                 b,
@@ -890,7 +890,7 @@ fn legalize_inst<M: AbiMetadata + Clone>(
             );
         }
         Op::RotateRight(a, amt, bits) if wide_result && *bits > 64 => {
-            leg_rotate_128(
+            leg_rotate_wide(
                 old,
                 s,
                 b,
@@ -901,7 +901,7 @@ fn legalize_inst<M: AbiMetadata + Clone>(
             );
         }
         Op::BitReverse(a, bits) if wide_result && *bits > 64 => {
-            leg_bit_reverse_128(old, s, b, old_vref, &a.clone().raw());
+            leg_bit_reverse_wide(old, s, b, old_vref, &a.clone().raw());
         }
         Op::ICmp(cmp_op, a, op_b)
             if is_wide(s, a.clone().raw().value)
@@ -918,7 +918,7 @@ fn legalize_inst<M: AbiMetadata + Clone>(
             );
         }
         Op::Load(ptr, bytes, mem) if *bytes >= 16 => {
-            leg_load_128(
+            leg_load_wide(
                 s,
                 b,
                 old_vref,
@@ -941,7 +941,7 @@ fn legalize_inst<M: AbiMetadata + Clone>(
             s.vmap.set(old_vref, Mapped::Pair(lo, hi));
         }
         Op::Store(val, ptr, bytes, mem) if *bytes >= 16 => {
-            leg_store_128(
+            leg_store_wide(
                 old,
                 s,
                 b,
@@ -1113,27 +1113,45 @@ fn legalize_inst<M: AbiMetadata + Clone>(
             // If the source is FpToSi, use the proper saturating compiler-rt call.
             let ft = get_fp_to_int_float_type(val.clone().raw().value, old);
             if let Some(ft) = ft {
-                leg_fp_to_int128(s, b, old_vref, &val.clone().raw(), true, ft, old, symbols);
+                leg_fp_to_int_double_width(
+                    s,
+                    b,
+                    old_vref,
+                    &val.clone().raw(),
+                    true,
+                    ft,
+                    old,
+                    symbols,
+                );
             } else {
-                leg_sext_128(s, b, old_vref, *bits, &val.clone().raw());
+                leg_sext_wide(s, b, old_vref, *bits, &val.clone().raw());
             }
         }
         Op::Zext(val, bits) if *bits > s.part_bits => {
             // If the source is FpToUi, use the proper saturating compiler-rt call.
             let ft = get_fp_to_int_float_type(val.clone().raw().value, old);
             if let Some(ft) = ft {
-                leg_fp_to_int128(s, b, old_vref, &val.clone().raw(), false, ft, old, symbols);
+                leg_fp_to_int_double_width(
+                    s,
+                    b,
+                    old_vref,
+                    &val.clone().raw(),
+                    false,
+                    ft,
+                    old,
+                    symbols,
+                );
             } else {
-                leg_zext_128(s, b, old_vref, *bits, &val.clone().raw());
+                leg_zext_wide(s, b, old_vref, *bits, &val.clone().raw());
             }
         }
         Op::Bswap(val, bytes) if *bytes >= 16 => {
-            leg_bswap_128(s, b, old_vref, *bytes, &val.clone().raw());
+            leg_bswap_wide(s, b, old_vref, *bytes, &val.clone().raw());
         }
         Op::SignedSaturatingAdd(a, op_b, bits)
             if *bits > s.part_bits && bits.is_multiple_of(s.limb_bits) =>
         {
-            leg_signed_saturating_addsub_128(
+            leg_signed_saturating_addsub_wide(
                 old,
                 s,
                 b,
@@ -1146,7 +1164,7 @@ fn legalize_inst<M: AbiMetadata + Clone>(
         Op::SignedSaturatingSub(a, op_b, bits)
             if *bits > s.part_bits && bits.is_multiple_of(s.limb_bits) =>
         {
-            leg_signed_saturating_addsub_128(
+            leg_signed_saturating_addsub_wide(
                 old,
                 s,
                 b,
@@ -1159,7 +1177,7 @@ fn legalize_inst<M: AbiMetadata + Clone>(
         Op::SaturatingAdd(a, op_b, bits)
             if *bits > s.part_bits && bits.is_multiple_of(s.limb_bits) =>
         {
-            leg_unsigned_saturating_addsub_128(
+            leg_unsigned_saturating_addsub_wide(
                 old,
                 s,
                 b,
@@ -1172,7 +1190,7 @@ fn legalize_inst<M: AbiMetadata + Clone>(
         Op::SaturatingSub(a, op_b, bits)
             if *bits > s.part_bits && bits.is_multiple_of(s.limb_bits) =>
         {
-            leg_unsigned_saturating_addsub_128(
+            leg_unsigned_saturating_addsub_wide(
                 old,
                 s,
                 b,
@@ -1183,7 +1201,7 @@ fn legalize_inst<M: AbiMetadata + Clone>(
             );
         }
         Op::Select(cond, tv, fv) if wide_result => {
-            leg_select_128(old, s, b, old_vref, &cond.clone().raw(), tv, fv);
+            leg_select_wide(old, s, b, old_vref, &cond.clone().raw(), tv, fv);
         }
         Op::Ret(val, mem)
             if old.ret_ty.as_ref().is_some_and(|t| {
@@ -1809,27 +1827,27 @@ fn copy_inst<M: AbiMetadata + Clone>(
             )
             .raw(),
         Op::SAddWithOverflow(a, op_b, bits) if *bits > 64 => {
-            leg_sadd_with_overflow_128(old, s, b, old_vref, &a.clone().raw(), &op_b.clone().raw());
+            leg_sadd_with_overflow_wide(old, s, b, old_vref, &a.clone().raw(), &op_b.clone().raw());
             return;
         }
         Op::UAddWithOverflow(a, op_b, bits) if *bits > 64 => {
-            leg_uadd_with_overflow_128(old, s, b, old_vref, &a.clone().raw(), &op_b.clone().raw());
+            leg_uadd_with_overflow_wide(old, s, b, old_vref, &a.clone().raw(), &op_b.clone().raw());
             return;
         }
         Op::SSubWithOverflow(a, op_b, bits) if *bits > 64 => {
-            leg_ssub_with_overflow_128(old, s, b, old_vref, &a.clone().raw(), &op_b.clone().raw());
+            leg_ssub_with_overflow_wide(old, s, b, old_vref, &a.clone().raw(), &op_b.clone().raw());
             return;
         }
         Op::USubWithOverflow(a, op_b, bits) if *bits > 64 => {
-            leg_usub_with_overflow_128(old, s, b, old_vref, &a.clone().raw(), &op_b.clone().raw());
+            leg_usub_with_overflow_wide(old, s, b, old_vref, &a.clone().raw(), &op_b.clone().raw());
             return;
         }
         Op::SMulWithOverflow(a, op_b, bits) if *bits > 64 => {
-            leg_smul_with_overflow_128(old, s, b, old_vref, &a.clone().raw(), &op_b.clone().raw());
+            leg_smul_with_overflow_wide(old, s, b, old_vref, &a.clone().raw(), &op_b.clone().raw());
             return;
         }
         Op::UMulWithOverflow(a, op_b, bits) if *bits > 64 => {
-            leg_umul_with_overflow_128(old, s, b, old_vref, &a.clone().raw(), &op_b.clone().raw());
+            leg_umul_with_overflow_wide(old, s, b, old_vref, &a.clone().raw(), &op_b.clone().raw());
             return;
         }
         Op::SAddWithOverflow(a, op_b, bits) => {
@@ -2033,7 +2051,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
                     )
                 });
             if is_two_part_wide {
-                leg_int128_to_fp(s, b, old_vref, &a.clone().raw(), *ft, true, symbols);
+                leg_int_to_fp_double_width(s, b, old_vref, &a.clone().raw(), *ft, true, symbols);
                 return;
             }
             b.si_to_fp(remap_op(s, &a.clone().raw()).into(), *ft, o())
@@ -2050,7 +2068,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
                     )
                 });
             if is_two_part_wide {
-                leg_int128_to_fp(s, b, old_vref, &a.clone().raw(), *ft, false, symbols);
+                leg_int_to_fp_double_width(s, b, old_vref, &a.clone().raw(), *ft, false, symbols);
                 return;
             }
             b.ui_to_fp(remap_op(s, &a.clone().raw()).into(), *ft, o())
@@ -3481,7 +3499,7 @@ fn leg_add128_core<M>(
     (lo.raw(), hi.raw(), a_hi, b_hi)
 }
 
-fn leg_uadd_with_overflow_128<M>(
+fn leg_uadd_with_overflow_wide<M>(
     old: &Function,
     s: &mut State<M>,
     b: &mut Builder,
@@ -3564,7 +3582,7 @@ fn leg_uadd_with_overflow_128<M>(
     s.vmap.set(old_sec, Mapped::One(overflow.into()));
 }
 
-fn leg_sadd_with_overflow_128<M>(
+fn leg_sadd_with_overflow_wide<M>(
     old: &Function,
     s: &mut State<M>,
     b: &mut Builder,
@@ -3618,7 +3636,7 @@ fn leg_sadd_with_overflow_128<M>(
     s.vmap.set(old_sec, Mapped::One(overflow.into()));
 }
 
-fn leg_usub_with_overflow_128<M>(
+fn leg_usub_with_overflow_wide<M>(
     old: &Function,
     s: &mut State<M>,
     b: &mut Builder,
@@ -3702,7 +3720,7 @@ fn leg_usub_with_overflow_128<M>(
 
 /// 128-bit signed saturating add/sub.
 /// `is_add == true` → saturating_add, `is_add == false` → saturating_sub.
-fn leg_signed_saturating_addsub_128<M>(
+fn leg_signed_saturating_addsub_wide<M>(
     old: &Function,
     s: &mut State<M>,
     b: &mut Builder,
@@ -3881,7 +3899,7 @@ fn leg_signed_saturating_addsub_128<M>(
 }
 
 /// 128-bit unsigned saturating add/sub.
-fn leg_unsigned_saturating_addsub_128<M>(
+fn leg_unsigned_saturating_addsub_wide<M>(
     old: &Function,
     s: &mut State<M>,
     b: &mut Builder,
@@ -4012,7 +4030,7 @@ fn leg_unsigned_saturating_addsub_128<M>(
     }
 }
 
-fn leg_ssub_with_overflow_128<M>(
+fn leg_ssub_with_overflow_wide<M>(
     old: &Function,
     s: &mut State<M>,
     b: &mut Builder,
@@ -4091,7 +4109,7 @@ fn leg_ssub_with_overflow_128<M>(
     s.vmap.set(old_sec, Mapped::One(overflow.into()));
 }
 
-fn leg_smul_with_overflow_128<M>(
+fn leg_smul_with_overflow_wide<M>(
     old: &Function,
     s: &mut State<M>,
     b: &mut Builder,
@@ -4243,7 +4261,7 @@ fn leg_smul_with_overflow_128<M>(
     s.vmap.set(old_sec, Mapped::One(overflow.into()));
 }
 
-fn leg_umul_with_overflow_128<M>(
+fn leg_umul_with_overflow_wide<M>(
     old: &Function,
     s: &mut State<M>,
     b: &mut Builder,
@@ -4650,7 +4668,7 @@ fn shr_128_pair(
     (lo, hi)
 }
 
-fn leg_rotate_128<M>(
+fn leg_rotate_wide<M>(
     old: &Function,
     s: &mut State<M>,
     b: &mut Builder,
@@ -4733,7 +4751,7 @@ fn leg_rotate_128<M>(
 // 128-bit bit reverse
 // ---------------------------------------------------------------------------
 
-fn leg_bit_reverse_128<M>(
+fn leg_bit_reverse_wide<M>(
     old: &Function,
     s: &mut State<M>,
     b: &mut Builder,
@@ -4831,7 +4849,7 @@ fn leg_icmp<M>(
 // 128-bit load: two 8-byte loads at offset 0 and 8
 // ---------------------------------------------------------------------------
 
-fn leg_load_128<M>(
+fn leg_load_wide<M>(
     s: &mut State<M>,
     b: &mut Builder,
     old_vref: ValueRef,
@@ -4884,7 +4902,7 @@ fn leg_load_128<M>(
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
-fn leg_store_128<M>(
+fn leg_store_wide<M>(
     old: &Function,
     s: &mut State<M>,
     b: &mut Builder,
@@ -4966,7 +4984,7 @@ fn leg_store_128<M>(
 // Sign-extend to 128: lo = original, hi = arithmetic right shift by 63
 // ---------------------------------------------------------------------------
 
-fn leg_sext_128<M>(
+fn leg_sext_wide<M>(
     s: &mut State<M>,
     b: &mut Builder,
     old_vref: ValueRef,
@@ -5012,7 +5030,7 @@ fn leg_sext_128<M>(
 // Zero-extend to 128: lo = original, hi = 0
 // ---------------------------------------------------------------------------
 
-fn leg_zext_128<M>(
+fn leg_zext_wide<M>(
     s: &mut State<M>,
     b: &mut Builder,
     old_vref: ValueRef,
@@ -5065,7 +5083,7 @@ fn get_fp_to_int_float_type(vref: ValueRef, old: &Function) -> Option<FloatType>
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
-fn leg_fp_to_int128<M: AbiMetadata + Clone>(
+fn leg_fp_to_int_double_width<M: AbiMetadata + Clone>(
     s: &mut State<M>,
     b: &mut Builder,
     old_vref: ValueRef,
@@ -5160,7 +5178,7 @@ fn leg_fp_to_int128<M: AbiMetadata + Clone>(
 // 128-bit bswap: bswap each half, then swap the halves
 // ---------------------------------------------------------------------------
 
-fn leg_bswap_128<M>(
+fn leg_bswap_wide<M>(
     s: &mut State<M>,
     b: &mut Builder,
     old_vref: ValueRef,
@@ -5196,7 +5214,7 @@ fn leg_bswap_128<M>(
 // 128-bit select: select on each half independently
 // ---------------------------------------------------------------------------
 
-fn leg_select_128<M>(
+fn leg_select_wide<M>(
     old: &Function,
     s: &mut State<M>,
     b: &mut Builder,
@@ -5259,7 +5277,7 @@ fn leg_select_128<M>(
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
-fn leg_div_rem_128<M: AbiMetadata + Clone>(
+fn leg_div_rem_double_width<M: AbiMetadata + Clone>(
     old: &Function,
     s: &mut State<M>,
     b: &mut Builder,
@@ -5333,7 +5351,7 @@ fn leg_div_rem_128<M: AbiMetadata + Clone>(
 //   i128 -> f64: __floattidf(lo, hi) -> f64
 // ---------------------------------------------------------------------------
 
-fn leg_int128_to_fp<M: AbiMetadata + Clone>(
+fn leg_int_to_fp_double_width<M: AbiMetadata + Clone>(
     s: &mut State<M>,
     b: &mut Builder,
     old_vref: ValueRef,
