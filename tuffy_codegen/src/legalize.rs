@@ -155,6 +155,18 @@ fn int_annotation_bits(ann: Option<&Annotation>) -> Option<u32> {
     }
 }
 
+fn is_exact_double_width_int_with_signedness(
+    ann: Option<&Annotation>,
+    part_bits: u32,
+    signedness: IntSignedness,
+) -> bool {
+    matches!(
+        ann,
+        Some(Annotation::Int(ia))
+            if ia.bit_width == part_bits * 2 && ia.signedness == signedness
+    )
+}
+
 fn compiler_rt_int_suffix(bits: u32) -> &'static str {
     match bits {
         16 => "hi",
@@ -2121,14 +2133,11 @@ fn copy_inst<M: AbiMetadata + Clone>(
             .raw(),
         Op::SiToFp(a, ft) => {
             let is_two_part_wide = s.wide.contains(&a.clone().raw().value.raw())
-                || value_annotation(old, a.clone().raw().value).is_some_and(|ann| {
-                    matches!(
-                        ann,
-                        Annotation::Int(ia)
-                            if ia.bit_width == s.part_bits * 2
-                                && matches!(ia.signedness, IntSignedness::Signed)
-                    )
-                });
+                || is_exact_double_width_int_with_signedness(
+                    value_annotation(old, a.clone().raw().value),
+                    s.part_bits,
+                    IntSignedness::Signed,
+                );
             if is_two_part_wide {
                 leg_int_to_fp_double_width(s, b, old_vref, &a.clone().raw(), *ft, true, symbols);
                 return;
@@ -2138,14 +2147,11 @@ fn copy_inst<M: AbiMetadata + Clone>(
         }
         Op::UiToFp(a, ft) => {
             let is_two_part_wide = s.wide.contains(&a.clone().raw().value.raw())
-                || value_annotation(old, a.clone().raw().value).is_some_and(|ann| {
-                    matches!(
-                        ann,
-                        Annotation::Int(ia)
-                            if ia.bit_width == s.part_bits * 2
-                                && matches!(ia.signedness, IntSignedness::Unsigned)
-                    )
-                });
+                || is_exact_double_width_int_with_signedness(
+                    value_annotation(old, a.clone().raw().value),
+                    s.part_bits,
+                    IntSignedness::Unsigned,
+                );
             if is_two_part_wide {
                 leg_int_to_fp_double_width(s, b, old_vref, &a.clone().raw(), *ft, false, symbols);
                 return;
