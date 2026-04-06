@@ -234,6 +234,37 @@ def evalUMulOverflow (a b : Int) (n : Nat) : Value × Value :=
     let wrapped := prod % (2 ^ n : Int)
     (.int wrapped, .bool overflowed)
 
+/-- Signed carrying multiply-add in n bits. n = 0 produces poison.
+    Returns (low_n_bits, high_n_bits) of the 2n-bit sum a*b + carry + add. -/
+def evalSCarryingMulAdd (a b carry add : Int) (n : Nat) : Value × Value :=
+  if n = 0 then (.poison, .poison)
+  else
+    let modulus := (2 : Int) ^ n
+    let full := a * b + carry + add
+    let lo := full % modulus
+    let lo := if lo < 0 then lo + modulus else lo
+    let hi := (full - lo) / modulus
+    let maxVal := (2 : Int) ^ (n - 1) - 1
+    let lo := if lo > maxVal then lo - modulus else lo
+    let hi := hi % modulus
+    let hi := if hi < 0 then hi + modulus else hi
+    let hi := if hi > maxVal then hi - modulus else hi
+    (.int lo, .int hi)
+
+/-- Unsigned carrying multiply-add in n bits. n = 0 produces poison.
+    Returns (low_n_bits, high_n_bits) of the 2n-bit sum a*b + carry + add. -/
+def evalUCarryingMulAdd (a b carry add : Int) (n : Nat) : Value × Value :=
+  if n = 0 then (.poison, .poison)
+  else
+    let modulus := (2 : Int) ^ n
+    let full := a * b + carry + add
+    let lo := full % modulus
+    let lo := if lo < 0 then lo + modulus else lo
+    let hi := (full - lo) / modulus
+    let hi := hi % modulus
+    let hi := if hi < 0 then hi + modulus else hi
+    (.int lo, .int hi)
+
 /-- Merge: replace the low `width` bits of `a` with the low `width` bits of `b`.
     width = 0 produces poison. -/
 def evalMerge (a b : Int) (width : Nat) : Value :=
