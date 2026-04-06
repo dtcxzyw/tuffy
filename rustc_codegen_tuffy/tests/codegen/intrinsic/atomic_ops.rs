@@ -1254,7 +1254,7 @@
 // CHECK:     v320: int:i64 = iconst 4
 // CHECK:     v321: ptr = ptradd v11, v320
 // CHECK:     v322: int:i32 = load.4 v321, v318
-// CHECK:     ret v319, v318
+// CHECK:     ret v319, v322, v318
 // CHECK:
 // CHECK:   bb29(v324: mem):
 // CHECK:     v325: int:i64 = iconst 1
@@ -1372,7 +1372,7 @@
 // CHECK:     v10: ptr = symbol_addr @_RINvNtNtC$HASH_4core4sync6atomic23atomic_compare_exchangemEC$HASH_10atomic_ops
 // CHECK:     v11: mem, v12: int:i32 = call v10(v7, v2, v3, v8, v9), v5 -> int:i32
 // CHECK:     v13: mem = store.4 v12, v6, v11
-// CHECK:     v14: int:i64 = iconst 0
+// CHECK:     v14: int:i32 = call_ret2 v11
 // CHECK:     v15: int:i64 = iconst 4
 // CHECK:     v16: ptr = ptradd v6, v15
 // CHECK:     v17: mem = store.4 v14, v16, v13
@@ -1383,7 +1383,7 @@
 // CHECK:     v21: int:i64 = iconst 4
 // CHECK:     v22: ptr = ptradd v6, v21
 // CHECK:     v23: int:i32 = load.4 v22, v19
-// CHECK:     ret v20, v19
+// CHECK:     ret v20, v23, v19
 // CHECK: }
 // CHECK:
 // CHECK: fn atomic_fetch_add(_1: &std::sync::atomic::Atomic<u32>, _2: u32) -> u32 {

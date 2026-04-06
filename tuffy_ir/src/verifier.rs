@@ -1043,7 +1043,7 @@ impl FuncVerifier<'_> {
                 );
             }
             Op::TlsSymbolAddr(_) => {}
-            Op::Call(callee, args, mem) => {
+            Op::Call(callee, args, mem, _) => {
                 self.check_operand(&callee.clone().raw(), loc);
                 self.check_operands(args, loc);
                 self.check_operand(&mem.clone().raw(), loc);
@@ -1052,6 +1052,23 @@ impl FuncVerifier<'_> {
                     self.result.error(
                         loc.clone(),
                         format!("call primary result must be Mem, got {:?}", inst.ty),
+                    );
+                }
+            }
+            Op::CallRet2(mem) => {
+                self.check_operand(&mem.clone().raw(), loc);
+                self.expect_mem(&mem.clone().raw(), "call_ret2 mem", loc);
+                if mem.0.value.is_block_arg() {
+                    self.result.error(
+                        loc.clone(),
+                        "call_ret2 operand must come from a call instruction",
+                    );
+                } else if let Some(node) = self.func.inst_pool.get(mem.0.value.index())
+                    && !matches!(node.inst.op, Op::Call(..))
+                {
+                    self.result.error(
+                        loc.clone(),
+                        "call_ret2 operand must reference a call result mem token",
                     );
                 }
             }
@@ -1098,7 +1115,7 @@ impl FuncVerifier<'_> {
             }
 
             // -- Terminators --
-            Op::Ret(val, mem) => {
+            Op::Ret(val, ret2, mem) => {
                 self.check_operand(&mem.clone().raw(), loc);
                 self.expect_mem(&mem.clone().raw(), "ret mem", loc);
                 if let Some(op) = val {
@@ -1111,6 +1128,9 @@ impl FuncVerifier<'_> {
                         loc.clone(),
                         "ret without value but function has return type",
                     );
+                }
+                if let Some(op) = ret2 {
+                    self.check_operand(op, loc);
                 }
             }
             Op::Br(target, args) => {

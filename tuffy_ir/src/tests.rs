@@ -44,7 +44,7 @@ fn build_add_function() {
     let a = builder.param(0, i64_type.clone(), None, Origin::synthetic());
     let b = builder.param(1, i64_type, None, Origin::synthetic());
     let sum = builder.add(a.into(), b.into(), I64, Origin::synthetic());
-    builder.ret(Some(sum.into()), mem0.into(), Origin::synthetic());
+    builder.ret(Some(sum.into()), None, mem0.into(), Origin::synthetic());
 
     builder.exit_region();
 
@@ -55,7 +55,7 @@ fn build_add_function() {
     assert!(matches!(func.inst(0).op, Op::Param(0)));
     assert!(matches!(func.inst(1).op, Op::Param(1)));
     assert!(matches!(func.inst(2).op, Op::Add(_, _)));
-    assert!(matches!(func.inst(3).op, Op::Ret(Some(_), _)));
+    assert!(matches!(func.inst(3).op, Op::Ret(Some(_), _, _)));
 }
 
 #[test]
@@ -83,7 +83,7 @@ fn build_with_annotations() {
     let a = builder.param(0, i32_type.clone(), None, Origin::synthetic());
     let b = builder.param(1, i32_type, None, Origin::synthetic());
     let sum = builder.add(a.into(), b.into(), I64, Origin::synthetic());
-    builder.ret(Some(sum.into()), mem0.into(), Origin::synthetic());
+    builder.ret(Some(sum.into()), None, mem0.into(), Origin::synthetic());
 
     builder.exit_region();
 
@@ -126,7 +126,7 @@ fn display_add_function() {
         },
         Origin::synthetic(),
     );
-    builder.ret(Some(sum.into()), mem0.into(), Origin::synthetic());
+    builder.ret(Some(sum.into()), None, mem0.into(), Origin::synthetic());
     builder.exit_region();
 
     let output = format!("{}", func.display(&st));
@@ -180,7 +180,7 @@ fn display_named_params() {
         },
         Origin::synthetic(),
     );
-    builder.ret(Some(sum.into()), mem0.into(), Origin::synthetic());
+    builder.ret(Some(sum.into()), None, mem0.into(), Origin::synthetic());
     builder.exit_region();
 
     let output = format!("{}", func.display(&st));
@@ -230,10 +230,10 @@ fn display_multi_block_branch() {
     builder.brif(cmp.into(), bb1, vec![], bb2, vec![], Origin::synthetic());
 
     builder.switch_to_block(bb1);
-    builder.ret(Some(a.into()), mem0.into(), Origin::synthetic());
+    builder.ret(Some(a.into()), None, mem0.into(), Origin::synthetic());
 
     builder.switch_to_block(bb2);
-    builder.ret(Some(b.into()), mem0.into(), Origin::synthetic());
+    builder.ret(Some(b.into()), None, mem0.into(), Origin::synthetic());
     builder.exit_region();
 
     let output = format!("{}", func.display(&st));
@@ -314,7 +314,7 @@ fn display_nested_loop_region() {
 
     // bb3: after loop
     builder.switch_to_block(bb3);
-    builder.ret(Some(acc.into()), mem0.into(), Origin::synthetic());
+    builder.ret(Some(acc.into()), None, mem0.into(), Origin::synthetic());
 
     builder.exit_region();
 
@@ -371,7 +371,7 @@ fn build_bitwise_ops() {
     let v_and = builder.and(a.into(), b.into(), I64, Origin::synthetic());
     let v_or = builder.or(a.into(), b.into(), I64, Origin::synthetic());
     let v_xor = builder.xor(v_and.into(), v_or.into(), I64, Origin::synthetic());
-    builder.ret(Some(v_xor.into()), mem0.into(), Origin::synthetic());
+    builder.ret(Some(v_xor.into()), None, mem0.into(), Origin::synthetic());
     builder.exit_region();
 
     assert_eq!(func.inst_pool.next_index(), 6);
@@ -409,7 +409,7 @@ fn display_shift_ops() {
     let b = builder.param(1, i64_type, s64_ann, Origin::synthetic());
     let _v_shl = builder.shl(a.into(), b.into(), S64, Origin::synthetic());
     let v_shr = builder.shr(a.into(), b.into(), S64, Origin::synthetic());
-    builder.ret(Some(v_shr.into()), mem0.into(), Origin::synthetic());
+    builder.ret(Some(v_shr.into()), None, mem0.into(), Origin::synthetic());
     builder.exit_region();
 
     let output = format!("{}", func.display(&st));
@@ -460,7 +460,7 @@ fn display_division_ops() {
     let v_div = builder.div(a.into(), b.into(), s64, Origin::synthetic());
     let v_rem = builder.rem(a.into(), b.into(), s64, Origin::synthetic());
     let v_add = builder.add(v_div.into(), v_rem.into(), s64, Origin::synthetic());
-    builder.ret(Some(v_add.into()), mem0.into(), Origin::synthetic());
+    builder.ret(Some(v_add.into()), None, mem0.into(), Origin::synthetic());
     builder.exit_region();
 
     let output = format!("{}", func.display(&st));
@@ -502,7 +502,7 @@ fn build_ptradd() {
     let ptr = builder.param(0, Type::Ptr(0), None, Origin::synthetic());
     let off = builder.param(1, i64_type, None, Origin::synthetic());
     let result = builder.ptradd(ptr.into(), off.into(), 0, Origin::synthetic());
-    builder.ret(Some(result.into()), mem0.into(), Origin::synthetic());
+    builder.ret(Some(result.into()), None, mem0.into(), Origin::synthetic());
     builder.exit_region();
 
     assert_eq!(func.inst_pool.next_index(), 4);
@@ -543,7 +543,7 @@ fn display_pointer_ops() {
     let _pi = builder.ptrtoint(p1.into(), 64, Origin::synthetic());
     let _addr = builder.ptrtoaddr(p2.into(), 64, Origin::synthetic());
     let _ip = builder.inttoptr(i.into(), 0, Origin::synthetic());
-    builder.ret(Some(_pi.into()), mem0.into(), Origin::synthetic());
+    builder.ret(Some(_pi.into()), None, mem0.into(), Origin::synthetic());
     builder.exit_region();
 
     let output = format!("{}", func.display(&st));
@@ -619,7 +619,7 @@ fn build_float_binary_ops() {
     let v_csign = builder.copysign(v_fdiv.into(), a.into(), f32_ty.clone(), Origin::synthetic());
     let v_neg = builder.fneg(v_csign.into(), f32_ty.clone(), Origin::synthetic());
     let v_abs = builder.fabs(v_neg.into(), f32_ty.clone(), Origin::synthetic());
-    builder.ret(Some(v_abs.into()), mem0.into(), Origin::synthetic());
+    builder.ret(Some(v_abs.into()), None, mem0.into(), Origin::synthetic());
     builder.exit_region();
 
     assert_eq!(func.inst_pool.next_index(), 10);
@@ -688,7 +688,7 @@ fn display_float_ops() {
     let _v_neg = builder.fneg(a.into(), f64_ty.clone(), Origin::synthetic());
     let _v_abs = builder.fabs(a.into(), f64_ty.clone(), Origin::synthetic());
     let _v_cs = builder.copysign(a.into(), b.into(), f64_ty.clone(), Origin::synthetic());
-    builder.ret(Some(_v_cs.into()), mem0.into(), Origin::synthetic());
+    builder.ret(Some(_v_cs.into()), None, mem0.into(), Origin::synthetic());
     builder.exit_region();
 
     let output = format!("{}", func.display(&st));
@@ -726,7 +726,7 @@ fn display_f128_const() {
     let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     let bits = 0x0123_4567_89ab_cdef_fedc_ba98_7654_3210_u128;
     let value = builder.fconst(FloatType::F128, bits, Origin::synthetic());
-    builder.ret(Some(value.into()), mem0.into(), Origin::synthetic());
+    builder.ret(Some(value.into()), None, mem0.into(), Origin::synthetic());
     builder.exit_region();
 
     let Op::FConst(constant) = &func.inst(0).op else {
@@ -807,7 +807,7 @@ fn build_atomic_ops() {
         Origin::synthetic(),
     );
     let mem5 = builder.fence(MemoryOrdering::SeqCst, mem4.into(), Origin::synthetic());
-    builder.ret(Some(v_cx.into()), mem5.into(), Origin::synthetic());
+    builder.ret(Some(v_cx.into()), None, mem5.into(), Origin::synthetic());
     builder.exit_region();
 
     assert_eq!(func.inst_pool.next_index(), 8);
@@ -885,7 +885,7 @@ fn display_atomic_ops() {
         Origin::synthetic(),
     );
     let mem5 = builder.fence(MemoryOrdering::SeqCst, mem4.into(), Origin::synthetic());
-    builder.ret(Some(_cx.into()), mem5.into(), Origin::synthetic());
+    builder.ret(Some(_cx.into()), None, mem5.into(), Origin::synthetic());
     builder.exit_region();
 
     let output = format!("{}", func.display(&st));
@@ -950,11 +950,12 @@ fn build_symbol_addr() {
         Type::Ptr(0),
         mem0.into(),
         None,
+        None,
         Origin::synthetic(),
     ) else {
         panic!("expected non-void call result");
     };
-    builder.ret(Some(result.into()), mem1.into(), Origin::synthetic());
+    builder.ret(Some(result.into()), None, mem1.into(), Origin::synthetic());
     builder.exit_region();
 
     assert_eq!(func.inst_pool.next_index(), 4);
@@ -982,7 +983,7 @@ fn display_symbol_addr_without_symbols() {
 
     let mem0 = builder.add_block_arg(entry, Type::Mem, None);
     builder.symbol_addr(sym, Origin::synthetic());
-    builder.ret(None, mem0.into(), Origin::synthetic());
+    builder.ret(None, None, mem0.into(), Origin::synthetic());
     builder.exit_region();
 
     // Without module context, SymbolAddr and function name show raw ids
@@ -1034,7 +1035,7 @@ fn build_valid_add_module() -> Module {
     let a = b.param(0, i64_type.clone(), s64_ann, Origin::synthetic());
     let p1 = b.param(1, i64_type, s64_ann, Origin::synthetic());
     let sum = b.add(a.into(), p1.into(), I64, Origin::synthetic());
-    b.ret(Some(sum.into()), mem0.into(), Origin::synthetic());
+    b.ret(Some(sum.into()), None, mem0.into(), Origin::synthetic());
     b.exit_region();
     module.add_function(func);
     module
@@ -1080,10 +1081,10 @@ fn verify_valid_multi_block() {
     b.brif(cmp.into(), bb1, vec![], bb2, vec![], Origin::synthetic());
 
     b.switch_to_block(bb1);
-    b.ret(Some(a.into()), mem0.into(), Origin::synthetic());
+    b.ret(Some(a.into()), None, mem0.into(), Origin::synthetic());
 
     b.switch_to_block(bb2);
-    b.ret(Some(p1.into()), mem0.into(), Origin::synthetic());
+    b.ret(Some(p1.into()), None, mem0.into(), Origin::synthetic());
     b.exit_region();
 
     let result = verify_function(&func, &st);
@@ -1139,7 +1140,7 @@ fn verify_valid_loop_region() {
     b.continue_(vec![new_acc.into(), new_i.into()], Origin::synthetic());
 
     b.switch_to_block(bb3);
-    b.ret(Some(acc.into()), mem0.into(), Origin::synthetic());
+    b.ret(Some(acc.into()), None, mem0.into(), Origin::synthetic());
     b.exit_region();
 
     let result = verify_function(&func, &st);
@@ -1172,7 +1173,7 @@ fn verify_detects_wrong_arith_operand_type() {
         let p1 = b.param(1, i64_type.clone(), None, Origin::synthetic());
         let cmp = b.icmp(ICmpOp::Gt, a.into(), p1.into(), Origin::synthetic());
 
-        b.ret(Some(a.into()), mem0.into(), Origin::synthetic());
+        b.ret(Some(a.into()), None, mem0.into(), Origin::synthetic());
         b.exit_region();
         (bb, mem0, a, p1, cmp)
     };
@@ -1265,7 +1266,7 @@ fn verify_detects_load_non_ptr() {
         None,
         Origin::synthetic(),
     );
-    b.ret(Some(v.into()), mem0.into(), Origin::synthetic());
+    b.ret(Some(v.into()), None, mem0.into(), Origin::synthetic());
     b.exit_region();
 
     let result = verify_function(&func, &st);
@@ -1314,7 +1315,7 @@ fn verify_detects_branch_arg_count_mismatch() {
     b.br(bb1, vec![], Origin::synthetic());
 
     b.switch_to_block(bb1);
-    b.ret(Some(a.into()), mem0.into(), Origin::synthetic());
+    b.ret(Some(a.into()), None, mem0.into(), Origin::synthetic());
     b.exit_region();
 
     let result = verify_function(&func, &st);
@@ -1382,7 +1383,7 @@ fn display_min_max() {
     let v_min = builder.min(a.into(), b.into(), S64, Origin::synthetic());
     let v_max = builder.max(a.into(), b.into(), S64, Origin::synthetic());
     let _sum = builder.add(v_min.into(), v_max.into(), s64, Origin::synthetic());
-    builder.ret(Some(_sum.into()), mem0.into(), Origin::synthetic());
+    builder.ret(Some(_sum.into()), None, mem0.into(), Origin::synthetic());
     builder.exit_region();
 
     assert!(matches!(func.inst(2).op, Op::Min(_, _)));
@@ -1450,7 +1451,7 @@ fn memssa_store_load_threading() {
         Origin::synthetic(),
     );
     // ret carries mem1 (load does not produce a new mem token)
-    b.ret(Some(loaded.into()), mem1.into(), Origin::synthetic());
+    b.ret(Some(loaded.into()), None, mem1.into(), Origin::synthetic());
     b.exit_region();
 
     // Verify store result is Mem
@@ -1497,7 +1498,7 @@ fn memssa_multi_result_load_atomic() {
         s64_ann,
         Origin::synthetic(),
     );
-    b.ret(Some(data.into()), mem1.into(), Origin::synthetic());
+    b.ret(Some(data.into()), None, mem1.into(), Origin::synthetic());
     b.exit_region();
 
     let inst = &func.inst(1);
@@ -1565,7 +1566,12 @@ fn memssa_block_arg_phi() {
         s32_ann,
         Origin::synthetic(),
     );
-    b.ret(Some(loaded.into()), mem_phi.into(), Origin::synthetic());
+    b.ret(
+        Some(loaded.into()),
+        None,
+        mem_phi.into(),
+        Origin::synthetic(),
+    );
 
     b.exit_region();
 
@@ -1609,7 +1615,7 @@ fn memssa_display_store_load() {
         s32_ann,
         Origin::synthetic(),
     );
-    b.ret(Some(loaded.into()), mem1.into(), Origin::synthetic());
+    b.ret(Some(loaded.into()), None, mem1.into(), Origin::synthetic());
     b.exit_region();
 
     let output = format!("{}", func.display(&st));
@@ -1650,7 +1656,7 @@ fn build_merge() {
     let a = b.param(0, i64_type.clone(), None, Origin::synthetic());
     let lo = b.param(1, i64_type.clone(), None, Origin::synthetic());
     let merged = b.merge(a.into(), lo.into(), 64, Origin::synthetic());
-    b.ret(Some(merged.into()), mem0.into(), Origin::synthetic());
+    b.ret(Some(merged.into()), None, mem0.into(), Origin::synthetic());
     b.exit_region();
 
     assert!(matches!(func.inst(2).op, Op::Merge(_, _, 64)));
@@ -1688,7 +1694,7 @@ fn build_split() {
     assert!(!hi.is_secondary_result());
     assert!(lo.is_secondary_result());
 
-    b.ret(Some(hi.into()), mem0.into(), Origin::synthetic());
+    b.ret(Some(hi.into()), None, mem0.into(), Origin::synthetic());
     b.exit_region();
 
     let inst = &func.inst(1);
@@ -1723,7 +1729,7 @@ fn build_clmul() {
     let a = b.param(0, i64_type.clone(), None, Origin::synthetic());
     let bv = b.param(1, i64_type.clone(), None, Origin::synthetic());
     let result = b.clmul(a.into(), bv.into(), Origin::synthetic());
-    b.ret(Some(result.into()), mem0.into(), Origin::synthetic());
+    b.ret(Some(result.into()), None, mem0.into(), Origin::synthetic());
     b.exit_region();
 
     assert!(matches!(func.inst(2).op, Op::Clmul(_, _)));
@@ -1773,7 +1779,7 @@ fn build_ucarrying_mul_add() {
     assert!(!lo.is_secondary_result());
     assert!(hi.is_secondary_result());
 
-    b.ret(Some(lo.into()), mem0.into(), Origin::synthetic());
+    b.ret(Some(lo.into()), None, mem0.into(), Origin::synthetic());
     b.exit_region();
 
     let inst = &func.inst(4);
@@ -1833,7 +1839,7 @@ fn test_extractvalue_basic() {
         None,
         Origin::synthetic(),
     );
-    b.ret(Some(field0.into()), mem0.into(), Origin::synthetic());
+    b.ret(Some(field0.into()), None, mem0.into(), Origin::synthetic());
     b.exit_region();
 
     assert_eq!(func.inst_pool.next_index(), 3);
@@ -1869,7 +1875,7 @@ fn test_insertvalue_basic() {
     let s = b.param(0, struct_ty.clone(), None, Origin::synthetic());
     let val = b.param(1, i64_type, None, Origin::synthetic());
     let result = b.insert_value(s.into(), val.into(), vec![0], None, Origin::synthetic());
-    b.ret(Some(result.into()), mem0.into(), Origin::synthetic());
+    b.ret(Some(result.into()), None, mem0.into(), Origin::synthetic());
     b.exit_region();
 
     assert_eq!(func.inst_pool.next_index(), 4);
@@ -1910,7 +1916,7 @@ fn test_extractvalue_array() {
         None,
         Origin::synthetic(),
     );
-    b.ret(Some(elem.into()), mem0.into(), Origin::synthetic());
+    b.ret(Some(elem.into()), None, mem0.into(), Origin::synthetic());
     b.exit_region();
 
     assert_eq!(func.inst_pool.next_index(), 3);
@@ -1943,7 +1949,7 @@ fn test_insertvalue_array() {
     let arr = b.param(0, array_ty.clone(), None, Origin::synthetic());
     let val = b.param(1, i64_type, None, Origin::synthetic());
     let result = b.insert_value(arr.into(), val.into(), vec![3], None, Origin::synthetic());
-    b.ret(Some(result.into()), mem0.into(), Origin::synthetic());
+    b.ret(Some(result.into()), None, mem0.into(), Origin::synthetic());
     b.exit_region();
 
     assert_eq!(func.inst_pool.next_index(), 4);
@@ -1976,7 +1982,7 @@ fn test_dontcare_annotation_display() {
     b.switch_to_block(bb);
     let mem0 = b.add_block_arg(bb, Type::Mem, None);
     let a = b.param(0, i32_dc, dc_ann, Origin::synthetic());
-    b.ret(Some(a.into()), mem0.into(), Origin::synthetic());
+    b.ret(Some(a.into()), None, mem0.into(), Origin::synthetic());
     b.exit_region();
 
     let output = format!("{}", func.display(&st));
@@ -2011,7 +2017,7 @@ fn verify_detects_dontcare_zero() {
     b.switch_to_block(bb);
     let mem0 = b.add_block_arg(bb, Type::Mem, None);
     let a = b.param(0, i0_type, zero_ann, Origin::synthetic());
-    b.ret(Some(a.into()), mem0.into(), Origin::synthetic());
+    b.ret(Some(a.into()), None, mem0.into(), Origin::synthetic());
     b.exit_region();
 
     let result = verify_function(&func, &st);
@@ -2056,7 +2062,7 @@ fn mem_copy_builder_and_display() {
         mem0.into(),
         Origin::synthetic(),
     );
-    b.ret(None, mem1.into(), Origin::synthetic());
+    b.ret(None, None, mem1.into(), Origin::synthetic());
     b.exit_region();
 
     assert!(matches!(func.inst(3).op, Op::MemCopy(_, _, _, _)));
@@ -2100,7 +2106,7 @@ fn mem_move_builder_and_display() {
         mem0.into(),
         Origin::synthetic(),
     );
-    b.ret(None, mem1.into(), Origin::synthetic());
+    b.ret(None, None, mem1.into(), Origin::synthetic());
     b.exit_region();
 
     assert!(matches!(func.inst(3).op, Op::MemMove(_, _, _, _)));
@@ -2145,7 +2151,7 @@ fn mem_set_builder_and_display() {
         mem0.into(),
         Origin::synthetic(),
     );
-    b.ret(None, mem1.into(), Origin::synthetic());
+    b.ret(None, None, mem1.into(), Origin::synthetic());
     b.exit_region();
 
     assert!(matches!(func.inst(3).op, Op::MemSet(_, _, _, _)));
@@ -2179,7 +2185,12 @@ fn test_boolean_ops() {
     let _or_result = builder.bor(t.into(), f.into(), Origin::synthetic());
     let _xor_result = builder.bxor(t.into(), f.into(), Origin::synthetic());
 
-    builder.ret(Some(and_result.into()), mem0.into(), Origin::synthetic());
+    builder.ret(
+        Some(and_result.into()),
+        None,
+        mem0.into(),
+        Origin::synthetic(),
+    );
     builder.exit_region();
 
     module.add_function(func);
@@ -2233,7 +2244,12 @@ fn test_typed_builder_api() {
         Origin::synthetic(),
     );
 
-    builder.ret(Some(sum.raw().into()), mem0.into(), Origin::synthetic());
+    builder.ret(
+        Some(sum.raw().into()),
+        None,
+        mem0.into(),
+        Origin::synthetic(),
+    );
     builder.exit_region();
 
     module.add_function(func);

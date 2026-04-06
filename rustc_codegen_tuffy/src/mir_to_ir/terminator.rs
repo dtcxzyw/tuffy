@@ -115,15 +115,18 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 unwind,
                 ..
             } => {
-                self.last_call_vref = None;
-                self.translate_call(func, args, destination, target, term.source_info);
-                // If the call has an unwind cleanup target, create a landing-pad
-                // wrapper block and record the call → wrapper mapping.
-                if let mir::UnwindAction::Cleanup(cleanup_bb) = unwind
-                    && let Some(call_idx) = self.last_call_vref
-                {
-                    self.setup_cleanup_landing_pad(call_idx, *cleanup_bb);
-                }
+                let cleanup_bb = match unwind {
+                    mir::UnwindAction::Cleanup(cleanup_bb) => Some(*cleanup_bb),
+                    _ => None,
+                };
+                self.translate_call(
+                    func,
+                    args,
+                    destination,
+                    target,
+                    cleanup_bb,
+                    term.source_info,
+                );
             }
             TerminatorKind::InlineAsm {
                 template,
@@ -154,6 +157,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         Type::Unit,
                         self.current_mem.into(),
                         None,
+                        None,
                         Origin::synthetic(),
                     );
                 }
@@ -182,6 +186,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         Type::Unit,
                         self.current_mem.into(),
                         None,
+                        None,
                         Origin::synthetic(),
                     );
                 }
@@ -201,16 +206,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     /// The wrapper captures the exception pointer from the unwinder,
     /// stores it to the shared `exc_ptr_slot`, and branches to the
     /// actual MIR cleanup block.
-    fn setup_cleanup_landing_pad(&mut self, call_idx: u32, cleanup_bb: mir::BasicBlock) {
+    pub(super) fn setup_cleanup_landing_pad(&mut self, cleanup_bb: mir::BasicBlock) -> u32 {
         // Create the wrapper IR block (no block args — entered by unwinder).
         let wrapper_block = self.builder.create_block();
 
-        // Record the cleanup label mapping.
-        self.abi_metadata
-            .mark_call_cleanup(call_idx, wrapper_block.index());
-
         // Defer wrapper block population to after the main translation loop.
         self.landing_pad_wrappers.push((wrapper_block, cleanup_bb));
+        wrapper_block.index()
     }
 
     /// Handle an InlineAsm terminator.
@@ -405,6 +407,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             if local_slot == sret {
                 self.builder.ret(
                     Some(sret.into()),
+                    None,
                     self.current_mem.into(),
                     Origin::synthetic(),
                 );
@@ -435,7 +438,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             );
 
             self.builder
-                .ret(Some(sret.into()), new_mem.into(), Origin::synthetic());
+                .ret(Some(sret.into()), None, new_mem.into(), Origin::synthetic());
             return;
         }
 
@@ -448,7 +451,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         {
             // Unit-returning or zero-sized untranslatable return type: bare ret, no value.
             self.builder
-                .ret(None, self.current_mem.into(), Origin::synthetic());
+                .ret(None, None, self.current_mem.into(), Origin::synthetic());
         } else if ret_size == 0 {
             // Zero-sized return type: return a dummy value to satisfy the
             // function signature (translate_ty maps ADTs to Int).
@@ -457,6 +460,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
             self.builder.ret(
                 Some(dummy.into()),
+                None,
                 self.current_mem.into(),
                 Origin::synthetic(),
             );
@@ -549,16 +553,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     int_annotation_for_bytes(b_sz as u32),
                     Origin::synthetic(),
                 );
-                let ret_inst = self.builder.ret(
+                self.builder.ret(
                     Some(coerced_word0.into()),
+                    Some(word1.into()),
                     self.current_mem.into(),
                     Origin::synthetic(),
                 );
-                self.abi_metadata
-                    .mark_secondary_return_move(ret_inst.index(), word1.index());
             } else {
                 self.builder.ret(
                     Some(coerced_word0.into()),
+                    None,
                     self.current_mem.into(),
                     Origin::synthetic(),
                 );
@@ -574,13 +578,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 .get(ret_local)
                 .expect("fat pointer return must have data_ptr");
             let coerced = self.coerce_to_ptr(v);
-            let ret_inst = self.builder.ret(
+            self.builder.ret(
                 Some(coerced.into()),
+                Some(fat_meta.into()),
                 self.current_mem.into(),
                 Origin::synthetic(),
             );
-            self.abi_metadata
-                .mark_secondary_return_move(ret_inst.index(), fat_meta.index());
         } else {
             // Normal scalar return.
             let val = self.locals.values[ret_local.as_usize()];
@@ -666,6 +669,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 };
                 self.builder.ret(
                     Some(coerced.into()),
+                    None,
                     self.current_mem.into(),
                     Origin::synthetic(),
                 );
@@ -697,6 +701,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 };
                 self.builder.ret(
                     Some(dummy.into()),
+                    None,
                     self.current_mem.into(),
                     Origin::synthetic(),
                 );
@@ -713,7 +718,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let drop_ty = place.ty(&self.mir.local_decls, self.tcx).ty;
         let drop_ty = self.monomorphize(drop_ty);
         let target_block = self.block_map.get(target);
-        self.last_call_vref = None;
+        let cleanup_label = match unwind {
+            mir::UnwindAction::Cleanup(cleanup_bb) => {
+                Some(self.setup_cleanup_landing_pad(*cleanup_bb))
+            }
+            _ => None,
+        };
 
         // Only emit drop glue when the type actually needs dropping.
         if drop_ty.needs_drop(self.tcx, ty::TypingEnv::fully_monomorphized()) {
@@ -771,10 +781,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         vec![data.into()],
                         Type::Unit,
                         call_mem_arg.into(),
+                        cleanup_label,
                         None,
                         Origin::synthetic(),
                     );
-                    self.last_call_vref = Some(call_mem.index());
                     self.builder
                         .br(merge_block, vec![call_mem.into()], Origin::synthetic());
 
@@ -908,10 +918,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             args,
                             Type::Unit,
                             self.current_mem.into(),
+                            cleanup_label,
                             None,
                             Origin::synthetic(),
                         );
-                        self.last_call_vref = Some(call_mem.index());
                         self.current_mem = call_mem.raw();
                     }
                 }
@@ -923,13 +933,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             vec![self.current_mem.into()],
             Origin::synthetic(),
         );
-        // If the drop has an unwind cleanup target, register a
-        // landing-pad wrapper so the unwinder can invoke cleanup.
-        if let mir::UnwindAction::Cleanup(cleanup_bb) = unwind
-            && let Some(call_idx) = self.last_call_vref
-        {
-            self.setup_cleanup_landing_pad(call_idx, *cleanup_bb);
-        }
     }
 
     pub(super) fn translate_switch_int(
@@ -1179,6 +1182,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 args,
                 Type::Unit,
                 self.current_mem.into(),
+                None,
                 None,
                 Origin::synthetic(),
             );

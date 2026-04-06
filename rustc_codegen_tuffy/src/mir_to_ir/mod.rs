@@ -29,7 +29,7 @@ use tuffy_ir::types::{Annotation, IntAnnotation, IntSignedness};
 use rustc_middle::mir::{self, BasicBlock};
 use rustc_middle::ty::{self, Instance, TyCtxt, TypeVisitableExt};
 
-use tuffy_codegen::{AbiMetadataBox, CodegenSession};
+use tuffy_codegen::CodegenSession;
 use tuffy_ir::builder::Builder;
 use tuffy_ir::function::{Function, RegionKind};
 use tuffy_ir::instruction::Origin;
@@ -61,8 +61,6 @@ pub struct TranslationResult<'tcx> {
     pub symbols: SymbolTable,
     /// Static data blobs to emit in .rodata, keyed by SymbolId.
     pub static_data: StaticDataVec,
-    /// Target-specific ABI metadata (e.g., secondary return register info).
-    pub abi_metadata: AbiMetadataBox,
     /// Instances referenced by direct calls during translation.
     /// Used to compile `#[inline]` functions not collected as mono items.
     pub referenced_instances: Vec<Instance<'tcx>>,
@@ -327,8 +325,6 @@ pub fn translate_function<'tcx>(
     let mut func = Function::new(func_sym, params, param_anns, param_names, ret_ty, ret_ann);
     func.byval_sizes = byval_sizes;
     let mut builder = Builder::new(&mut func);
-    let abi_metadata = session.new_metadata();
-
     let root = builder.create_region(RegionKind::Function);
     builder.enter_region(root);
 
@@ -395,7 +391,6 @@ pub fn translate_function<'tcx>(
         static_data: Vec::new(),
         block_map,
         block_mem_args,
-        abi_metadata,
         target_max_int_width: session.max_int_width(),
         target_max_abi_int_parts: session.max_abi_int_parts(),
         instance,
@@ -411,7 +406,6 @@ pub fn translate_function<'tcx>(
         caller_location_param: None,
         exc_ptr_slot: None,
         landing_pad_wrappers: Vec::new(),
-        last_call_vref: None,
     };
 
     // Emit params into the entry block.
@@ -493,7 +487,6 @@ pub fn translate_function<'tcx>(
     let TranslationCtx {
         symbols,
         static_data,
-        abi_metadata,
         referenced_instances,
         weak_undefined_symbols,
         ..
@@ -503,7 +496,6 @@ pub fn translate_function<'tcx>(
         func,
         symbols,
         static_data,
-        abi_metadata,
         referenced_instances,
         weak_undefined_symbols,
     })

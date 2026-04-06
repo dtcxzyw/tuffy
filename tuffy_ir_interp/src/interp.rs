@@ -686,7 +686,7 @@ impl<'a> Interpreter<'a> {
             }
 
             // Handle Call instruction specially.
-            if let Op::Call(func_ptr, args, _mem) = &inst.op {
+            if let Op::Call(func_ptr, args, _mem, _) = &inst.op {
                 let vp = {
                     let base = frame.get_value(func_ptr.clone().raw().value);
                     crate::exec::apply_result_annotation(base, &func_ptr.clone().raw().annotation)

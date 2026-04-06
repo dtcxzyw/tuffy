@@ -170,6 +170,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 vec![dst_v.into(), src_v.into(), byte_count.into()],
                                 Type::Int,
                                 self.current_mem.into(),
+                                None,
                                 Some(Annotation::Int(I64)),
                                 Origin::synthetic(),
                             );

@@ -1040,11 +1040,24 @@ pointer is to the thread-local instance of the symbol. The result type is `ptr`.
 ```
 vM = call vCallee(vArg0, vArg1, ...), vMem
 vM, vN = call vCallee(vArg0, vArg1, ...), vMem -> <ret_type>
+vM, vN = call vCallee(vArg0, vArg1, ...), vMem -> <ret_type>  ; may carry an internal cleanup label
 ```
 
 Call the function pointed to by `vCallee` with the given arguments. Takes a `mem`
 token as input (MemoryDef). For void calls, produces a single `mem` token result.
 For non-void calls, produces two results: a new `mem` token and the return value.
+Calls may also carry an internal cleanup label used by the unwinder to enter a
+landing-pad wrapper block if the call unwinds.
+
+### `call_ret2`
+
+```
+vN = call_ret2 vMem
+```
+
+Read the secondary machine return value associated with the call that produced
+`vMem`. This is used for ABIs that return values in two machine registers
+without relying on a backend side table.
 
 ## Terminators
 
@@ -1055,12 +1068,15 @@ By convention, they are the last instruction in a block.
 
 ```
 ret vA, vMem
+ret vA, vB, vMem
 ret vMem
 ```
 
 Return from the function. Takes a `mem` token as the final memory state operand.
-Optionally returns a data value. A function with a return type must return a value;
-a void function uses `ret vMem` with only the mem token.
+Optionally returns one or two data values. A function with a return type must
+return at least the primary value; a void function uses `ret vMem` with only the
+mem token. The optional second return value is used for ABIs with a secondary
+machine return register.
 
 ### `br`
 

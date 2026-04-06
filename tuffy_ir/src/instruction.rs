@@ -390,7 +390,9 @@ pub enum Op {
 
     // -- Call --
     /// Call function with arguments. Third is mem token input.
-    Call(PtrOperand, Vec<Operand>, MemOperand),
+    /// Optional cleanup label names the landing-pad wrapper block to enter
+    /// if the call unwinds.
+    Call(PtrOperand, Vec<Operand>, MemOperand, Option<u32>),
 
     // -- Type conversion --
     /// Bitcast (reinterpret bits).
@@ -453,8 +455,10 @@ pub enum Op {
     InsertValue(Operand, Operand, Vec<u32>),
 
     // -- Terminators (by convention, placed last in a basic block) --
-    /// Return value from function. Second is mem token output.
-    Ret(Option<Operand>, MemOperand),
+    /// Return value(s) from function. Final operand is the mem token output.
+    /// The optional second operand models backends whose ABI uses a second
+    /// machine return register (e.g. x86-64 RDX) without relying on side tables.
+    Ret(Option<Operand>, Option<Operand>, MemOperand),
     /// Unconditional branch with block arguments.
     Br(BlockRef, Vec<Operand>),
     /// Conditional branch: brif cond, then_block(args...), else_block(args...).
@@ -467,6 +471,14 @@ pub enum Op {
     Unreachable,
     /// Trap: unconditionally abort execution (e.g., failed assertion).
     Trap,
+
+    /// Read the secondary machine return value produced by the call that
+    /// yielded the given mem token.
+    ///
+    /// This is a post-call ABI-lowering hook kept in IR so backends can
+    /// reason about multi-register returns without frontends emitting
+    /// backend-specific metadata side channels.
+    CallRet2(MemOperand),
 
     /// Capture the exception pointer at a landing-pad entry.
     ///
@@ -646,11 +658,14 @@ impl Op {
             }
 
             // Call
-            Call(func_ptr, args, mem) => {
+            Call(func_ptr, args, mem, _) => {
                 f(func_ptr.0.value);
                 for a in args {
                     f(a.value);
                 }
+                f(mem.0.value);
+            }
+            CallRet2(mem) => {
                 f(mem.0.value);
             }
 
@@ -661,8 +676,11 @@ impl Op {
             }
 
             // Terminators
-            Ret(val, mem) => {
+            Ret(val, ret2, mem) => {
                 if let Some(v) = val {
+                    f(v.value);
+                }
+                if let Some(v) = ret2 {
                     f(v.value);
                 }
                 f(mem.0.value);
@@ -862,11 +880,14 @@ impl Op {
                 f(&mut mem.0.value);
             }
 
-            Call(func_ptr, args, mem) => {
+            Call(func_ptr, args, mem, _) => {
                 f(&mut func_ptr.0.value);
                 for a in args.iter_mut() {
                     f(&mut a.value);
                 }
+                f(&mut mem.0.value);
+            }
+            CallRet2(mem) => {
                 f(&mut mem.0.value);
             }
 
@@ -875,8 +896,11 @@ impl Op {
                 f(&mut val.value);
             }
 
-            Ret(val, mem) => {
+            Ret(val, ret2, mem) => {
                 if let Some(v) = val {
+                    f(&mut v.value);
+                }
+                if let Some(v) = ret2 {
                     f(&mut v.value);
                 }
                 f(&mut mem.0.value);

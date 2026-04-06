@@ -40,7 +40,7 @@
 // CHECK:     v12: int:i64 = iconst 8
 // CHECK:     v13: ptr = ptradd v3, v12
 // CHECK:     v14: int:i8 = load.1 v13, v10
-// CHECK:     ret v11, v10
+// CHECK:     ret v11, v14, v10
 // CHECK: }
 // CHECK:
 // CHECK: fn checked_mul_u64(_1: u64, _2: u64) -> (u64, bool) {
@@ -71,7 +71,7 @@
 // CHECK:     v11: int:i64 = iconst 8
 // CHECK:     v12: ptr = ptradd v3, v11
 // CHECK:     v13: int:i8 = load.1 v12, v9
-// CHECK:     ret v10, v9
+// CHECK:     ret v10, v13, v9
 // CHECK: }
 // CHECK:
 

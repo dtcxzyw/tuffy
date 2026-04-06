@@ -5,44 +5,6 @@ use tuffy_ir::module::SymbolTable;
 
 use crate::types::{CompiledFunction, StaticData};
 
-/// Target-specific ABI metadata collected during MIR-to-IR translation.
-///
-/// Each backend defines how secondary return values (e.g., RDX on x86-64)
-/// are captured and moved. The codegen layer uses this trait to communicate
-/// ABI-specific information without knowing the target details.
-pub trait AbiMetadata: Default {
-    /// Mark an IR instruction as capturing the secondary return register
-    /// from the preceding call (e.g., RDX on x86-64).
-    /// `inst_idx` is the placeholder instruction, `call_idx` is the call.
-    fn mark_secondary_return_capture(&mut self, inst_idx: u32, call_idx: u32);
-
-    /// Mark a call instruction as producing a secondary return value
-    /// (e.g., RDX on x86-64 for 9-16 byte returns).
-    fn mark_call_secondary_return(&mut self, call_idx: u32);
-
-    /// Mark an IR instruction as moving a value into the secondary return
-    /// register before a return (e.g., moving into RDX on x86-64).
-    fn mark_secondary_return_move(&mut self, inst_idx: u32, source_idx: u32);
-
-    /// Mark a call instruction as returning an exact double-width integer
-    /// value that needs legalization into the backend's secondary-return convention.
-    fn mark_double_width_return_call(&mut self, call_idx: u32);
-
-    /// Check whether a call instruction returns an exact double-width integer value.
-    fn is_double_width_return_call(&self, call_idx: u32) -> bool;
-
-    /// Check whether a call instruction produces a secondary return value.
-    fn has_secondary_return(&self, call_idx: u32) -> bool;
-
-    /// Find the capture instruction index associated with a given call index,
-    /// if one exists. Returns the old capture instruction index.
-    fn find_capture_for_call(&self, call_idx: u32) -> Option<u32>;
-
-    /// Find the source instruction index registered as the secondary return
-    /// value for a given `ret` instruction, if any.
-    fn get_secondary_return_move(&self, ret_inst_idx: u32) -> Option<u32>;
-}
-
 /// Allocator stub definition: a pair of (export_name, target_name).
 pub type AllocatorPair<'a> = (&'a str, &'a str);
 
@@ -51,18 +13,10 @@ pub type AllocatorPair<'a> = (&'a str, &'a str);
 /// Implementations provide instruction selection, encoding, object file
 /// emission, and generation of runtime stubs for a specific architecture.
 pub trait Backend {
-    /// The ABI metadata type for this backend.
-    type Metadata: AbiMetadata;
-
     /// Compile a single IR function to machine code.
     ///
     /// Returns `None` if the function contains unsupported IR operations.
-    fn compile_function(
-        &self,
-        func: &Function,
-        symbols: &SymbolTable,
-        metadata: &Self::Metadata,
-    ) -> Option<CompiledFunction>;
+    fn compile_function(&self, func: &Function, symbols: &SymbolTable) -> Option<CompiledFunction>;
 
     /// Emit compiled functions and static data as an object file.
     fn emit_object(&self, functions: &[CompiledFunction], statics: &[StaticData]) -> Vec<u8>;

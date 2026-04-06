@@ -2,8 +2,9 @@
 //!
 //! Splits integer operations wider than the target's native register width
 //! into pairs of narrower operations before instruction selection.
-//! Target-independent: parameterized over the backend's ABI metadata type
-//! and target legality information.
+//! Target-independent apart from the target legality information.
+//! Any backend-visible ABI glue is expressed directly in IR (`call_ret2`,
+//! secondary `ret` operand), not through a side metadata channel.
 
 use std::collections::{HashMap, HashSet};
 
@@ -16,8 +17,6 @@ use tuffy_ir::instruction::{FCmpOp, ICmpOp, Op, Operand, Origin};
 use tuffy_ir::module::SymbolTable;
 use tuffy_ir::types::{Annotation, FloatType, IntAnnotation, IntSignedness, Type};
 use tuffy_ir::value::{BlockRef, ValueRef};
-
-use tuffy_target::backend::AbiMetadata;
 
 // 64-bit unsigned IntAnnotation for legalized operations
 const I64: IntAnnotation = IntAnnotation {
@@ -247,11 +246,7 @@ fn needs_wide_const(v: &BigInt) -> bool {
     !v.is_zero() && v.to_i64().is_none() && v.to_u64().is_none()
 }
 
-fn has_wide_values<M: AbiMetadata>(
-    func: &Function,
-    metadata: &M,
-    legality: &impl LegalityInfo,
-) -> bool {
+fn has_wide_values(func: &Function, legality: &impl LegalityInfo) -> bool {
     // Check for wide parameters
     for (ty, ann) in func.params.iter().zip(func.param_annotations.iter()) {
         if is_wide_width(type_width(ty), legality) {
@@ -359,7 +354,7 @@ fn has_wide_values<M: AbiMetadata>(
             Op::FMaxNum(..) | Op::FMinNum(..) => return true,
             // A call with any wide integer argument needs legalization to
             // split it into legalized parts even when the value fits in one part.
-            Op::Call(_, args, _)
+            Op::Call(_, args, _, _)
                 if args.iter().any(|a| {
                     a.annotation
                         .as_ref()
@@ -372,13 +367,6 @@ fn has_wide_values<M: AbiMetadata>(
             }
             Op::SCarryingMulAdd(..) | Op::UCarryingMulAdd(..) => return true,
             _ => {}
-        }
-    }
-
-    // Check for exact-double-width-return calls
-    for (i, _) in func.inst_pool.iter_insts() {
-        if metadata.is_double_width_return_call(i) {
-            return true;
         }
     }
 
@@ -398,16 +386,15 @@ fn has_wide_values<M: AbiMetadata>(
 /// 4. Repeat until all instructions are legal
 ///
 /// Returns `None` if no legalization is needed.
-pub fn legalize<M: AbiMetadata + Clone>(
+pub fn legalize(
     func: &Function,
-    metadata: &M,
     legality: &impl LegalityInfo,
     symbols: &mut SymbolTable,
-) -> Option<(Function, M)> {
-    if !has_wide_values(func, metadata, legality) {
+) -> Option<Function> {
+    if !has_wide_values(func, legality) {
         return None;
     }
-    let (out, state) = build_new_func(func, metadata, legality);
+    let (out, state) = build_new_func(func, legality);
     Some(run_legalize(func, out, state, symbols))
 }
 
@@ -415,21 +402,13 @@ pub fn legalize<M: AbiMetadata + Clone>(
 // State (separate from Function so Builder can borrow Function independently)
 // ---------------------------------------------------------------------------
 
-struct State<M> {
-    meta: M,
-    /// Original ABI metadata from before legalization, used to transfer
-    /// non-wide secondary return info (e.g. 16-byte struct returns in
-    /// RAX+RDX) that would otherwise be lost when instruction indices change.
-    old_meta: M,
+struct State {
     vmap: VMap,
     bmap: HashMap<u32, BlockRef>,
     /// Old param index → (new_lo_index, Option<new_hi_index>).
     param_map: Vec<(u32, Option<u32>)>,
     /// Set of old ValueRef raw values that are wider than one legal integer part.
     wide: HashSet<u32>,
-    /// Old RDX-capture instruction index → new ValueRef created in leg_call.
-    /// Used to avoid re-creating the capture in copy_inst.
-    rdx_capture_remap: HashMap<u32, ValueRef>,
     /// The most recent mem-producing old ValueRef in the current block.
     /// Used to thread the mem token when expanding a wide Div/Rem into a
     /// libcall (which requires a mem operand that the pure Div/Rem lacks).
@@ -442,11 +421,7 @@ fn o() -> Origin {
     Origin::synthetic()
 }
 
-fn build_new_func<M: AbiMetadata + Clone>(
-    old: &Function,
-    old_meta: &M,
-    legality: &impl LegalityInfo,
-) -> (Function, State<M>) {
+fn build_new_func(old: &Function, legality: &impl LegalityInfo) -> (Function, State) {
     let mut params = Vec::new();
     let mut param_anns = Vec::new();
     let mut param_names = Vec::new();
@@ -497,16 +472,13 @@ fn build_new_func<M: AbiMetadata + Clone>(
         old.ret_annotation
     };
 
-    let wide = collect_wide_values(old, old_meta, legality);
+    let wide = collect_wide_values(old, legality);
     let out = Function::new(old.name, params, param_anns, param_names, ret_ty, ret_ann);
     let state = State {
-        meta: M::default(),
-        old_meta: old_meta.clone(),
         vmap: VMap::new(),
         bmap: HashMap::new(),
         param_map,
         wide,
-        rdx_capture_remap: HashMap::new(),
         current_old_mem: None,
         part_bits: legality.max_int_width(),
         limb_bits: (legality.max_int_width() / 2).max(1),
@@ -518,11 +490,7 @@ fn build_new_func<M: AbiMetadata + Clone>(
 // Pre-scan: identify wide values in the old function
 // ---------------------------------------------------------------------------
 
-fn collect_wide_values<M: AbiMetadata>(
-    old: &Function,
-    meta: &M,
-    legality: &impl LegalityInfo,
-) -> HashSet<u32> {
+fn collect_wide_values(old: &Function, legality: &impl LegalityInfo) -> HashSet<u32> {
     let mut wide = HashSet::new();
 
     // Mark instructions that produce wide results.
@@ -538,11 +506,6 @@ fn collect_wide_values<M: AbiMetadata>(
         {
             wide.insert(vref.raw());
             continue;
-        }
-        // Calls returning exact double-width values are marked in ABI metadata
-        if meta.is_double_width_return_call(i) {
-            let sec = ValueRef::inst_secondary_result(i);
-            wide.insert(sec.raw());
         }
         match &inst.op {
             Op::Const(v) if needs_wide_const(v) => {
@@ -636,7 +599,7 @@ fn collect_wide_values<M: AbiMetadata>(
     wide
 }
 
-fn is_wide<M>(s: &State<M>, v: ValueRef) -> bool {
+fn is_wide(s: &State, v: ValueRef) -> bool {
     s.wide.contains(&v.raw()) || matches!(s.vmap.get(v), Mapped::Pair(_, _) | Mapped::Parts(_))
 }
 
@@ -654,12 +617,7 @@ fn is_wide<M>(s: &State<M>, v: ValueRef) -> bool {
 ///   (hi = lo >> 63).  This handles negative constants such as `iconst(-1)`
 ///   used as the all-ones mask for bitwise NOT; those have annotation `None`
 ///   or `Signed(n)` and must propagate their sign bit into the upper half.
-fn wide_pair<M>(
-    s: &State<M>,
-    old: &Function,
-    b: &mut Builder,
-    op: &Operand,
-) -> (ValueRef, ValueRef) {
+fn wide_pair(s: &State, old: &Function, b: &mut Builder, op: &Operand) -> (ValueRef, ValueRef) {
     if is_wide(s, op.value) {
         s.vmap.pair(op.value)
     } else {
@@ -684,12 +642,12 @@ fn wide_pair<M>(
 // Main legalization loop
 // ---------------------------------------------------------------------------
 
-fn run_legalize<M: AbiMetadata + Clone>(
+fn run_legalize(
     old: &Function,
     mut out: Function,
-    mut s: State<M>,
+    mut s: State,
     symbols: &mut SymbolTable,
-) -> (Function, M) {
+) -> Function {
     {
         let mut b = Builder::new(&mut out);
         let old_root = old.root_region;
@@ -698,12 +656,12 @@ fn run_legalize<M: AbiMetadata + Clone>(
         walk_region(old, &mut s, &mut b, old_root, symbols);
         b.exit_region();
     }
-    (out, s.meta)
+    out
 }
 
-fn walk_region<M: AbiMetadata + Clone>(
+fn walk_region(
     old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     old_region: tuffy_ir::value::RegionRef,
     symbols: &mut SymbolTable,
@@ -725,9 +683,9 @@ fn walk_region<M: AbiMetadata + Clone>(
     }
 }
 
-fn precreate_blocks<M>(
+fn precreate_blocks(
     old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     old_region: tuffy_ir::value::RegionRef,
 ) {
@@ -756,9 +714,9 @@ fn precreate_blocks<M>(
     }
 }
 
-fn walk_block_insts<M: AbiMetadata + Clone>(
+fn walk_block_insts(
     old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     old_blk: BlockRef,
     symbols: &mut SymbolTable,
@@ -791,9 +749,9 @@ fn walk_block_insts<M: AbiMetadata + Clone>(
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_lines)]
-fn legalize_inst<M: AbiMetadata + Clone>(
+fn legalize_inst(
     old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     inst: &tuffy_ir::instruction::Instruction,
@@ -1287,15 +1245,15 @@ fn legalize_inst<M: AbiMetadata + Clone>(
         Op::Select(cond, tv, fv) if wide_result => {
             leg_select_wide(old, s, b, old_vref, &cond.clone().raw(), tv, fv);
         }
-        Op::Ret(val, mem)
+        Op::Ret(val, ret2, mem)
             if old.ret_ty.as_ref().is_some_and(|t| {
                 is_wide_int_with_annotation_limit(t, &old.ret_annotation, s.part_bits)
                     || matches!(t, Type::Float(FloatType::F128))
             }) =>
         {
-            leg_ret(s, b, old_vref, val, &mem.clone().raw());
+            leg_ret(s, b, old_vref, val, ret2, &mem.clone().raw());
         }
-        Op::Call(callee, args, mem) => {
+        Op::Call(callee, args, mem, _) => {
             leg_call(
                 old,
                 s,
@@ -1507,10 +1465,6 @@ fn legalize_inst<M: AbiMetadata + Clone>(
             }
         }
         _ => {
-            // Skip instructions already remapped as RDX captures in leg_call.
-            if s.rdx_capture_remap.contains_key(&old_vref.index()) {
-                return;
-            }
             copy_inst(old, s, b, old_vref, inst, symbols);
         }
     }
@@ -1520,18 +1474,18 @@ fn legalize_inst<M: AbiMetadata + Clone>(
 // Copy non-wide instruction with remapped operands
 // ---------------------------------------------------------------------------
 
-fn remap_op<M>(s: &State<M>, op: &Operand) -> Operand {
+fn remap_op(s: &State, op: &Operand) -> Operand {
     s.vmap.remap_op(op)
 }
 
-fn new_block<M>(s: &State<M>, old: BlockRef) -> BlockRef {
+fn new_block(s: &State, old: BlockRef) -> BlockRef {
     s.bmap[&old.index()]
 }
 
 #[allow(clippy::too_many_lines)]
-fn copy_inst<M: AbiMetadata + Clone>(
+fn copy_inst(
     old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     inst: &tuffy_ir::instruction::Instruction,
@@ -2239,16 +2193,10 @@ fn copy_inst<M: AbiMetadata + Clone>(
             // The backend will handle the actual insertion during instruction selection.
             current
         }
-        Op::Ret(val, mem) => {
+        Op::Ret(val, ret2, mem) => {
             let rv = val.as_ref().map(|v| remap_op(s, v));
-            let new_ret = b.ret(rv, remap_op(s, &mem.clone().raw()).into(), o());
-            // Remap secondary-return move (e.g. 16-byte struct returns via RAX+RDX).
-            if let Some(src_idx) = s.old_meta.get_secondary_return_move(old_vref.index()) {
-                let new_src = s.vmap.one(ValueRef::inst_result(src_idx));
-                s.meta
-                    .mark_secondary_return_move(new_ret.index(), new_src.index());
-            }
-            new_ret
+            let rv2 = ret2.as_ref().map(|v| remap_op(s, v));
+            b.ret(rv, rv2, remap_op(s, &mem.clone().raw()).into(), o())
         }
         Op::Unreachable => b.unreachable(o()),
         Op::Trap => b.trap(o()),
@@ -2310,6 +2258,7 @@ fn copy_inst<M: AbiMetadata + Clone>(
                 vec![Operand::new(lhs.value), Operand::new(rhs.value)],
                 inst.ty.clone(),
                 Operand::new(new_mem).into(),
+                None,
                 None,
                 o(),
             );
@@ -2413,6 +2362,12 @@ fn copy_inst<M: AbiMetadata + Clone>(
         Op::Fence(ord, mem) => b
             .fence(*ord, remap_op(s, &mem.clone().raw()).into(), o())
             .raw(),
+        Op::CallRet2(mem) => b.call_ret2(
+            remap_op(s, &mem.clone().raw()).into(),
+            inst.ty.clone(),
+            inst.result_annotation,
+            o(),
+        ),
         Op::Merge(a, b_op, width) => b
             .merge(
                 remap_op(s, &a.clone().raw()).into(),
@@ -2453,7 +2408,7 @@ enum BitwiseKind {
 // Wide parameter split into legal parts
 // ---------------------------------------------------------------------------
 
-fn leg_param<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, lo_idx: u32, hi_idx: u32) {
+fn leg_param(s: &mut State, b: &mut Builder, old_vref: ValueRef, lo_idx: u32, hi_idx: u32) {
     let ann64 = Some(Annotation::Int(IntAnnotation {
         bit_width: 64,
         signedness: IntSignedness::Unsigned,
@@ -2467,9 +2422,9 @@ fn leg_param<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, lo_idx: u
 // Wide constant (> 64 bits)
 // ---------------------------------------------------------------------------
 
-fn leg_wide_const<M>(
+fn leg_wide_const(
     old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     val: &BigInt,
@@ -2542,9 +2497,9 @@ fn part_sign_fill(
     }
 }
 
-fn operand_parts64<M>(
+fn operand_parts64(
     old: &Function,
-    s: &State<M>,
+    s: &State,
     b: &mut Builder,
     op: &Operand,
     bits: u32,
@@ -2575,8 +2530,8 @@ fn operand_parts64<M>(
     parts
 }
 
-fn split_parts64_to_limbs32<M>(
-    s: &State<M>,
+fn split_parts64_to_limbs32(
+    s: &State,
     b: &mut Builder,
     parts: &[ValueRef],
     limb_count: usize,
@@ -2627,7 +2582,7 @@ fn split_parts64_to_limbs32<M>(
     limbs
 }
 
-fn limbs32_to_parts64<M>(s: &State<M>, b: &mut Builder, limbs: &[ValueRef]) -> Vec<ValueRef> {
+fn limbs32_to_parts64(s: &State, b: &mut Builder, limbs: &[ValueRef]) -> Vec<ValueRef> {
     let limbs_per_part = (s.part_bits / s.limb_bits).max(1) as usize;
     let mut parts = Vec::with_capacity(limbs.len().div_ceil(limbs_per_part));
     let part_ann = IntAnnotation {
@@ -2674,21 +2629,21 @@ fn limbs32_to_parts64<M>(s: &State<M>, b: &mut Builder, limbs: &[ValueRef]) -> V
     parts
 }
 
-fn limb_ann<M>(s: &State<M>) -> IntAnnotation {
+fn limb_ann(s: &State) -> IntAnnotation {
     IntAnnotation {
         bit_width: s.limb_bits,
         signedness: IntSignedness::DontCare,
     }
 }
 
-fn part_ann<M>(s: &State<M>) -> IntAnnotation {
+fn part_ann(s: &State) -> IntAnnotation {
     IntAnnotation {
         bit_width: s.part_bits,
         signedness: IntSignedness::Unsigned,
     }
 }
 
-fn bool_to_u32<M>(s: &State<M>, b: &mut Builder, val: tuffy_ir::typed::BoolValue) -> ValueRef {
+fn bool_to_u32(s: &State, b: &mut Builder, val: tuffy_ir::typed::BoolValue) -> ValueRef {
     let zero = b.iconst(0i64, s.limb_bits, IntSignedness::Unsigned, o());
     let one = b.iconst(1i64, s.limb_bits, IntSignedness::Unsigned, o());
     b.select(
@@ -2704,7 +2659,7 @@ fn bool_to_u32<M>(s: &State<M>, b: &mut Builder, val: tuffy_ir::typed::BoolValue
     )
 }
 
-fn bool_to_part<M>(s: &State<M>, b: &mut Builder, val: tuffy_ir::typed::BoolValue) -> ValueRef {
+fn bool_to_part(s: &State, b: &mut Builder, val: tuffy_ir::typed::BoolValue) -> ValueRef {
     let zero = b
         .iconst(0i64, s.part_bits, IntSignedness::Unsigned, o())
         .raw();
@@ -2721,8 +2676,8 @@ fn bool_to_part<M>(s: &State<M>, b: &mut Builder, val: tuffy_ir::typed::BoolValu
     )
 }
 
-fn add3_u32<M>(
-    s: &State<M>,
+fn add3_u32(
+    s: &State,
     b: &mut Builder,
     a: ValueRef,
     b_val: ValueRef,
@@ -2754,8 +2709,8 @@ fn add3_u32<M>(
     (sum2.raw(), carry_out.raw())
 }
 
-fn sub2_u32<M>(
-    s: &State<M>,
+fn sub2_u32(
+    s: &State,
     b: &mut Builder,
     a: ValueRef,
     sub: ValueRef,
@@ -2787,8 +2742,8 @@ fn sub2_u32<M>(
     (diff2.raw(), borrow_out.raw())
 }
 
-fn add_into_limbs<M>(
-    s: &State<M>,
+fn add_into_limbs(
+    s: &State,
     b: &mut Builder,
     dst: &mut [ValueRef],
     start: usize,
@@ -2806,7 +2761,7 @@ fn add_into_limbs<M>(
     }
 }
 
-fn mask_limb_to_width<M>(s: &State<M>, b: &mut Builder, limb: ValueRef, width: u32) -> ValueRef {
+fn mask_limb_to_width(s: &State, b: &mut Builder, limb: ValueRef, width: u32) -> ValueRef {
     if width >= s.limb_bits {
         return limb;
     }
@@ -2825,12 +2780,7 @@ fn mask_limb_to_width<M>(s: &State<M>, b: &mut Builder, limb: ValueRef, width: u
     .raw()
 }
 
-fn normalize_limbs32<M>(
-    s: &State<M>,
-    b: &mut Builder,
-    limbs: &[ValueRef],
-    bits: u32,
-) -> Vec<ValueRef> {
+fn normalize_limbs32(s: &State, b: &mut Builder, limbs: &[ValueRef], bits: u32) -> Vec<ValueRef> {
     let widths = wide_limb_widths(s, bits);
     limbs
         .iter()
@@ -2840,7 +2790,7 @@ fn normalize_limbs32<M>(
         .collect()
 }
 
-fn sub_from_limbs<M>(s: &State<M>, b: &mut Builder, dst: &mut [ValueRef], src: &[ValueRef]) {
+fn sub_from_limbs(s: &State, b: &mut Builder, dst: &mut [ValueRef], src: &[ValueRef]) {
     let zero = b
         .iconst(0i64, s.limb_bits, IntSignedness::Unsigned, o())
         .raw();
@@ -2853,14 +2803,14 @@ fn sub_from_limbs<M>(s: &State<M>, b: &mut Builder, dst: &mut [ValueRef], src: &
     }
 }
 
-fn zero_limbs32<M>(s: &State<M>, b: &mut Builder, len: usize) -> Vec<ValueRef> {
+fn zero_limbs32(s: &State, b: &mut Builder, len: usize) -> Vec<ValueRef> {
     let zero = b
         .iconst(0i64, s.limb_bits, IntSignedness::Unsigned, o())
         .raw();
     vec![zero; len]
 }
 
-fn poison_limb32<M>(s: &State<M>, b: &mut Builder) -> ValueRef {
+fn poison_limb32(s: &State, b: &mut Builder) -> ValueRef {
     let zero = b.iconst(0i64, s.limb_bits, IntSignedness::Unsigned, o());
     b.div(
         Operand::annotated(zero.raw(), Annotation::Int(limb_ann(s))).into(),
@@ -2871,13 +2821,13 @@ fn poison_limb32<M>(s: &State<M>, b: &mut Builder) -> ValueRef {
     .raw()
 }
 
-fn poison_limbs32<M>(s: &State<M>, b: &mut Builder, len: usize) -> Vec<ValueRef> {
+fn poison_limbs32(s: &State, b: &mut Builder, len: usize) -> Vec<ValueRef> {
     let poison = poison_limb32(s, b);
     vec![poison; len]
 }
 
-fn select_limbs32<M>(
-    s: &State<M>,
+fn select_limbs32(
+    s: &State,
     b: &mut Builder,
     cond: tuffy_ir::typed::BoolValue,
     t: &[ValueRef],
@@ -2899,11 +2849,7 @@ fn select_limbs32<M>(
         .collect()
 }
 
-fn limbs32_are_zero<M>(
-    s: &State<M>,
-    b: &mut Builder,
-    limbs: &[ValueRef],
-) -> tuffy_ir::typed::BoolValue {
+fn limbs32_are_zero(s: &State, b: &mut Builder, limbs: &[ValueRef]) -> tuffy_ir::typed::BoolValue {
     let zero = b
         .iconst(0i64, s.limb_bits, IntSignedness::Unsigned, o())
         .raw();
@@ -2920,8 +2866,8 @@ fn limbs32_are_zero<M>(
     eq
 }
 
-fn icmp_unsigned_ge_limbs32<M>(
-    s: &State<M>,
+fn icmp_unsigned_ge_limbs32(
+    s: &State,
     b: &mut Builder,
     lhs: &[ValueRef],
     rhs: &[ValueRef],
@@ -2948,19 +2894,14 @@ fn icmp_unsigned_ge_limbs32<M>(
     b.bor(gt.into(), eq.into(), o())
 }
 
-fn negate_limbs32<M>(
-    s: &State<M>,
-    b: &mut Builder,
-    limbs: &[ValueRef],
-    bits: u32,
-) -> Vec<ValueRef> {
+fn negate_limbs32(s: &State, b: &mut Builder, limbs: &[ValueRef], bits: u32) -> Vec<ValueRef> {
     let zeroes = zero_limbs32(s, b, limbs.len());
     let (neg, _) = sub_limbs32(s, b, &zeroes, limbs);
     normalize_limbs32(s, b, &neg, bits)
 }
 
-fn limb_sign_bool<M>(
-    s: &State<M>,
+fn limb_sign_bool(
+    s: &State,
     b: &mut Builder,
     v: ValueRef,
     width: u32,
@@ -2981,16 +2922,11 @@ fn limb_sign_bool<M>(
     b.icmp(ICmpOp::Ne, sign.into(), zero.into(), o())
 }
 
-fn u32_sign_bool<M>(s: &State<M>, b: &mut Builder, v: ValueRef) -> tuffy_ir::typed::BoolValue {
+fn u32_sign_bool(s: &State, b: &mut Builder, v: ValueRef) -> tuffy_ir::typed::BoolValue {
     limb_sign_bool(s, b, v, s.limb_bits)
 }
 
-fn widening_mul_u32<M>(
-    s: &State<M>,
-    b: &mut Builder,
-    x: ValueRef,
-    y: ValueRef,
-) -> (ValueRef, ValueRef) {
+fn widening_mul_u32(s: &State, b: &mut Builder, x: ValueRef, y: ValueRef) -> (ValueRef, ValueRef) {
     let xw = b.zext(
         Operand::annotated(x, Annotation::Int(limb_ann(s))).into(),
         s.part_bits,
@@ -3031,7 +2967,7 @@ fn widening_mul_u32<M>(
     (lo.raw(), hi.raw())
 }
 
-fn result_bits<M>(s: &State<M>, old: &Function, old_vref: ValueRef) -> u32 {
+fn result_bits(s: &State, old: &Function, old_vref: ValueRef) -> u32 {
     value_annotation(old, old_vref)
         .and_then(|ann| int_annotation_bits(Some(ann)))
         .unwrap_or(s.part_bits * 2)
@@ -3048,13 +2984,13 @@ fn chunk_widths(bits: u32, chunk_bits: u32) -> Vec<u32> {
     widths
 }
 
-fn wide_limb_widths<M>(s: &State<M>, bits: u32) -> Vec<u32> {
+fn wide_limb_widths(s: &State, bits: u32) -> Vec<u32> {
     chunk_widths(bits, s.limb_bits)
 }
 
-fn operand_limbs32<M>(
+fn operand_limbs32(
     old: &Function,
-    s: &State<M>,
+    s: &State,
     b: &mut Builder,
     op: &Operand,
     bits: u32,
@@ -3063,8 +2999,8 @@ fn operand_limbs32<M>(
     split_parts64_to_limbs32(s, b, &parts, num_limbs32(bits, s.limb_bits))
 }
 
-fn add_limbs32<M>(
-    s: &State<M>,
+fn add_limbs32(
+    s: &State,
     b: &mut Builder,
     lhs: &[ValueRef],
     rhs: &[ValueRef],
@@ -3082,8 +3018,8 @@ fn add_limbs32<M>(
     (out, carry)
 }
 
-fn sub_limbs32<M>(
-    s: &State<M>,
+fn sub_limbs32(
+    s: &State,
     b: &mut Builder,
     lhs: &[ValueRef],
     rhs: &[ValueRef],
@@ -3101,7 +3037,7 @@ fn sub_limbs32<M>(
     (out, borrow)
 }
 
-fn nonzero_u32<M>(s: &State<M>, b: &mut Builder, v: ValueRef) -> tuffy_ir::typed::BoolValue {
+fn nonzero_u32(s: &State, b: &mut Builder, v: ValueRef) -> tuffy_ir::typed::BoolValue {
     let zero = b.iconst(0i64, s.limb_bits, IntSignedness::Unsigned, o());
     b.icmp(ICmpOp::Ne, Operand::new(v).into(), zero.into(), o())
 }
@@ -3121,8 +3057,8 @@ fn fp_format_params(ft: FloatType) -> Option<(u32, u32, u32, u32)> {
     }
 }
 
-fn wide_uint_from_small_value<M>(
-    s: &State<M>,
+fn wide_uint_from_small_value(
+    s: &State,
     b: &mut Builder,
     val: ValueRef,
     src_bits: u32,
@@ -3162,8 +3098,8 @@ fn wide_uint_from_small_value<M>(
     normalize_limbs32(s, b, &limbs, bits)
 }
 
-fn wide_shift_amount<M>(
-    s: &State<M>,
+fn wide_shift_amount(
+    s: &State,
     b: &mut Builder,
     amt: ValueRef,
     bits: u32,
@@ -3185,8 +3121,8 @@ fn wide_shift_amount<M>(
     (whole.raw(), rem.raw(), rem_zero)
 }
 
-fn wide_shl_limbs<M>(
-    s: &State<M>,
+fn wide_shl_limbs(
+    s: &State,
     b: &mut Builder,
     limbs: &[ValueRef],
     amt: ValueRef,
@@ -3263,8 +3199,8 @@ fn wide_shl_limbs<M>(
     out
 }
 
-fn wide_shr_limbs<M>(
-    s: &State<M>,
+fn wide_shr_limbs(
+    s: &State,
     b: &mut Builder,
     limbs: &[ValueRef],
     amt: ValueRef,
@@ -3370,8 +3306,8 @@ fn wide_shr_limbs<M>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn full_mul_add_limbs32<M>(
-    s: &State<M>,
+fn full_mul_add_limbs32(
+    s: &State,
     b: &mut Builder,
     a_limbs: &[ValueRef],
     b_limbs: &[ValueRef],
@@ -3481,8 +3417,8 @@ fn full_mul_add_limbs32<M>(
     full
 }
 
-fn udivrem_limbs32<M>(
-    s: &State<M>,
+fn udivrem_limbs32(
+    s: &State,
     b: &mut Builder,
     dividend: &[ValueRef],
     divisor: &[ValueRef],
@@ -3537,14 +3473,14 @@ fn udivrem_limbs32<M>(
     )
 }
 
-fn limb_mask_const<M>(s: &State<M>, b: &mut Builder, bits: u32) -> ValueRef {
+fn limb_mask_const(s: &State, b: &mut Builder, bits: u32) -> ValueRef {
     let val = (BigInt::from(1u8) << bits) - BigInt::from(1u8);
     b.iconst(val, s.limb_bits, IntSignedness::Unsigned, o())
         .raw()
 }
 
-fn signed_sat_limbs32<M>(
-    s: &State<M>,
+fn signed_sat_limbs32(
+    s: &State,
     b: &mut Builder,
     bits: u32,
     negative: tuffy_ir::typed::BoolValue,
@@ -3593,12 +3529,7 @@ fn signed_sat_limbs32<M>(
     out
 }
 
-fn unsigned_sat_limbs32<M>(
-    s: &State<M>,
-    b: &mut Builder,
-    bits: u32,
-    is_add: bool,
-) -> Vec<ValueRef> {
+fn unsigned_sat_limbs32(s: &State, b: &mut Builder, bits: u32, is_add: bool) -> Vec<ValueRef> {
     let widths = wide_limb_widths(s, bits);
     let zero = b
         .iconst(0i64, s.limb_bits, IntSignedness::Unsigned, o())
@@ -3616,8 +3547,8 @@ fn unsigned_sat_limbs32<M>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn leg_carrying_mul_add_small<M>(
-    s: &mut State<M>,
+fn leg_carrying_mul_add_small(
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
@@ -3710,8 +3641,8 @@ fn leg_carrying_mul_add_small<M>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn leg_carrying_mul_add_64<M>(
-    s: &mut State<M>,
+fn leg_carrying_mul_add_64(
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
@@ -3811,9 +3742,9 @@ fn leg_carrying_mul_add_64<M>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn leg_carrying_mul_add_128<M>(
+fn leg_carrying_mul_add_128(
     old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
@@ -3970,9 +3901,9 @@ fn leg_carrying_mul_add_128<M>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn leg_carrying_mul_add_wide<M>(
+fn leg_carrying_mul_add_wide(
     old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
@@ -4024,9 +3955,9 @@ fn leg_carrying_mul_add_wide<M>(
 // Double-width add: low part add, carry into high part
 // ---------------------------------------------------------------------------
 
-fn leg_add<M>(
+fn leg_add(
     old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
@@ -4067,9 +3998,9 @@ fn leg_add<M>(
 // Double-width sub
 // ---------------------------------------------------------------------------
 
-fn leg_sub<M>(
+fn leg_sub(
     _old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
@@ -4111,9 +4042,9 @@ fn leg_sub<M>(
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_lines)]
-fn leg_mul<M>(
+fn leg_mul(
     old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
@@ -4337,9 +4268,9 @@ fn sub_from_words64(b: &mut Builder, dst: &mut [ValueRef], src: &[ValueRef]) {
 
 /// Shared double-width add core: computes (lo, hi) for a + b.
 /// Returns (lo, hi, a_hi, b_hi) for use in overflow detection.
-fn leg_add128_core<M>(
+fn leg_add128_core(
     old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     a: &Operand,
     op_b: &Operand,
@@ -4366,9 +4297,9 @@ fn leg_add128_core<M>(
     (lo.raw(), hi.raw(), a_hi, b_hi)
 }
 
-fn leg_uadd_with_overflow_wide<M>(
+fn leg_uadd_with_overflow_wide(
     old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
@@ -4449,9 +4380,9 @@ fn leg_uadd_with_overflow_wide<M>(
     s.vmap.set(old_sec, Mapped::One(overflow.into()));
 }
 
-fn leg_sadd_with_overflow_wide<M>(
+fn leg_sadd_with_overflow_wide(
     old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
@@ -4503,9 +4434,9 @@ fn leg_sadd_with_overflow_wide<M>(
     s.vmap.set(old_sec, Mapped::One(overflow.into()));
 }
 
-fn leg_usub_with_overflow_wide<M>(
+fn leg_usub_with_overflow_wide(
     old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
@@ -4587,9 +4518,9 @@ fn leg_usub_with_overflow_wide<M>(
 
 /// Double-width signed saturating add/sub.
 /// `is_add == true` → saturating_add, `is_add == false` → saturating_sub.
-fn leg_signed_saturating_addsub_wide<M>(
+fn leg_signed_saturating_addsub_wide(
     old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
@@ -4766,9 +4697,9 @@ fn leg_signed_saturating_addsub_wide<M>(
 }
 
 /// Double-width unsigned saturating add/sub.
-fn leg_unsigned_saturating_addsub_wide<M>(
+fn leg_unsigned_saturating_addsub_wide(
     old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
@@ -4897,9 +4828,9 @@ fn leg_unsigned_saturating_addsub_wide<M>(
     }
 }
 
-fn leg_ssub_with_overflow_wide<M>(
+fn leg_ssub_with_overflow_wide(
     old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
@@ -4976,9 +4907,9 @@ fn leg_ssub_with_overflow_wide<M>(
     s.vmap.set(old_sec, Mapped::One(overflow.into()));
 }
 
-fn leg_smul_with_overflow_wide<M>(
+fn leg_smul_with_overflow_wide(
     old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
@@ -5127,9 +5058,9 @@ fn leg_smul_with_overflow_wide<M>(
     s.vmap.set(old_sec, Mapped::One(overflow.into()));
 }
 
-fn leg_umul_with_overflow_wide<M>(
+fn leg_umul_with_overflow_wide(
     old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
@@ -5206,9 +5137,9 @@ fn leg_umul_with_overflow_wide<M>(
     s.vmap.set(old_sec, Mapped::One(overflow.into()));
 }
 
-fn leg_bitwise<M>(
+fn leg_bitwise(
     old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
@@ -5286,9 +5217,9 @@ fn leg_bitwise<M>(
 // Wide left shift
 // ---------------------------------------------------------------------------
 
-fn leg_shl<M>(
+fn leg_shl(
     old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
@@ -5352,9 +5283,9 @@ fn leg_shl<M>(
 // Wide right shift (logical or arithmetic based on annotation)
 // ---------------------------------------------------------------------------
 
-fn leg_shr<M>(
+fn leg_shr(
     old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
@@ -5535,9 +5466,9 @@ fn shr_double_width_pair(
     (lo, hi)
 }
 
-fn leg_rotate_wide<M>(
+fn leg_rotate_wide(
     old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
@@ -5623,9 +5554,9 @@ fn leg_rotate_wide<M>(
 // Wide bit reverse
 // ---------------------------------------------------------------------------
 
-fn leg_bit_reverse_wide<M>(
+fn leg_bit_reverse_wide(
     old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
@@ -5657,9 +5588,9 @@ fn leg_bit_reverse_wide<M>(
 // Two-part integer comparison
 // ---------------------------------------------------------------------------
 
-fn leg_icmp<M>(
+fn leg_icmp(
     old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     cmp_op: ICmpOp,
@@ -5805,8 +5736,8 @@ fn leg_icmp<M>(
 // Wide load
 // ---------------------------------------------------------------------------
 
-fn leg_load_wide<M>(
-    s: &mut State<M>,
+fn leg_load_wide(
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     bytes: u32,
@@ -5858,9 +5789,9 @@ fn leg_load_wide<M>(
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
-fn leg_store_wide<M>(
+fn leg_store_wide(
     old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     bytes: u32,
@@ -5940,13 +5871,7 @@ fn leg_store_wide<M>(
 // Sign-extend to a wider-than-legal integer
 // ---------------------------------------------------------------------------
 
-fn leg_sext_wide<M>(
-    s: &mut State<M>,
-    b: &mut Builder,
-    old_vref: ValueRef,
-    bits: u32,
-    val: &Operand,
-) {
+fn leg_sext_wide(s: &mut State, b: &mut Builder, old_vref: ValueRef, bits: u32, val: &Operand) {
     if bits > s.part_bits {
         let lo = s.vmap.one(val.value);
         let shift = b.iconst(
@@ -5986,13 +5911,7 @@ fn leg_sext_wide<M>(
 // Zero-extend to a wider-than-legal integer
 // ---------------------------------------------------------------------------
 
-fn leg_zext_wide<M>(
-    s: &mut State<M>,
-    b: &mut Builder,
-    old_vref: ValueRef,
-    bits: u32,
-    val: &Operand,
-) {
+fn leg_zext_wide(s: &mut State, b: &mut Builder, old_vref: ValueRef, bits: u32, val: &Operand) {
     if bits > s.part_bits {
         let lo = s.vmap.one(val.value);
         let hi = b
@@ -6037,8 +5956,8 @@ fn get_fp_to_int_float_type(vref: ValueRef, old: &Function) -> Option<FloatType>
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
-fn leg_fp_to_int_double_width<M: AbiMetadata + Clone>(
-    s: &mut State<M>,
+fn leg_fp_to_int_double_width(
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     // Operand of the outer Zext/Sext — its value is the FpToUi/FpToSi result.
@@ -6106,24 +6025,25 @@ fn leg_fp_to_int_double_width<M: AbiMetadata + Clone>(
         I64_TYPE,
         Operand::new(new_mem).into(),
         None,
+        None,
         o(),
     );
     let data = data.unwrap();
 
     s.vmap.set(old_mem, Mapped::One(call_mem.into()));
 
-    // Record exact-double-width return: hi arrives in RDX.
-    let call_idx = call_mem.index();
-    s.meta.mark_call_secondary_return(call_idx);
-    let hi_capture = b.iconst(0i64, s.part_bits, IntSignedness::Unsigned, o());
-    s.meta
-        .mark_secondary_return_capture(hi_capture.index(), call_idx);
+    let hi_capture = b.call_ret2(
+        Operand::new(call_mem.into()).into(),
+        Type::Int,
+        Some(Annotation::Int(I64)),
+        o(),
+    );
 
-    s.vmap.set(old_vref, Mapped::Pair(data, hi_capture.into()));
+    s.vmap.set(old_vref, Mapped::Pair(data, hi_capture));
 }
 
-fn leg_fp_to_int_wide<M: AbiMetadata>(
-    s: &mut State<M>,
+fn leg_fp_to_int_wide(
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     zext_val: &Operand,
@@ -6388,13 +6308,7 @@ fn leg_fp_to_int_wide<M: AbiMetadata>(
 // Wide bswap
 // ---------------------------------------------------------------------------
 
-fn leg_bswap_wide<M>(
-    s: &mut State<M>,
-    b: &mut Builder,
-    old_vref: ValueRef,
-    bytes: u32,
-    val: &Operand,
-) {
+fn leg_bswap_wide(s: &mut State, b: &mut Builder, old_vref: ValueRef, bytes: u32, val: &Operand) {
     let part_bytes = s.part_bits / 8;
     let limb_bytes = s.limb_bits / 8;
     if bytes > part_bytes && limb_bytes > 0 && bytes.is_multiple_of(limb_bytes) {
@@ -6424,9 +6338,9 @@ fn leg_bswap_wide<M>(
 // Wide select
 // ---------------------------------------------------------------------------
 
-fn leg_select_wide<M>(
+fn leg_select_wide(
     old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     cond: &Operand,
@@ -6482,9 +6396,9 @@ fn leg_select_wide<M>(
 // Wide integer Div/Rem
 // ---------------------------------------------------------------------------
 
-fn leg_div_rem_wide<M>(
+fn leg_div_rem_wide(
     old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
@@ -6531,9 +6445,9 @@ fn leg_div_rem_wide<M>(
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
-fn leg_div_rem_double_width<M: AbiMetadata + Clone>(
+fn leg_div_rem_double_width(
     old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
@@ -6572,6 +6486,7 @@ fn leg_div_rem_double_width<M: AbiMetadata + Clone>(
         I64_TYPE,
         Operand::new(new_mem).into(),
         None,
+        None,
         o(),
     );
     let data = data.unwrap();
@@ -6580,23 +6495,22 @@ fn leg_div_rem_double_width<M: AbiMetadata + Clone>(
     // stores/calls pick up the updated mem without rewriting their operands.
     s.vmap.set(old_mem, Mapped::One(call_mem.into()));
 
-    // Record the secondary-register return so the register allocator knows
-    // that the hi half arrives in RDX.
-    let call_idx = call_mem.index();
-    s.meta.mark_call_secondary_return(call_idx);
-    let hi_capture = b.iconst(0i64, s.part_bits, IntSignedness::Unsigned, o());
-    s.meta
-        .mark_secondary_return_capture(hi_capture.index(), call_idx);
+    let hi_capture = b.call_ret2(
+        Operand::new(call_mem.into()).into(),
+        Type::Int,
+        Some(Annotation::Int(I64)),
+        o(),
+    );
 
     // Map the old wide Div/Rem result to (lo, hi).
-    s.vmap.set(old_vref, Mapped::Pair(data, hi_capture.raw()));
+    s.vmap.set(old_vref, Mapped::Pair(data, hi_capture));
 }
 
 // ---------------------------------------------------------------------------
 // Wide integer to float: lower via target-derived limb rounding
 // ---------------------------------------------------------------------------
 
-fn wide_bit_length<M>(s: &State<M>, b: &mut Builder, limbs: &[ValueRef], bits: u32) -> ValueRef {
+fn wide_bit_length(s: &State, b: &mut Builder, limbs: &[ValueRef], bits: u32) -> ValueRef {
     let widths = wide_limb_widths(s, bits);
     let zero_part = b
         .iconst(0i64, s.part_bits, IntSignedness::Unsigned, o())
@@ -6673,9 +6587,9 @@ fn wide_bit_length<M>(s: &State<M>, b: &mut Builder, limbs: &[ValueRef], bits: u
     .raw()
 }
 
-fn leg_int_to_fp_wide<M>(
+fn leg_int_to_fp_wide(
     old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
@@ -6962,8 +6876,8 @@ fn leg_int_to_fp_wide<M>(
 //   (`si` / `di` / `ti`), e.g. `__floatdisf` or `__floatuntidf`.
 // ---------------------------------------------------------------------------
 
-fn leg_int_to_fp_double_width<M: AbiMetadata + Clone>(
-    s: &mut State<M>,
+fn leg_int_to_fp_double_width(
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     a: &Operand,
@@ -7016,6 +6930,7 @@ fn leg_int_to_fp_double_width<M: AbiMetadata + Clone>(
         Type::Float(ft),
         Operand::new(new_mem).into(),
         None,
+        None,
         o(),
     );
     let data = data.unwrap();
@@ -7028,16 +6943,19 @@ fn leg_int_to_fp_double_width<M: AbiMetadata + Clone>(
 // Exact double-width return: low part → RAX, second part → RDX (via metadata)
 // ---------------------------------------------------------------------------
 
-fn leg_ret<M: AbiMetadata>(
-    s: &mut State<M>,
+fn leg_ret(
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     val: &Option<Operand>,
+    ret2: &Option<Operand>,
     mem: &Operand,
 ) {
     let m = s.vmap.one(mem.value);
     if let Some(rv) = val {
-        let (lo, hi) = if is_wide(s, rv.value) {
+        let (lo, hi) = if let Some(ret2) = ret2 {
+            (s.vmap.one(rv.value), s.vmap.one(ret2.value))
+        } else if is_wide(s, rv.value) {
             let parts = s.vmap.parts(rv.value);
             let lo = parts[0];
             let hi = parts.get(1).copied().unwrap_or_else(|| {
@@ -7047,23 +6965,20 @@ fn leg_ret<M: AbiMetadata>(
             (lo, hi)
         } else {
             let lo = s.vmap.one(rv.value);
-            // If terminator.rs set up a secondary-return move for this ret
-            // If terminator lowering set up a secondary return move, carry it
-            // forward. Otherwise emit zero as a harmless placeholder.
-            let hi = if let Some(src_idx) = s.old_meta.get_secondary_return_move(old_vref.index()) {
-                s.vmap.one(ValueRef::inst_result(src_idx))
-            } else {
-                b.iconst(0i64, s.part_bits, IntSignedness::Unsigned, o())
-                    .raw()
-            };
+            let hi = b
+                .iconst(0i64, s.part_bits, IntSignedness::Unsigned, o())
+                .raw();
             (lo, hi)
         };
-        let ret_inst = b.ret(Some(Operand::new(lo)), Operand::new(m).into(), o());
-        let ret_idx = ret_inst.index();
-        s.meta.mark_secondary_return_move(ret_idx, hi.index());
+        let ret_inst = b.ret(
+            Some(Operand::new(lo)),
+            Some(Operand::new(hi)),
+            Operand::new(m).into(),
+            o(),
+        );
         s.vmap.set(old_vref, Mapped::One(ret_inst));
     } else {
-        let v = b.ret(None, Operand::new(m).into(), o());
+        let v = b.ret(None, None, Operand::new(m).into(), o());
         s.vmap.set(old_vref, Mapped::One(v));
     }
 }
@@ -7073,9 +6988,9 @@ fn leg_ret<M: AbiMetadata>(
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
-fn leg_call<M: AbiMetadata + Clone>(
+fn leg_call(
     _old: &Function,
-    s: &mut State<M>,
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     inst: &tuffy_ir::instruction::Instruction,
@@ -7105,11 +7020,10 @@ fn leg_call<M: AbiMetadata + Clone>(
     let double_width_ret = is_exact_double_width_int_annotation(
         inst.secondary_result_annotation.as_ref(),
         s.part_bits,
-    ) || s.old_meta.is_double_width_return_call(old_vref.index())
-        || matches!(
-            inst.secondary_ty.as_ref(),
-            Some(Type::Float(FloatType::F128))
-        );
+    ) || matches!(
+        inst.secondary_ty.as_ref(),
+        Some(Type::Float(FloatType::F128))
+    );
     let ret_ty = if double_width_ret {
         I64_TYPE
     } else {
@@ -7122,42 +7036,38 @@ fn leg_call<M: AbiMetadata + Clone>(
         inst.result_annotation
     };
 
-    let (mem_out, data_out) = b.call(c.into(), new_args, ret_ty, m.into(), ann, o());
+    let cleanup_label = match &inst.op {
+        Op::Call(_, _, _, cleanup) => *cleanup,
+        _ => None,
+    };
+    let (mem_out, data_out) = b.call(
+        c.into(),
+        new_args,
+        ret_ty,
+        m.into(),
+        cleanup_label,
+        ann,
+        o(),
+    );
     s.vmap.set(old_vref, Mapped::One(mem_out.into()));
 
     if double_width_ret {
         if let Some(data) = data_out {
-            let call_idx = mem_out.index();
-            s.meta.mark_call_secondary_return(call_idx);
-
-            let hi_capture = b.iconst(0i64, s.part_bits, IntSignedness::Unsigned, o());
-            let hi_idx = hi_capture.index();
-            s.meta.mark_secondary_return_capture(hi_idx, call_idx);
+            let hi_capture = b.call_ret2(
+                Operand::new(mem_out.into()).into(),
+                Type::Int,
+                Some(Annotation::Int(I64)),
+                o(),
+            );
 
             s.vmap.set(
                 ValueRef::inst_secondary_result(old_vref.index()),
-                Mapped::Pair(data, hi_capture.into()),
+                Mapped::Pair(data, hi_capture),
             );
         }
     } else if let Some(data) = data_out {
         let old_sec = ValueRef::inst_secondary_result(old_vref.index());
         s.vmap.set(old_sec, Mapped::One(data));
-
-        let old_call_idx = old_vref.index();
-        if s.old_meta.has_secondary_return(old_call_idx) {
-            let new_call_idx = mem_out.index();
-            s.meta.mark_call_secondary_return(new_call_idx);
-
-            let rdx_capture = b.iconst(0i64, s.part_bits, IntSignedness::Unsigned, o());
-            s.meta
-                .mark_secondary_return_capture(rdx_capture.index(), new_call_idx);
-
-            if let Some(old_cap_idx) = s.old_meta.find_capture_for_call(old_call_idx) {
-                let old_cap_vref = ValueRef::inst_result(old_cap_idx);
-                s.vmap.set(old_cap_vref, Mapped::One(rdx_capture.into()));
-                s.rdx_capture_remap.insert(old_cap_idx, rdx_capture.into());
-            }
-        }
     }
 }
 
@@ -7165,7 +7075,7 @@ fn leg_call<M: AbiMetadata + Clone>(
 // Branch argument remapping: split wide integer args into legalized parts
 // ---------------------------------------------------------------------------
 
-fn remap_branch_args<M>(s: &State<M>, args: &[Operand]) -> Vec<Operand> {
+fn remap_branch_args(s: &State, args: &[Operand]) -> Vec<Operand> {
     let mut out = Vec::new();
     for arg in args {
         if is_wide(s, arg.value) {
@@ -7183,13 +7093,7 @@ fn remap_branch_args<M>(s: &State<M>, args: &[Operand]) -> Vec<Operand> {
 // Unconditional branch
 // ---------------------------------------------------------------------------
 
-fn leg_br<M>(
-    s: &mut State<M>,
-    b: &mut Builder,
-    old_vref: ValueRef,
-    target: BlockRef,
-    args: &[Operand],
-) {
+fn leg_br(s: &mut State, b: &mut Builder, old_vref: ValueRef, target: BlockRef, args: &[Operand]) {
     let new_target = new_block(s, target);
     let new_args = remap_branch_args(s, args);
     let v = b.br(new_target, new_args, o());
@@ -7201,8 +7105,8 @@ fn leg_br<M>(
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
-fn leg_brif<M>(
-    s: &mut State<M>,
+fn leg_brif(
+    s: &mut State,
     b: &mut Builder,
     old_vref: ValueRef,
     cond: &Operand,
@@ -7231,7 +7135,7 @@ fn leg_brif<M>(
 // Continue (loop back-edge)
 // ---------------------------------------------------------------------------
 
-fn leg_continue<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, args: &[Operand]) {
+fn leg_continue(s: &mut State, b: &mut Builder, old_vref: ValueRef, args: &[Operand]) {
     let new_args = remap_branch_args(s, args);
     let v = b.continue_(new_args, o());
     s.vmap.set(old_vref, Mapped::One(v));
@@ -7241,7 +7145,7 @@ fn leg_continue<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, args: 
 // Region yield
 // ---------------------------------------------------------------------------
 
-fn leg_region_yield<M>(s: &mut State<M>, b: &mut Builder, old_vref: ValueRef, args: &[Operand]) {
+fn leg_region_yield(s: &mut State, b: &mut Builder, old_vref: ValueRef, args: &[Operand]) {
     let new_args = remap_branch_args(s, args);
     let v = b.region_yield(new_args, o());
     s.vmap.set(old_vref, Mapped::One(v));
@@ -7253,7 +7157,6 @@ mod tests {
     use tuffy_ir::function::RegionKind;
     use tuffy_ir::module::Module;
     use tuffy_ir_interp::{ExecMode, InterpResult, Interpreter, Value};
-    use tuffy_target_x86::backend::X86AbiMetadata;
     use tuffy_target_x86::legality::X86LegalityInfo;
 
     fn build_carrying_mul_add_func(bits: u32, signed: bool) -> (Function, SymbolTable) {
@@ -7299,7 +7202,7 @@ mod tests {
                 o(),
             );
         }
-        b.ret(None, mem0.into(), o());
+        b.ret(None, None, mem0.into(), o());
         b.exit_region();
         (func, symbols)
     }
@@ -7375,7 +7278,7 @@ mod tests {
             o(),
         );
         let ok = b.band(lo_ok.into(), hi_ok.into(), o());
-        b.ret(Some(ok.into()), mem0.into(), o());
+        b.ret(Some(ok.into()), None, mem0.into(), o());
         b.exit_region();
         (func, symbols)
     }
@@ -7410,7 +7313,7 @@ mod tests {
             },
             o(),
         );
-        b.ret(None, mem0.into(), o());
+        b.ret(None, None, mem0.into(), o());
         b.exit_region();
         (func, symbols)
     }
@@ -7462,7 +7365,7 @@ mod tests {
                 o(),
             ),
         };
-        b.ret(None, mem0.into(), o());
+        b.ret(None, None, mem0.into(), o());
         b.exit_region();
         (func, symbols)
     }
@@ -7503,7 +7406,7 @@ mod tests {
                 o(),
             )
         };
-        b.ret(None, mem0.into(), o());
+        b.ret(None, None, mem0.into(), o());
         b.exit_region();
         (func, symbols)
     }
@@ -7548,7 +7451,7 @@ mod tests {
                 o(),
             )
         };
-        b.ret(None, mem0.into(), o());
+        b.ret(None, None, mem0.into(), o());
         b.exit_region();
         (func, symbols)
     }
@@ -7590,7 +7493,7 @@ mod tests {
                 o(),
             )
         };
-        b.ret(None, mem0.into(), o());
+        b.ret(None, None, mem0.into(), o());
         b.exit_region();
         (func, symbols)
     }
@@ -7634,7 +7537,7 @@ mod tests {
         };
         let expected = b.fconst(FloatType::F64, expected_bits, o());
         let ok = b.fcmp(FCmpOp::OEq, actual.into(), expected.into(), o());
-        b.ret(Some(ok.into()), mem0.into(), o());
+        b.ret(Some(ok.into()), None, mem0.into(), o());
         b.exit_region();
         (func, symbols)
     }
@@ -7666,7 +7569,7 @@ mod tests {
             let raw = b.fp_to_ui(f.into(), 64, o());
             let _ = b.zext(raw.into(), bits, o());
         }
-        b.ret(None, mem0.into(), o());
+        b.ret(None, None, mem0.into(), o());
         b.exit_region();
         let _ = ann;
         (func, symbols)
@@ -7727,7 +7630,7 @@ mod tests {
             Operand::annotated(zero.raw(), Annotation::Int(unsigned_ann)).into(),
             o(),
         );
-        b.ret(Some(ok.into()), mem0.into(), o());
+        b.ret(Some(ok.into()), None, mem0.into(), o());
         b.exit_region();
         let _ = ann;
         (func, symbols)
@@ -7769,7 +7672,7 @@ mod tests {
             Operand::annotated(rhs.raw(), Annotation::Int(ann)).into(),
             o(),
         );
-        b.ret(None, mem0.into(), o());
+        b.ret(None, None, mem0.into(), o());
         b.exit_region();
         (func, symbols)
     }
@@ -7792,17 +7695,16 @@ mod tests {
         let clz = b.count_leading_zeros(Operand::annotated(val.raw(), ann).into(), bits, 64, o());
         let expected = b.iconst(expected as i64, 64, IntSignedness::Unsigned, o());
         let ok = b.icmp(ICmpOp::Eq, clz.into(), expected.into(), o());
-        b.ret(Some(ok.into()), mem0.into(), o());
+        b.ret(Some(ok.into()), None, mem0.into(), o());
         b.exit_region();
         (func, symbols)
     }
 
     fn assert_legalized_widths(bits: u32, signed: bool) {
         let (func, mut symbols) = build_carrying_mul_add_func(bits, signed);
-        let meta = X86AbiMetadata::default();
         let legalized =
-            legalize(&func, &meta, &X86LegalityInfo, &mut symbols).expect("expected legalization");
-        let out = legalized.0;
+            legalize(&func, &X86LegalityInfo, &mut symbols).expect("expected legalization");
+        let out = legalized;
         for (_, inst) in out.inst_pool.iter_insts() {
             assert!(
                 !matches!(inst.op, Op::SCarryingMulAdd(..) | Op::UCarryingMulAdd(..)),
@@ -7834,10 +7736,9 @@ mod tests {
     #[test]
     fn legalize_wide_add_160() {
         let (func, mut symbols) = build_add_func(160);
-        let meta = X86AbiMetadata::default();
         let legalized =
-            legalize(&func, &meta, &X86LegalityInfo, &mut symbols).expect("expected legalization");
-        for (_, inst) in legalized.0.inst_pool.iter_insts() {
+            legalize(&func, &X86LegalityInfo, &mut symbols).expect("expected legalization");
+        for (_, inst) in legalized.inst_pool.iter_insts() {
             if let Some(Annotation::Int(ann)) = &inst.result_annotation {
                 assert!(ann.bit_width <= 64);
             }
@@ -7853,10 +7754,9 @@ mod tests {
             (256, true, true),
         ] {
             let (func, mut symbols) = build_overflow_func(bits, signed, is_mul);
-            let meta = X86AbiMetadata::default();
-            let legalized = legalize(&func, &meta, &X86LegalityInfo, &mut symbols)
+            let legalized = legalize(&func, &X86LegalityInfo, &mut symbols)
                 .expect("expected overflow legalization");
-            for (_, inst) in legalized.0.inst_pool.iter_insts() {
+            for (_, inst) in legalized.inst_pool.iter_insts() {
                 if let Some(Annotation::Int(ann)) = &inst.result_annotation {
                     assert!(ann.bit_width <= 64);
                 }
@@ -7868,10 +7768,9 @@ mod tests {
     fn legalize_wide_shift_and_rotate_widths() {
         for rotate in [false, true] {
             let (func, mut symbols) = build_shift_func(160, rotate);
-            let meta = X86AbiMetadata::default();
-            let legalized = legalize(&func, &meta, &X86LegalityInfo, &mut symbols)
+            let legalized = legalize(&func, &X86LegalityInfo, &mut symbols)
                 .expect("expected shift/rotate legalization");
-            for (_, inst) in legalized.0.inst_pool.iter_insts() {
+            for (_, inst) in legalized.inst_pool.iter_insts() {
                 if let Some(Annotation::Int(ann)) = &inst.result_annotation {
                     assert!(ann.bit_width <= 64);
                 }
@@ -7883,10 +7782,9 @@ mod tests {
     fn legalize_double_width_divrem_paths() {
         for (is_div, signed) in [(true, false), (true, true), (false, false), (false, true)] {
             let (func, mut symbols) = build_divrem_func(128, is_div, signed);
-            let meta = X86AbiMetadata::default();
-            let legalized = legalize(&func, &meta, &X86LegalityInfo, &mut symbols)
+            let legalized = legalize(&func, &X86LegalityInfo, &mut symbols)
                 .expect("expected div/rem legalization");
-            for (_, inst) in legalized.0.inst_pool.iter_insts() {
+            for (_, inst) in legalized.inst_pool.iter_insts() {
                 if let Some(Annotation::Int(ann)) = &inst.result_annotation {
                     assert!(ann.bit_width <= 64);
                 }
@@ -7903,10 +7801,9 @@ mod tests {
             (256, false, true),
         ] {
             let (func, mut symbols) = build_divrem_func(bits, is_div, signed);
-            let meta = X86AbiMetadata::default();
-            let legalized = legalize(&func, &meta, &X86LegalityInfo, &mut symbols)
+            let legalized = legalize(&func, &X86LegalityInfo, &mut symbols)
                 .expect("expected wide div/rem legalization");
-            for (_, inst) in legalized.0.inst_pool.iter_insts() {
+            for (_, inst) in legalized.inst_pool.iter_insts() {
                 if let Some(Annotation::Int(ann)) = &inst.result_annotation {
                     assert!(ann.bit_width <= 64);
                 }
@@ -7918,10 +7815,9 @@ mod tests {
     fn legalize_double_width_int_to_fp_paths() {
         for signed in [false, true] {
             let (func, mut symbols) = build_int_to_fp_func(128, signed);
-            let meta = X86AbiMetadata::default();
-            let legalized = legalize(&func, &meta, &X86LegalityInfo, &mut symbols)
+            let legalized = legalize(&func, &X86LegalityInfo, &mut symbols)
                 .expect("expected int-to-fp legalization");
-            for (_, inst) in legalized.0.inst_pool.iter_insts() {
+            for (_, inst) in legalized.inst_pool.iter_insts() {
                 if let Some(Annotation::Int(ann)) = &inst.result_annotation {
                     assert!(ann.bit_width <= 64);
                 }
@@ -7933,17 +7829,16 @@ mod tests {
     fn legalize_wide_int_to_fp_paths() {
         for (bits, signed) in [(160, false), (192, true)] {
             let (func, mut symbols) = build_int_to_fp_func(bits, signed);
-            let meta = X86AbiMetadata::default();
-            let legalized = legalize(&func, &meta, &X86LegalityInfo, &mut symbols)
+            let legalized = legalize(&func, &X86LegalityInfo, &mut symbols)
                 .expect("expected wide int-to-fp legalization");
-            let saw_helper = legalized.0.inst_pool.iter_insts().any(|(_, inst)| {
+            let saw_helper = legalized.inst_pool.iter_insts().any(|(_, inst)| {
                 matches!(inst.op, Op::SymbolAddr(sym) if symbols.resolve(sym).starts_with("__float"))
             });
             assert!(
                 !saw_helper,
                 "wider-than-double-width int-to-fp should not rely on compiler-rt helpers"
             );
-            for (_, inst) in legalized.0.inst_pool.iter_insts() {
+            for (_, inst) in legalized.inst_pool.iter_insts() {
                 if let Some(Annotation::Int(ann)) = &inst.result_annotation {
                     assert!(ann.bit_width <= 64);
                 }
@@ -7961,10 +7856,9 @@ mod tests {
                 (2f64.powi(96)).to_bits() as u128
             };
             let (func, mut symbols) = build_fp_to_int_func(bits, signed, f);
-            let meta = X86AbiMetadata::default();
-            let legalized = legalize(&func, &meta, &X86LegalityInfo, &mut symbols)
+            let legalized = legalize(&func, &X86LegalityInfo, &mut symbols)
                 .expect("expected fp-to-int legalization");
-            for (_, inst) in legalized.0.inst_pool.iter_insts() {
+            for (_, inst) in legalized.inst_pool.iter_insts() {
                 if let Some(Annotation::Int(ann)) = &inst.result_annotation {
                     assert!(ann.bit_width <= 64);
                 }
@@ -8014,10 +7908,9 @@ mod tests {
     fn legalize_wide_icmp_paths() {
         for signed in [false, true] {
             let (func, mut symbols) = build_icmp_func(160, signed);
-            let meta = X86AbiMetadata::default();
-            let legalized = legalize(&func, &meta, &X86LegalityInfo, &mut symbols)
+            let legalized = legalize(&func, &X86LegalityInfo, &mut symbols)
                 .expect("expected icmp legalization");
-            for (_, inst) in legalized.0.inst_pool.iter_insts() {
+            for (_, inst) in legalized.inst_pool.iter_insts() {
                 if let Some(Annotation::Int(ann)) = &inst.result_annotation {
                     assert!(ann.bit_width <= 64);
                 }
@@ -8071,12 +7964,9 @@ mod tests {
             o(),
         );
         let result = b.band(prod_ok.into(), ov.into(), o());
-        b.ret(Some(result.into()), mem0.into(), o());
+        b.ret(Some(result.into()), None, mem0.into(), o());
         b.exit_region();
-
-        let meta = X86AbiMetadata::default();
-        let (legalized, _) =
-            legalize(&func, &meta, &X86LegalityInfo, &mut symbols).expect("legalized");
+        let legalized = legalize(&func, &X86LegalityInfo, &mut symbols).expect("legalized");
         eprintln!("{}", legalized.display(&symbols));
 
         let mut module = Module::new("test");
@@ -8094,10 +7984,9 @@ mod tests {
     fn legalize_double_width_int_to_fp_uses_compiler_rt_helpers() {
         for (signed, expected) in [(false, "__floatuntidf"), (true, "__floattidf")] {
             let (func, mut symbols) = build_int_to_fp_func(128, signed);
-            let meta = X86AbiMetadata::default();
-            let legalized = legalize(&func, &meta, &X86LegalityInfo, &mut symbols)
+            let legalized = legalize(&func, &X86LegalityInfo, &mut symbols)
                 .expect("expected int-to-fp legalization");
-            let saw_helper = legalized.0.inst_pool.iter_insts().any(|(_, inst)| {
+            let saw_helper = legalized.inst_pool.iter_insts().any(|(_, inst)| {
                 matches!(inst.op, Op::SymbolAddr(sym) if symbols.resolve(sym) == expected)
             });
             assert!(saw_helper, "expected helper symbol {expected}");
@@ -8119,9 +8008,7 @@ mod tests {
             ),
         ] {
             let (func, mut symbols) = build_int_to_fp_check_func(128, signed, value, expected_bits);
-            let meta = X86AbiMetadata::default();
-            let (legalized, _) =
-                legalize(&func, &meta, &X86LegalityInfo, &mut symbols).expect("legalized");
+            let legalized = legalize(&func, &X86LegalityInfo, &mut symbols).expect("legalized");
             let mut module = Module::new("test");
             module.symbols = symbols;
             module.add_function(legalized);
@@ -8153,9 +8040,7 @@ mod tests {
         ] {
             let (func, mut symbols) =
                 build_int_to_fp_check_func(bits, signed, value, expected_bits);
-            let meta = X86AbiMetadata::default();
-            let (legalized, _) =
-                legalize(&func, &meta, &X86LegalityInfo, &mut symbols).expect("legalized");
+            let legalized = legalize(&func, &X86LegalityInfo, &mut symbols).expect("legalized");
             let mut module = Module::new("test");
             module.symbols = symbols;
             module.add_function(legalized);
@@ -8202,9 +8087,7 @@ mod tests {
                 expected_lo,
                 expected_hi,
             );
-            let meta = X86AbiMetadata::default();
-            let (legalized, _) =
-                legalize(&func, &meta, &X86LegalityInfo, &mut symbols).expect("legalized");
+            let legalized = legalize(&func, &X86LegalityInfo, &mut symbols).expect("legalized");
             let mut module = Module::new("test");
             module.symbols = symbols;
             module.add_function(legalized);
@@ -8220,9 +8103,7 @@ mod tests {
     #[test]
     fn interpret_legalized_exact_double_width_clz_regression() {
         let (func, mut symbols) = build_clz_check_func(128, BigInt::from(u128::MAX), 0);
-        let meta = X86AbiMetadata::default();
-        let (legalized, _) =
-            legalize(&func, &meta, &X86LegalityInfo, &mut symbols).expect("legalized");
+        let legalized = legalize(&func, &X86LegalityInfo, &mut symbols).expect("legalized");
         let mut module = Module::new("test");
         module.symbols = symbols;
         module.add_function(legalized);
@@ -8242,9 +8123,7 @@ mod tests {
             (2f64.powi(96)).to_bits() as u128,
             BigInt::from(1u8) << 96,
         );
-        let meta = X86AbiMetadata::default();
-        let (legalized, _) =
-            legalize(&func, &meta, &X86LegalityInfo, &mut symbols).expect("legalized");
+        let legalized = legalize(&func, &X86LegalityInfo, &mut symbols).expect("legalized");
         let mut module = Module::new("test");
         module.symbols = symbols;
         module.add_function(legalized);

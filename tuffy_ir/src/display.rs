@@ -633,7 +633,7 @@ fn fmt_inst(
             };
             format!("{v} = tls_symbol_addr {name}")
         }
-        Op::Call(callee, args, mem) => {
+        Op::Call(callee, args, mem, _cleanup_label) => {
             if let Some(sec_ty) = &inst.secondary_ty {
                 // Non-void call: multi-result (mem, data)
                 // Use the secondary result annotation for the `-> type:ann` suffix,
@@ -658,6 +658,7 @@ fn fmt_inst(
                 )
             }
         }
+        Op::CallRet2(mem) => format!("{v} = call_ret2 {}", ctx.fmt_operand(&mem.clone().raw())),
         Op::Bitcast(src) => format!("{v} = bitcast {}", ctx.fmt_operand(src)),
         Op::Sext(src, bits) => {
             format!("{v} = sext {}, {bits}", ctx.fmt_operand(&src.clone().raw()))
@@ -718,13 +719,24 @@ fn fmt_inst(
                 indices_str
             )
         }
-        Op::Ret(val, mem) => match val {
-            Some(o) => format!(
-                "ret {}, {}",
-                ctx.fmt_operand(o),
+        Op::Ret(val, ret2, mem) => match (val, ret2) {
+            (Some(v1), Some(v2)) => format!(
+                "ret {}, {}, {}",
+                ctx.fmt_operand(v1),
+                ctx.fmt_operand(v2),
                 ctx.fmt_operand(&mem.clone().raw())
             ),
-            None => format!("ret {}", ctx.fmt_operand(&mem.clone().raw())),
+            (Some(v), None) => format!(
+                "ret {}, {}",
+                ctx.fmt_operand(v),
+                ctx.fmt_operand(&mem.clone().raw())
+            ),
+            (None, Some(v)) => format!(
+                "ret {}, {}",
+                ctx.fmt_operand(v),
+                ctx.fmt_operand(&mem.clone().raw())
+            ),
+            (None, None) => format!("ret {}", ctx.fmt_operand(&mem.clone().raw())),
         },
         Op::Br(target, args) => {
             if args.is_empty() {

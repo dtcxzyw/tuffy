@@ -674,6 +674,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     vec![a.into(), b.into(), sz.into()],
                     Type::Int,
                     current_mem.into(),
+                    None,
                     int_annotation_for_bytes(4),
                     Origin::synthetic(),
                 );
@@ -1766,6 +1767,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     Type::Unit,
                     current_mem.into(),
                     None,
+                    None,
                     Origin::synthetic(),
                 );
                 true
@@ -1782,6 +1784,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         vec![ir_args[0].into(), ir_args[1].into(), ir_args[2].into()],
                         Type::Int,
                         current_mem.into(),
+                        None,
                         int_annotation_for_bytes(4),
                         Origin::synthetic(),
                     );

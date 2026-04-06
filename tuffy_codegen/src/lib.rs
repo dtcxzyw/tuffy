@@ -8,10 +8,10 @@ mod legalize;
 
 use tuffy_ir::function::Function;
 use tuffy_ir::module::SymbolTable;
-use tuffy_target::backend::{AbiMetadata, Backend};
+use tuffy_target::backend::Backend;
 use tuffy_target::legality::LegalityInfo;
 use tuffy_target::types::{CompiledFunction, StaticData};
-use tuffy_target_x86::backend::{X86AbiMetadata, X86Backend};
+use tuffy_target_x86::backend::X86Backend;
 use tuffy_target_x86::legality::X86LegalityInfo;
 
 /// Target-agnostic code generation session.
@@ -26,14 +26,6 @@ enum CodegenInner {
     X86(X86Backend),
 }
 
-/// Target-agnostic ABI metadata container.
-///
-/// Wraps backend-specific metadata so that MIR translation code can
-/// record ABI information without knowing the target.
-pub enum AbiMetadataBox {
-    X86(X86AbiMetadata),
-}
-
 impl CodegenSession {
     /// Create a new codegen session for the given target triple.
     ///
@@ -46,13 +38,6 @@ impl CodegenSession {
             }
         } else {
             panic!("unsupported target triple: {target_triple}");
-        }
-    }
-
-    /// Create a default ABI metadata container for this session's backend.
-    pub fn new_metadata(&self) -> AbiMetadataBox {
-        match &self.inner {
-            CodegenInner::X86(_) => AbiMetadataBox::X86(X86AbiMetadata::default()),
         }
     }
 
@@ -85,17 +70,13 @@ impl CodegenSession {
         &self,
         func: &Function,
         symbols: &mut SymbolTable,
-        metadata: &AbiMetadataBox,
     ) -> Option<CompiledFunction> {
-        match (&self.inner, metadata) {
-            (CodegenInner::X86(backend), AbiMetadataBox::X86(meta)) => {
+        match &self.inner {
+            CodegenInner::X86(backend) => {
                 let legality = X86LegalityInfo;
-                let legalized = legalize::legalize(func, meta, &legality, symbols);
-                let (func_ref, meta_ref) = match &legalized {
-                    Some((f, m)) => (f, m),
-                    None => (func, meta),
-                };
-                backend.compile_function(func_ref, symbols, meta_ref)
+                let legalized = legalize::legalize(func, &legality, symbols);
+                let func_ref = legalized.as_ref().unwrap_or(func);
+                backend.compile_function(func_ref, symbols)
             }
         }
     }
@@ -122,45 +103,6 @@ impl CodegenSession {
     pub fn generate_entry_point(&self, main_sym: &str, start_sym: &str) -> Vec<CompiledFunction> {
         match &self.inner {
             CodegenInner::X86(backend) => backend.generate_entry_point(main_sym, start_sym),
-        }
-    }
-}
-
-impl AbiMetadataBox {
-    /// Mark an IR instruction as capturing the secondary return register.
-    pub fn mark_secondary_return_capture(&mut self, inst_idx: u32, call_idx: u32) {
-        match self {
-            AbiMetadataBox::X86(meta) => meta.mark_secondary_return_capture(inst_idx, call_idx),
-        }
-    }
-
-    /// Mark a call instruction as producing a secondary return value.
-    pub fn mark_call_secondary_return(&mut self, call_idx: u32) {
-        match self {
-            AbiMetadataBox::X86(meta) => meta.mark_call_secondary_return(call_idx),
-        }
-    }
-
-    /// Mark an IR instruction as moving a value into the secondary return register.
-    pub fn mark_secondary_return_move(&mut self, inst_idx: u32, source_idx: u32) {
-        match self {
-            AbiMetadataBox::X86(meta) => meta.mark_secondary_return_move(inst_idx, source_idx),
-        }
-    }
-
-    /// Mark a call instruction as returning an exact double-width integer value.
-    pub fn mark_double_width_return_call(&mut self, call_idx: u32) {
-        match self {
-            AbiMetadataBox::X86(meta) => meta.mark_double_width_return_call(call_idx),
-        }
-    }
-
-    /// Record that the call at `call_idx` has a cleanup landing pad at `label`.
-    pub fn mark_call_cleanup(&mut self, call_idx: u32, label: u32) {
-        match self {
-            AbiMetadataBox::X86(meta) => {
-                meta.call_cleanup_labels.insert(call_idx, label);
-            }
         }
     }
 }

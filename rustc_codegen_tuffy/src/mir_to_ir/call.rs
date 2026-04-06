@@ -5,7 +5,7 @@ use rustc_middle::ty::{self, Instance, TyCtxt, TypeVisitableExt};
 use rustc_span::Spanned;
 
 use tuffy_ir::instruction::{Operand as IrOperand, Origin};
-use tuffy_ir::types::{Annotation, FloatType, IntAnnotation, IntSignedness, Type};
+use tuffy_ir::types::{Annotation, IntAnnotation, IntSignedness, Type};
 use tuffy_ir::value::ValueRef;
 
 use super::ctx::TranslationCtx;
@@ -230,6 +230,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         args: &[Spanned<Operand<'tcx>>],
         destination: &Place<'tcx>,
         target: &Option<BasicBlock>,
+        cleanup_bb: Option<BasicBlock>,
         source_info: mir::SourceInfo,
     ) {
         // Check for compiler intrinsics and handle them inline.
@@ -1309,30 +1310,17 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         } else {
             None
         };
-        let is_f128_ret = matches!(call_ret_ty, Type::Float(FloatType::F128));
+        let cleanup_label = cleanup_bb.map(|bb| self.setup_cleanup_landing_pad(bb));
         let (call_mem, call_data) = self.builder.call(
             callee_val.into(),
             ir_args,
             call_ret_ty,
             self.current_mem.into(),
+            cleanup_label,
             call_ret_ann,
             Origin::synthetic(),
         );
-        self.last_call_vref = Some(call_mem.index());
         self.current_mem = call_mem.raw();
-
-        // Mark calls whose return uses the backend's exact double-width
-        // integer return convention so legalize can recover the low/high ABI split.
-        if let Some(Annotation::Int(ia)) = call_ret_ann
-            && ia.bit_width == self.target_direct_abi_bits()
-        {
-            self.abi_metadata
-                .mark_double_width_return_call(call_mem.index());
-        }
-        if is_f128_ret {
-            self.abi_metadata
-                .mark_double_width_return_call(call_mem.index());
-        }
 
         // For non-void calls, call_data is Some(data_vref).
         // For void calls, call_data is None — use a dummy zero.
@@ -1424,7 +1412,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         } else if matches!(dest_repr, ReprKind::ScalarPair) {
             // Direct-register aggregate return (ScalarPair): the primary ABI
             // part is returned in the normal call result and the secondary
-            // part arrives through backend metadata.
+            // part is read explicitly via `call_ret2`.
             let size = dest_size.unwrap();
             let (a_size, b_size, b_offset) = scalar_pair_info(self.tcx, dest_ty).unwrap_or((
                 size.min(part_bytes),
@@ -1451,18 +1439,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     Origin::synthetic(),
                 )
                 .raw();
-            // Mark the call as having a secondary return and capture it via a
-            // placeholder instruction.
-            let call_idx = call_mem.index();
-            self.abi_metadata.mark_call_secondary_return(call_idx);
-            let rdx_capture = self.builder.iconst(
-                0,
-                self.target_max_int_width,
-                IntSignedness::DontCare,
+            let ret2 = self.builder.call_ret2(
+                call_mem.into(),
+                Type::Int,
+                int_annotation_for_bytes(b_size as u32),
                 Origin::synthetic(),
             );
-            self.abi_metadata
-                .mark_secondary_return_capture(rdx_capture.index(), call_idx);
             // Store the secondary ABI part at the correct offset.
             let off_val = self.builder.iconst(
                 b_offset as i64,
@@ -1476,7 +1458,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             self.current_mem = self
                 .builder
                 .store(
-                    rdx_capture.into(),
+                    ret2.into(),
                     hi_addr.into(),
                     b_size as u32,
                     self.current_mem.into(),

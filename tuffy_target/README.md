@@ -17,7 +17,10 @@ The `Backend` trait is the main interface each target implements:
 - `generate_allocator_stubs` — generate allocator forwarding stubs (e.g., `__rust_alloc` → `__rdl_alloc`).
 - `generate_entry_point` — generate the C `main` entry point and `lang_start`.
 
-The `AbiMetadata` trait communicates ABI-specific information (secondary return registers, exact double-width returns) from the MIR translation layer to the backend without coupling them.
+Backends are responsible for their own ABI lowering. Machine-specific details
+such as secondary return registers or byval stack copies must be derived from
+the IR and target rules inside the backend, not passed in from the frontend via
+side metadata.
 
 ### `isel.rs` — Instruction Selection Helpers
 

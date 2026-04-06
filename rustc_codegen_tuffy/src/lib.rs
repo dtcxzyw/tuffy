@@ -232,11 +232,9 @@ impl CodegenBackend for TuffyCodegenBackend {
                                 });
                             }
 
-                            if let Some(mut cf) = session.compile_function(
-                                &result.func,
-                                &mut result.symbols,
-                                &result.abi_metadata,
-                            ) {
+                            if let Some(mut cf) =
+                                session.compile_function(&result.func, &mut result.symbols)
+                            {
                                 use rustc_hir::attrs::Linkage;
                                 cf.weak = matches!(
                                     item_data.linkage,
@@ -581,11 +579,7 @@ impl CodegenBackend for TuffyCodegenBackend {
                         thread_local: false,
                     });
                 }
-                if let Some(mut cf) = session.compile_function(
-                    &result.func,
-                    &mut result.symbols,
-                    &result.abi_metadata,
-                ) {
+                if let Some(mut cf) = session.compile_function(&result.func, &mut result.symbols) {
                     cf.weak = true;
                     inline_funcs.push(cf);
                 } else {

@@ -24,7 +24,7 @@
 // CHECK:     v6: ptr = symbol_addr @_RNvXs2_NtNtC$HASH_4core10intrinsics8fallbackmNtB5_14CarryingMulAdd16carrying_mul_addC$HASH_16carrying_mul_add
 // CHECK:     v7: mem, v8: int:i32 = call v6(v1, v2, v3, v4), v0 -> int:i32
 // CHECK:     v9: mem = store.4 v8, v5, v7
-// CHECK:     v10: int:i64 = iconst 0
+// CHECK:     v10: int:i32 = call_ret2 v7
 // CHECK:     v11: int:i64 = iconst 4
 // CHECK:     v12: ptr = ptradd v5, v11
 // CHECK:     v13: mem = store.4 v10, v12, v9
@@ -35,7 +35,7 @@
 // CHECK:     v17: int:i64 = iconst 4
 // CHECK:     v18: ptr = ptradd v5, v17
 // CHECK:     v19: int:i32 = load.4 v18, v15
-// CHECK:     ret v16, v15
+// CHECK:     ret v16, v19, v15
 // CHECK: }
 // CHECK:
 // CHECK: fn core::intrinsics::carrying_mul_add(_1: T, _2: T, _3: T, _4: T) -> (U, T) {
@@ -131,7 +131,7 @@
 // CHECK:     v6: ptr = symbol_addr @_RNvXs3_NtNtC$HASH_4core10intrinsics8fallbackyNtB5_14CarryingMulAdd16carrying_mul_addC$HASH_16carrying_mul_add
 // CHECK:     v7: mem, v8: int:i64 = call v6(v1, v2, v3, v4), v0 -> int:i64
 // CHECK:     v9: mem = store.8 v8, v5, v7
-// CHECK:     v10: int:i64 = iconst 0
+// CHECK:     v10: int:i64 = call_ret2 v7
 // CHECK:     v11: int:i64 = iconst 8
 // CHECK:     v12: ptr = ptradd v5, v11
 // CHECK:     v13: mem = store.8 v10, v12, v9
@@ -142,7 +142,7 @@
 // CHECK:     v17: int:i64 = iconst 8
 // CHECK:     v18: ptr = ptradd v5, v17
 // CHECK:     v19: int:i64 = load.8 v18, v15
-// CHECK:     ret v16, v15
+// CHECK:     ret v16, v19, v15
 // CHECK: }
 // CHECK:
 // CHECK: fn core::intrinsics::fallback::wide_mul_u128(_1: u128, _2: u128) -> (u128, u128) {
@@ -572,7 +572,7 @@
 // CHECK:     v29: int:i64 = iconst 4
 // CHECK:     v30: ptr = ptradd v5, v29
 // CHECK:     v31: int:i32 = load.4 v30, v27
-// CHECK:     ret v28, v27
+// CHECK:     ret v28, v31, v27
 // CHECK: }
 // CHECK:
 // CHECK: fn <u64 as core::intrinsics::fallback::CarryingMulAdd>::carrying_mul_add(_1: u64, _2: u64, _3: u64, _4: u64) -> (u64, u64) {
@@ -653,7 +653,7 @@
 // CHECK:     v26: int:i64 = iconst 8
 // CHECK:     v27: ptr = ptradd v5, v26
 // CHECK:     v28: int:i64 = load.8 v27, v24
-// CHECK:     ret v25, v24
+// CHECK:     ret v25, v28, v24
 // CHECK: }
 // CHECK:
 // CHECK: fn <i128 as core::intrinsics::fallback::CarryingMulAdd>::carrying_mul_add(_1: i128, _2: i128, _3: i128, _4: i128) -> (u128, i128) {
@@ -1039,7 +1039,7 @@
 // CHECK:     v18: int:i64 = iconst 4
 // CHECK:     v19: ptr = ptradd v5, v18
 // CHECK:     v20: int:i32 = load.4 v19, v16
-// CHECK:     ret v17, v16
+// CHECK:     ret v17, v20, v16
 // CHECK: }
 // CHECK:
 // CHECK: fn carrying_mul_add_u64(_1: u64, _2: u64, _3: u64, _4: u64) -> (u64, u64) {
@@ -1085,7 +1085,7 @@
 // CHECK:     v24: int:i64 = iconst 8
 // CHECK:     v25: ptr = ptradd v5, v24
 // CHECK:     v26: int:i64 = load.8 v25, v22
-// CHECK:     ret v23, v22
+// CHECK:     ret v23, v26, v22
 // CHECK: }
 // CHECK:
 

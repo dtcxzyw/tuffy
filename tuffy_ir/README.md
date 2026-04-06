@@ -55,8 +55,8 @@ Instructions are defined in `instruction.rs` as the `Op` enum. Categories includ
 - **Floating point**: `FAdd`, `FSub`, `FMul`, `FDiv`, `FNeg`, `FAbs`, `CopySign`
 - **Pointer**: `PtrAdd`, `PtrDiff`, `PtrToInt`, `PtrToAddr`, `IntToPtr`
 - **Type conversion**: `Bitcast`, `Sext`, `Zext`, `FpToSi`, `FpToUi`, `SiToFp`, `UiToFp`, `FpConvert`
-- **Control flow**: `Ret`, `Br`, `BrIf`, `Continue`, `RegionYield`, `Unreachable`, `Trap`
-- **Other**: `Const` (arbitrary-precision), `BConst`, `Param`, `Call`, `SymbolAddr`
+- **Control flow**: `Ret` (with optional secondary return operand), `Br`, `BrIf`, `Continue`, `RegionYield`, `Unreachable`, `Trap`
+- **Other**: `Const` (arbitrary-precision), `BConst`, `Param`, `Call` (with optional cleanup label), `CallRet2`, `SymbolAddr`
 
 Every instruction carries an `Origin` for debug info / provenance tracking.
 

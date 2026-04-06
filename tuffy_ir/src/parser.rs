@@ -1257,20 +1257,26 @@ impl<'a> Parser<'a> {
 
         let (op, ty) = match opcode.as_str() {
             "ret" => {
-                // ret v0, v1 or ret v0
+                // ret v0, v1 or ret v0, v1, v2
                 if matches!(self.current, Token::Value(_)) {
                     let ops = self.parse_operand_list()?;
-                    if ops.len() == 2 {
+                    if ops.len() == 3 {
+                        // ret val, val2, mem
+                        let val_op = ops[0].clone();
+                        let ret2_op = ops[1].clone();
+                        let mem_op: MemOperand = ops[2].clone().into();
+                        (Op::Ret(Some(val_op), Some(ret2_op), mem_op), Type::Unit)
+                    } else if ops.len() == 2 {
                         // ret val, mem
                         let val_op = ops[0].clone();
                         let mem_op: MemOperand = ops[1].clone().into();
-                        (Op::Ret(Some(val_op), mem_op), Type::Unit)
+                        (Op::Ret(Some(val_op), None, mem_op), Type::Unit)
                     } else if ops.len() == 1 {
                         // ret mem (void return)
                         let mem_op: MemOperand = ops[0].clone().into();
-                        (Op::Ret(None, mem_op), Type::Unit)
+                        (Op::Ret(None, None, mem_op), Type::Unit)
                     } else {
-                        return Err(self.error("ret expects 1 or 2 operands"));
+                        return Err(self.error("ret expects 1, 2, or 3 operands"));
                     }
                 } else {
                     return Err(self.error("ret expects at least one operand"));
@@ -1849,7 +1855,7 @@ impl<'a> Parser<'a> {
                     // binding annotation for compatibility with older dumps.
                     let effective_ann = ret_ann.or_else(|| multi.as_ref().and_then(|(_, _, a)| *a));
                     Ok((
-                        Op::Call(callee.into(), args, mem.into()),
+                        Op::Call(callee.into(), args, mem.into(), None),
                         primary_ty.clone(),
                         *primary_ann,
                         Some(ret_ty),
@@ -1858,11 +1864,20 @@ impl<'a> Parser<'a> {
                 } else {
                     // Void call: only mem result
                     Ok(single(
-                        Op::Call(callee.into(), args, mem.into()),
+                        Op::Call(callee.into(), args, mem.into(), None),
                         primary_ty.clone(),
                         *primary_ann,
                     ))
                 }
+            }
+
+            "call_ret2" => {
+                let mem = self.parse_operand()?;
+                Ok(single(
+                    Op::CallRet2(mem.into()),
+                    primary_ty.clone(),
+                    *primary_ann,
+                ))
             }
 
             // sext v0, N

@@ -1,11 +1,11 @@
 //! X86-64 backend implementation.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use tuffy_ir::function::Function;
 use tuffy_ir::module::SymbolTable;
 use tuffy_regalloc::{OpKind, PReg, RegAllocInst};
-use tuffy_target::backend::{AbiMetadata, Backend};
+use tuffy_target::backend::Backend;
 use tuffy_target::regbank::{RegBank, preg_reg_num};
 use tuffy_target::reloc::{RelocKind, Relocation};
 use tuffy_target::types::{CompiledFunction, StaticData};
@@ -90,70 +90,6 @@ fn preg_to_dwarf(p: PReg) -> u8 {
         7 => 5,          // Rdi
         n @ 8..=15 => n, // R8–R15
         _ => panic!("preg_to_dwarf: unexpected PReg({})", p.0),
-    }
-}
-
-/// X86-64 ABI metadata tracking secondary return register (RDX) usage.
-#[derive(Default, Clone)]
-pub struct X86AbiMetadata {
-    pub rdx_captures: HashMap<u32, u32>,
-    pub rdx_moves: HashMap<u32, u32>,
-    pub call_has_ret2: HashSet<u32>,
-    /// Call instruction indices whose return value is an exact double-width
-    /// integer that needs legalization into the backend's low/high return convention.
-    pub double_width_return_calls: HashSet<u32>,
-    /// Map from IR call instruction index to the landing-pad wrapper block
-    /// index (used as label id during isel).  Only populated for calls that
-    /// have `UnwindAction::Cleanup`.
-    pub call_cleanup_labels: HashMap<u32, u32>,
-}
-
-impl X86AbiMetadata {
-    /// Return the call set that needs RDX secondary-return handling.
-    ///
-    /// This keeps compatibility with existing metadata producers while
-    /// allowing wide call classification inputs to be merged centrally.
-    fn call_secondary_return_set(&self) -> HashSet<u32> {
-        let mut out = self.call_has_ret2.clone();
-        out.extend(self.double_width_return_calls.iter().copied());
-        out
-    }
-}
-
-impl AbiMetadata for X86AbiMetadata {
-    fn mark_secondary_return_capture(&mut self, inst_idx: u32, call_idx: u32) {
-        self.rdx_captures.insert(inst_idx, call_idx);
-    }
-
-    fn mark_call_secondary_return(&mut self, call_idx: u32) {
-        self.call_has_ret2.insert(call_idx);
-    }
-
-    fn mark_secondary_return_move(&mut self, inst_idx: u32, source_idx: u32) {
-        self.rdx_moves.insert(inst_idx, source_idx);
-    }
-
-    fn mark_double_width_return_call(&mut self, call_idx: u32) {
-        self.double_width_return_calls.insert(call_idx);
-    }
-
-    fn is_double_width_return_call(&self, call_idx: u32) -> bool {
-        self.double_width_return_calls.contains(&call_idx)
-    }
-
-    fn has_secondary_return(&self, call_idx: u32) -> bool {
-        self.call_has_ret2.contains(&call_idx)
-    }
-
-    fn find_capture_for_call(&self, call_idx: u32) -> Option<u32> {
-        self.rdx_captures
-            .iter()
-            .find(|&(_, &target)| target == call_idx)
-            .map(|(&cap_idx, _)| cap_idx)
-    }
-
-    fn get_secondary_return_move(&self, ret_inst_idx: u32) -> Option<u32> {
-        self.rdx_moves.get(&ret_inst_idx).copied()
     }
 }
 
@@ -712,29 +648,9 @@ pub fn lower_isel_result(isel_result: &IselResult<VInst>) -> Vec<PInst> {
 pub struct X86Backend;
 
 impl Backend for X86Backend {
-    type Metadata = X86AbiMetadata;
-
-    fn compile_function(
-        &self,
-        func: &Function,
-        symbols: &SymbolTable,
-        metadata: &X86AbiMetadata,
-    ) -> Option<CompiledFunction> {
+    fn compile_function(&self, func: &Function, symbols: &SymbolTable) -> Option<CompiledFunction> {
         // 1. Instruction selection → MInst<VReg>
-        let call_secondary_return = metadata.call_secondary_return_set();
-        let isel_result = match isel::isel(
-            func,
-            symbols,
-            &metadata.rdx_captures,
-            &metadata.rdx_moves,
-            &call_secondary_return,
-            &metadata.call_cleanup_labels,
-        ) {
-            Some(r) => r,
-            None => {
-                return None;
-            }
-        };
+        let isel_result = isel::isel(func, symbols)?;
 
         // 2. Register allocation → VReg assignments
         let alloc_result = tuffy_regalloc::allocator::allocate(

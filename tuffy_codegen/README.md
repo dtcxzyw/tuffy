@@ -18,9 +18,12 @@ API surface:
 - `generate_allocator_stubs` — generate allocator forwarding stubs.
 - `generate_entry_point` — generate C `main` and `lang_start`.
 
-### `AbiMetadataBox`
+### ABI Lowering
 
-Target-agnostic wrapper for backend-specific ABI metadata. Allows the MIR translation layer to record ABI information (secondary return registers, exact double-width returns) without knowing the target.
+`tuffy_codegen` no longer carries backend-specific ABI side metadata from the
+frontend. It legalizes wide IR values, preserves semantic IR operations such as
+`call_ret2`, and then lets the selected backend derive its own machine ABI
+lowering directly from the legalized IR.
 
 ## Dependencies
 

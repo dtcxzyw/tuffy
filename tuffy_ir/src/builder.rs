@@ -1399,12 +1399,13 @@ impl<'a> Builder<'a> {
         args: Vec<Operand>,
         ret_ty: Type,
         mem: MemOperand,
+        cleanup_label: Option<u32>,
         ann: Option<Annotation>,
         origin: Origin,
     ) -> (MemValue, Option<ValueRef>) {
         if ret_ty == Type::Unit {
             let primary = self.push_inst(
-                Op::Call(callee.raw().into(), args, mem),
+                Op::Call(callee.raw().into(), args, mem, cleanup_label),
                 Type::Mem,
                 None,
                 origin,
@@ -1413,7 +1414,7 @@ impl<'a> Builder<'a> {
             (MemValue::new(primary, self.func), None)
         } else {
             let primary = self.push_inst_with_secondary(
-                Op::Call(callee.raw().into(), args, mem),
+                Op::Call(callee.raw().into(), args, mem, cleanup_label),
                 Type::Mem,
                 ret_ty,
                 origin,
@@ -1423,6 +1424,17 @@ impl<'a> Builder<'a> {
             let secondary = ValueRef::inst_secondary_result(primary.index());
             (MemValue::new(primary, self.func), Some(secondary))
         }
+    }
+
+    /// Read the secondary machine return value of a call.
+    pub fn call_ret2(
+        &mut self,
+        mem: MemOperand,
+        ty: Type,
+        ann: Option<Annotation>,
+        origin: Origin,
+    ) -> ValueRef {
+        self.push_inst(Op::CallRet2(mem), ty, None, origin, ann)
     }
 
     // ── Type conversion ──
@@ -1596,9 +1608,15 @@ impl<'a> Builder<'a> {
     // ── Terminators ──
 
     /// Return from function. Takes mem token output.
-    pub fn ret(&mut self, val: Option<Operand>, mem: MemOperand, origin: Origin) -> ValueRef {
+    pub fn ret(
+        &mut self,
+        val: Option<Operand>,
+        ret2: Option<Operand>,
+        mem: MemOperand,
+        origin: Origin,
+    ) -> ValueRef {
         let ty = self.func.ret_ty.clone().unwrap_or(Type::Unit);
-        self.push_inst(Op::Ret(val, mem), ty, None, origin, None)
+        self.push_inst(Op::Ret(val, ret2, mem), ty, None, origin, None)
     }
 
     /// Unconditional branch with block arguments.

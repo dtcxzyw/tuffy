@@ -1289,7 +1289,7 @@ pub fn execute_instruction(
         }
 
         // ── Call ──
-        Op::Call(_, _, _) => {
+        Op::Call(..) | Op::CallRet2(..) => {
             // Calls are handled specially by the interpreter (interp.rs).
             unreachable!("Call should be handled by the interpreter, not the executor")
         }
@@ -1700,7 +1700,7 @@ pub fn execute_instruction(
         }
 
         // ── Terminators ──
-        Op::Ret(val, _mem) => {
+        Op::Ret(val, _, _mem) => {
             let ret_val = val.as_ref().map(resolve_operand_value);
             Ok(ExecResult::Terminator(TerminatorAction::Return(ret_val)))
         }

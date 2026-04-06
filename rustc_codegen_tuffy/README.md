@@ -53,7 +53,9 @@ The downstream crates (`tuffy_ir`, `tuffy_opt`, `tuffy_target`, `tuffy_target_x8
 
 ## Key Design Decisions
 
-- Uses `tuffy_codegen::AbiMetadataBox` to communicate ABI details (secondary returns, exact double-width returns) to the backend without target coupling.
+- Keeps MIR lowering semantic: machine ABI details such as secondary return
+  registers are represented explicitly in IR (`call_ret2`, secondary `ret`
+  operand, call cleanup labels) or derived later by the backend.
 - Handles i128/u128 types through annotation-based legalization rather than type splitting at the IR level.
 - **wide integer load/store**: emits a single wide `load` / `store` IR instruction; the backend legalize pass lowers it into legal-width operations.
 - **carrying_mul_add**: emits dedicated `scarrying_mul_add` / `ucarrying_mul_add` IR ops; the backend legalize pass lowers them into legal-width arithmetic.

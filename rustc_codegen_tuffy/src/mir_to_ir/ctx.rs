@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 
 use rustc_middle::mir::{self, BasicBlock};
 use rustc_middle::ty::{self, Instance, TyCtxt};
-use tuffy_codegen::AbiMetadataBox;
 use tuffy_ir::builder::Builder;
 use tuffy_ir::instruction::{Operand, Origin};
 use tuffy_ir::module::{SymbolId, SymbolTable};
@@ -166,7 +165,6 @@ pub(super) struct TranslationCtx<'a, 'tcx> {
     pub(super) block_map: BlockMap,
     /// MemSSA block arguments: one `Type::Mem` arg per MIR basic block.
     pub(super) block_mem_args: Vec<Option<ValueRef>>,
-    pub(super) abi_metadata: AbiMetadataBox,
     pub(super) target_max_int_width: u32,
     pub(super) target_max_abi_int_parts: u32,
     pub(super) instance: Instance<'tcx>,
@@ -207,9 +205,6 @@ pub(super) struct TranslationCtx<'a, 'tcx> {
     /// Landing-pad wrapper blocks to emit after the main translation loop.
     /// Each entry is `(wrapper_ir_block, cleanup_mir_bb)`.
     pub(super) landing_pad_wrappers: Vec<(tuffy_ir::value::BlockRef, BasicBlock)>,
-    /// ValueRef index of the last emitted call instruction (Op::Call).
-    /// Used by the terminator handler to record cleanup label associations.
-    pub(super) last_call_vref: Option<u32>,
 }
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {

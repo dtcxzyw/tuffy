@@ -869,6 +869,16 @@ struct CallAbiPlan {
     has_secondary_return: bool,
 }
 
+fn collect_call_ret2_users(func: &Function) -> HashSet<u32> {
+    let mut calls = HashSet::new();
+    for (_, inst) in func.inst_pool.iter_insts() {
+        if let Op::CallRet2(mem) = &inst.op {
+            calls.insert(mem.clone().raw().value.index());
+        }
+    }
+    calls
+}
+
 fn has_exact_double_gpr_int_result(func: &Function, inst_idx: u32) -> bool {
     let inst = func.inst(inst_idx);
     is_exact_double_gpr_int_annotation(inst.secondary_result_annotation.as_ref())
@@ -881,13 +891,11 @@ fn classify_call_abi(
 ) -> CallAbiPlan {
     let call_idx = call_vref.index();
     let inst = func.inst(call_idx);
-    let wide_scalar_call = has_exact_double_gpr_int_result(func, call_idx);
+    let exact_double = has_exact_double_gpr_int_result(func, call_idx);
     CallAbiPlan {
         // In tuffy IR, call data is encoded in the call's secondary result.
         has_primary_return: inst.secondary_ty.is_some(),
-        // Secondary return (RDX) may be provided either by legacy metadata
-        // or by exact double-width integer annotations on the call result.
-        has_secondary_return: call_has_ret2.contains(&call_idx) || wide_scalar_call,
+        has_secondary_return: call_has_ret2.contains(&call_idx) || exact_double,
     }
 }
 
@@ -897,14 +905,8 @@ fn classify_call_abi(
 /// insertion is deferred to a post-regalloc step.
 ///
 /// Returns None if the function contains unsupported IR ops.
-pub fn isel(
-    func: &Function,
-    symbols: &SymbolTable,
-    rdx_captures: &HashMap<u32, u32>,
-    rdx_moves: &HashMap<u32, u32>,
-    call_has_ret2: &HashSet<u32>,
-    call_cleanup_labels: &HashMap<u32, u32>,
-) -> Option<IselResult<VInst>> {
+pub fn isel(func: &Function, symbols: &SymbolTable) -> Option<IselResult<VInst>> {
+    let call_has_ret2 = collect_call_ret2_users(func);
     let ba_cap = func.block_args.len();
     let pool_cap = func.inst_pool.next_index() as usize;
     let mut ctx = IselCtx {
@@ -934,10 +936,7 @@ pub fn isel(
                     &inst.ty,
                     func,
                     symbols,
-                    rdx_captures,
-                    rdx_moves,
-                    call_has_ret2,
-                    call_cleanup_labels,
+                    &call_has_ret2,
                 )
                 .is_none()
                 {
@@ -999,10 +998,7 @@ fn select_inst(
     inst_ty: &Type,
     func: &Function,
     symbols: &SymbolTable,
-    rdx_captures: &HashMap<u32, u32>,
-    rdx_moves: &HashMap<u32, u32>,
     call_has_ret2: &HashSet<u32>,
-    call_cleanup_labels: &HashMap<u32, u32>,
 ) -> Option<()> {
     // Handle exact double-width integer operations before the generated rules.
     if has_exact_double_gpr_int_result(func, vref.index())
@@ -1231,89 +1227,69 @@ fn select_inst(
         }
 
         Op::Const(imm) => {
-            if let Some(call_idx) = rdx_captures.get(&vref.index()) {
-                // Look up the RDX vreg captured at the call site.
-                let captured = ctx
-                    .rdx_captured
-                    .get(call_idx)
-                    .copied()
-                    .expect("rdx_captured must be set for call with secondary return");
-                ctx.regs.assign(vref, captured);
-            } else if let Some(src_idx) = rdx_moves.get(&vref.index()) {
-                let src_vref = ValueRef::inst_result(*src_idx);
-                let src_vreg = ctx.regs.get(src_vref)?;
-                let dst = ctx.alloc.alloc_fixed(Gpr::Rdx.to_preg());
-                ctx.out.push(MInst::MovRR {
-                    size: OpSize::S64,
-                    dst,
-                    src: src_vreg,
-                });
+            // Try to fit in i64
+            if let Some(imm_i64) = imm.to_i64().or_else(|| imm.to_u64().map(|v| v as i64)) {
+                let dst = ctx.alloc.alloc();
+                if imm_i64 >= 0 && imm_i64 <= u32::MAX as i64 {
+                    ctx.out.push(MInst::MovRI {
+                        size: OpSize::S32,
+                        dst,
+                        imm: imm_i64,
+                    });
+                } else {
+                    ctx.out.push(MInst::MovRI64 { dst, imm: imm_i64 });
+                }
                 ctx.regs.assign(vref, dst);
             } else {
-                // Try to fit in i64
-                if let Some(imm_i64) = imm.to_i64().or_else(|| imm.to_u64().map(|v| v as i64)) {
-                    let dst = ctx.alloc.alloc();
-                    if imm_i64 >= 0 && imm_i64 <= u32::MAX as i64 {
-                        ctx.out.push(MInst::MovRI {
-                            size: OpSize::S32,
-                            dst,
-                            imm: imm_i64,
-                        });
-                    } else {
-                        ctx.out.push(MInst::MovRI64 { dst, imm: imm_i64 });
-                    }
-                    ctx.regs.assign(vref, dst);
+                // i128 constant: allocate stack slot (16 bytes for i128)
+                let offset = ctx.stack.alloc(vref, 16, 16);
+                let rbp = ctx.alloc.alloc_fixed(Gpr::Rbp.to_preg());
+
+                // Convert to two's complement u128 representation
+                let u128_repr = if imm.sign() == num_bigint::Sign::Minus {
+                    // For negative: u128 = 2^128 + value
+                    let modulus = num_bigint::BigInt::from(1u128) << 128;
+                    modulus + imm.clone()
                 } else {
-                    // i128 constant: allocate stack slot (16 bytes for i128)
-                    let offset = ctx.stack.alloc(vref, 16, 16);
-                    let rbp = ctx.alloc.alloc_fixed(Gpr::Rbp.to_preg());
+                    imm.clone()
+                };
 
-                    // Convert to two's complement u128 representation
-                    let u128_repr = if imm.sign() == num_bigint::Sign::Minus {
-                        // For negative: u128 = 2^128 + value
-                        let modulus = num_bigint::BigInt::from(1u128) << 128;
-                        modulus + imm.clone()
-                    } else {
-                        imm.clone()
-                    };
+                // Extract low 64 bits using modulo
+                let modulo = num_bigint::BigInt::from(1u64) << 64;
+                let lo_bigint: num_bigint::BigInt = &u128_repr % &modulo;
+                let lo_val = lo_bigint.to_u64().unwrap_or(0) as i64;
+                let lo_reg = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRI64 {
+                    dst: lo_reg,
+                    imm: lo_val,
+                });
+                ctx.out.push(MInst::MovMR {
+                    size: OpSize::S64,
+                    base: rbp,
+                    offset,
+                    src: lo_reg,
+                });
 
-                    // Extract low 64 bits using modulo
-                    let modulo = num_bigint::BigInt::from(1u64) << 64;
-                    let lo_bigint: num_bigint::BigInt = &u128_repr % &modulo;
-                    let lo_val = lo_bigint.to_u64().unwrap_or(0) as i64;
-                    let lo_reg = ctx.alloc.alloc();
-                    ctx.out.push(MInst::MovRI64 {
-                        dst: lo_reg,
-                        imm: lo_val,
-                    });
-                    ctx.out.push(MInst::MovMR {
-                        size: OpSize::S64,
-                        base: rbp,
-                        offset,
-                        src: lo_reg,
-                    });
+                // Extract high 64 bits
+                let divisor = num_bigint::BigInt::from(1u64) << 64;
+                let hi_bigint: num_bigint::BigInt = u128_repr / divisor;
+                let hi_val = hi_bigint.to_u64().unwrap_or(0) as i64;
+                let hi_reg = ctx.alloc.alloc();
+                ctx.out.push(MInst::MovRI64 {
+                    dst: hi_reg,
+                    imm: hi_val,
+                });
+                ctx.out.push(MInst::MovMR {
+                    size: OpSize::S64,
+                    base: rbp,
+                    offset: offset + 8,
+                    src: hi_reg,
+                });
 
-                    // Extract high 64 bits
-                    let divisor = num_bigint::BigInt::from(1u64) << 64;
-                    let hi_bigint: num_bigint::BigInt = u128_repr / divisor;
-                    let hi_val = hi_bigint.to_u64().unwrap_or(0) as i64;
-                    let hi_reg = ctx.alloc.alloc();
-                    ctx.out.push(MInst::MovRI64 {
-                        dst: hi_reg,
-                        imm: hi_val,
-                    });
-                    ctx.out.push(MInst::MovMR {
-                        size: OpSize::S64,
-                        base: rbp,
-                        offset: offset + 8,
-                        src: hi_reg,
-                    });
-
-                    // Assign lo as primary, hi as secondary
-                    ctx.regs.assign(vref, lo_reg);
-                    let secondary = ValueRef::inst_secondary_result(vref.index());
-                    ctx.regs.assign(secondary, hi_reg);
-                }
+                // Assign lo as primary, hi as secondary
+                ctx.regs.assign(vref, lo_reg);
+                let secondary = ValueRef::inst_secondary_result(vref.index());
+                ctx.regs.assign(secondary, hi_reg);
             }
         }
 
@@ -1424,16 +1400,14 @@ fn select_inst(
             )?;
         }
 
-        Op::Ret(val, _mem) => {
+        Op::Ret(val, ret2, _mem) => {
             // If this ret has a secondary return value (upper machine part),
             // we need to place lo in RAX and hi in RDX.  We must be
             // careful about ordering to avoid clobbering: read both
             // source registers first, then write to the fixed regs.
-            let hi_src = if let Some(src_idx) = rdx_moves.get(&vref.index()) {
-                let src_vref = ValueRef::inst_result(*src_idx);
-                Some(ctx.regs.get(src_vref)?)
-            } else {
-                None
+            let hi_src = match ret2.as_ref() {
+                Some(op) => Some(ctx.ensure_in_reg(op.value)?),
+                None => None,
             };
             // Check if this function returns a float (SysV ABI: f32/f64 in XMM0).
             let ret_is_float = matches!(func.ret_ty, Some(tuffy_ir::types::Type::Float(_)));
@@ -1491,7 +1465,7 @@ fn select_inst(
             ctx.out.push(MInst::Ret);
         }
 
-        Op::Call(callee, args, _mem) => {
+        Op::Call(callee, args, _mem, _cleanup_label) => {
             select_call(
                 ctx,
                 vref,
@@ -1500,8 +1474,16 @@ fn select_inst(
                 func,
                 symbols,
                 call_has_ret2,
-                call_cleanup_labels,
             )?;
+        }
+
+        Op::CallRet2(mem) => {
+            let captured = ctx
+                .rdx_captured
+                .get(&mem.clone().raw().value.index())
+                .copied()
+                .expect("call_ret2 must follow a call with secondary return");
+            ctx.regs.assign(vref, captured);
         }
 
         Op::StackSlot(bytes, align) => {
@@ -3634,7 +3616,6 @@ fn select_call(
     func: &Function,
     symbols: &SymbolTable,
     call_has_ret2: &HashSet<u32>,
-    call_cleanup_labels: &HashMap<u32, u32>,
 ) -> Option<()> {
     // Phase 1: materialize all args into unconstrained vregs.
     // This must happen before any fixed-register moves, otherwise
@@ -3887,7 +3868,10 @@ fn select_call(
     };
 
     let callee_idx = callee.value.index();
-    let cleanup_label = call_cleanup_labels.get(&{ vref.index() }).copied();
+    let cleanup_label = match &func.inst(vref.index()).op {
+        Op::Call(_, _, _, cleanup) => *cleanup,
+        _ => None,
+    };
     if let Op::SymbolAddr(sym_id) = &func.inst(callee_idx).op {
         let name = symbols.resolve(*sym_id).to_string();
         ctx.out.push(MInst::CallSym {
