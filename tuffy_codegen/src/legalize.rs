@@ -7007,6 +7007,20 @@ mod tests {
     }
 
     #[test]
+    fn legalize_double_width_int_to_fp_uses_compiler_rt_helpers() {
+        for (signed, expected) in [(false, "__floatuntidf"), (true, "__floattidf")] {
+            let (func, mut symbols) = build_int_to_fp_func(128, signed);
+            let meta = X86AbiMetadata::default();
+            let legalized = legalize(&func, &meta, &X86LegalityInfo, &mut symbols)
+                .expect("expected int-to-fp legalization");
+            let saw_helper = legalized.0.inst_pool.iter_insts().any(|(_, inst)| {
+                matches!(inst.op, Op::SymbolAddr(sym) if symbols.resolve(sym) == expected)
+            });
+            assert!(saw_helper, "expected helper symbol {expected}");
+        }
+    }
+
+    #[test]
     fn interpret_legalized_wide_fp_to_int_regressions() {
         let (func, mut symbols) = build_fp_to_int_check_func(
             160,
