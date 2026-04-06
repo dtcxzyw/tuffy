@@ -590,7 +590,7 @@ fn is_wide<M>(s: &State<M>, v: ValueRef) -> bool {
 
 /// Returns the low/high legal-part pair for a double-width operand, correctly handling non-wide
 /// values. Unlike `vmap.pair()`, which returns `(v, v)` for a non-wide value,
-/// this derives the hi word from lo:
+/// this derives the upper part from the low part:
 ///
 /// - For `Unsigned` annotated operands, zero-extend (hi = 0).  A non-wide
 ///   value with `Unsigned(n)` annotation represents a u64 constant whose
@@ -726,7 +726,7 @@ fn walk_block_insts<M: AbiMetadata + Clone>(
 
     for (old_vref, inst) in old.block_insts_with_values(old_blk) {
         legalize_inst(old, s, b, old_vref, inst, symbols);
-        // Keep current_old_mem up to date so that leg_div_rem_128 can
+        // Keep current_old_mem up to date so that double-width div/rem legalization can
         // inject calls into the correct position in the mem chain.
         if inst.ty == Type::Mem {
             s.current_old_mem = Some(old_vref);
@@ -2362,7 +2362,7 @@ fn leg_wide_const<M>(
 ) {
     let bits = value_annotation(old, old_vref)
         .and_then(|ann| int_annotation_bits(Some(ann)))
-        .unwrap_or(128);
+        .unwrap_or(s.part_bits * 2);
     let parts = const_parts_for_bits(b, val, bits, s.part_bits);
     s.vmap.set_parts(old_vref, parts);
 }
@@ -3244,7 +3244,7 @@ fn leg_add<M>(
     a: &Operand,
     op_b: &Operand,
 ) {
-    let bits = int_annotation_bits(value_annotation(old, old_vref)).unwrap_or(128);
+    let bits = int_annotation_bits(value_annotation(old, old_vref)).unwrap_or(s.part_bits * 2);
     if bits > s.part_bits && bits.is_multiple_of(s.limb_bits) {
         let a_limbs = operand_limbs32(old, s, b, a, bits);
         let b_limbs = operand_limbs32(old, s, b, op_b, bits);
@@ -3287,7 +3287,7 @@ fn leg_sub<M>(
     a: &Operand,
     op_b: &Operand,
 ) {
-    let bits = int_annotation_bits(value_annotation(_old, old_vref)).unwrap_or(128);
+    let bits = int_annotation_bits(value_annotation(_old, old_vref)).unwrap_or(s.part_bits * 2);
     if bits > s.part_bits && bits.is_multiple_of(s.limb_bits) {
         let a_limbs = operand_limbs32(_old, s, b, a, bits);
         let b_limbs = operand_limbs32(_old, s, b, op_b, bits);
@@ -3397,7 +3397,7 @@ fn leg_mul<M>(
 }
 
 // ---------------------------------------------------------------------------
-// Widening 64×64→128 multiply and arithmetic helpers
+// Widening legal-part multiply and arithmetic helpers
 // ---------------------------------------------------------------------------
 
 /// Compute the full double-part product of two legal parts using quarter limbs.
@@ -3505,7 +3505,7 @@ fn leg_uadd_with_overflow_wide<M>(
     a: &Operand,
     op_b: &Operand,
 ) {
-    let bits = int_annotation_bits(value_annotation(old, old_vref)).unwrap_or(128);
+    let bits = int_annotation_bits(value_annotation(old, old_vref)).unwrap_or(s.part_bits * 2);
     if bits > s.part_bits && bits.is_multiple_of(s.limb_bits) {
         let a_limbs = operand_limbs32(old, s, b, a, bits);
         let b_limbs = operand_limbs32(old, s, b, op_b, bits);
@@ -3588,7 +3588,7 @@ fn leg_sadd_with_overflow_wide<M>(
     a: &Operand,
     op_b: &Operand,
 ) {
-    let bits = int_annotation_bits(value_annotation(old, old_vref)).unwrap_or(128);
+    let bits = int_annotation_bits(value_annotation(old, old_vref)).unwrap_or(s.part_bits * 2);
     if bits > s.part_bits && bits.is_multiple_of(s.limb_bits) {
         let a_limbs = operand_limbs32(old, s, b, a, bits);
         let b_limbs = operand_limbs32(old, s, b, op_b, bits);
@@ -3642,7 +3642,7 @@ fn leg_usub_with_overflow_wide<M>(
     a: &Operand,
     op_b: &Operand,
 ) {
-    let bits = int_annotation_bits(value_annotation(old, old_vref)).unwrap_or(128);
+    let bits = int_annotation_bits(value_annotation(old, old_vref)).unwrap_or(s.part_bits * 2);
     if bits > s.part_bits && bits.is_multiple_of(s.limb_bits) {
         let a_limbs = operand_limbs32(old, s, b, a, bits);
         let b_limbs = operand_limbs32(old, s, b, op_b, bits);
@@ -4036,7 +4036,7 @@ fn leg_ssub_with_overflow_wide<M>(
     a: &Operand,
     op_b: &Operand,
 ) {
-    let bits = int_annotation_bits(value_annotation(old, old_vref)).unwrap_or(128);
+    let bits = int_annotation_bits(value_annotation(old, old_vref)).unwrap_or(s.part_bits * 2);
     if bits > s.part_bits && bits.is_multiple_of(s.limb_bits) {
         let a_limbs = operand_limbs32(old, s, b, a, bits);
         let b_limbs = operand_limbs32(old, s, b, op_b, bits);
@@ -4115,7 +4115,7 @@ fn leg_smul_with_overflow_wide<M>(
     a: &Operand,
     op_b: &Operand,
 ) {
-    let bits = int_annotation_bits(value_annotation(old, old_vref)).unwrap_or(128);
+    let bits = int_annotation_bits(value_annotation(old, old_vref)).unwrap_or(s.part_bits * 2);
     if bits > s.part_bits * 2 && bits.is_multiple_of(s.limb_bits) {
         let limb_count = num_limbs32(bits, s.limb_bits);
         let zero = b
@@ -4167,7 +4167,7 @@ fn leg_smul_with_overflow_wide<M>(
     let (hl_lo, hl_hi) = widening_mul_u64(b, a_hi, b_lo);
     let (hh_lo, hh_hi) = widening_mul_u64(b, a_hi, b_hi);
 
-    // Combine into four 64-bit words of the 256-bit result:
+    // Combine into four equal-width words of the full product:
     //   w0 = ll_lo
     //   w1 = ll_hi + lh_lo + hl_lo  (carry → c1)
     //   w2 = lh_hi + hl_hi + hh_lo + c1  (carry → c2)
@@ -4266,7 +4266,7 @@ fn leg_umul_with_overflow_wide<M>(
     a: &Operand,
     op_b: &Operand,
 ) {
-    let bits = int_annotation_bits(value_annotation(old, old_vref)).unwrap_or(128);
+    let bits = int_annotation_bits(value_annotation(old, old_vref)).unwrap_or(s.part_bits * 2);
     if bits > s.part_bits * 2 && bits.is_multiple_of(s.limb_bits) {
         let limb_count = num_limbs32(bits, s.limb_bits);
         let zero = b
@@ -4565,8 +4565,8 @@ fn leg_shr<M>(
 // Wide rotate (left or right)
 // ---------------------------------------------------------------------------
 
-/// Helper: compute a two-part left shift without setting vmap.
-fn shl_128_pair(
+/// Helper: compute a double-width left shift without setting vmap.
+fn shl_double_width_pair(
     b: &mut Builder,
     a_lo: ValueRef,
     a_hi: ValueRef,
@@ -4615,8 +4615,8 @@ fn shl_128_pair(
     (lo, hi)
 }
 
-/// Helper: compute a two-part unsigned right shift without setting vmap.
-fn shr_128_pair(
+/// Helper: compute a double-width unsigned right shift without setting vmap.
+fn shr_double_width_pair(
     b: &mut Builder,
     a_lo: ValueRef,
     a_hi: ValueRef,
@@ -4724,17 +4724,22 @@ fn leg_rotate_wide<M>(
     // Complement: (bits - n_mod) mod bits
     // When n_mod == 0, the complement becomes 0 and the combined result is the identity.
     // then shl_result | shr_result = x | x = x, which is correct.
-    let c128 = b.iconst(128i64, 64, IntSignedness::Unsigned, o());
-    let comp = b.sub(c128.into(), n_mod.into(), I64, o());
+    let width_total = b.iconst(
+        (s.part_bits * 2) as i64,
+        s.part_bits,
+        IntSignedness::Unsigned,
+        o(),
+    );
+    let comp = b.sub(width_total.into(), n_mod.into(), part_ann(s), o());
     let comp_mod = b.and(comp.into(), c127.into(), I64, o()).raw();
 
     let (fwd_lo, fwd_hi, bwd_lo, bwd_hi) = if is_left {
-        let (shl_lo, shl_hi) = shl_128_pair(b, a_lo, a_hi, n_mod);
-        let (shr_lo, shr_hi) = shr_128_pair(b, a_lo, a_hi, comp_mod);
+        let (shl_lo, shl_hi) = shl_double_width_pair(b, a_lo, a_hi, n_mod);
+        let (shr_lo, shr_hi) = shr_double_width_pair(b, a_lo, a_hi, comp_mod);
         (shl_lo, shl_hi, shr_lo, shr_hi)
     } else {
-        let (shr_lo, shr_hi) = shr_128_pair(b, a_lo, a_hi, n_mod);
-        let (shl_lo, shl_hi) = shl_128_pair(b, a_lo, a_hi, comp_mod);
+        let (shr_lo, shr_hi) = shr_double_width_pair(b, a_lo, a_hi, n_mod);
+        let (shl_lo, shl_hi) = shl_double_width_pair(b, a_lo, a_hi, comp_mod);
         (shr_lo, shr_hi, shl_lo, shl_hi)
     };
 
@@ -5070,11 +5075,11 @@ fn get_fp_to_int_float_type(vref: ValueRef, old: &Function) -> Option<FloatType>
 }
 
 // ---------------------------------------------------------------------------
-// float → i128/u128: lower to compiler-rt libcall
-//   f32 → u128: __fixunssfti(f32) → u128   (lo=rax, hi=rdx)
-//   f64 → u128: __fixunsdfti(f64) → u128
-//   f32 → i128: __fixsfti(f32)    → i128
-//   f64 → i128: __fixdfti(f64)    → i128
+// float → double-width integer: lower to compiler-rt libcall
+//   f32 → unsigned double-width integer: __fixunssfti(f32)
+//   f64 → unsigned double-width integer: __fixunsdfti(f64)
+//   f32 → signed double-width integer:   __fixsfti(f32)
+//   f64 → signed double-width integer:   __fixdfti(f64)
 // Called from the wide Zext(fp_to_ui) and Sext(fp_to_si) handlers
 // to provide correct saturation semantics for overflow/infinity/NaN.
 // ---------------------------------------------------------------------------
@@ -5136,7 +5141,7 @@ fn leg_fp_to_int_double_width<M: AbiMetadata + Clone>(
         (false, FloatType::F64) => "__fixunsdfti",
         (true, FloatType::F32) => "__fixsfti",
         (true, FloatType::F64) => "__fixdfti",
-        _ => panic!("unsupported float-to-i128: signed={signed} ft={ft:?}"),
+        _ => panic!("unsupported float-to-double-width-int: signed={signed} ft={ft:?}"),
     };
     let sym_id = symbols.intern(name);
     let callee = b.symbol_addr(sym_id, o()).raw();
@@ -5146,7 +5151,7 @@ fn leg_fp_to_int_double_width<M: AbiMetadata + Clone>(
 
     let old_mem = s
         .current_old_mem
-        .expect("float-to-i128 requires a mem token in scope");
+        .expect("float-to-double-width-int requires a mem token in scope");
     let new_mem = s.vmap.one(old_mem);
 
     let (call_mem, data) = b.call(
@@ -5342,10 +5347,10 @@ fn leg_div_rem_double_width<M: AbiMetadata + Clone>(
 
 // ---------------------------------------------------------------------------
 // Double-width integer to float: lower to compiler-rt libcall
-//   u128 -> f32: __floatuntisf(lo, hi) -> f32
-//   u128 -> f64: __floatuntidf(lo, hi) -> f64
-//   i128 -> f32: __floattisf(lo, hi) -> f32
-//   i128 -> f64: __floattidf(lo, hi) -> f64
+//   unsigned double-width integer -> f32: __floatuntisf(lo, hi)
+//   unsigned double-width integer -> f64: __floatuntidf(lo, hi)
+//   signed double-width integer -> f32:   __floattisf(lo, hi)
+//   signed double-width integer -> f64:   __floattidf(lo, hi)
 // ---------------------------------------------------------------------------
 
 fn leg_int_to_fp_double_width<M: AbiMetadata + Clone>(
@@ -5372,7 +5377,7 @@ fn leg_int_to_fp_double_width<M: AbiMetadata + Clone>(
         (parts[0], parts[1])
     } else {
         // Small double-width value mapped to a single legal part.
-        // Compute the hi word: sign-extend for i128, zero for u128.
+        // Compute the upper part: sign-extend for signed, zero for unsigned.
         let lo = s.vmap.one(a.value);
         let hi = if signed {
             let shift = b.iconst(
