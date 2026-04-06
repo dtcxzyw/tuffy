@@ -1499,11 +1499,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // Explicitly extend to the full destination width.
                     if signed {
                         self.builder
-                            .sext(raw.into(), 128, Origin::synthetic())
+                            .sext(raw.into(), bit_width as u32, Origin::synthetic())
                             .raw()
                     } else {
                         self.builder
-                            .zext(raw.into(), 128, Origin::synthetic())
+                            .zext(raw.into(), bit_width as u32, Origin::synthetic())
                             .raw()
                     }
                 } else if signed {
