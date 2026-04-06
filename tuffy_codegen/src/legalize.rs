@@ -5317,7 +5317,7 @@ fn leg_div_rem_128<M: AbiMetadata + Clone>(
     // that the hi half arrives in RDX.
     let call_idx = call_mem.index();
     s.meta.mark_call_secondary_return(call_idx);
-    let hi_capture = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
+    let hi_capture = b.iconst(0i64, s.part_bits, IntSignedness::Unsigned, o());
     s.meta
         .mark_secondary_return_capture(hi_capture.index(), call_idx);
 
@@ -5431,7 +5431,8 @@ fn leg_ret<M: AbiMetadata>(
             let hi = if let Some(src_idx) = s.old_meta.get_secondary_return_move(old_vref.index()) {
                 s.vmap.one(ValueRef::inst_result(src_idx))
             } else {
-                b.iconst(0i64, 64, IntSignedness::Unsigned, o()).raw()
+                b.iconst(0i64, s.part_bits, IntSignedness::Unsigned, o())
+                    .raw()
             };
             (lo, hi)
         };
@@ -5507,7 +5508,7 @@ fn leg_call<M: AbiMetadata + Clone>(
             let call_idx = mem_out.index();
             s.meta.mark_call_secondary_return(call_idx);
 
-            let hi_capture = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
+            let hi_capture = b.iconst(0i64, s.part_bits, IntSignedness::Unsigned, o());
             let hi_idx = hi_capture.index();
             s.meta.mark_secondary_return_capture(hi_idx, call_idx);
 
@@ -5525,7 +5526,7 @@ fn leg_call<M: AbiMetadata + Clone>(
             let new_call_idx = mem_out.index();
             s.meta.mark_call_secondary_return(new_call_idx);
 
-            let rdx_capture = b.iconst(0i64, 64, IntSignedness::Unsigned, o());
+            let rdx_capture = b.iconst(0i64, s.part_bits, IntSignedness::Unsigned, o());
             s.meta
                 .mark_secondary_return_capture(rdx_capture.index(), new_call_idx);
 
