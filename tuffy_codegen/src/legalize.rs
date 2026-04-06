@@ -833,7 +833,17 @@ fn legalize_inst<M: AbiMetadata + Clone>(
         }
         Op::Div(a, op_b) if wide_result => {
             let bits = result_bits(s, old, old_vref);
-            if bits == s.part_bits * 2 {
+            if bits > s.part_bits * 2 && bits.is_multiple_of(s.limb_bits) {
+                leg_div_rem_wide(
+                    old,
+                    s,
+                    b,
+                    old_vref,
+                    &a.clone().raw(),
+                    &op_b.clone().raw(),
+                    true,
+                );
+            } else if bits == s.part_bits * 2 {
                 leg_div_rem_double_width(
                     old,
                     s,
@@ -846,12 +856,24 @@ fn legalize_inst<M: AbiMetadata + Clone>(
                     symbols,
                 );
             } else {
-                unimplemented!("wide div legalization beyond two parts is not implemented");
+                unimplemented!(
+                    "wide div legalization for non-limb-aligned widths is not implemented"
+                );
             }
         }
         Op::Rem(a, op_b) if wide_result => {
             let bits = result_bits(s, old, old_vref);
-            if bits == s.part_bits * 2 {
+            if bits > s.part_bits * 2 && bits.is_multiple_of(s.limb_bits) {
+                leg_div_rem_wide(
+                    old,
+                    s,
+                    b,
+                    old_vref,
+                    &a.clone().raw(),
+                    &op_b.clone().raw(),
+                    false,
+                );
+            } else if bits == s.part_bits * 2 {
                 leg_div_rem_double_width(
                     old,
                     s,
@@ -864,7 +886,9 @@ fn legalize_inst<M: AbiMetadata + Clone>(
                     symbols,
                 );
             } else {
-                unimplemented!("wide rem legalization beyond two parts is not implemented");
+                unimplemented!(
+                    "wide rem legalization for non-limb-aligned widths is not implemented"
+                );
             }
         }
         Op::And(a, op_b) if wide_result => {
@@ -2724,6 +2748,40 @@ fn add_into_limbs<M>(
     }
 }
 
+fn mask_limb_to_width<M>(s: &State<M>, b: &mut Builder, limb: ValueRef, width: u32) -> ValueRef {
+    if width >= s.limb_bits {
+        return limb;
+    }
+    let mask = b.iconst(
+        (BigInt::from(1u8) << width) - BigInt::from(1u8),
+        s.limb_bits,
+        IntSignedness::Unsigned,
+        o(),
+    );
+    b.and(
+        Operand::annotated(limb, Annotation::Int(limb_ann(s))).into(),
+        Operand::annotated(mask.raw(), Annotation::Int(limb_ann(s))).into(),
+        limb_ann(s),
+        o(),
+    )
+    .raw()
+}
+
+fn normalize_limbs32<M>(
+    s: &State<M>,
+    b: &mut Builder,
+    limbs: &[ValueRef],
+    bits: u32,
+) -> Vec<ValueRef> {
+    let widths = wide_limb_widths(s, bits);
+    limbs
+        .iter()
+        .copied()
+        .zip(widths)
+        .map(|(limb, width)| mask_limb_to_width(s, b, limb, width))
+        .collect()
+}
+
 fn sub_from_limbs<M>(s: &State<M>, b: &mut Builder, dst: &mut [ValueRef], src: &[ValueRef]) {
     let zero = b
         .iconst(0i64, s.limb_bits, IntSignedness::Unsigned, o())
@@ -2735,6 +2793,112 @@ fn sub_from_limbs<M>(s: &State<M>, b: &mut Builder, dst: &mut [ValueRef], src: &
         *slot = diff;
         borrow = next_borrow;
     }
+}
+
+fn zero_limbs32<M>(s: &State<M>, b: &mut Builder, len: usize) -> Vec<ValueRef> {
+    let zero = b
+        .iconst(0i64, s.limb_bits, IntSignedness::Unsigned, o())
+        .raw();
+    vec![zero; len]
+}
+
+fn poison_limb32<M>(s: &State<M>, b: &mut Builder) -> ValueRef {
+    let zero = b.iconst(0i64, s.limb_bits, IntSignedness::Unsigned, o());
+    b.div(
+        Operand::annotated(zero.raw(), Annotation::Int(limb_ann(s))).into(),
+        Operand::annotated(zero.raw(), Annotation::Int(limb_ann(s))).into(),
+        limb_ann(s),
+        o(),
+    )
+    .raw()
+}
+
+fn poison_limbs32<M>(s: &State<M>, b: &mut Builder, len: usize) -> Vec<ValueRef> {
+    let poison = poison_limb32(s, b);
+    vec![poison; len]
+}
+
+fn select_limbs32<M>(
+    s: &State<M>,
+    b: &mut Builder,
+    cond: tuffy_ir::typed::BoolValue,
+    t: &[ValueRef],
+    f: &[ValueRef],
+) -> Vec<ValueRef> {
+    t.iter()
+        .copied()
+        .zip(f.iter().copied())
+        .map(|(tv, fv)| {
+            b.select(
+                cond.into(),
+                Operand::annotated(tv, Annotation::Int(limb_ann(s))),
+                Operand::annotated(fv, Annotation::Int(limb_ann(s))),
+                Type::Int,
+                Some(Annotation::Int(limb_ann(s))),
+                o(),
+            )
+        })
+        .collect()
+}
+
+fn limbs32_are_zero<M>(
+    s: &State<M>,
+    b: &mut Builder,
+    limbs: &[ValueRef],
+) -> tuffy_ir::typed::BoolValue {
+    let zero = b
+        .iconst(0i64, s.limb_bits, IntSignedness::Unsigned, o())
+        .raw();
+    let mut eq = b.bconst(true, o());
+    for limb in limbs {
+        let limb_zero = b.icmp(
+            ICmpOp::Eq,
+            Operand::annotated(*limb, Annotation::Int(limb_ann(s))).into(),
+            Operand::annotated(zero, Annotation::Int(limb_ann(s))).into(),
+            o(),
+        );
+        eq = b.band(eq.into(), limb_zero.into(), o());
+    }
+    eq
+}
+
+fn icmp_unsigned_ge_limbs32<M>(
+    s: &State<M>,
+    b: &mut Builder,
+    lhs: &[ValueRef],
+    rhs: &[ValueRef],
+) -> tuffy_ir::typed::BoolValue {
+    let mut eq = b.bconst(true, o());
+    let mut gt = b.bconst(false, o());
+    for (l, r) in lhs.iter().copied().zip(rhs.iter().copied()).rev() {
+        let limb_gt = b.icmp(
+            ICmpOp::Gt,
+            Operand::annotated(l, Annotation::Int(limb_ann(s))).into(),
+            Operand::annotated(r, Annotation::Int(limb_ann(s))).into(),
+            o(),
+        );
+        let limb_eq = b.icmp(
+            ICmpOp::Eq,
+            Operand::annotated(l, Annotation::Int(limb_ann(s))).into(),
+            Operand::annotated(r, Annotation::Int(limb_ann(s))).into(),
+            o(),
+        );
+        let gt_here = b.band(eq.into(), limb_gt.into(), o());
+        gt = b.bor(gt.into(), gt_here.into(), o());
+        eq = b.band(eq.into(), limb_eq.into(), o());
+    }
+    b.bor(gt.into(), eq.into(), o())
+}
+
+fn negate_limbs32<M>(
+    s: &State<M>,
+    b: &mut Builder,
+    limbs: &[ValueRef],
+    bits: u32,
+) -> Vec<ValueRef> {
+    let zeroes = zero_limbs32(s, b, limbs.len());
+    let (neg, _) = sub_limbs32(s, b, &zeroes, limbs);
+    normalize_limbs32(s, b, &neg, bits)
 }
 
 fn u32_sign_bool<M>(s: &State<M>, b: &mut Builder, v: ValueRef) -> tuffy_ir::typed::BoolValue {
@@ -3167,6 +3331,62 @@ fn full_mul_add_limbs32<M>(
     }
 
     full
+}
+
+fn udivrem_limbs32<M>(
+    s: &State<M>,
+    b: &mut Builder,
+    dividend: &[ValueRef],
+    divisor: &[ValueRef],
+    bits: u32,
+) -> (Vec<ValueRef>, Vec<ValueRef>, tuffy_ir::typed::BoolValue) {
+    let limb_count = dividend.len();
+    let mut quotient = zero_limbs32(s, b, limb_count);
+    let mut remainder = normalize_limbs32(s, b, dividend, bits);
+    let divisor = normalize_limbs32(s, b, divisor, bits);
+    let divisor_zero = limbs32_are_zero(s, b, &divisor);
+
+    for shift_idx in (0..bits).rev() {
+        let shift = b.iconst(shift_idx as i64, s.part_bits, IntSignedness::Unsigned, o());
+        let rem_shifted_raw = wide_shr_limbs(s, b, &remainder, shift.raw(), bits, false);
+        let rem_shifted = normalize_limbs32(s, b, &rem_shifted_raw, bits);
+        let ge = icmp_unsigned_ge_limbs32(s, b, &rem_shifted, &divisor);
+        let shifted_div_raw = wide_shl_limbs(s, b, &divisor, shift.raw(), bits);
+        let shifted_div = normalize_limbs32(s, b, &shifted_div_raw, bits);
+        let (diff, _) = sub_limbs32(s, b, &remainder, &shifted_div);
+        let diff = normalize_limbs32(s, b, &diff, bits);
+        remainder = select_limbs32(s, b, ge, &diff, &remainder);
+        remainder = normalize_limbs32(s, b, &remainder, bits);
+
+        let limb_idx = (shift_idx / s.limb_bits) as usize;
+        let bit_idx = shift_idx % s.limb_bits;
+        let bit = b.iconst(
+            BigInt::from(1u8) << bit_idx,
+            s.limb_bits,
+            IntSignedness::Unsigned,
+            o(),
+        );
+        let set = b.or(
+            Operand::annotated(quotient[limb_idx], Annotation::Int(limb_ann(s))).into(),
+            Operand::annotated(bit.raw(), Annotation::Int(limb_ann(s))).into(),
+            limb_ann(s),
+            o(),
+        );
+        quotient[limb_idx] = b.select(
+            ge.into(),
+            Operand::annotated(set.raw(), Annotation::Int(limb_ann(s))),
+            Operand::annotated(quotient[limb_idx], Annotation::Int(limb_ann(s))),
+            Type::Int,
+            Some(Annotation::Int(limb_ann(s))),
+            o(),
+        );
+    }
+
+    (
+        normalize_limbs32(s, b, &quotient, bits),
+        normalize_limbs32(s, b, &remainder, bits),
+        divisor_zero,
+    )
 }
 
 fn limb_mask_const<M>(s: &State<M>, b: &mut Builder, bits: u32) -> ValueRef {
@@ -5378,6 +5598,52 @@ fn leg_select_wide<M>(
 }
 
 // ---------------------------------------------------------------------------
+// Wide integer Div/Rem
+// ---------------------------------------------------------------------------
+
+fn leg_div_rem_wide<M>(
+    old: &Function,
+    s: &mut State<M>,
+    b: &mut Builder,
+    old_vref: ValueRef,
+    a: &Operand,
+    op_b: &Operand,
+    is_div: bool,
+) {
+    let bits = result_bits(s, old, old_vref);
+    let limb_count = num_limbs32(bits, s.limb_bits);
+    let a_limbs_raw = operand_limbs32(old, s, b, a, bits);
+    let a_limbs = normalize_limbs32(s, b, &a_limbs_raw, bits);
+    let b_limbs_raw = operand_limbs32(old, s, b, op_b, bits);
+    let b_limbs = normalize_limbs32(s, b, &b_limbs_raw, bits);
+    let signed = is_signed_annotation(a.annotation.as_ref());
+
+    let (result_limbs, div_zero) = if signed {
+        let a_neg = u32_sign_bool(s, b, *a_limbs.last().expect("signed wide div lhs limbs"));
+        let b_neg = u32_sign_bool(s, b, *b_limbs.last().expect("signed wide div rhs limbs"));
+        let neg_a = negate_limbs32(s, b, &a_limbs, bits);
+        let neg_b = negate_limbs32(s, b, &b_limbs, bits);
+        let abs_a = select_limbs32(s, b, a_neg, &neg_a, &a_limbs);
+        let abs_b = select_limbs32(s, b, b_neg, &neg_b, &b_limbs);
+        let (quot_mag, rem_mag, div_zero) = udivrem_limbs32(s, b, &abs_a, &abs_b, bits);
+        let quot_neg = b.bxor(a_neg.into(), b_neg.into(), o());
+        let neg_quot = negate_limbs32(s, b, &quot_mag, bits);
+        let quot = select_limbs32(s, b, quot_neg, &neg_quot, &quot_mag);
+        let neg_rem = negate_limbs32(s, b, &rem_mag, bits);
+        let rem = select_limbs32(s, b, a_neg, &neg_rem, &rem_mag);
+        (if is_div { quot } else { rem }, div_zero)
+    } else {
+        let (quot, rem, div_zero) = udivrem_limbs32(s, b, &a_limbs, &b_limbs, bits);
+        (if is_div { quot } else { rem }, div_zero)
+    };
+
+    let poison = poison_limbs32(s, b, limb_count);
+    let result_limbs = select_limbs32(s, b, div_zero, &poison, &result_limbs);
+    s.vmap
+        .set_parts(old_vref, limbs32_to_parts64(s, b, &result_limbs));
+}
+
+// ---------------------------------------------------------------------------
 // Double-width integer Div/Rem: lower to compiler-rt libcall
 //   The exact symbol suffix is chosen from the legalized double-width bits
 //   (`si` / `di` / `ti`), e.g. `__divdi3` or `__udivti3`.
@@ -6138,6 +6404,26 @@ mod tests {
             let meta = X86AbiMetadata::default();
             let legalized = legalize(&func, &meta, &X86LegalityInfo, &mut symbols)
                 .expect("expected div/rem legalization");
+            for (_, inst) in legalized.0.inst_pool.iter_insts() {
+                if let Some(Annotation::Int(ann)) = &inst.result_annotation {
+                    assert!(ann.bit_width <= 64);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn legalize_wide_divrem_paths() {
+        for (bits, is_div, signed) in [
+            (160, true, false),
+            (160, false, false),
+            (192, true, true),
+            (256, false, true),
+        ] {
+            let (func, mut symbols) = build_divrem_func(bits, is_div, signed);
+            let meta = X86AbiMetadata::default();
+            let legalized = legalize(&func, &meta, &X86LegalityInfo, &mut symbols)
+                .expect("expected wide div/rem legalization");
             for (_, inst) in legalized.0.inst_pool.iter_insts() {
                 if let Some(Annotation::Int(ann)) = &inst.result_annotation {
                     assert!(ann.bit_width <= 64);
