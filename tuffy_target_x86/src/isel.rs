@@ -428,10 +428,11 @@ fn get_int_annotation(func: &Function, val: ValueRef) -> Option<IntAnnotation> {
     }
 }
 
-/// Get the high 64 bits of a 128-bit value as a VReg.
+/// Get the upper 64-bit machine part of a wide integer value as a VReg.
 ///
-/// First checks the secondary result register (set by previous 128-bit ops).
-/// If not available, derives hi from lo using sign- or zero-extension based on annotation.
+/// First checks the secondary result register (set by previous wide-int ops).
+/// If not available, derives the upper part from the low part using sign- or
+/// zero-extension based on annotation.
 fn ensure_hi_in_reg(
     ctx: &mut IselCtx,
     val: ValueRef,
@@ -816,7 +817,7 @@ fn classify_param_abi(
                 }
             }
             _ => {
-                // Wide scalars (int:u128 / int:s128) use two consecutive GPR slots.
+                // Wide scalars lowered to two machine parts use two consecutive GPR slots.
                 let slots = if is_wide { 2 } else { 1 };
                 if int_count + slots <= ARG_REGS.len() {
                     int_count += slots;
@@ -1285,7 +1286,7 @@ fn select_inst(
         }
 
         Op::Ret(val, _mem) => {
-            // If this ret has a secondary return value (hi half of i128),
+            // If this ret has a secondary return value (upper machine part),
             // we need to place lo in RAX and hi in RDX.  We must be
             // careful about ordering to avoid clobbering: read both
             // source registers first, then write to the fixed regs.
@@ -3767,7 +3768,7 @@ fn select_call(
     }
 
     // Copy return values from fixed registers to unconstrained vregs.
-    // When both RAX and RDX are live (i128/u128 return), use MovRR2 to
+    // When both RAX and RDX are live for a wide integer return, use MovRR2 to
     // copy both as a single pseudo-instruction. This prevents the register
     // allocator from assigning one copy's destination to the other's source
     // register, which would clobber the value before it's read.

@@ -208,7 +208,7 @@ impl RegAllocInst for VInst {
                 ops.push(def_op(*dst));
                 ops.push(use_op(*src));
             }
-            // Parallel copy of two register pairs (used for i128 call returns).
+            // Parallel copy of two register pairs (used for wide integer call returns).
             MInst::MovRR2 {
                 dst1,
                 src1,

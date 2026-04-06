@@ -24,11 +24,11 @@ pub trait AbiMetadata: Default {
     /// register before a return (e.g., moving into RDX on x86-64).
     fn mark_secondary_return_move(&mut self, inst_idx: u32, source_idx: u32);
 
-    /// Mark a call instruction as returning an i128/u128 value that needs
-    /// legalization into a lo/hi register pair.
+    /// Mark a call instruction as returning a wide integer value that needs
+    /// legalization into the backend's secondary-return convention.
     fn mark_wide_return_call(&mut self, call_idx: u32);
 
-    /// Check whether a call instruction returns a wide (i128/u128) value.
+    /// Check whether a call instruction returns a wide integer value.
     fn is_wide_return_call(&self, call_idx: u32) -> bool;
 
     /// Check whether a call instruction produces a secondary return value.

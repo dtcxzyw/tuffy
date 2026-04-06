@@ -99,8 +99,8 @@ pub struct X86AbiMetadata {
     pub rdx_captures: HashMap<u32, u32>,
     pub rdx_moves: HashMap<u32, u32>,
     pub call_has_ret2: HashSet<u32>,
-    /// Call instruction indices whose return value is i128/u128 (needs
-    /// legalization into a lo/hi pair).
+    /// Call instruction indices whose return value is a wide integer that
+    /// needs legalization into the backend's low/high return convention.
     pub wide_return_calls: HashSet<u32>,
     /// Map from IR call instruction index to the landing-pad wrapper block
     /// index (used as label id during isel).  Only populated for calls that
@@ -112,7 +112,7 @@ impl X86AbiMetadata {
     /// Return the call set that needs RDX secondary-return handling.
     ///
     /// This keeps compatibility with existing metadata producers while
-    /// allowing wider call classification inputs to be merged centrally.
+    /// allowing wide call classification inputs to be merged centrally.
     fn call_secondary_return_set(&self) -> HashSet<u32> {
         let mut out = self.call_has_ret2.clone();
         out.extend(self.wide_return_calls.iter().copied());

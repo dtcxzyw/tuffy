@@ -126,7 +126,7 @@ impl AbiMetadataBox {
         }
     }
 
-    /// Mark a call instruction as returning an i128/u128 value.
+    /// Mark a call instruction as returning a wide integer value.
     pub fn mark_wide_return_call(&mut self, call_idx: u32) {
         match self {
             AbiMetadataBox::X86(meta) => meta.mark_wide_return_call(call_idx),

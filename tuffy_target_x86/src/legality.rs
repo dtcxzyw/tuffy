@@ -9,8 +9,8 @@ use tuffy_target::legality::{LegalityInfo, LegalizeAction};
 /// X86-64 legality information.
 ///
 /// x86-64 natively supports 64-bit integer operations. Operations on wider
-/// integers (e.g., 128-bit) must be split into pairs of 64-bit operations
-/// or lowered to library calls.
+/// integers must be legalized into supported-width operations or lowered to
+/// library calls.
 pub struct X86LegalityInfo;
 
 impl LegalityInfo for X86LegalityInfo {
