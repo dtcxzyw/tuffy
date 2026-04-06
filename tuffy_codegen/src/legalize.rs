@@ -2562,7 +2562,7 @@ fn limbs32_to_parts64<M>(s: &State<M>, b: &mut Builder, limbs: &[ValueRef]) -> V
 fn limb_ann<M>(s: &State<M>) -> IntAnnotation {
     IntAnnotation {
         bit_width: s.limb_bits,
-        signedness: IntSignedness::Unsigned,
+        signedness: IntSignedness::DontCare,
     }
 }
 
@@ -3244,7 +3244,7 @@ fn leg_add<M>(
     op_b: &Operand,
 ) {
     let bits = int_annotation_bits(value_annotation(old, old_vref)).unwrap_or(s.part_bits * 2);
-    if bits > s.part_bits && bits.is_multiple_of(s.limb_bits) {
+    if bits > s.part_bits * 2 && bits.is_multiple_of(s.limb_bits) {
         let a_limbs = operand_limbs32(old, s, b, a, bits);
         let b_limbs = operand_limbs32(old, s, b, op_b, bits);
         let (sum, _) = add_limbs32(s, b, &a_limbs, &b_limbs);
@@ -3287,7 +3287,7 @@ fn leg_sub<M>(
     op_b: &Operand,
 ) {
     let bits = int_annotation_bits(value_annotation(_old, old_vref)).unwrap_or(s.part_bits * 2);
-    if bits > s.part_bits && bits.is_multiple_of(s.limb_bits) {
+    if bits > s.part_bits * 2 && bits.is_multiple_of(s.limb_bits) {
         let a_limbs = operand_limbs32(_old, s, b, a, bits);
         let b_limbs = operand_limbs32(_old, s, b, op_b, bits);
         let (diff, _) = sub_limbs32(s, b, &a_limbs, &b_limbs);
@@ -3505,7 +3505,7 @@ fn leg_uadd_with_overflow_wide<M>(
     op_b: &Operand,
 ) {
     let bits = int_annotation_bits(value_annotation(old, old_vref)).unwrap_or(s.part_bits * 2);
-    if bits > s.part_bits && bits.is_multiple_of(s.limb_bits) {
+    if bits > s.part_bits * 2 && bits.is_multiple_of(s.limb_bits) {
         let a_limbs = operand_limbs32(old, s, b, a, bits);
         let b_limbs = operand_limbs32(old, s, b, op_b, bits);
         let (sum, carry) = add_limbs32(s, b, &a_limbs, &b_limbs);
@@ -3588,7 +3588,7 @@ fn leg_sadd_with_overflow_wide<M>(
     op_b: &Operand,
 ) {
     let bits = int_annotation_bits(value_annotation(old, old_vref)).unwrap_or(s.part_bits * 2);
-    if bits > s.part_bits && bits.is_multiple_of(s.limb_bits) {
+    if bits > s.part_bits * 2 && bits.is_multiple_of(s.limb_bits) {
         let a_limbs = operand_limbs32(old, s, b, a, bits);
         let b_limbs = operand_limbs32(old, s, b, op_b, bits);
         let (sum, _) = add_limbs32(s, b, &a_limbs, &b_limbs);
@@ -3642,7 +3642,7 @@ fn leg_usub_with_overflow_wide<M>(
     op_b: &Operand,
 ) {
     let bits = int_annotation_bits(value_annotation(old, old_vref)).unwrap_or(s.part_bits * 2);
-    if bits > s.part_bits && bits.is_multiple_of(s.limb_bits) {
+    if bits > s.part_bits * 2 && bits.is_multiple_of(s.limb_bits) {
         let a_limbs = operand_limbs32(old, s, b, a, bits);
         let b_limbs = operand_limbs32(old, s, b, op_b, bits);
         let (diff, borrow) = sub_limbs32(s, b, &a_limbs, &b_limbs);
@@ -3727,7 +3727,7 @@ fn leg_signed_saturating_addsub_wide<M>(
     is_add: bool,
 ) {
     let bits = result_bits(s, old, old_vref);
-    if bits > s.part_bits && bits.is_multiple_of(s.limb_bits) {
+    if bits > s.part_bits * 2 && bits.is_multiple_of(s.limb_bits) {
         let a_limbs = operand_limbs32(old, s, b, a, bits);
         let b_limbs = operand_limbs32(old, s, b, op_b, bits);
         let result_limbs = if is_add {
@@ -3906,7 +3906,7 @@ fn leg_unsigned_saturating_addsub_wide<M>(
     is_add: bool,
 ) {
     let bits = result_bits(s, old, old_vref);
-    if bits > s.part_bits && bits.is_multiple_of(s.limb_bits) {
+    if bits > s.part_bits * 2 && bits.is_multiple_of(s.limb_bits) {
         let (result_limbs, overflow) = if is_add {
             let a_limbs = operand_limbs32(old, s, b, a, bits);
             let b_limbs = operand_limbs32(old, s, b, op_b, bits);
@@ -4036,7 +4036,7 @@ fn leg_ssub_with_overflow_wide<M>(
     op_b: &Operand,
 ) {
     let bits = int_annotation_bits(value_annotation(old, old_vref)).unwrap_or(s.part_bits * 2);
-    if bits > s.part_bits && bits.is_multiple_of(s.limb_bits) {
+    if bits > s.part_bits * 2 && bits.is_multiple_of(s.limb_bits) {
         let a_limbs = operand_limbs32(old, s, b, a, bits);
         let b_limbs = operand_limbs32(old, s, b, op_b, bits);
         let (diff, _) = sub_limbs32(s, b, &a_limbs, &b_limbs);

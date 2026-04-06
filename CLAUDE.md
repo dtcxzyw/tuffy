@@ -25,6 +25,7 @@ Match the user's language in conversation. All committed content (code, comments
 - No `static` mutable state (`AtomicU64`, `Mutex`, etc.). Session state belongs on context structs.
 - **Generated files:** Files with "DO NOT EDIT" headers must not be edited manually — modify the generator instead (e.g., `tuffy_target_x86/src/isel_gen.rs`).
 - **Component conventions:** Follow each component's `README.md`. Do not insert workarounds or special-case logic in the wrong component.
+- **Wide integer lowering:** Derive split widths, limb widths, and ABI thresholds from target legality or backend abstractions. Do not hardcode `32`, `64`, or `128` for target-independent wide integer logic.
 - **Comments:** Do not add comments that the code itself explains. Only comment non-obvious logic — comments should explain *why*, not *what*. Do not delete or modify comments in code you are not otherwise changing.
 
 ## Testing Policy

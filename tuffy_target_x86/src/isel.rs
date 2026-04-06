@@ -472,11 +472,16 @@ fn ensure_hi_in_reg(
     Some(hi)
 }
 
-/// Handle integer operations with 128-bit result annotations (i128/u128).
+/// Handle exact double-width integer operations lowered into two GPR-sized halves.
 ///
 /// Keeps lo half in the primary vreg and hi half in the secondary vreg.
 /// Returns Some(()) if the operation was handled, None to fall through.
-fn select_128bit_op(ctx: &mut IselCtx, vref: ValueRef, op: &Op, func: &Function) -> Option<()> {
+fn select_double_width_int_op(
+    ctx: &mut IselCtx,
+    vref: ValueRef,
+    op: &Op,
+    func: &Function,
+) -> Option<()> {
     let _ann = func.inst(vref.index()).result_annotation;
     match op {
         Op::Add(lhs, rhs)
@@ -613,7 +618,7 @@ fn select_128bit_op(ctx: &mut IselCtx, vref: ValueRef, op: &Op, func: &Function)
                     });
                 }
                 Op::Mul(_, _) => {
-                    // 128-bit mul: lo = lo_l * lo_r (mod 2^64)
+                    // Double-width multiply: lo = lo_l * lo_r (mod 2^64)
                     // hi = lo_l*hi_r + hi_l*lo_r (partial; ignores carry from lo*lo)
                     ctx.out.push(MInst::MovRR {
                         size: OpSize::S64,
@@ -769,6 +774,15 @@ fn select_128bit_op(ctx: &mut IselCtx, vref: ValueRef, op: &Op, func: &Function)
 
 const ARG_REGS: [Gpr; 6] = [Gpr::Rdi, Gpr::Rsi, Gpr::Rdx, Gpr::Rcx, Gpr::R8, Gpr::R9];
 const MAX_XMM_ARGS: usize = 8;
+const GPR_BITS: u32 = 64;
+const DOUBLE_GPR_BITS: u32 = GPR_BITS * 2;
+
+fn is_exact_double_gpr_int_annotation(ann: Option<&Annotation>) -> bool {
+    matches!(
+        ann,
+        Some(Annotation::Int(IntAnnotation { bit_width, .. })) if *bit_width == DOUBLE_GPR_BITS
+    )
+}
 
 /// ABI location for a function parameter or call argument under SysV x86-64.
 enum ParamAbi {
@@ -783,11 +797,7 @@ enum ParamAbi {
 /// Classify where parameter `param_idx` goes under SysV x86-64 ABI,
 /// given the complete ordered parameter type list.
 fn is_wide_scalar_type(ty: &Type, ann: &Option<Annotation>) -> bool {
-    matches!(ty, Type::Int)
-        && matches!(
-            ann,
-            Some(Annotation::Int(IntAnnotation { bit_width: 128, .. }))
-        )
+    matches!(ty, Type::Int) && is_exact_double_gpr_int_annotation(ann.as_ref())
 }
 
 fn classify_param_abi(
@@ -859,12 +869,9 @@ struct CallAbiPlan {
     has_secondary_return: bool,
 }
 
-fn has_wide_scalar_annotation(func: &Function, inst_idx: u32) -> bool {
+fn has_exact_double_gpr_int_result(func: &Function, inst_idx: u32) -> bool {
     let inst = func.inst(inst_idx);
-    matches!(
-        &inst.secondary_result_annotation,
-        Some(Annotation::Int(IntAnnotation { bit_width: 128, .. }))
-    )
+    is_exact_double_gpr_int_annotation(inst.secondary_result_annotation.as_ref())
 }
 
 fn classify_call_abi(
@@ -874,12 +881,12 @@ fn classify_call_abi(
 ) -> CallAbiPlan {
     let call_idx = call_vref.index();
     let inst = func.inst(call_idx);
-    let wide_scalar_call = has_wide_scalar_annotation(func, call_idx);
+    let wide_scalar_call = has_exact_double_gpr_int_result(func, call_idx);
     CallAbiPlan {
         // In tuffy IR, call data is encoded in the call's secondary result.
         has_primary_return: inst.secondary_ty.is_some(),
         // Secondary return (RDX) may be provided either by legacy metadata
-        // or by wide scalar annotations on the call result.
+        // or by exact double-width integer annotations on the call result.
         has_secondary_return: call_has_ret2.contains(&call_idx) || wide_scalar_call,
     }
 }
@@ -997,9 +1004,9 @@ fn select_inst(
     call_has_ret2: &HashSet<u32>,
     call_cleanup_labels: &HashMap<u32, u32>,
 ) -> Option<()> {
-    // Handle 128-bit integer operations before the generated rules.
-    if has_wide_scalar_annotation(func, vref.index())
-        && select_128bit_op(ctx, vref, op, func).is_some()
+    // Handle exact double-width integer operations before the generated rules.
+    if has_exact_double_gpr_int_result(func, vref.index())
+        && select_double_width_int_op(ctx, vref, op, func).is_some()
     {
         return Some(());
     }
@@ -1033,7 +1040,7 @@ fn select_inst(
                         src: fixed,
                     });
                     ctx.regs.assign(vref, dst);
-                    // Wide scalars (int:u128 / int:s128) occupy two consecutive GPRs.
+                    // Exact double-width integer scalars occupy two consecutive GPRs.
                     // Capture the hi half from the next argument register.
                     if wide && i + 1 < ARG_REGS.len() {
                         let hi_fixed = ctx.alloc.alloc_fixed(ARG_REGS[i + 1].to_preg());
@@ -1571,10 +1578,11 @@ fn select_inst(
 
         Op::SiToFp(val, ft) | Op::UiToFp(val, ft) => {
             let val_ann = get_int_annotation(func, val.clone().raw().value);
-            let is_i128 = matches!(val_ann, Some(IntAnnotation { bit_width: 128, .. }));
+            let is_exact_double_gpr_int =
+                val_ann.is_some_and(|ann| ann.bit_width == DOUBLE_GPR_BITS);
 
-            if is_i128 {
-                // i128 to float: not yet fully implemented
+            if is_exact_double_gpr_int {
+                // Double-width integer to float: not yet fully implemented
                 // TODO: implement i128 to float conversion
                 return None;
             }
