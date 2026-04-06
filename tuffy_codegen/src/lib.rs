@@ -63,6 +63,20 @@ impl CodegenSession {
         }
     }
 
+    /// Return how many legal integer-sized parts the active target can use
+    /// for direct integer-class ABI passing/return.
+    pub fn max_abi_int_parts(&self) -> u32 {
+        match &self.inner {
+            CodegenInner::X86(_) => 2,
+        }
+    }
+
+    /// Return the maximum byte size handled directly by the target's
+    /// integer-class ABI path before lowering switches to indirect passing.
+    pub fn max_direct_abi_int_bytes(&self) -> u32 {
+        (self.max_int_width() / 8) * self.max_abi_int_parts()
+    }
+
     /// Compile a single IR function to machine code.
     ///
     /// Runs legalization according to the target's legality rules before

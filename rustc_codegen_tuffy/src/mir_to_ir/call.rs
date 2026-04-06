@@ -419,15 +419,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         };
         let dest_size = type_size(self.tcx, dest_ty);
         let dest_repr = repr_kind(self.tcx, dest_ty);
+        let part_bytes = self.target_part_bytes();
+        let direct_abi_bytes = self.target_direct_abi_bytes();
 
-        // In Rust/SysV ABI, Scalar and ScalarPair types ≤ 16 bytes are returned
-        // in registers (RAX + RDX).  Only use SRET for types that exceed two
-        // INTEGER-class registers.
+        // Values that fit in the target's direct integer-register ABI path
+        // stay in registers; larger ones use SRET.
         let needs_sret = match dest_repr {
             ReprKind::Zst => false,
             ReprKind::Scalar => false,
-            ReprKind::ScalarPair => dest_size.is_some_and(|sz| sz > 16),
-            ReprKind::Memory => dest_size.is_some_and(|sz| sz > 8),
+            ReprKind::ScalarPair => dest_size.is_some_and(|sz| sz > direct_abi_bytes),
+            ReprKind::Memory => dest_size.is_some_and(|sz| sz > part_bytes),
         };
         let sret_slot = if needs_sret {
             // Always use the destination local's own stack slot (or a fresh
@@ -617,7 +618,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 .ptradd(base.into(), off.into(), 0, Origin::synthetic())
                                 .raw()
                         };
-                        if fsz <= 8 {
+                        if fsz <= part_bytes {
                             let fty = translate_ty(self.tcx, ft).unwrap_or(Type::Int);
                             let ann = if matches!(fty, Type::Int) {
                                 translate_annotation(ft)
@@ -634,21 +635,21 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 Origin::synthetic(),
                             );
                             ir_args.push(val.into());
-                        } else if fsz <= 16 {
+                        } else if fsz <= direct_abi_bytes {
                             let prk = repr_kind(self.tcx, ft);
                             if matches!(prk, ReprKind::ScalarPair | ReprKind::Scalar) {
-                                // ScalarPair/Scalar: decompose into two words.
+                                // Decompose into the target's direct ABI parts.
                                 let w0 = self.builder.load(
                                     addr.into(),
-                                    8,
+                                    part_bytes as u32,
                                     Type::Int,
                                     self.current_mem.into(),
-                                    int_annotation_for_bytes(8),
+                                    int_annotation_for_bytes(part_bytes as u32),
                                     Origin::synthetic(),
                                 );
                                 ir_args.push(w0.into());
                                 let off8 = self.builder.iconst(
-                                    8,
+                                    part_bytes as i64,
                                     64,
                                     IntSignedness::DontCare,
                                     Origin::synthetic(),
@@ -661,10 +662,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 );
                                 let w1 = self.builder.load(
                                     a1.into(),
-                                    8,
+                                    part_bytes as u32,
                                     Type::Int,
                                     self.current_mem.into(),
-                                    int_annotation_for_bytes(8),
+                                    int_annotation_for_bytes(part_bytes as u32),
                                     Origin::synthetic(),
                                 );
                                 ir_args.push(w1.into());
@@ -674,7 +675,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 ir_args.push(addr.into());
                             }
                         } else {
-                            // >16 byte fields: pass pointer.
+                            // Larger fields are passed indirectly.
                             ir_args.push(addr.into());
                         }
                     }
@@ -696,7 +697,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 if matches!(&arg.node, Operand::Constant(_))
                     && matches!(arg_ty.kind(), ty::Tuple(_) | ty::Adt(..) | ty::Array(..))
                     && arg_size > 0
-                    && arg_size <= 8
+                    && arg_size <= part_bytes
                     && matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
                     && !is_scalar_adt
                 {
@@ -710,10 +711,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     );
                 }
 
-                // Decompose 9-16 byte struct arguments into two register-
-                // sized words for the SysV ABI.  Stack-allocated structs
-                // are represented as Ptr values; load both halves so the
-                // callee receives them in two registers (rdi+rsi, etc.).
+                // Decompose small aggregate arguments into the target's direct
+                // integer-register ABI parts. Stack-allocated structs are
+                // represented as Ptr values; load both parts so the callee
+                // receives the direct-register ABI form.
                 // Fat pointer values from constants (symbol_addr to
                 // string data) or non-stack locals (the data pointer
                 // itself) are NOT addresses of [ptr, len] pairs.
@@ -745,13 +746,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         }
                         _ => false,
                     };
-                let is_struct_arg = arg_size > 8
-                    && arg_size <= 16
+                let is_struct_arg = arg_size > part_bytes
+                    && arg_size <= direct_abi_bytes
                     && matches!(repr_kind(self.tcx, arg_ty), ReprKind::ScalarPair)
                     && !is_fat_value_not_slot
                     && !is_fat_stack_local
                     && matches!(self.builder.value_type(v), Some(Type::Ptr(_)));
-                let decomposed = if is_fat_stack_local && arg_size > 8 && arg_size <= 16 {
+                let decomposed = if is_fat_stack_local
+                    && arg_size > part_bytes
+                    && arg_size <= direct_abi_bytes
+                {
                     // Load both words from the stack slot (at the projected
                     // field offset if applicable).
                     // For virtual dispatch self args, only pass the data
@@ -775,16 +779,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     if let Some(slot_addr) = slot_base {
                         let w0 = self.builder.load(
                             slot_addr.into(),
-                            8,
+                            part_bytes as u32,
                             Type::Int,
                             self.current_mem.into(),
-                            int_annotation_for_bytes(8),
+                            int_annotation_for_bytes(part_bytes as u32),
                             Origin::synthetic(),
                         );
                         ir_args.push(w0.into());
                         if !skip_vtable {
                             let off8 = self.builder.iconst(
-                                8,
+                                part_bytes as i64,
                                 64,
                                 IntSignedness::DontCare,
                                 Origin::synthetic(),
@@ -797,10 +801,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             );
                             let w1 = self.builder.load(
                                 hi_addr.into(),
-                                8,
+                                part_bytes as u32,
                                 Type::Int,
                                 self.current_mem.into(),
-                                int_annotation_for_bytes(8),
+                                int_annotation_for_bytes(part_bytes as u32),
                                 Origin::synthetic(),
                             );
                             ir_args.push(w1.into());
@@ -812,25 +816,28 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 } else if is_struct_arg {
                     let w0 = self.builder.load(
                         v.into(),
-                        8,
+                        part_bytes as u32,
                         Type::Int,
                         self.current_mem.into(),
-                        int_annotation_for_bytes(8),
+                        int_annotation_for_bytes(part_bytes as u32),
                         Origin::synthetic(),
                     );
                     ir_args.push(w0.into());
-                    let off8 =
-                        self.builder
-                            .iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
+                    let off8 = self.builder.iconst(
+                        part_bytes as i64,
+                        64,
+                        IntSignedness::DontCare,
+                        Origin::synthetic(),
+                    );
                     let hi_addr =
                         self.builder
                             .ptradd(v.into(), off8.into(), 0, Origin::synthetic());
                     let w1 = self.builder.load(
                         hi_addr.into(),
-                        8,
+                        part_bytes as u32,
                         Type::Int,
                         self.current_mem.into(),
-                        int_annotation_for_bytes(8),
+                        int_annotation_for_bytes(part_bytes as u32),
                         Origin::synthetic(),
                     );
                     ir_args.push(w1.into());
@@ -843,10 +850,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // Memory aggregate > 8 bytes: pass a pointer to a fresh copy.
                     // Passing the original slot directly would let the callee overwrite
                     // the caller's local (violating Rust pass-by-value semantics).
-                    let is_memory_indirect = arg_size > 8
+                    let is_memory_indirect = arg_size > part_bytes
                         && matches!(repr_kind(self.tcx, arg_ty), ReprKind::Memory)
                         && matches!(self.builder.value_type(v), Some(Type::Ptr(_)));
-                    if (arg_size > 16 || is_memory_indirect)
+                    if (arg_size > direct_abi_bytes || is_memory_indirect)
                         && matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
                     {
                         let align = type_align(self.tcx, arg_ty).unwrap_or(1) as u32;
@@ -882,7 +889,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             ir_args.push(tmp.into());
                         }
                     } else if arg_size > 0
-                        && arg_size <= 8
+                        && arg_size <= part_bytes
                         && matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
                         && self.builder.is_local_memory_address(v)
                         && translate_ty(self.tcx, arg_ty).is_none()
@@ -905,8 +912,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             Origin::synthetic(),
                         );
                         ir_args.push(loaded.into());
-                    } else if arg_size > 8
-                        && arg_size <= 16
+                    } else if arg_size > part_bytes
+                        && arg_size <= direct_abi_bytes
                         && matches!(repr_kind(self.tcx, arg_ty), ReprKind::Scalar)
                         && matches!(self.builder.value_type(v), Some(Type::Ptr(_)))
                     {
@@ -936,9 +943,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     }
                     // If this arg is a Copy/Move of a checked-op local (e.g.
                     // (i64, bool) from AddWithOverflow), pack or append the
-                    // overflow flag.  Small tuples (primary ≤ 4 bytes) fit in
-                    // one register — pack the bool at the primary-size offset.
-                    // Larger tuples use a second register argument.
+                    // overflow flag. Small tuples whose primary fits in half
+                    // of one ABI part stay in a single register; larger tuples
+                    // use the next direct ABI part or go indirect.
                     if let Operand::Copy(place) | Operand::Move(place) = &arg.node
                         && place.projection.is_empty()
                         && !self.stack_locals.is_stack(place.local)
@@ -950,8 +957,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             && fields[1].is_bool()
                             && !fields[0].is_bool()
                         {
-                            let primary_bytes = type_size(self.tcx, fields[0]).unwrap_or(8);
-                            if primary_bytes <= 4 {
+                            let primary_bytes =
+                                type_size(self.tcx, fields[0]).unwrap_or(part_bytes);
+                            if primary_bytes <= part_bytes / 2 {
                                 // Pack overflow flag into the same register:
                                 // value |= (flag_as_int << (primary_bytes * 8))
                                 let shift_bits = (primary_bytes * 8) as i64;
@@ -1023,9 +1031,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     );
                                     *last = packed.into();
                                 }
-                            } else if primary_bytes > 8 {
-                                // Very large primary (>8 bytes, e.g. u128): the full
-                                // tuple is >16 bytes, so the callee expects a pointer.
+                            } else if primary_bytes > part_bytes {
+                                // The primary spans more than one ABI part, so
+                                // the full tuple is passed indirectly.
                                 // Store primary + overflow flag into a stack slot and
                                 // pass its address.
                                 let full_size = type_size(self.tcx, local_ty).unwrap_or(32) as u32;
@@ -1258,10 +1266,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 .raw()
         };
         // Determine the IR return type for the call instruction.
-        // For structs ≤16 bytes that translate_ty returns None for,
-        // use Type::Int so the call captures the register return value.
+        // Small aggregates that fit in the target's direct integer-register
+        // return path use `Type::Int` so the call captures the register value.
         let call_ret_ty = translate_ty(self.tcx, dest_ty).unwrap_or_else(|| {
-            if dest_size.is_some_and(|sz| sz > 0 && sz <= 16) {
+            if dest_size.is_some_and(|sz| sz > 0 && sz <= direct_abi_bytes) {
                 Type::Int
             } else {
                 Type::Unit
@@ -1274,22 +1282,25 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // double-width annotation so legalization can recover the
                 // backend's low/high return convention.
                 // For ScalarPair, use only the first scalar's byte width
-                // as the call annotation — the second scalar is captured
-                // from RDX via ABI metadata.
+                // as the call annotation — the remaining ABI part is
+                // captured via metadata.
                 dest_size.and_then(|sz| {
                     if matches!(dest_repr, ReprKind::ScalarPair) {
-                        // ScalarPair: annotation covers only the first
-                        // scalar (returned in RAX); second goes in RDX.
+                        // ScalarPair: annotation covers only the primary ABI
+                        // register part; the remaining direct ABI part arrives
+                        // via backend metadata.
                         let first_sz = scalar_pair_info(self.tcx, dest_ty)
                             .map(|(a, _, _)| a as u32)
-                            .unwrap_or(sz.min(8) as u32);
+                            .unwrap_or(sz.min(part_bytes) as u32);
                         int_annotation_for_bytes(first_sz)
-                    } else if sz <= 8 || (sz <= 16 && matches!(dest_repr, ReprKind::Scalar)) {
+                    } else if sz <= part_bytes
+                        || (sz <= direct_abi_bytes && matches!(dest_repr, ReprKind::Scalar))
+                    {
                         int_annotation_for_bytes(sz as u32)
-                    } else if sz <= 16 {
-                        // Memory aggregate 9-16 bytes: use 64-bit annotation
-                        // since only the first 8 bytes are in RAX.
-                        int_annotation_for_bytes(8)
+                    } else if sz <= direct_abi_bytes {
+                        // Small memory aggregates capture only the primary ABI
+                        // register part at the IR call result.
+                        int_annotation_for_bytes(part_bytes as u32)
                     } else {
                         None
                     }
@@ -1313,7 +1324,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         // Mark calls whose return uses the backend's exact double-width
         // integer return convention so legalize can recover the low/high ABI split.
         if let Some(Annotation::Int(ia)) = call_ret_ann
-            && ia.bit_width == self.target_max_int_width * 2
+            && ia.bit_width == self.target_direct_abi_bits()
         {
             self.abi_metadata
                 .mark_double_width_return_call(call_mem.index());
@@ -1379,12 +1390,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 self.stack_locals.mark(destination.local);
             }
         } else if let Some(slot) = sret_slot {
-            // SRET return (>16 bytes): the callee wrote the struct to the
+            // Indirect return: the callee wrote the result to the
             // stack slot we passed as the first argument. Just record the
             // slot as the destination local.
             self.locals.set(destination.local, slot);
             self.stack_locals.mark(destination.local);
-        } else if dest_size.unwrap_or(0) > 8 && matches!(dest_repr, ReprKind::Scalar) {
+        } else if dest_size.unwrap_or(0) > part_bytes && matches!(dest_repr, ReprKind::Scalar) {
             // Wide scalar return (e.g. i128, transparent newtype over i128):
             // emit a single full-width store and let legalization split the
             // value into lo/hi halves with the correct RDX capture.
@@ -1411,14 +1422,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             self.locals.set(destination.local, slot);
             self.stack_locals.mark(destination.local);
         } else if matches!(dest_repr, ReprKind::ScalarPair) {
-            // Two-register return (ScalarPair): first scalar in RAX,
-            // second scalar in RDX.  Works for any size (e.g. 2-byte
-            // Result<u8, E> up to 16-byte fat pointers).
+            // Direct-register aggregate return (ScalarPair): the primary ABI
+            // part is returned in the normal call result and the secondary
+            // part arrives through backend metadata.
             let size = dest_size.unwrap();
             let (a_size, b_size, b_offset) = scalar_pair_info(self.tcx, dest_ty).unwrap_or((
-                size.min(8),
-                size.saturating_sub(8),
-                8,
+                size.min(part_bytes),
+                size.saturating_sub(part_bytes),
+                part_bytes,
             ));
             let slot = if let Some(existing) = self.locals.get(destination.local) {
                 if self.stack_locals.is_stack(destination.local) {
@@ -1429,7 +1440,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             } else {
                 self.builder.stack_slot(size as u32, 0, Origin::synthetic())
             };
-            // Store RAX (primary return / first scalar) at offset 0.
+            // Store the primary ABI part at offset 0.
             self.current_mem = self
                 .builder
                 .store(
@@ -1440,16 +1451,19 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     Origin::synthetic(),
                 )
                 .raw();
-            // Mark the call as having a secondary return in RDX and
-            // capture it via a placeholder instruction.
+            // Mark the call as having a secondary return and capture it via a
+            // placeholder instruction.
             let call_idx = call_mem.index();
             self.abi_metadata.mark_call_secondary_return(call_idx);
-            let rdx_capture =
-                self.builder
-                    .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
+            let rdx_capture = self.builder.iconst(
+                0,
+                self.target_max_int_width,
+                IntSignedness::DontCare,
+                Origin::synthetic(),
+            );
             self.abi_metadata
                 .mark_secondary_return_capture(rdx_capture.index(), call_idx);
-            // Store RDX (secondary return / second scalar) at the correct offset.
+            // Store the secondary ABI part at the correct offset.
             let off_val = self.builder.iconst(
                 b_offset as i64,
                 64,
@@ -1569,6 +1583,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     ) -> bool {
         // Translate intrinsic arguments to IR values.
         let mut intrinsic_args: Vec<ValueRef> = Vec::new();
+        let direct_abi_bytes = self.target_direct_abi_bytes();
         for arg in args {
             if let Some(v) = self.translate_operand(&arg.node) {
                 // For large scalar types (e.g. i128, 16 bytes) translate_operand
@@ -1578,7 +1593,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let v = if matches!(self.builder.value_type(v), Some(Type::Ptr(_))) {
                     let arg_ty = self.monomorphize(arg.node.ty(&self.mir.local_decls, self.tcx));
                     if let Some(sz) = type_size(self.tcx, arg_ty) {
-                        if sz <= 16 && matches!(translate_ty(self.tcx, arg_ty), Some(Type::Int)) {
+                        if sz <= direct_abi_bytes
+                            && matches!(translate_ty(self.tcx, arg_ty), Some(Type::Int))
+                        {
                             self.builder.load(
                                 v.into(),
                                 sz as u32,
@@ -1735,9 +1752,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 {
                     let dest_ty = self.monomorphize(self.mir.local_decls[destination.local].ty);
                     let size = type_size(self.tcx, dest_ty).unwrap_or(8) as u32;
+                    let part_bytes = self.target_part_bytes() as u32;
                     // When result_val is a pointer to a known memory
                     // location (stack slot, symbol, ptr_add) and the type
-                    // is wider than 8 bytes, copy word-by-word from that
+                    // spans multiple direct ABI parts, copy word-by-word from that
                     // address.  Bare pointer *values* (e.g. the data-ptr
                     // half of a fat pointer returned by black_box) must
                     // NOT be dereferenced — fall through to the scalar
@@ -1747,7 +1765,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     if val_is_ptr && self.builder.is_memory_address(result_val) {
                         let mut offset = 0u32;
                         while offset < size {
-                            let chunk = std::cmp::min(8, size - offset);
+                            let chunk = std::cmp::min(part_bytes, size - offset);
                             let src_addr = if offset == 0 {
                                 result_val
                             } else {
@@ -1796,12 +1814,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         }
                     } else {
                         // For fat-pointer types the result is just the
-                        // first scalar (e.g. data_ptr); cap the store at 8
+                        // first scalar (e.g. data_ptr); cap the store at one
+                        // ABI part so we don't write past the value width.
                         // bytes so we don't write past the value width.
                         // The second half (metadata) is persisted separately
                         // by the fat-metadata propagation below.
-                        let store_size = if val_is_ptr && size > 8 {
-                            8u32
+                        let store_size = if val_is_ptr && size > part_bytes {
+                            part_bytes
                         } else {
                             size.max(1)
                         };
@@ -1822,14 +1841,17 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // Propagate fat pointer metadata to the stack slot.
                 // When an intrinsic (e.g. black_box) sets fat_locals for
                 // the destination, we must also persist the metadata to
-                // slot+8 so that Return loads see both halves.
+                // slot+part_bytes so that Return loads see both halves.
                 if let Some(fat_val) = self.fat_locals.get(destination.local)
                     && let Some(slot) = self.locals.get(destination.local)
                     && self.stack_locals.is_stack(destination.local)
                 {
-                    let off =
-                        self.builder
-                            .iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
+                    let off = self.builder.iconst(
+                        self.target_part_bytes() as i64,
+                        64,
+                        IntSignedness::DontCare,
+                        Origin::synthetic(),
+                    );
                     let meta_addr =
                         self.builder
                             .ptradd(slot.into(), off.into(), 0, Origin::synthetic());
@@ -1838,7 +1860,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         .store(
                             fat_val.into(),
                             meta_addr.into(),
-                            8,
+                            self.target_part_bytes() as u32,
                             self.current_mem.into(),
                             Origin::synthetic(),
                         )

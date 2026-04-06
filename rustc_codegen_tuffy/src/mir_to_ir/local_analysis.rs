@@ -238,16 +238,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 self.stack_locals.mark(local);
                                 continue;
                             }
-                            // Large params (size > 16 bytes) are passed by hidden pointer in
-                            // the SysV ABI — regardless of whether rustc classifies them as
-                            // Memory, ScalarPair, or Scalar.  The received value IS already
-                            // the pointer to the data in the caller's stack frame.  Creating
-                            // a new slot and only copying 8 bytes (the pointer itself) would
-                            // lose the indirection, so just mark the local as stack-allocated
-                            // without allocating a new slot.
-                            // This optimization only applies to parameters, not to local
-                            // variables — locals with size > 16 bytes need a real slot.
-                            if size > 16 && local.as_usize() <= self.mir.arg_count {
+                            // Parameters larger than the target's direct
+                            // integer-register ABI capacity are received
+                            // indirectly. The local already denotes the caller
+                            // storage, so introducing a fresh slot here would
+                            // lose that indirection.
+                            if size > self.target_direct_abi_bytes()
+                                && local.as_usize() <= self.mir.arg_count
+                            {
                                 self.stack_locals.mark(local);
                                 continue;
                             }
@@ -407,20 +405,22 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             }
         }
 
-        // Pre-allocate a stack slot for the return place (_0) when it is a
-        // multi-word type (9-16 bytes, e.g. &str, &[T]) or a ScalarPair
-        // (e.g. Option<u8>).  ScalarPair returns are always two-register
-        // (RAX + RDX), so the return handler needs a stack slot to load
-        // both scalars from.
+        // Pre-allocate a stack slot for the return place (_0) when it spans
+        // multiple direct ABI parts or when a ScalarPair return needs both
+        // ABI return registers materialized in memory for later loads.
         {
             let ret_local = mir::Local::from_usize(0);
             let ret_ty = self.monomorphize(self.mir.local_decls[ret_local].ty);
             let ret_size = type_size(self.tcx, ret_ty).unwrap_or(0);
             let ret_repr = repr_kind(self.tcx, ret_ty);
-            let needs_slot = (ret_size > 8
-                && ret_size <= 16
-                && !matches!(ret_repr, ReprKind::Scalar if ret_size <= 8))
-                || (matches!(ret_repr, ReprKind::ScalarPair) && ret_size > 0 && ret_size <= 8);
+            let part_bytes = self.target_part_bytes();
+            let direct_abi_bytes = self.target_direct_abi_bytes();
+            let needs_slot = (ret_size > part_bytes
+                && ret_size <= direct_abi_bytes
+                && !matches!(ret_repr, ReprKind::Scalar if ret_size <= part_bytes))
+                || (matches!(ret_repr, ReprKind::ScalarPair)
+                    && ret_size > 0
+                    && ret_size <= part_bytes);
             if needs_slot && !self.stack_locals.is_stack(ret_local) {
                 let ret_align = type_align(self.tcx, ret_ty).unwrap_or(8) as u32;
                 let slot = self

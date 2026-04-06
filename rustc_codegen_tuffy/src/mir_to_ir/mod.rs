@@ -119,29 +119,30 @@ pub fn translate_function<'tcx>(
     let mut params = Vec::new();
     let mut param_anns = Vec::new();
     let mut byval_sizes: Vec<Option<u32>> = Vec::new();
+    let target_part_bytes = u64::from(session.max_int_width() / 8);
+    let target_direct_abi_bytes = u64::from(session.max_direct_abi_int_bytes());
 
     let ret_mir_ty = monomorphize(mir.local_decls[mir::RETURN_PLACE].ty);
     let ret_size = type_size(tcx, ret_mir_ty).unwrap_or(0);
     let ret_repr = repr_kind(tcx, ret_mir_ty);
-    // In Rust/SysV ABI, Scalar and ScalarPair types ≤ 16 bytes are returned
-    // in registers (RAX + RDX).  Only use SRET for types that exceed two
-    // INTEGER-class registers.
+    // Scalar and ScalarPair types that fit within the target's direct
+    // integer-register ABI capacity stay in registers; larger values use SRET.
     let needs_sret = match ret_repr {
         ReprKind::Zst => false,
         ReprKind::Scalar => false,
-        ReprKind::ScalarPair => ret_size > 16,
-        ReprKind::Memory => ret_size > 8,
+        ReprKind::ScalarPair => ret_size > target_direct_abi_bytes,
+        ReprKind::Memory => ret_size > target_part_bytes,
     };
 
-    // For SRET functions, the return type becomes Ptr (the SRET pointer is
-    // returned in RAX per SysV ABI). Otherwise, use the semantic return type.
-    // For structs ≤16 bytes, use Type::Int to capture register return.
+    // For SRET functions, the return type becomes the hidden result pointer.
+    // Otherwise, use the semantic return type. Small aggregates that fit in
+    // the target's direct integer-register return path are captured as `Int`.
     let (ret_ty, ret_ann) = if needs_sret {
         (Some(Type::Ptr(0)), None)
     } else {
         let ty = translate_ty(tcx, ret_mir_ty)
             .filter(|t| !matches!(t, Type::Unit))
-            .or(if ret_size > 0 && ret_size <= 16 {
+            .or(if ret_size > 0 && ret_size <= target_direct_abi_bytes {
                 Some(Type::Int)
             } else {
                 None
@@ -159,12 +160,11 @@ pub fn translate_function<'tcx>(
                     })
                 })
                 .or_else(|| {
-                    // For ScalarPair returns (e.g. fat pointers, Argument),
-                    // use 64-bit annotation since the function returns the first
-                    // 8 bytes in RAX; the remaining bytes are returned in RDX
-                    // via ABI metadata (see terminator.rs).
+                    // ScalarPair returns capture the first direct-register part
+                    // in the primary return value; later lowering models the
+                    // remaining ABI part via metadata.
                     if matches!(ret_repr, ReprKind::ScalarPair) {
-                        int_annotation_for_bytes(8)
+                        int_annotation_for_bytes(target_part_bytes as u32)
                     } else {
                         int_annotation_for_bytes(ret_size as u32)
                     }
@@ -229,17 +229,20 @@ pub fn translate_function<'tcx>(
         // Non-zero-sized aggregate with no direct IR type: use Int register(s).
         if ir_ty.is_none() {
             let prk = repr_kind(tcx, ty);
-            if matches!(prk, ReprKind::ScalarPair | ReprKind::Scalar) && sz > 8 && sz <= 16 {
-                // ScalarPair ≤ 16 bytes (e.g. fat pointer): two registers.
+            if matches!(prk, ReprKind::ScalarPair | ReprKind::Scalar)
+                && sz > target_part_bytes
+                && sz <= target_direct_abi_bytes
+            {
+                // Aggregate fits in the target's direct integer-register ABI path.
                 params.push(Type::Int);
-                param_anns.push(int_annotation_for_bytes(8));
+                param_anns.push(int_annotation_for_bytes(target_part_bytes as u32));
                 param_names.push(None);
                 byval_sizes.push(None);
                 params.push(Type::Int);
-                param_anns.push(int_annotation_for_bytes((sz - 8) as u32));
+                param_anns.push(int_annotation_for_bytes((sz - target_part_bytes) as u32));
                 param_names.push(None);
                 byval_sizes.push(None);
-            } else if sz > 8 {
+            } else if sz > target_part_bytes {
                 // Memory type > 8 bytes: passed by hidden pointer.
                 // For C ABI with size > 32 bytes, the data is on the
                 // caller's stack (byval) rather than via a register pointer.
@@ -259,9 +262,14 @@ pub fn translate_function<'tcx>(
 
         let ir_ty = ir_ty.unwrap();
         let is_int = matches!(ir_ty, Type::Int);
-        // For >16 byte parameters, the caller passes a pointer per x86-64 ABI.
-        let param_ty = if sz > 16 { Type::Ptr(0) } else { ir_ty };
-        let param_ann = if sz > 16 {
+        // Values larger than the target's direct integer-register ABI
+        // capacity are passed indirectly.
+        let param_ty = if sz > target_direct_abi_bytes {
+            Type::Ptr(0)
+        } else {
+            ir_ty
+        };
+        let param_ann = if sz > target_direct_abi_bytes {
             None
         } else if is_int {
             int_bitwidth(ty).map(|bw| {
@@ -389,6 +397,7 @@ pub fn translate_function<'tcx>(
         block_mem_args,
         abi_metadata,
         target_max_int_width: session.max_int_width(),
+        target_max_abi_int_parts: session.max_abi_int_parts(),
         instance,
         current_mem: initial_mem,
         cast_fat_meta: FatLocalMap::new(),

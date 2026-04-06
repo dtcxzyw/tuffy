@@ -168,6 +168,7 @@ pub(super) struct TranslationCtx<'a, 'tcx> {
     pub(super) block_mem_args: Vec<Option<ValueRef>>,
     pub(super) abi_metadata: AbiMetadataBox,
     pub(super) target_max_int_width: u32,
+    pub(super) target_max_abi_int_parts: u32,
     pub(super) instance: Instance<'tcx>,
     /// Current memory token for MemSSA threading.
     pub(super) current_mem: ValueRef,
@@ -190,7 +191,8 @@ pub(super) struct TranslationCtx<'a, 'tcx> {
     /// Catches identical allocations with different AllocIds (e.g., const
     /// promotions duplicated by inlining).
     pub(super) content_cache: &'a mut super::ContentCache,
-    /// SRET pointer for functions returning large structs (>16 bytes).
+    /// SRET pointer for functions returning values larger than the target's
+    /// direct integer-register ABI capacity.
     /// When set, param indices are shifted by 1 (param 0 = hidden SRET ptr).
     pub(super) sret_ptr: Option<ValueRef>,
     /// Symbol names that should be emitted as weak undefined references
@@ -211,6 +213,18 @@ pub(super) struct TranslationCtx<'a, 'tcx> {
 }
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
+    pub(super) fn target_part_bytes(&self) -> u64 {
+        (self.target_max_int_width / 8) as u64
+    }
+
+    pub(super) fn target_direct_abi_bytes(&self) -> u64 {
+        self.target_part_bytes() * self.target_max_abi_int_parts as u64
+    }
+
+    pub(super) fn target_direct_abi_bits(&self) -> u32 {
+        self.target_max_int_width * self.target_max_abi_int_parts
+    }
+
     pub(super) fn next_data_id(&mut self) -> u64 {
         let id = *self.data_counter;
         *self.data_counter += 1;
@@ -456,6 +470,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             },
         }
         let mut deferred: Vec<Deferred> = Vec::new();
+        let part_bytes = self.target_part_bytes();
+        let direct_abi_bytes = self.target_direct_abi_bytes();
 
         // --- Phase 1: receive all param values ---
         for i in 0..self.mir.arg_count {
@@ -480,19 +496,22 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // tuples, ADTs).  Receive register(s) and reconstruct on stack.
             if ir_ty.is_none() {
                 let prk = repr_kind(self.tcx, ty);
-                if matches!(prk, ReprKind::ScalarPair | ReprKind::Scalar) && sz > 8 && sz <= 16 {
-                    // ScalarPair aggregate ≤ 16 bytes: passed in two registers
+                if matches!(prk, ReprKind::ScalarPair | ReprKind::Scalar)
+                    && sz > part_bytes
+                    && sz <= direct_abi_bytes
+                {
+                    // Aggregate fits in the target's direct integer-register ABI path.
                     let lo = self.builder.param(
                         param_idx,
                         Type::Int,
-                        int_annotation_for_bytes(8),
+                        int_annotation_for_bytes(part_bytes as u32),
                         Origin::synthetic(),
                     );
                     param_idx += 1;
                     let hi = self.builder.param(
                         param_idx,
                         Type::Int,
-                        int_annotation_for_bytes((sz - 8) as u32),
+                        int_annotation_for_bytes((sz - part_bytes) as u32),
                         Origin::synthetic(),
                     );
                     param_idx += 1;
@@ -504,12 +523,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         lo,
                         hi,
                         slot: local_slot,
-                        hi_bytes: sz - 8,
+                        hi_bytes: sz - part_bytes,
                     });
                     self.locals.set(local, local_slot);
                     self.stack_locals.mark(local);
-                } else if sz > 8 {
-                    // Memory aggregate > 8 bytes: passed by pointer
+                } else if sz > part_bytes {
+                    // Larger memory aggregates are passed indirectly.
                     let ptr =
                         self.builder
                             .param(param_idx, Type::Ptr(0), None, Origin::synthetic());
@@ -571,10 +590,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         );
                         match tail.kind() {
                             ty::TyKind::Dynamic(..) => (Type::Ptr(0), None),
-                            _ => (Type::Int, int_annotation_for_bytes(8)),
+                            _ => (Type::Int, int_annotation_for_bytes(part_bytes as u32)),
                         }
                     }
-                    _ => (Type::Int, int_annotation_for_bytes(8)),
+                    _ => (Type::Int, int_annotation_for_bytes(part_bytes as u32)),
                 };
 
                 let metadata =
@@ -586,7 +605,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             } else {
                 let ir_ty_val = ir_ty.expect("checked above");
                 let sz = type_size(self.tcx, ty).unwrap_or(0);
-                let is_large = sz > 16;
+                let is_large = sz > direct_abi_bytes;
 
                 if is_large {
                     // Large parameter: receive pointer from caller
