@@ -99,18 +99,23 @@ fi
 echo ""
 
 # ── Hashbrown release-focused tests ───────────────────────────────────────────
-# Use an isolated working copy outside /tuffy so Cargo doesn't try to inherit
-# the parent workspace.
+# Use an isolated working copy under TEMP_DIR and give it its own [workspace]
+# so Cargo doesn't try to inherit the parent tuffy workspace.
 
 HASHBROWN_SRC="$REPO_ROOT/scratch/hashbrown"
 if [ ! -d "$HASHBROWN_SRC" ]; then
     echo "=== Cloning hashbrown ==="
     git clone --filter=blob:none https://github.com/rust-lang/hashbrown.git "$HASHBROWN_SRC"
 fi
-HASHBROWN_DIR="/tmp/hashbrown-tuffy-work"
-HASHBROWN_TARGET_DIR="/tmp/hashbrown-tuffy-target"
+HASHBROWN_DIR="$TEMP_DIR/hashbrown-tuffy-work"
+HASHBROWN_TARGET_DIR="$TEMP_DIR/hashbrown-tuffy-target"
 rm -rf "$HASHBROWN_DIR" "$HASHBROWN_TARGET_DIR"
 cp -a "$HASHBROWN_SRC" "$HASHBROWN_DIR"
+# Ensure the working copy has its own [workspace] so Cargo doesn't try to join
+# the parent tuffy workspace.
+if ! grep -q '^\[workspace\]' "$HASHBROWN_DIR/Cargo.toml"; then
+    printf '\n[workspace]\n' >> "$HASHBROWN_DIR/Cargo.toml"
+fi
 
 echo "=== Hashbrown release-focused tests ==="
 if CARGO_TARGET_DIR="$HASHBROWN_TARGET_DIR" \
