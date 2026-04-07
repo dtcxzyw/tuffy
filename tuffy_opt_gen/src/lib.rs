@@ -18,6 +18,7 @@ pub enum GenerateError {
         rule: String,
         conditions: Vec<String>,
     },
+    UnsupportedPattern(String),
     MissingReplacementBinding {
         rule: String,
         binding: String,
@@ -44,6 +45,9 @@ impl fmt::Display for GenerateError {
                     "rule `{rule}` uses unsupported side conditions: {}",
                     conditions.join(", ")
                 )
+            }
+            GenerateError::UnsupportedPattern(msg) => {
+                write!(f, "unsupported peephole pattern: {msg}")
             }
             GenerateError::MissingReplacementBinding { rule, binding } => {
                 write!(
@@ -89,11 +93,13 @@ mod tests {
         "kind": "brif",
         "condition": {
           "kind": "inst",
-          "op": "icmp_eq",
+          "op": "icmp",
+          "attrs": [{ "kind": "icmp_pred", "value": "eq" }],
           "args": [
             {
               "kind": "inst",
               "op": "select",
+              "attrs": [],
               "args": [
                 { "kind": "capture", "name": "b", "ty": "bool" },
                 { "kind": "int_const", "value": "1" },

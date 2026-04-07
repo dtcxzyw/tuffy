@@ -7,6 +7,7 @@ import TuffyLean.Target.X86.Export
 
 namespace TuffyLean.Export
 
+open TuffyLean.IR
 open TuffyLean.Rewrites
 
 private def quote (s : String) : String := s!"\"{s}\""
@@ -22,11 +23,26 @@ private def valueTypeToJson : ValueType → String
   | .int => quote "int"
   | .bool => quote "bool"
 
-private def patternOpToJson : PatternOp → String
+private def patternOpcodeToJson : PatternOpcode → String
   | .select => quote "select"
   | .and => quote "and"
   | .xor => quote "xor"
-  | .icmpEq => quote "icmp_eq"
+  | .icmp => quote "icmp"
+
+private def icmpPredToJson : ICmpOp → String
+  | .eq => quote "eq"
+  | .ne => quote "ne"
+  | .lt => quote "lt"
+  | .le => quote "le"
+  | .gt => quote "gt"
+  | .ge => quote "ge"
+
+private def patternAttrToJson : PatternAttr → String
+  | .icmpPred pred =>
+    jsonObj [
+      ("kind", quote "icmp_pred"),
+      ("value", icmpPredToJson pred)
+    ]
 
 private def transformKindToJson : TransformKind → String
   | .equivalence => quote "equivalence"
@@ -58,10 +74,11 @@ private def patternToJson : Pattern → String
       ("kind", quote "int_const_binding"),
       ("name", quote name)
     ]
-  | .inst op args =>
+  | .inst opcode attrs args =>
     jsonObj [
       ("kind", quote "inst"),
-      ("op", patternOpToJson op),
+      ("op", patternOpcodeToJson opcode),
+      ("attrs", jsonArr (attrs.map patternAttrToJson)),
       ("args", jsonArr (args.map patternToJson))
     ]
 

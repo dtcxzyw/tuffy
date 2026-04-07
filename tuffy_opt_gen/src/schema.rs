@@ -69,7 +69,9 @@ pub enum Pattern {
         name: String,
     },
     Inst {
-        op: PatternOp,
+        op: String,
+        #[serde(default)]
+        attrs: Vec<PatternAttr>,
         args: Vec<Pattern>,
     },
 }
@@ -98,25 +100,16 @@ impl Pattern {
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PatternOp {
-    Select,
-    And,
-    Xor,
-    IcmpEq,
-}
-
-impl PatternOp {
-    pub fn is_commutative(self) -> bool {
-        matches!(self, Self::And | Self::Xor | Self::IcmpEq)
-    }
-}
-
-#[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ValueType {
     Int,
     Bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PatternAttr {
+    IcmpPred { value: String },
 }
 
 pub fn validate_spec(spec: &PeepholeSpec) -> Result<(), GenerateError> {

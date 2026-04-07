@@ -3,7 +3,7 @@ use std::fmt::Write;
 use num_bigint::BigInt;
 
 use crate::GenerateError;
-use crate::schema::{Pattern, PatternOp, PeepholeRule, PeepholeSpec, Rewrite, ValueType};
+use crate::schema::{Pattern, PatternAttr, PeepholeRule, PeepholeSpec, Rewrite, ValueType};
 
 pub fn generate(spec: &PeepholeSpec) -> Result<String, GenerateError> {
     let mut out = String::new();
@@ -262,7 +262,7 @@ impl PatternGen {
                 );
                 self.line(out, &format!("matched_insts.insert({inst_idx});"));
             }
-            Pattern::Inst { op, args } => {
+            Pattern::Inst { op, attrs, args } => {
                 let inst_idx = self.local("inst_idx");
                 let node = self.local("node");
                 self.line(
@@ -282,7 +282,7 @@ impl PatternGen {
                     &format!("if {node}.parent_block != root_block {{ return None; }};"),
                 );
                 self.line(out, &format!("matched_insts.insert({inst_idx});"));
-                self.emit_inst_match(out, *op, args, &node)?;
+                self.emit_inst_match(out, op, attrs, args, &node)?;
             }
         }
         Ok(())
@@ -291,28 +291,30 @@ impl PatternGen {
     fn emit_inst_match(
         &mut self,
         out: &mut String,
-        op: PatternOp,
+        op: &str,
+        attrs: &[PatternAttr],
         args: &[Pattern],
         node: &str,
     ) -> Result<(), GenerateError> {
-        let arm = match op {
-            PatternOp::Select => "Op::Select(cond, t, e)",
-            PatternOp::And => "Op::And(a, b)",
-            PatternOp::Xor => "Op::Xor(a, b)",
-            PatternOp::IcmpEq => "Op::ICmp(ICmpOp::Eq, a, b)",
+        let op_kind = classify_pattern_inst(op, attrs)?;
+        let arm = match op_kind {
+            PatternInstKind::Select => "Op::Select(cond, t, e)",
+            PatternInstKind::And => "Op::And(a, b)",
+            PatternInstKind::Xor => "Op::Xor(a, b)",
+            PatternInstKind::ICmpEq => "Op::ICmp(ICmpOp::Eq, a, b)",
         };
         self.line(out, &format!("match &{node}.inst.op {{"));
         self.indent += 1;
         self.line(out, &format!("{arm} => {{"));
         self.indent += 1;
 
-        let operand_exprs: Vec<String> = match op {
-            PatternOp::Select => vec![
+        let operand_exprs: Vec<String> = match op_kind {
+            PatternInstKind::Select => vec![
                 "cond.clone().raw().value".to_string(),
                 "t.value".to_string(),
                 "e.value".to_string(),
             ],
-            PatternOp::And | PatternOp::Xor | PatternOp::IcmpEq => vec![
+            PatternInstKind::And | PatternInstKind::Xor | PatternInstKind::ICmpEq => vec![
                 "a.clone().raw().value".to_string(),
                 "b.clone().raw().value".to_string(),
             ],
@@ -327,7 +329,7 @@ impl PatternGen {
             })
             .collect();
 
-        if op.is_commutative() && arg_locals.len() == 2 {
+        if op_kind.is_commutative() && arg_locals.len() == 2 {
             let binding_names = collect_binding_names(args);
             let snapshot_bindings = self.local("snapshot_bindings");
             let snapshot_insts = self.local("snapshot_insts");
@@ -405,6 +407,46 @@ impl PatternGen {
         }
         out.push_str(text);
         out.push('\n');
+    }
+}
+
+#[derive(Clone, Copy)]
+enum PatternInstKind {
+    Select,
+    And,
+    Xor,
+    ICmpEq,
+}
+
+impl PatternInstKind {
+    fn is_commutative(self) -> bool {
+        matches!(self, Self::And | Self::Xor | Self::ICmpEq)
+    }
+}
+
+fn classify_pattern_inst(
+    op: &str,
+    attrs: &[PatternAttr],
+) -> Result<PatternInstKind, GenerateError> {
+    match op {
+        "select" => Ok(PatternInstKind::Select),
+        "and" => Ok(PatternInstKind::And),
+        "xor" => Ok(PatternInstKind::Xor),
+        "icmp" => match attrs {
+            [PatternAttr::IcmpPred { value }] if value == "eq" => Ok(PatternInstKind::ICmpEq),
+            [PatternAttr::IcmpPred { value }] => Err(GenerateError::UnsupportedPattern(format!(
+                "icmp predicate `{value}`"
+            ))),
+            [] => Err(GenerateError::UnsupportedPattern(
+                "icmp is missing required predicate attribute".to_string(),
+            )),
+            _ => Err(GenerateError::UnsupportedPattern(
+                "icmp uses unsupported attribute set".to_string(),
+            )),
+        },
+        other => Err(GenerateError::UnsupportedPattern(format!(
+            "unsupported pattern op `{other}`"
+        ))),
     }
 }
 

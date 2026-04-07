@@ -13,12 +13,17 @@ inductive ValueType where
   | bool
   deriving DecidableEq, Repr
 
-/-- The small local instruction vocabulary supported by the v1 peephole exporter. -/
-inductive PatternOp where
+/-- Generic opcode names used by exported peephole patterns. -/
+inductive PatternOpcode where
   | select
   | and
   | xor
-  | icmpEq
+  | icmp
+  deriving DecidableEq, Repr
+
+/-- Attributes attached to an instruction pattern. -/
+inductive PatternAttr where
+  | icmpPred (pred : ICmpOp)
   deriving DecidableEq, Repr
 
 /-- Declarative expression pattern for local peephole rewrites. -/
@@ -27,7 +32,7 @@ inductive Pattern where
   | bind (name : String) (pattern : Pattern)
   | intConst (value : Int)
   | intConstBinding (name : String)
-  | inst (op : PatternOp) (args : List Pattern)
+  | inst (opcode : PatternOpcode) (attrs : List PatternAttr := []) (args : List Pattern)
   deriving Repr
 
 /-- Replacement references an already-matched binding. -/
@@ -85,7 +90,7 @@ theorem icmp_eq_xor_select_bool_to_int_one_one (b : Bool) :
   cases b <;> rfl
 
 private def selectBoolToInt (boolName : String) : Pattern :=
-  .inst .select [
+  .inst .select [] [
     .capture boolName (.some .bool),
     .intConst 1,
     .intConst 0
@@ -100,7 +105,7 @@ def andSelectBoolToIntMask255Rule : PeepholeRule :=
     name := "and_select_bool_to_int_mask_255"
     proofRef := "TuffyLean.Rewrites.and_select_bool_to_int_mask_255"
     body := .value
-      (.inst .and [bindSelectBoolToInt "bool_int" "b", .intConst 255])
+      (.inst .and [] [bindSelectBoolToInt "bool_int" "b", .intConst 255])
       (.binding "bool_int")
   }
 
@@ -110,7 +115,7 @@ def brifIcmpEqSelectBoolToIntOneRule : PeepholeRule :=
     name := "brif_icmp_eq_select_bool_to_int_one"
     proofRef := "TuffyLean.Rewrites.icmp_eq_select_bool_to_int_one"
     body := .brif
-      (.inst .icmpEq [selectBoolToInt "b", .intConst 1])
+      (.inst .icmp [.icmpPred .eq] [selectBoolToInt "b", .intConst 1])
       (.binding "b")
       false
   }
@@ -121,7 +126,7 @@ def brifIcmpEqSelectBoolToIntZeroRule : PeepholeRule :=
     name := "brif_icmp_eq_select_bool_to_int_zero"
     proofRef := "TuffyLean.Rewrites.icmp_eq_select_bool_to_int_zero"
     body := .brif
-      (.inst .icmpEq [selectBoolToInt "b", .intConst 0])
+      (.inst .icmp [.icmpPred .eq] [selectBoolToInt "b", .intConst 0])
       (.binding "b")
       true
   }
@@ -132,8 +137,8 @@ def brifIcmpEqXorSelectBoolToIntOneOneRule : PeepholeRule :=
     name := "brif_icmp_eq_xor_select_bool_to_int_one_one"
     proofRef := "TuffyLean.Rewrites.icmp_eq_xor_select_bool_to_int_one_one"
     body := .brif
-      (.inst .icmpEq [
-        .inst .xor [selectBoolToInt "b", .intConst 1],
+      (.inst .icmp [.icmpPred .eq] [
+        .inst .xor [] [selectBoolToInt "b", .intConst 1],
         .intConst 1
       ])
       (.binding "b")
