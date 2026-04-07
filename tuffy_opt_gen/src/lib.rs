@@ -18,6 +18,10 @@ pub enum GenerateError {
         rule: String,
         conditions: Vec<String>,
     },
+    UnsupportedRootRewrite {
+        rule: String,
+        message: String,
+    },
     UnsupportedPattern(String),
     MissingReplacementBinding {
         rule: String,
@@ -45,6 +49,9 @@ impl fmt::Display for GenerateError {
                     "rule `{rule}` uses unsupported side conditions: {}",
                     conditions.join(", ")
                 )
+            }
+            GenerateError::UnsupportedRootRewrite { rule, message } => {
+                write!(f, "rule `{rule}` uses unsupported root rewrite: {message}")
             }
             GenerateError::UnsupportedPattern(msg) => {
                 write!(f, "unsupported peephole pattern: {msg}")
@@ -90,27 +97,37 @@ mod tests {
       "proof_ref": "TuffyLean.Rewrites.icmp_eq_select_bool_to_int_one",
       "side_conditions": [],
       "rewrite": {
-        "kind": "brif",
-        "condition": {
-          "kind": "inst",
-          "op": "icmp",
-          "attrs": [{ "kind": "icmp_pred", "value": "eq" }],
-          "args": [
+        "match_root": {
+          "kind": "terminator",
+          "op": "brif",
+          "operands": [
             {
               "kind": "inst",
-              "op": "select",
-              "attrs": [],
+              "op": "icmp",
+              "attrs": [{ "kind": "icmp_pred", "value": "eq" }],
               "args": [
-                { "kind": "capture", "name": "b", "ty": "bool" },
-                { "kind": "int_const", "value": "1" },
-                { "kind": "int_const", "value": "0" }
+                {
+                  "kind": "inst",
+                  "op": "select",
+                  "attrs": [],
+                  "args": [
+                    { "kind": "capture", "name": "b", "ty": "bool" },
+                    { "kind": "int_const", "value": "1" },
+                    { "kind": "int_const", "value": "0" }
+                  ]
+                },
+                { "kind": "int_const", "value": "1" }
               ]
-            },
-            { "kind": "int_const", "value": "1" }
-          ]
+            }
+          ],
+          "successor_count": 2
         },
-        "replacement": { "kind": "binding", "name": "b" },
-        "invert": false
+        "replacement": {
+          "kind": "terminator",
+          "op": "brif",
+          "operands": [{ "kind": "binding", "name": "b" }],
+          "successors": [0, 1]
+        }
       }
     }
   ]
@@ -124,7 +141,8 @@ mod tests {
         assert!(rust.contains("pub(super) const GENERATED_RULE_COUNT: usize = 1;"));
         assert!(rust.contains("fn try_apply_brif_icmp_eq_select_bool_to_int_one"));
         assert!(rust.contains("Op::Select(cond, t, e)"));
-        assert!(rust.contains("apply_brif_rewrite"));
+        assert!(rust.contains("apply_terminator_root_rewrite"));
+        assert!(rust.contains("TerminatorOpcode::BrIf"));
     }
 
     #[test]

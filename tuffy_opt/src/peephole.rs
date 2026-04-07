@@ -2,10 +2,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use num_bigint::BigInt;
 use tuffy_ir::function::Function;
-use tuffy_ir::instruction::{ICmpOp, Op, Origin};
+use tuffy_ir::instruction::{ICmpOp, Op, Operand, Origin};
 use tuffy_ir::module::Module;
 use tuffy_ir::typed::{BoolOperand, BoolValue};
 use tuffy_ir::types::Type;
+use tuffy_ir::value::BlockRef;
 use tuffy_ir::value::ValueRef;
 
 const MAX_ITERATIONS: usize = 32;
@@ -97,7 +98,24 @@ fn parse_decimal_bigint(value: &str) -> BigInt {
         .unwrap_or_else(|_| panic!("invalid generated bigint literal: {value}"))
 }
 
-fn apply_value_rewrite(
+#[derive(Clone, Copy)]
+enum TerminatorOpcode {
+    BrIf,
+}
+
+struct ReplacementTerminator {
+    opcode: TerminatorOpcode,
+    operands: Vec<ValueRef>,
+    successors: Vec<usize>,
+}
+
+#[derive(Clone)]
+struct MatchedSuccessor {
+    block: BlockRef,
+    args: Vec<Operand>,
+}
+
+fn apply_value_root_rewrite(
     func: &mut Function,
     root_idx: u32,
     replacement: ValueRef,
@@ -112,33 +130,64 @@ fn apply_value_rewrite(
     cleanup_dead_instructions(func, matched_insts);
 }
 
-fn apply_brif_rewrite(
+fn apply_terminator_root_rewrite(
     func: &mut Function,
     root_idx: u32,
-    replacement: ValueRef,
-    invert: bool,
+    replacement: ReplacementTerminator,
     matched_insts: &BTreeSet<u32>,
 ) {
     let old_inst = func.inst(root_idx).clone();
     let mut new_inst = old_inst.clone();
     new_inst.origin = merged_origin(func, root_idx, matched_insts);
-    new_inst.op = rewrite_brif_op(func, old_inst.op, replacement, invert);
+    new_inst.op = build_terminator_op(func, &old_inst.op, replacement);
     func.insert_inst_before(root_idx, new_inst);
     func.remove_inst(root_idx);
     cleanup_dead_instructions(func, matched_insts);
 }
 
-fn rewrite_brif_op(func: &Function, op: Op, replacement: ValueRef, invert: bool) -> Op {
-    let replacement = BoolOperand::from_value(BoolValue::new(replacement, func));
-    match op {
-        Op::BrIf(_, then_block, then_args, else_block, else_args) => {
-            if invert {
-                Op::BrIf(replacement, else_block, else_args, then_block, then_args)
-            } else {
-                Op::BrIf(replacement, then_block, then_args, else_block, else_args)
-            }
+fn build_terminator_op(func: &Function, root_op: &Op, replacement: ReplacementTerminator) -> Op {
+    let matched_successors = extract_matched_successors(root_op);
+
+    match replacement.opcode {
+        TerminatorOpcode::BrIf => {
+            assert_eq!(
+                replacement.operands.len(),
+                1,
+                "brif replacement expects one condition operand"
+            );
+            assert_eq!(
+                replacement.successors.len(),
+                2,
+                "brif replacement expects two successor mappings"
+            );
+
+            let cond = BoolOperand::from_value(BoolValue::new(replacement.operands[0], func));
+            let then_succ = &matched_successors[replacement.successors[0]];
+            let else_succ = &matched_successors[replacement.successors[1]];
+            Op::BrIf(
+                cond,
+                then_succ.block,
+                then_succ.args.clone(),
+                else_succ.block,
+                else_succ.args.clone(),
+            )
         }
-        other => panic!("expected brif terminator, got {other:?}"),
+    }
+}
+
+fn extract_matched_successors(root_op: &Op) -> Vec<MatchedSuccessor> {
+    match root_op {
+        Op::BrIf(_, then_block, then_args, else_block, else_args) => vec![
+            MatchedSuccessor {
+                block: *then_block,
+                args: then_args.clone(),
+            },
+            MatchedSuccessor {
+                block: *else_block,
+                args: else_args.clone(),
+            },
+        ],
+        other => panic!("unsupported matched terminator root: {other:?}"),
     }
 }
 

@@ -21,6 +21,11 @@ inductive PatternOpcode where
   | icmp
   deriving DecidableEq, Repr
 
+/-- Generic terminator opcode names used by exported peephole rewrites. -/
+inductive TerminatorOpcode where
+  | brif
+  deriving DecidableEq, Repr
+
 /-- Attributes attached to an instruction pattern. -/
 inductive PatternAttr where
   | icmpPred (pred : ICmpOp)
@@ -45,10 +50,22 @@ inductive TransformKind where
   | equivalence
   deriving DecidableEq, Repr
 
-/-- Rule bodies supported by the v1 peephole executor. -/
-inductive RewriteBody where
-  | value (root : Pattern) (replacement : Replacement)
-  | brif (condition : Pattern) (replacement : Replacement) (invert : Bool)
+/-- Root matching forms supported by the peephole DSL. -/
+inductive MatchRoot where
+  | value (root : Pattern)
+  | terminator (opcode : TerminatorOpcode) (operands : List Pattern) (successorCount : Nat)
+  deriving Repr
+
+/-- Root replacement forms supported by the peephole DSL. -/
+inductive RootReplacement where
+  | value (replacement : Replacement)
+  | terminator (opcode : TerminatorOpcode) (operands : List Replacement) (successors : List Nat)
+  deriving Repr
+
+/-- Generic local root rewrite. -/
+structure RewriteBody where
+  matchRoot : MatchRoot
+  replacement : RootReplacement
   deriving Repr
 
 /-- Exportable peephole rule metadata. -/
@@ -99,14 +116,22 @@ private def selectBoolToInt (boolName : String) : Pattern :=
 private def bindSelectBoolToInt (bindName boolName : String) : Pattern :=
   .bind bindName (selectBoolToInt boolName)
 
+private def brifRoot (condition : Pattern) : MatchRoot :=
+  .terminator .brif [condition] 2
+
+private def brifReplacement (condition : Replacement) (successors : List Nat) : RootReplacement :=
+  .terminator .brif [condition] successors
+
 /-- `and (select %b, 1, 0), 255 -> select %b, 1, 0` -/
 def andSelectBoolToIntMask255Rule : PeepholeRule :=
   {
     name := "and_select_bool_to_int_mask_255"
     proofRef := "TuffyLean.Rewrites.and_select_bool_to_int_mask_255"
-    body := .value
-      (.inst .and [] [bindSelectBoolToInt "bool_int" "b", .intConst 255])
-      (.binding "bool_int")
+    body := {
+      matchRoot := .value
+        (.inst .and [] [bindSelectBoolToInt "bool_int" "b", .intConst 255])
+      replacement := .value (.binding "bool_int")
+    }
   }
 
 /-- `brif (icmp.eq (select %b, 1, 0), 1) -> brif %b` -/
@@ -114,10 +139,11 @@ def brifIcmpEqSelectBoolToIntOneRule : PeepholeRule :=
   {
     name := "brif_icmp_eq_select_bool_to_int_one"
     proofRef := "TuffyLean.Rewrites.icmp_eq_select_bool_to_int_one"
-    body := .brif
-      (.inst .icmp [.icmpPred .eq] [selectBoolToInt "b", .intConst 1])
-      (.binding "b")
-      false
+    body := {
+      matchRoot := brifRoot
+        (.inst .icmp [.icmpPred .eq] [selectBoolToInt "b", .intConst 1])
+      replacement := brifReplacement (.binding "b") [0, 1]
+    }
   }
 
 /-- `brif (icmp.eq (select %b, 1, 0), 0) -> brif !%b` -/
@@ -125,10 +151,11 @@ def brifIcmpEqSelectBoolToIntZeroRule : PeepholeRule :=
   {
     name := "brif_icmp_eq_select_bool_to_int_zero"
     proofRef := "TuffyLean.Rewrites.icmp_eq_select_bool_to_int_zero"
-    body := .brif
-      (.inst .icmp [.icmpPred .eq] [selectBoolToInt "b", .intConst 0])
-      (.binding "b")
-      true
+    body := {
+      matchRoot := brifRoot
+        (.inst .icmp [.icmpPred .eq] [selectBoolToInt "b", .intConst 0])
+      replacement := brifReplacement (.binding "b") [1, 0]
+    }
   }
 
 /-- `brif (icmp.eq (xor (select %b, 1, 0), 1), 1) -> brif !%b` -/
@@ -136,13 +163,14 @@ def brifIcmpEqXorSelectBoolToIntOneOneRule : PeepholeRule :=
   {
     name := "brif_icmp_eq_xor_select_bool_to_int_one_one"
     proofRef := "TuffyLean.Rewrites.icmp_eq_xor_select_bool_to_int_one_one"
-    body := .brif
-      (.inst .icmp [.icmpPred .eq] [
-        .inst .xor [] [selectBoolToInt "b", .intConst 1],
-        .intConst 1
-      ])
-      (.binding "b")
-      true
+    body := {
+      matchRoot := brifRoot
+        (.inst .icmp [.icmpPred .eq] [
+          .inst .xor [] [selectBoolToInt "b", .intConst 1],
+          .intConst 1
+        ])
+      replacement := brifReplacement (.binding "b") [1, 0]
+    }
   }
 
 /-- Seed rules for the first exported peephole batch. -/

@@ -3,7 +3,10 @@ use std::fmt::Write;
 use num_bigint::BigInt;
 
 use crate::GenerateError;
-use crate::schema::{Pattern, PatternAttr, PeepholeRule, PeepholeSpec, Rewrite, ValueType};
+use crate::schema::{
+    MatchRoot, Pattern, PatternAttr, PeepholeRule, PeepholeSpec, Replacement, RootReplacement,
+    ValueType,
+};
 
 pub fn generate(spec: &PeepholeSpec) -> Result<String, GenerateError> {
     let mut out = String::new();
@@ -53,9 +56,13 @@ fn generate_dispatch(out: &mut String, rules: &[PeepholeRule]) {
 fn generate_rule_fn(out: &mut String, rule: &PeepholeRule) -> Result<(), GenerateError> {
     let ident = rule_ident(&rule.name);
     let mut bindings = Vec::new();
-    match &rule.rewrite {
-        Rewrite::Value { root, .. } => root.collect_bindings(&mut bindings),
-        Rewrite::Brif { condition, .. } => condition.collect_bindings(&mut bindings),
+    match &rule.rewrite.match_root {
+        MatchRoot::Value { root } => root.collect_bindings(&mut bindings),
+        MatchRoot::Terminator { operands, .. } => {
+            for operand in operands {
+                operand.collect_bindings(&mut bindings);
+            }
+        }
     }
 
     writeln!(
@@ -72,15 +79,23 @@ fn generate_rule_fn(out: &mut String, rule: &PeepholeRule) -> Result<(), Generat
         writeln!(out, "    let mut bind_{binding}: Option<ValueRef> = None;").unwrap();
     }
     writeln!(out, "    let mut matched_insts = BTreeSet::new();").unwrap();
-    writeln!(out, "    let replacement = (|| -> Option<ValueRef> {{").unwrap();
+    let replacement_ty = match &rule.rewrite.replacement {
+        RootReplacement::Value { .. } => "ValueRef",
+        RootReplacement::Terminator { .. } => "ReplacementTerminator",
+    };
+    writeln!(
+        out,
+        "    let replacement = (|| -> Option<{replacement_ty}> {{"
+    )
+    .unwrap();
     writeln!(
         out,
         "        let Some(root_node) = func.inst_pool.get(root_idx) else {{ return None; }};"
     )
     .unwrap();
     writeln!(out, "        let root_block = root_node.parent_block;").unwrap();
-    match &rule.rewrite {
-        Rewrite::Value { root, replacement } => {
+    match (&rule.rewrite.match_root, &rule.rewrite.replacement) {
+        (MatchRoot::Value { root }, RootReplacement::Value { value: replacement }) => {
             writeln!(
                 out,
                 "        let root_value = ValueRef::inst_result(root_idx);"
@@ -96,28 +111,36 @@ fn generate_rule_fn(out: &mut String, rule: &PeepholeRule) -> Result<(), Generat
             .unwrap();
             writeln!(out, "        Some(replacement)").unwrap();
         }
-        Rewrite::Brif {
-            condition,
-            replacement,
-            ..
-        } => {
-            writeln!(out, "        let root_cond = match &root_node.inst.op {{").unwrap();
-            writeln!(
-                out,
-                "            Op::BrIf(cond, _, _, _, _) => cond.clone().raw().value,"
-            )
-            .unwrap();
-            writeln!(out, "            _ => return None,").unwrap();
-            writeln!(out, "        }};").unwrap();
-            let mut pattern_gen = PatternGen::new(2);
-            pattern_gen.emit_pattern(out, condition, "root_cond")?;
-            writeln!(
-                out,
-                "        let replacement = bind_{}?;",
-                replacement.binding_name()
-            )
-            .unwrap();
-            writeln!(out, "        Some(replacement)").unwrap();
+        (
+            MatchRoot::Terminator {
+                op,
+                operands,
+                successor_count,
+            },
+            RootReplacement::Terminator {
+                op: replacement_op,
+                operands: replacement_operands,
+                successors,
+            },
+        ) => {
+            let terminator_kind = classify_terminator_kind(op, *successor_count)?;
+            let replacement_kind = classify_terminator_kind(replacement_op, successors.len())?;
+            if terminator_kind != replacement_kind {
+                return Err(GenerateError::UnsupportedRootRewrite {
+                    rule: rule.name.clone(),
+                    message: format!(
+                        "terminator root `{op}` cannot be replaced with `{replacement_op}`"
+                    ),
+                });
+            }
+            emit_terminator_root_match(out, terminator_kind, operands)?;
+            emit_terminator_replacement(out, replacement_kind, replacement_operands, successors)?;
+        }
+        _ => {
+            return Err(GenerateError::UnsupportedRootRewrite {
+                rule: rule.name.clone(),
+                message: "root kind and replacement kind must match".to_string(),
+            });
         }
     }
     writeln!(out, "    }})();").unwrap();
@@ -126,18 +149,18 @@ fn generate_rule_fn(out: &mut String, rule: &PeepholeRule) -> Result<(), Generat
         "    let Some(replacement) = replacement else {{ return false; }};"
     )
     .unwrap();
-    match &rule.rewrite {
-        Rewrite::Value { .. } => {
+    match &rule.rewrite.replacement {
+        RootReplacement::Value { .. } => {
             writeln!(
                 out,
-                "    apply_value_rewrite(func, root_idx, replacement, &matched_insts);"
+                "    apply_value_root_rewrite(func, root_idx, replacement, &matched_insts);"
             )
             .unwrap();
         }
-        Rewrite::Brif { invert, .. } => {
+        RootReplacement::Terminator { .. } => {
             writeln!(
                 out,
-                "    apply_brif_rewrite(func, root_idx, replacement, {invert}, &matched_insts);"
+                "    apply_terminator_root_rewrite(func, root_idx, replacement, &matched_insts);"
             )
             .unwrap();
         }
@@ -147,6 +170,76 @@ fn generate_rule_fn(out: &mut String, rule: &PeepholeRule) -> Result<(), Generat
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
     Ok(())
+}
+
+fn emit_terminator_root_match(
+    out: &mut String,
+    kind: TerminatorKind,
+    operands: &[Pattern],
+) -> Result<(), GenerateError> {
+    match kind {
+        TerminatorKind::BrIf => {
+            writeln!(
+                out,
+                "        let root_op_arg_0 = match &root_node.inst.op {{"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "            Op::BrIf(cond, _, _, _, _) => cond.clone().raw().value,"
+            )
+            .unwrap();
+            writeln!(out, "            _ => return None,").unwrap();
+            writeln!(out, "        }};").unwrap();
+            let mut pattern_gen = PatternGen::new(2);
+            if operands.len() != 1 {
+                return Err(GenerateError::UnsupportedPattern(
+                    "brif root currently expects exactly one matched operand".to_string(),
+                ));
+            }
+            pattern_gen.emit_pattern(out, &operands[0], "root_op_arg_0")?;
+        }
+    }
+    Ok(())
+}
+
+fn emit_terminator_replacement(
+    out: &mut String,
+    kind: TerminatorKind,
+    operands: &[Replacement],
+    successors: &[usize],
+) -> Result<(), GenerateError> {
+    match kind {
+        TerminatorKind::BrIf => {
+            if operands.len() != 1 {
+                return Err(GenerateError::UnsupportedPattern(
+                    "brif replacement currently expects exactly one operand".to_string(),
+                ));
+            }
+            let cond = replacement_expr(&operands[0]);
+            writeln!(out, "        Some(ReplacementTerminator {{").unwrap();
+            writeln!(out, "            opcode: TerminatorOpcode::BrIf,").unwrap();
+            writeln!(out, "            operands: vec![{cond}],").unwrap();
+            writeln!(
+                out,
+                "            successors: vec![{}],",
+                successors
+                    .iter()
+                    .map(|idx| idx.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+            .unwrap();
+            writeln!(out, "        }})").unwrap();
+        }
+    }
+    Ok(())
+}
+
+fn replacement_expr(replacement: &Replacement) -> String {
+    match replacement {
+        Replacement::Binding { name } => format!("bind_{name}?"),
+    }
 }
 
 struct PatternGen {
@@ -421,6 +514,26 @@ enum PatternInstKind {
 impl PatternInstKind {
     fn is_commutative(self) -> bool {
         matches!(self, Self::And | Self::Xor | Self::ICmpEq)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TerminatorKind {
+    BrIf,
+}
+
+fn classify_terminator_kind(
+    op: &str,
+    successor_count: usize,
+) -> Result<TerminatorKind, GenerateError> {
+    match op {
+        "brif" if successor_count == 2 => Ok(TerminatorKind::BrIf),
+        "brif" => Err(GenerateError::UnsupportedPattern(format!(
+            "brif expects exactly 2 successors, got {successor_count}"
+        ))),
+        other => Err(GenerateError::UnsupportedPattern(format!(
+            "unsupported terminator op `{other}`"
+        ))),
     }
 }
 

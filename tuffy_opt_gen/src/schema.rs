@@ -19,20 +19,38 @@ pub struct PeepholeRule {
     pub proof_ref: String,
     #[serde(default)]
     pub side_conditions: Vec<String>,
-    pub rewrite: Rewrite,
+    pub rewrite: RewriteBody,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RewriteBody {
+    pub match_root: MatchRoot,
+    pub replacement: RootReplacement,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum Rewrite {
+pub enum MatchRoot {
     Value {
         root: Pattern,
-        replacement: Replacement,
     },
-    Brif {
-        condition: Pattern,
-        replacement: Replacement,
-        invert: bool,
+    Terminator {
+        op: String,
+        operands: Vec<Pattern>,
+        successor_count: usize,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RootReplacement {
+    Value {
+        value: Replacement,
+    },
+    Terminator {
+        op: String,
+        operands: Vec<Replacement>,
+        successors: Vec<usize>,
     },
 }
 
@@ -134,8 +152,8 @@ pub fn validate_spec(spec: &PeepholeSpec) -> Result<(), GenerateError> {
         }
 
         let mut bindings = Vec::new();
-        match &rule.rewrite {
-            Rewrite::Value { root, replacement } => {
+        match (&rule.rewrite.match_root, &rule.rewrite.replacement) {
+            (MatchRoot::Value { root }, RootReplacement::Value { value: replacement }) => {
                 root.collect_bindings(&mut bindings);
                 if !bindings.contains(&replacement.binding_name()) {
                     return Err(GenerateError::MissingReplacementBinding {
@@ -145,19 +163,55 @@ pub fn validate_spec(spec: &PeepholeSpec) -> Result<(), GenerateError> {
                 }
                 validate_pattern(root)?;
             }
-            Rewrite::Brif {
-                condition,
-                replacement,
-                ..
-            } => {
-                condition.collect_bindings(&mut bindings);
-                if !bindings.contains(&replacement.binding_name()) {
-                    return Err(GenerateError::MissingReplacementBinding {
+            (
+                MatchRoot::Terminator {
+                    op,
+                    operands,
+                    successor_count,
+                },
+                RootReplacement::Terminator {
+                    op: replacement_op,
+                    operands: replacement_operands,
+                    successors,
+                },
+            ) => {
+                for operand in operands {
+                    operand.collect_bindings(&mut bindings);
+                    validate_pattern(operand)?;
+                }
+                for replacement in replacement_operands {
+                    if !bindings.contains(&replacement.binding_name()) {
+                        return Err(GenerateError::MissingReplacementBinding {
+                            rule: rule.name.clone(),
+                            binding: replacement.binding_name().to_string(),
+                        });
+                    }
+                }
+                if op != replacement_op {
+                    return Err(GenerateError::UnsupportedRootRewrite {
                         rule: rule.name.clone(),
-                        binding: replacement.binding_name().to_string(),
+                        message: format!(
+                            "terminator root op `{op}` cannot be replaced with `{replacement_op}`"
+                        ),
                     });
                 }
-                validate_pattern(condition)?;
+                for successor in successors {
+                    if *successor >= *successor_count {
+                        return Err(GenerateError::UnsupportedRootRewrite {
+                            rule: rule.name.clone(),
+                            message: format!(
+                                "replacement successor index {successor} is out of range for {successor_count} matched successors"
+                            ),
+                        });
+                    }
+                }
+            }
+            (MatchRoot::Value { .. }, RootReplacement::Terminator { .. })
+            | (MatchRoot::Terminator { .. }, RootReplacement::Value { .. }) => {
+                return Err(GenerateError::UnsupportedRootRewrite {
+                    rule: rule.name.clone(),
+                    message: "root kind and replacement kind must match".to_string(),
+                });
             }
         }
     }

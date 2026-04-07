@@ -29,6 +29,9 @@ private def patternOpcodeToJson : PatternOpcode → String
   | .xor => quote "xor"
   | .icmp => quote "icmp"
 
+private def terminatorOpcodeToJson : TerminatorOpcode → String
+  | .brif => quote "brif"
+
 private def icmpPredToJson : ICmpOp → String
   | .eq => quote "eq"
   | .ne => quote "ne"
@@ -89,20 +92,39 @@ private def replacementToJson : Replacement → String
       ("name", quote name)
     ]
 
-private def rewriteBodyToJson : RewriteBody → String
-  | .value root replacement =>
+private def matchRootToJson : MatchRoot → String
+  | .value root =>
     jsonObj [
       ("kind", quote "value"),
-      ("root", patternToJson root),
-      ("replacement", replacementToJson replacement)
+      ("root", patternToJson root)
     ]
-  | .brif condition replacement invert =>
+  | .terminator opcode operands successorCount =>
     jsonObj [
-      ("kind", quote "brif"),
-      ("condition", patternToJson condition),
-      ("replacement", replacementToJson replacement),
-      ("invert", if invert then "true" else "false")
+      ("kind", quote "terminator"),
+      ("op", terminatorOpcodeToJson opcode),
+      ("operands", jsonArr (operands.map patternToJson)),
+      ("successor_count", toString successorCount)
     ]
+
+private def rootReplacementToJson : RootReplacement → String
+  | .value replacement =>
+    jsonObj [
+      ("kind", quote "value"),
+      ("value", replacementToJson replacement)
+    ]
+  | .terminator opcode operands successors =>
+    jsonObj [
+      ("kind", quote "terminator"),
+      ("op", terminatorOpcodeToJson opcode),
+      ("operands", jsonArr (operands.map replacementToJson)),
+      ("successors", jsonArr (successors.map toString))
+    ]
+
+private def rewriteBodyToJson (body : RewriteBody) : String :=
+  jsonObj [
+    ("match_root", matchRootToJson body.matchRoot),
+    ("replacement", rootReplacementToJson body.replacement)
+  ]
 
 private def peepholeRuleToJson (rule : PeepholeRule) : String :=
   jsonObj [
