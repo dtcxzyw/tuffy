@@ -233,6 +233,7 @@ __marimo__/
 
 scratch/
 lean/.lake
+tuffy_opt/generated/
 
 # rustc ICE reports
 rustc-ice-*.txt

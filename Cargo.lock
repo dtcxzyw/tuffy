@@ -391,6 +391,9 @@ dependencies = [
 name = "tuffy_opt"
 version = "0.1.0"
 dependencies = [
+ "num-bigint",
+ "serde",
+ "serde_json",
  "tuffy_ir",
 ]
 
