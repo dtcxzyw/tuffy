@@ -8,7 +8,7 @@ use rustc_data_structures::fx::FxIndexMap;
 use rustc_hir::attrs::Linkage;
 use rustc_middle::dep_graph::{WorkProduct, WorkProductId};
 use rustc_middle::mir::mono::MonoItem;
-use rustc_middle::ty::{self, Instance, TyCtxt};
+use rustc_middle::ty::{self, Instance, TyCtxt, TypeVisitableExt};
 use tuffy_codegen::CodegenSession;
 use tuffy_target::reloc::{RelocKind, Relocation};
 use tuffy_target::types::{CompiledFunction, StaticData};
@@ -147,19 +147,7 @@ impl<'tcx> AotCodegen<'tcx> {
         if Some(instance.def_id()) == self.tcx.lang_items().start_fn() {
             return;
         }
-        if let ty::InstanceKind::Intrinsic(def_id) = instance.def
-            && self
-                .tcx
-                .intrinsic(def_id)
-                .is_some_and(|intrinsic| intrinsic.must_be_overridden)
-        {
-            return;
-        }
-        if let ty::InstanceKind::Item(def_id) = instance.def
-            && !def_id.is_local()
-            && !self.tcx.is_mir_available(def_id)
-            && !matches!(self.tcx.def_kind(def_id), rustc_hir::def::DefKind::Ctor(..))
-        {
+        if !self.should_codegen_instance(instance) {
             return;
         }
 
@@ -253,6 +241,13 @@ impl<'tcx> AotCodegen<'tcx> {
         artifacts: &mut ObjectArtifacts,
         caches: &mut TranslationCaches,
     ) {
+        if !self.should_codegen_instance(instance) {
+            self.fatal_instance(
+                instance,
+                "internal error: attempted to compile a non-codegenable instance",
+            );
+        }
+
         if self.config.dump_ir && dump_mir {
             self.dump_mir(instance);
         }
@@ -268,32 +263,27 @@ impl<'tcx> AotCodegen<'tcx> {
         );
 
         let Some(mut result) = result else {
-            artifacts.functions.push(make_stub(
-                self.tcx.symbol_name(instance).name.to_string(),
-                weak,
-            ));
-            return;
+            self.fatal_instance(
+                instance,
+                "MIR-to-IR translation unexpectedly skipped a codegenable instance",
+            );
         };
 
         self.pending_instances
             .extend(result.referenced_instances.iter().copied());
         self.append_translation_dump(&result);
-        verify_translation_result(&result);
+        if let Err(err) = verify_translation_result(&result) {
+            self.fatal_instance(instance, &err);
+        }
         append_translation_static_data(&mut artifacts.static_data, &result);
 
-        if let Some(mut compiled) = self
+        let compiled = self
             .session
             .compile_function(&result.func, &mut result.symbols)
-        {
-            compiled.weak = weak;
-            artifacts.functions.push(compiled);
-            return;
-        }
-
-        let sym_name = self.tcx.symbol_name(instance).name.to_string();
-        let func_name = result.symbols.resolve(result.func.name);
-        eprintln!("warning: isel failed for {func_name}, emitting stub");
-        artifacts.functions.push(make_stub(sym_name, weak));
+            .unwrap_or_else(|err| self.fatal_instance(instance, &err));
+        artifacts
+            .functions
+            .push(CompiledFunction { weak, ..compiled });
     }
 
     fn codegen_inline_instances(&mut self) {
@@ -314,10 +304,7 @@ impl<'tcx> AotCodegen<'tcx> {
             }
 
             for instance in batch {
-                if let ty::InstanceKind::Item(def_id) = instance.def
-                    && !self.tcx.is_mir_available(def_id)
-                    && !matches!(self.tcx.def_kind(def_id), rustc_hir::def::DefKind::Ctor(..))
-                {
+                if !self.should_codegen_instance(instance) {
                     continue;
                 }
                 self.compile_instance(instance, true, false, &mut artifacts, &mut caches);
@@ -473,14 +460,45 @@ impl<'tcx> AotCodegen<'tcx> {
         fs::write(path, text)
             .unwrap_or_else(|err| panic!("failed to write module IR to {}: {err}", path.display()));
     }
+
+    fn should_codegen_instance(&self, instance: Instance<'tcx>) -> bool {
+        if instance.args.has_non_region_param() {
+            return false;
+        }
+        if let ty::InstanceKind::Intrinsic(def_id) = instance.def
+            && self
+                .tcx
+                .intrinsic(def_id)
+                .is_some_and(|intrinsic| intrinsic.must_be_overridden)
+        {
+            return false;
+        }
+        if let ty::InstanceKind::Item(def_id) = instance.def
+            && !self.tcx.is_mir_available(def_id)
+            && !matches!(self.tcx.def_kind(def_id), rustc_hir::def::DefKind::Ctor(..))
+        {
+            return false;
+        }
+        true
+    }
+
+    fn fatal_instance(&self, instance: Instance<'tcx>, message: &str) -> ! {
+        let symbol = self.tcx.symbol_name(instance).name;
+        self.tcx.dcx().fatal(format!(
+            "rustc_codegen_tuffy failed for {symbol}: {message}"
+        ));
+    }
 }
 
-fn verify_translation_result(result: &mir_to_ir::TranslationResult<'_>) {
+fn verify_translation_result(result: &mir_to_ir::TranslationResult<'_>) -> Result<(), String> {
     let verification = tuffy_ir::verifier::verify_function(&result.func, &result.symbols);
     if !verification.is_ok() {
         let func_name = result.symbols.resolve(result.func.name);
-        panic!("IR verification failed for {func_name}: {verification}");
+        return Err(format!(
+            "IR verification failed for {func_name}: {verification}"
+        ));
     }
+    Ok(())
 }
 
 fn append_translation_static_data(
@@ -530,28 +548,4 @@ fn is_weak_linkage(linkage: Linkage) -> bool {
             | Linkage::LinkOnceAny
             | Linkage::WeakAny
     )
-}
-
-fn make_stub(name: String, weak: bool) -> CompiledFunction {
-    let code = if is_noop_stub(&name) {
-        vec![0xC3]
-    } else {
-        vec![0x0F, 0x0B]
-    };
-
-    CompiledFunction {
-        name,
-        code,
-        relocations: vec![],
-        weak,
-        local: false,
-        has_frame_pointer: false,
-        call_site_table: vec![],
-        callee_saved_dwarf_regs: vec![],
-        sub_amount: 0,
-    }
-}
-
-fn is_noop_stub(name: &str) -> bool {
-    name.contains("drop_in_place") || name.contains("precondition_check")
 }

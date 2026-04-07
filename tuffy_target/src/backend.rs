@@ -14,9 +14,11 @@ pub type AllocatorPair<'a> = (&'a str, &'a str);
 /// emission, and generation of runtime stubs for a specific architecture.
 pub trait Backend {
     /// Compile a single IR function to machine code.
-    ///
-    /// Returns `None` if the function contains unsupported IR operations.
-    fn compile_function(&self, func: &Function, symbols: &SymbolTable) -> Option<CompiledFunction>;
+    fn compile_function(
+        &self,
+        func: &Function,
+        symbols: &SymbolTable,
+    ) -> Result<CompiledFunction, String>;
 
     /// Emit compiled functions and static data as an object file.
     fn emit_object(&self, functions: &[CompiledFunction], statics: &[StaticData]) -> Vec<u8>;

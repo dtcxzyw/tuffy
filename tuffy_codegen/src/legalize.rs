@@ -7967,8 +7967,6 @@ mod tests {
         b.ret(Some(result.into()), None, mem0.into(), o());
         b.exit_region();
         let legalized = legalize(&func, &X86LegalityInfo, &mut symbols).expect("legalized");
-        eprintln!("{}", legalized.display(&symbols));
-
         let mut module = Module::new("test");
         module.symbols = symbols;
         module.add_function(legalized);

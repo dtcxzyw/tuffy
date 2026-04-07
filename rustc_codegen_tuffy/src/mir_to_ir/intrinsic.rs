@@ -480,6 +480,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             | "unchecked_shr"
             | "unchecked_funnel_shl"
             | "unchecked_funnel_shr"
+            | "float_to_int_unchecked"
                 if let Some(result) = self.translate_arithmetic_intrinsic(
                     name,
                     substs,
@@ -495,6 +496,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             | "fmul_algebraic"
             | "fdiv_algebraic"
             | "frem_algebraic"
+            | "fadd_fast"
+            | "fsub_fast"
+            | "fmul_fast"
+            | "fdiv_fast"
+            | "frem_fast"
             | "minimumf32"
             | "minimumf64"
             | "minnumf32"
@@ -534,6 +540,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     ) -> Option<ValueRef> {
         let current_mem = self.current_mem;
         let tcx = self.tcx;
+        if name.starts_with("atomic_fence") || name.starts_with("atomic_singlethreadfence") {
+            let ordering = parse_atomic_ordering(name);
+            let new_mem = self
+                .builder
+                .fence(ordering, current_mem.into(), Origin::synthetic());
+            return Some(new_mem.raw());
+        }
         // Extract the type parameter T and compute its size and alignment.
         let (elem_size, elem_align) = match substs.first().and_then(|a| a.as_type()) {
             Some(t) => (
@@ -882,17 +895,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 Some(new_mem.raw())
             }
 
-            // atomic_fence_*, atomic_singlethreadfence_* → fence instruction
-            _ if name.starts_with("atomic_fence")
-                || name.starts_with("atomic_singlethreadfence") =>
-            {
-                let ordering = parse_atomic_ordering(name);
-                let new_mem = self
-                    .builder
-                    .fence(ordering, current_mem.into(), Origin::synthetic());
-                Some(new_mem.raw())
-            }
-
             // Read-modify-write: atomic_{and,or,xor,nand,xadd,xsub,
             //                     max,min,umax,umin}_*
             // All return the OLD value.
@@ -1101,7 +1103,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // write_via_move<T>(dst, src) / write_volatile<T>(dst, src)
             // — write src to *dst. Tuffy does not model volatility
             // separately yet, so lower both to the same memory effect.
-            "write_via_move" | "write_volatile" | "volatile_store" => {
+            "write_via_move" | "write_volatile" | "volatile_store" | "unaligned_volatile_store" => {
                 if ir_args.len() < 2 {
                     return None;
                 }
@@ -1142,7 +1144,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // read_via_copy<T>(src) / read_volatile<T>(src) → *src
             // Tuffy does not model volatility separately yet, so lower
             // both to the same memory effect.
-            "read_via_copy" | "read_volatile" | "volatile_load" => {
+            "read_via_copy" | "read_volatile" | "volatile_load" | "unaligned_volatile_load" => {
                 if ir_args.is_empty() {
                     return None;
                 }
@@ -1616,6 +1618,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 }
                 true
             }
+
             _ => return None,
         })
     }
@@ -1657,6 +1660,67 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         self.builder
                             .ptradd(ptr.into(), byte_offset.into(), 0, Origin::synthetic());
                     self.locals.set(destination_local, result.raw());
+                }
+                true
+            }
+
+            "float_to_int_unchecked" => {
+                if let Some(&val) = ir_args.first() {
+                    let src_ft = substs
+                        .first()
+                        .and_then(|a| a.as_type())
+                        .and_then(|t| match t.kind() {
+                            ty::Float(ty::FloatTy::F16) => Some(FloatType::F16),
+                            ty::Float(ty::FloatTy::F32) => Some(FloatType::F32),
+                            ty::Float(ty::FloatTy::F64) => Some(FloatType::F64),
+                            ty::Float(ty::FloatTy::F128) => Some(FloatType::F128),
+                            _ => None,
+                        })
+                        .unwrap_or(FloatType::F64);
+                    let dst_ty = substs.get(1).and_then(|a| a.as_type());
+                    let signed = dst_ty.is_some_and(|t| matches!(t.kind(), ty::Int(_)));
+                    let bit_width = dst_ty
+                        .and_then(|t| type_size(tcx, t))
+                        .map(|s| (s * 8) as u32)
+                        .unwrap_or(64);
+                    let float_val = if matches!(self.builder.value_type(val), Some(Type::Float(_)))
+                    {
+                        val
+                    } else {
+                        self.builder.bitcast(
+                            val.into(),
+                            Type::Float(src_ft),
+                            None,
+                            Origin::synthetic(),
+                        )
+                    };
+                    let raw = if signed {
+                        self.builder.fp_to_si(
+                            float_val.into(),
+                            bit_width.min(64),
+                            Origin::synthetic(),
+                        )
+                    } else {
+                        self.builder.fp_to_ui(
+                            float_val.into(),
+                            bit_width.min(64),
+                            Origin::synthetic(),
+                        )
+                    };
+                    let result = if bit_width > 64 {
+                        if signed {
+                            self.builder
+                                .sext(raw.into(), bit_width, Origin::synthetic())
+                                .raw()
+                        } else {
+                            self.builder
+                                .zext(raw.into(), bit_width, Origin::synthetic())
+                                .raw()
+                        }
+                    } else {
+                        raw.raw()
+                    };
+                    self.locals.set(destination_local, result);
                 }
                 true
             }
@@ -2225,7 +2289,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     ) -> Option<bool> {
         Some(match name {
             "fadd_algebraic" | "fsub_algebraic" | "fmul_algebraic" | "fdiv_algebraic"
-            | "frem_algebraic" => {
+            | "frem_algebraic" | "fadd_fast" | "fsub_fast" | "fmul_fast" | "fdiv_fast"
+            | "frem_fast" => {
                 let a = ir_args[0];
                 let b = ir_args[1];
                 let ty = self
@@ -2239,11 +2304,21 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 };
                 let o = Origin::synthetic();
                 let result = match name {
-                    "fadd_algebraic" => self.builder.fadd(a.into(), b.into(), flags, ty, o),
-                    "fsub_algebraic" => self.builder.fsub(a.into(), b.into(), flags, ty, o),
-                    "fmul_algebraic" => self.builder.fmul(a.into(), b.into(), flags, ty, o),
-                    "fdiv_algebraic" => self.builder.fdiv(a.into(), b.into(), flags, ty, o),
-                    "frem_algebraic" => self.builder.frem(a.into(), b.into(), flags, ty, o),
+                    "fadd_algebraic" | "fadd_fast" => {
+                        self.builder.fadd(a.into(), b.into(), flags, ty, o)
+                    }
+                    "fsub_algebraic" | "fsub_fast" => {
+                        self.builder.fsub(a.into(), b.into(), flags, ty, o)
+                    }
+                    "fmul_algebraic" | "fmul_fast" => {
+                        self.builder.fmul(a.into(), b.into(), flags, ty, o)
+                    }
+                    "fdiv_algebraic" | "fdiv_fast" => {
+                        self.builder.fdiv(a.into(), b.into(), flags, ty, o)
+                    }
+                    "frem_algebraic" | "frem_fast" => {
+                        self.builder.frem(a.into(), b.into(), flags, ty, o)
+                    }
                     _ => unreachable!(),
                 };
                 self.locals.set(destination_local, result.raw());

@@ -903,9 +903,7 @@ fn classify_call_abi(
 ///
 /// Emits `MInst<VReg>` with constraint metadata. Prologue/epilogue
 /// insertion is deferred to a post-regalloc step.
-///
-/// Returns None if the function contains unsupported IR ops.
-pub fn isel(func: &Function, symbols: &SymbolTable) -> Option<IselResult<VInst>> {
+pub fn isel(func: &Function, symbols: &SymbolTable) -> Result<IselResult<VInst>, String> {
     let call_has_ret2 = collect_call_ret2_users(func);
     let ba_cap = func.block_args.len();
     let pool_cap = func.inst_pool.next_index() as usize;
@@ -922,7 +920,6 @@ pub fn isel(func: &Function, symbols: &SymbolTable) -> Option<IselResult<VInst>>
     };
 
     let root = &func.regions[func.root_region.index() as usize];
-    let mut _isel_failed = false;
     for child in &root.children {
         if let CfgNode::Block(block_ref) = child {
             ctx.out.push(MInst::Label {
@@ -940,38 +937,12 @@ pub fn isel(func: &Function, symbols: &SymbolTable) -> Option<IselResult<VInst>>
                 )
                 .is_none()
                 {
-                    if !_isel_failed {
-                        _isel_failed = true;
-                        // Dump all instructions with their block_insts_with_values vrefs
-                        eprintln!(
-                            "=== ISel failure dump for {} ===",
-                            symbols.resolve(func.name)
-                        );
-                        for child2 in &root.children {
-                            if let CfgNode::Block(br2) = child2 {
-                                let bb2 = func.block(*br2);
-                                eprintln!(
-                                    "  block {} (inst_count={}):",
-                                    br2.index(),
-                                    bb2.inst_count
-                                );
-                                for (v2, i2) in func.block_insts_with_values(*br2) {
-                                    eprintln!(
-                                        "    vref={} (index={}) op={:?}",
-                                        v2.index(),
-                                        v2.index(),
-                                        i2.op
-                                    );
-                                }
-                            }
-                        }
-                        eprintln!("  Raw instruction pool (first 60):");
-                        for (i, inst) in func.inst_pool.iter_insts().take(60) {
-                            eprintln!("    [{}] {:?}", i, inst.op);
-                        }
-                    }
-                    eprintln!("warning: isel failed on vref={:?} op {:?}", vref, inst.op);
-                    return None;
+                    return Err(format!(
+                        "instruction selection failed for {} at value {}: {:?}",
+                        symbols.resolve(func.name),
+                        vref.index(),
+                        inst.op,
+                    ));
                 }
             }
         }
@@ -979,7 +950,7 @@ pub fn isel(func: &Function, symbols: &SymbolTable) -> Option<IselResult<VInst>>
 
     let has_calls = ctx.out.iter().any(|i| matches!(i, MInst::CallSym { .. }));
 
-    Some(IselResult {
+    Ok(IselResult {
         name: symbols.resolve(func.name).to_string(),
         insts: ctx.out,
         vreg_count: ctx.alloc.next,
@@ -1355,7 +1326,10 @@ fn select_inst(
         }
 
         Op::FConst(value) => {
-            if !matches!(value.float_type(), FloatType::F32 | FloatType::F64) {
+            if !matches!(
+                value.float_type(),
+                FloatType::F16 | FloatType::BF16 | FloatType::F32 | FloatType::F64
+            ) {
                 return None;
             }
             let dst = ctx.alloc.alloc();
@@ -1656,7 +1630,7 @@ fn select_inst(
         }
 
         Op::ExtractValue(..) | Op::InsertValue(..) => {
-            return None; // Unimplemented: should be legalized before isel
+            return None; // These aggregate ops must be lowered before x86 isel.
         }
 
         Op::Sext(val, _target_bits) => {
@@ -3624,19 +3598,7 @@ fn select_call(
     // values already placed there by earlier fixed-register moves.
     let mut arg_vregs: Vec<VReg> = Vec::new();
     for arg in args.iter() {
-        let src = match ctx.ensure_in_reg(arg.value) {
-            Some(v) => v,
-            None => {
-                eprintln!(
-                    "  select_call: ensure_in_reg failed for arg {:?} (is_block_arg={}, is_secondary={}, index={})",
-                    arg.value,
-                    arg.value.is_block_arg(),
-                    arg.value.is_secondary_result(),
-                    arg.value.index()
-                );
-                return None;
-            }
-        };
+        let src = ctx.ensure_in_reg(arg.value)?;
         arg_vregs.push(src);
     }
 

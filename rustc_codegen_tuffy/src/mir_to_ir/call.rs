@@ -1609,12 +1609,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     }
                 }
             } else if intrinsic_name.starts_with("simd_") {
-                eprintln!(
-                    "WARNING: simd arg translate_operand returned None for {:?} in {:?}, arg_ty={:?}",
+                self.tcx.dcx().fatal(format!(
+                    "failed to translate SIMD intrinsic argument {:?} in {:?}, arg_ty={:?}",
                     &arg.node,
                     self.instance,
                     arg.node.ty(&self.mir.local_decls, self.tcx),
-                );
+                ));
             }
         }
 
@@ -1961,8 +1961,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         // the normal call path so resolve_call_target can emit the call.
         // Newer intrinsics (e.g. carryless_mul) have fallback bodies
         // compiled as regular functions — also fall through for those.
-        // Only treat truly unhandled intrinsics (no libc mapping, no
-        // fallback body) as no-ops.
+        // Any intrinsic that reaches this point must lower to either a libc
+        // symbol or a real Rust fallback body. Silent no-op lowering is a bug.
         if intrinsic_to_libc(intrinsic_name).is_none() {
             // Check if the intrinsic has a fallback body we can call.
             // Intrinsics with must_be_overridden=false have Rust
@@ -1986,15 +1986,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             };
 
             if !has_fallback_body {
-                if let Some(target) = target {
-                    let target_block = self.block_map.get(*target);
-                    self.builder.br(
-                        target_block,
-                        vec![self.current_mem.into()],
-                        Origin::synthetic(),
-                    );
-                }
-                return true;
+                self.tcx.dcx().fatal(format!(
+                    "unsupported intrinsic {intrinsic_name} in {:?}",
+                    self.instance
+                ));
             }
             // has_fallback_body: fall through to normal call path below
         }

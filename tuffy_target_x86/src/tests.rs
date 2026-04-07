@@ -31,10 +31,11 @@ const I64: IntAnnotation = IntAnnotation {
     signedness: IntSignedness::Unsigned,
 };
 
-use crate::backend::lower_isel_result;
+use crate::backend::{X86Backend, lower_isel_result};
 use crate::encode;
 use crate::isel;
 use crate::legality::X86LegalityInfo;
+use tuffy_target::backend::Backend;
 
 #[test]
 fn legality_uses_expand_for_divrem_wider_than_double_width() {
@@ -98,6 +99,17 @@ fn encode_f64_const_return_function() {
 }
 
 #[test]
+fn encode_f16_const_return_function() {
+    let (func, symbols) = build_f16_const_func();
+    let result = isel::isel(&func, &symbols).expect("isel should succeed for f16 const");
+    let pinsts = lower_isel_result(&result);
+    let enc = encode::encode_function(&pinsts);
+
+    assert!(!enc.code.is_empty());
+    assert!(enc.code.contains(&0xc3), "expected ret in encoded output");
+}
+
+#[test]
 fn emit_elf_valid() {
     let (func, symbols) = build_add_func();
     let result = isel::isel(&func, &symbols).expect("isel should succeed for add");
@@ -107,6 +119,28 @@ fn emit_elf_valid() {
 
     // Verify ELF magic number.
     assert_eq!(&elf[..4], b"\x7fELF");
+}
+
+#[test]
+fn isel_unsupported_continue_returns_error() {
+    let (func, symbols) = build_continue_func();
+    let err = match isel::isel(&func, &symbols) {
+        Ok(_) => panic!("isel should fail for continue"),
+        Err(err) => err,
+    };
+    assert!(err.contains("instruction selection failed"));
+    assert!(err.contains("Continue"));
+}
+
+#[test]
+fn backend_compile_function_propagates_isel_error() {
+    let (func, symbols) = build_continue_func();
+    let err = match X86Backend.compile_function(&func, &symbols) {
+        Ok(_) => panic!("backend should fail fast on unsupported IR"),
+        Err(err) => err,
+    };
+    assert!(err.contains("instruction selection failed"));
+    assert!(err.contains("Continue"));
 }
 
 fn build_add_func() -> (Function, SymbolTable) {
@@ -160,6 +194,46 @@ fn build_f64_const_func() -> (Function, SymbolTable) {
         Origin::synthetic(),
     );
     builder.ret(Some(value.into()), None, mem0.into(), Origin::synthetic());
+
+    builder.exit_region();
+
+    (func, st)
+}
+
+fn build_f16_const_func() -> (Function, SymbolTable) {
+    let f16_type = Type::Float(FloatType::F16);
+    let mut st = SymbolTable::new();
+    let name = st.intern("const_f16");
+    let mut func = Function::new(name, vec![], vec![], vec![], Some(f16_type.clone()), None);
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+
+    let entry = builder.create_block();
+    builder.switch_to_block(entry);
+
+    let mem0 = builder.add_block_arg(entry, Type::Mem, None);
+    let value = builder.fconst(FloatType::F16, 0x3c00_u128, Origin::synthetic());
+    builder.ret(Some(value.into()), None, mem0.into(), Origin::synthetic());
+
+    builder.exit_region();
+
+    (func, st)
+}
+
+fn build_continue_func() -> (Function, SymbolTable) {
+    let mut st = SymbolTable::new();
+    let name = st.intern("continue_fail");
+    let mut func = Function::new(name, vec![], vec![], vec![], None, None);
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+
+    let entry = builder.create_block();
+    builder.switch_to_block(entry);
+    builder.continue_(vec![], Origin::synthetic());
 
     builder.exit_region();
 

@@ -9,14 +9,22 @@ use tuffy_ir::types::{Annotation, FloatType, FpRewriteFlags, IntAnnotation, IntS
 use tuffy_ir::value::ValueRef;
 
 use super::ctx::TranslationCtx;
-use super::types::type_size;
+use super::intrinsic::intrinsic_to_libc;
+use super::types::{int_ann_for_bytes, int_annotation_for_bytes, translate_annotation, type_size};
+
+#[derive(Clone, Copy)]
+struct SimdCastInfo {
+    elem_size: u32,
+    lanes: u32,
+    int_ann: Option<IntAnnotation>,
+    float_ty: Option<FloatType>,
+}
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     /// Translate a SIMD intrinsic to scalar IR.
     ///
-    /// Returns `Some(true)` if the intrinsic was handled successfully,
-    /// `Some(false)` if handling failed (e.g. missing args), or `None`
-    /// if the intrinsic name is not a SIMD intrinsic.
+    /// Returns `Some(true)` if the intrinsic was handled successfully, or
+    /// `None` if the intrinsic name is not a SIMD intrinsic.
     pub(super) fn translate_simd_intrinsic(
         &mut self,
         name: &str,
@@ -39,11 +47,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     ) -> bool {
         match name {
             _ if ir_args.is_empty() => {
-                eprintln!(
-                    "WARNING: simd intrinsic {name} has 0 ir_args in {:?}",
-                    self.instance,
-                );
-                false
+                self.tcx.dcx().fatal(format!(
+                    "SIMD intrinsic {name} in {:?} has no translated arguments",
+                    self.instance
+                ));
             }
 
             "simd_bitmask" => {
@@ -148,6 +155,66 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let simd_bytes = self.simd_size_from_substs(substs).unwrap_or(16);
                 let elem_info = self.simd_elem_info_from_substs(substs);
                 self.emit_simd_elementwise_binop(
+                    ir_args,
+                    destination_local,
+                    name,
+                    simd_bytes,
+                    elem_info,
+                );
+                true
+            }
+
+            "simd_shl" | "simd_shr" => {
+                let simd_bytes = self.simd_size_from_substs(substs).unwrap_or(16);
+                self.emit_simd_shift(ir_args, destination_local, name, substs, simd_bytes);
+                true
+            }
+
+            "simd_cast" => {
+                self.emit_simd_cast(ir_args, destination_local, substs);
+                true
+            }
+
+            "simd_extract" => {
+                self.emit_simd_extract(ir_args, destination_local, substs);
+                true
+            }
+
+            "simd_insert" => {
+                self.emit_simd_insert(ir_args, destination_local, substs);
+                true
+            }
+
+            "simd_fma" => {
+                let simd_bytes = self.simd_size_from_substs(substs).unwrap_or(16);
+                let elem_info = self.simd_elem_info_from_substs(substs);
+                self.emit_simd_fma(ir_args, destination_local, simd_bytes, elem_info);
+                true
+            }
+
+            "simd_relaxed_fma" => {
+                let simd_bytes = self.simd_size_from_substs(substs).unwrap_or(16);
+                let elem_info = self.simd_elem_info_from_substs(substs);
+                self.emit_simd_fma(ir_args, destination_local, simd_bytes, elem_info);
+                true
+            }
+
+            "simd_ceil"
+            | "simd_floor"
+            | "simd_round"
+            | "simd_round_ties_even"
+            | "simd_trunc"
+            | "simd_fsqrt"
+            | "simd_fsin"
+            | "simd_fcos"
+            | "simd_fexp"
+            | "simd_fexp2"
+            | "simd_flog10"
+            | "simd_flog2"
+            | "simd_flog" => {
+                let simd_bytes = self.simd_size_from_substs(substs).unwrap_or(16);
+                let elem_info = self.simd_elem_info_from_substs(substs);
+                self.emit_simd_float_unary_libcall(
                     ir_args,
                     destination_local,
                     name,
@@ -702,11 +769,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             }
             // Not a recognized SIMD intrinsic.
             _ => {
-                eprintln!(
-                    "WARNING: unhandled simd intrinsic: {name} in {:?}",
+                self.tcx.dcx().fatal(format!(
+                    "unhandled SIMD intrinsic {name} in {:?}",
                     self.instance
-                );
-                false
+                ));
             }
         }
     }
@@ -763,6 +829,59 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             }
         }
         (1, None) // default: byte-sized integer
+    }
+
+    fn simd_elem_int_ann_from_substs(
+        &self,
+        substs: &'tcx ty::List<ty::GenericArg<'tcx>>,
+    ) -> Option<IntAnnotation> {
+        let simd_ty = substs.first().and_then(|a| a.as_type())?;
+        let elem_ty = self.simd_elem_ty(simd_ty)?;
+        match translate_annotation(elem_ty) {
+            Some(Annotation::Int(int_ann)) => Some(int_ann),
+            _ => None,
+        }
+    }
+
+    fn simd_elem_ty(&self, simd_ty: ty::Ty<'tcx>) -> Option<ty::Ty<'tcx>> {
+        if let ty::Adt(def, adt_substs) = simd_ty.kind() {
+            if let Some(elem_ty) = adt_substs.first().and_then(|a| a.as_type()) {
+                return Some(elem_ty);
+            }
+            let variant = def.non_enum_variant();
+            if let Some(field) = variant.fields.iter().next() {
+                let field_ty = field.ty(self.tcx, adt_substs);
+                return Some(match field_ty.kind() {
+                    ty::Array(elem, _) => *elem,
+                    _ => field_ty,
+                });
+            }
+        }
+        None
+    }
+
+    fn simd_cast_info(&self, simd_ty: ty::Ty<'tcx>) -> Option<SimdCastInfo> {
+        let elem_ty = self.simd_elem_ty(simd_ty)?;
+        let elem_size = type_size(self.tcx, elem_ty)? as u32;
+        let total_size = type_size(self.tcx, simd_ty)? as u32;
+        let lanes = total_size / elem_size.max(1);
+        let int_ann = match translate_annotation(elem_ty) {
+            Some(Annotation::Int(int_ann)) => Some(int_ann),
+            _ => None,
+        };
+        let float_ty = match elem_ty.kind() {
+            ty::Float(ty::FloatTy::F16) => Some(FloatType::F16),
+            ty::Float(ty::FloatTy::F32) => Some(FloatType::F32),
+            ty::Float(ty::FloatTy::F64) => Some(FloatType::F64),
+            ty::Float(ty::FloatTy::F128) => Some(FloatType::F128),
+            _ => None,
+        };
+        Some(SimdCastInfo {
+            elem_size,
+            lanes,
+            int_ann,
+            float_ty,
+        })
     }
 
     /// Ensure a SIMD value is on the stack.  If the value is already
@@ -1243,6 +1362,686 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     )
                     .raw();
             }
+        }
+
+        let result = self.simd_result_from_stack(slot, simd_bytes);
+        self.locals.set(destination_local, result);
+    }
+
+    fn emit_simd_shift(
+        &mut self,
+        ir_args: &[ValueRef],
+        destination_local: mir::Local,
+        op_name: &str,
+        substs: &'tcx ty::List<ty::GenericArg<'tcx>>,
+        simd_bytes: u32,
+    ) {
+        macro_rules! o {
+            () => {
+                Origin::synthetic()
+            };
+        }
+        let elem_ann = self
+            .simd_elem_int_ann_from_substs(substs)
+            .unwrap_or_else(|| {
+                self.tcx.dcx().fatal(format!(
+                    "{op_name} requires an integer SIMD element type in {:?}",
+                    self.instance
+                ))
+            });
+        let elem_size = elem_ann.bit_width / 8;
+        let a_ptr = self.ensure_simd_on_stack(ir_args[0], simd_bytes);
+        let b_ptr = self.ensure_simd_on_stack(ir_args[1], simd_bytes);
+        let slot = self.builder.stack_slot(simd_bytes.max(8), 0, o!());
+        let n_lanes = simd_bytes / elem_size;
+        let lane_ann = Some(Annotation::Int(elem_ann));
+
+        for i in 0..n_lanes {
+            let byte_off = (i * elem_size) as i64;
+            let a_addr = if i == 0 {
+                a_ptr
+            } else {
+                let off = self
+                    .builder
+                    .iconst(byte_off, 64, IntSignedness::Unsigned, o!());
+                self.builder.ptradd(a_ptr.into(), off.into(), 0, o!()).raw()
+            };
+            let b_addr = if i == 0 {
+                b_ptr
+            } else {
+                let off = self
+                    .builder
+                    .iconst(byte_off, 64, IntSignedness::Unsigned, o!());
+                self.builder.ptradd(b_ptr.into(), off.into(), 0, o!()).raw()
+            };
+            let dst_addr = if i == 0 {
+                slot
+            } else {
+                let off = self
+                    .builder
+                    .iconst(byte_off, 64, IntSignedness::Unsigned, o!());
+                self.builder.ptradd(slot.into(), off.into(), 0, o!()).raw()
+            };
+
+            let a_val = self.builder.load(
+                a_addr.into(),
+                elem_size,
+                Type::Int,
+                self.current_mem.into(),
+                lane_ann,
+                o!(),
+            );
+            let b_val = self.builder.load(
+                b_addr.into(),
+                elem_size,
+                Type::Int,
+                self.current_mem.into(),
+                lane_ann,
+                o!(),
+            );
+            let a_op = IntOperand::from(IrOperand::annotated(a_val, Annotation::Int(elem_ann)));
+            let b_op = IntOperand::from(IrOperand::annotated(b_val, Annotation::Int(elem_ann)));
+            let result = match op_name {
+                "simd_shl" => self.builder.shl(a_op, b_op, elem_ann, o!()),
+                "simd_shr" => self.builder.shr(a_op, b_op, elem_ann, o!()),
+                _ => unreachable!(),
+            };
+            self.current_mem = self
+                .builder
+                .store(
+                    result.raw().into(),
+                    dst_addr.into(),
+                    elem_size,
+                    self.current_mem.into(),
+                    o!(),
+                )
+                .raw();
+        }
+
+        let result = self.simd_result_from_stack(slot, simd_bytes);
+        self.locals.set(destination_local, result);
+    }
+
+    fn emit_simd_cast(
+        &mut self,
+        ir_args: &[ValueRef],
+        destination_local: mir::Local,
+        substs: &'tcx ty::List<ty::GenericArg<'tcx>>,
+    ) {
+        macro_rules! o {
+            () => {
+                Origin::synthetic()
+            };
+        }
+        let src_ty = substs.first().and_then(|a| a.as_type()).unwrap_or_else(|| {
+            self.tcx.dcx().fatal(format!(
+                "simd_cast missing source type in {:?}",
+                self.instance
+            ))
+        });
+        let dst_ty = substs.get(1).and_then(|a| a.as_type()).unwrap_or_else(|| {
+            self.tcx.dcx().fatal(format!(
+                "simd_cast missing destination type in {:?}",
+                self.instance
+            ))
+        });
+        let src_info = self.simd_cast_info(src_ty).unwrap_or_else(|| {
+            self.tcx
+                .dcx()
+                .fatal(format!("unsupported simd_cast source type {src_ty:?}"))
+        });
+        let dst_info = self.simd_cast_info(dst_ty).unwrap_or_else(|| {
+            self.tcx
+                .dcx()
+                .fatal(format!("unsupported simd_cast destination type {dst_ty:?}"))
+        });
+        if src_info.lanes != dst_info.lanes {
+            self.tcx.dcx().fatal(format!(
+                "simd_cast requires equal lane counts, got {} and {} in {:?}",
+                src_info.lanes, dst_info.lanes, self.instance
+            ));
+        }
+
+        let src_bytes = type_size(self.tcx, src_ty).unwrap_or(16) as u32;
+        let dst_bytes = type_size(self.tcx, dst_ty).unwrap_or(16) as u32;
+        let src_ptr = self.ensure_simd_on_stack(ir_args[0], src_bytes);
+        let dst_slot = self.builder.stack_slot(dst_bytes.max(8), 0, o!());
+        let trunc_slot =
+            self.builder
+                .stack_slot(src_info.elem_size.max(dst_info.elem_size), 0, o!());
+
+        for i in 0..src_info.lanes {
+            let src_byte_off = (i * src_info.elem_size) as i64;
+            let dst_byte_off = (i * dst_info.elem_size) as i64;
+            let src_addr = if i == 0 {
+                src_ptr
+            } else {
+                let off = self
+                    .builder
+                    .iconst(src_byte_off, 64, IntSignedness::Unsigned, o!());
+                self.builder
+                    .ptradd(src_ptr.into(), off.into(), 0, o!())
+                    .raw()
+            };
+            let dst_addr = if i == 0 {
+                dst_slot
+            } else {
+                let off = self
+                    .builder
+                    .iconst(dst_byte_off, 64, IntSignedness::Unsigned, o!());
+                self.builder
+                    .ptradd(dst_slot.into(), off.into(), 0, o!())
+                    .raw()
+            };
+
+            let cast_result = match (
+                src_info.int_ann,
+                src_info.float_ty,
+                dst_info.int_ann,
+                dst_info.float_ty,
+            ) {
+                (Some(src_int), None, Some(dst_int), None) => {
+                    let src_val = self.builder.load(
+                        src_addr.into(),
+                        src_info.elem_size,
+                        Type::Int,
+                        self.current_mem.into(),
+                        Some(Annotation::Int(src_int)),
+                        o!(),
+                    );
+                    if dst_int.bit_width > src_int.bit_width {
+                        if matches!(src_int.signedness, IntSignedness::Signed) {
+                            self.builder
+                                .sext(src_val.into(), dst_int.bit_width, o!())
+                                .raw()
+                        } else {
+                            self.builder
+                                .zext(src_val.into(), dst_int.bit_width, o!())
+                                .raw()
+                        }
+                    } else if dst_int.bit_width < src_int.bit_width {
+                        self.current_mem = self
+                            .builder
+                            .store(
+                                src_val.into(),
+                                trunc_slot.into(),
+                                src_info.elem_size,
+                                self.current_mem.into(),
+                                o!(),
+                            )
+                            .raw();
+                        self.builder.load(
+                            trunc_slot.into(),
+                            dst_info.elem_size,
+                            Type::Int,
+                            self.current_mem.into(),
+                            Some(Annotation::Int(dst_int)),
+                            o!(),
+                        )
+                    } else {
+                        src_val
+                    }
+                }
+                (Some(src_int), None, None, Some(dst_float)) => {
+                    let src_val = self.builder.load(
+                        src_addr.into(),
+                        src_info.elem_size,
+                        Type::Int,
+                        self.current_mem.into(),
+                        Some(Annotation::Int(src_int)),
+                        o!(),
+                    );
+                    if matches!(src_int.signedness, IntSignedness::Signed) {
+                        self.builder.si_to_fp(src_val.into(), dst_float, o!()).raw()
+                    } else {
+                        self.builder.ui_to_fp(src_val.into(), dst_float, o!()).raw()
+                    }
+                }
+                (None, Some(src_float), Some(dst_int), None) => {
+                    let src_val = self.builder.load(
+                        src_addr.into(),
+                        src_info.elem_size,
+                        Type::Float(src_float),
+                        self.current_mem.into(),
+                        None,
+                        o!(),
+                    );
+                    if matches!(dst_int.signedness, IntSignedness::Signed) {
+                        self.builder
+                            .fp_to_si(src_val.into(), dst_int.bit_width, o!())
+                            .raw()
+                    } else {
+                        self.builder
+                            .fp_to_ui(src_val.into(), dst_int.bit_width, o!())
+                            .raw()
+                    }
+                }
+                (None, Some(src_float), None, Some(dst_float)) => {
+                    let src_val = self.builder.load(
+                        src_addr.into(),
+                        src_info.elem_size,
+                        Type::Float(src_float),
+                        self.current_mem.into(),
+                        None,
+                        o!(),
+                    );
+                    if src_float == dst_float {
+                        src_val
+                    } else {
+                        self.builder
+                            .fp_convert(src_val.into(), dst_float, o!())
+                            .raw()
+                    }
+                }
+                _ => self.tcx.dcx().fatal(format!(
+                    "unsupported simd_cast element conversion in {:?}",
+                    self.instance
+                )),
+            };
+
+            self.current_mem = self
+                .builder
+                .store(
+                    cast_result.into(),
+                    dst_addr.into(),
+                    dst_info.elem_size,
+                    self.current_mem.into(),
+                    o!(),
+                )
+                .raw();
+        }
+
+        let result = self.simd_result_from_stack(dst_slot, dst_bytes);
+        self.locals.set(destination_local, result);
+    }
+
+    fn emit_simd_extract(
+        &mut self,
+        ir_args: &[ValueRef],
+        destination_local: mir::Local,
+        substs: &'tcx ty::List<ty::GenericArg<'tcx>>,
+    ) {
+        macro_rules! o {
+            () => {
+                Origin::synthetic()
+            };
+        }
+        let vec_ty = substs.first().and_then(|a| a.as_type()).unwrap_or_else(|| {
+            self.tcx.dcx().fatal(format!(
+                "simd_extract missing vector type in {:?}",
+                self.instance
+            ))
+        });
+        let vec_info = self.simd_cast_info(vec_ty).unwrap_or_else(|| {
+            self.tcx
+                .dcx()
+                .fatal(format!("unsupported simd_extract vector type {vec_ty:?}"))
+        });
+        let vec_bytes = type_size(self.tcx, vec_ty).unwrap_or(16) as u32;
+        let vec_ptr = self.ensure_simd_on_stack(ir_args[0], vec_bytes);
+        let idx = self.coerce_to_int(ir_args[1]);
+        let byte_off = if vec_info.elem_size == 1 {
+            idx
+        } else {
+            let elem_size =
+                self.builder
+                    .iconst(vec_info.elem_size as i64, 64, IntSignedness::Unsigned, o!());
+            self.builder
+                .mul(idx.into(), elem_size.into(), int_ann_for_bytes(8), o!())
+                .raw()
+        };
+        let elem_addr = self
+            .builder
+            .ptradd(vec_ptr.into(), byte_off.into(), 0, o!())
+            .raw();
+        let result = match (vec_info.int_ann, vec_info.float_ty) {
+            (Some(int_ann), None) => self.builder.load(
+                elem_addr.into(),
+                vec_info.elem_size,
+                Type::Int,
+                self.current_mem.into(),
+                Some(Annotation::Int(int_ann)),
+                o!(),
+            ),
+            (None, Some(float_ty)) => self.builder.load(
+                elem_addr.into(),
+                vec_info.elem_size,
+                Type::Float(float_ty),
+                self.current_mem.into(),
+                None,
+                o!(),
+            ),
+            _ => self.tcx.dcx().fatal(format!(
+                "unsupported simd_extract element type in {:?}",
+                self.instance
+            )),
+        };
+        self.locals.set(destination_local, result);
+    }
+
+    fn emit_simd_insert(
+        &mut self,
+        ir_args: &[ValueRef],
+        destination_local: mir::Local,
+        substs: &'tcx ty::List<ty::GenericArg<'tcx>>,
+    ) {
+        macro_rules! o {
+            () => {
+                Origin::synthetic()
+            };
+        }
+        let vec_ty = substs.first().and_then(|a| a.as_type()).unwrap_or_else(|| {
+            self.tcx.dcx().fatal(format!(
+                "simd_insert missing vector type in {:?}",
+                self.instance
+            ))
+        });
+        let vec_info = self.simd_cast_info(vec_ty).unwrap_or_else(|| {
+            self.tcx
+                .dcx()
+                .fatal(format!("unsupported simd_insert vector type {vec_ty:?}"))
+        });
+        let vec_bytes = type_size(self.tcx, vec_ty).unwrap_or(16) as u32;
+        let vec_ptr = self.ensure_simd_on_stack(ir_args[0], vec_bytes);
+        let idx = self.coerce_to_int(ir_args[1]);
+        let value = ir_args[2];
+        let slot = self.builder.stack_slot(vec_bytes.max(8), 0, o!());
+
+        for w in 0..vec_bytes.div_ceil(8) {
+            let chunk = (vec_bytes - w * 8).min(8);
+            let byte_off = (w * 8) as i64;
+            let src_addr = if w == 0 {
+                vec_ptr
+            } else {
+                let off = self
+                    .builder
+                    .iconst(byte_off, 64, IntSignedness::Unsigned, o!());
+                self.builder
+                    .ptradd(vec_ptr.into(), off.into(), 0, o!())
+                    .raw()
+            };
+            let dst_addr = if w == 0 {
+                slot
+            } else {
+                let off = self
+                    .builder
+                    .iconst(byte_off, 64, IntSignedness::Unsigned, o!());
+                self.builder.ptradd(slot.into(), off.into(), 0, o!()).raw()
+            };
+            let word = self.builder.load(
+                src_addr.into(),
+                chunk,
+                Type::Int,
+                self.current_mem.into(),
+                int_annotation_for_bytes(chunk),
+                o!(),
+            );
+            self.current_mem = self
+                .builder
+                .store(
+                    word.into(),
+                    dst_addr.into(),
+                    chunk,
+                    self.current_mem.into(),
+                    o!(),
+                )
+                .raw();
+        }
+
+        let byte_off = if vec_info.elem_size == 1 {
+            idx
+        } else {
+            let elem_size =
+                self.builder
+                    .iconst(vec_info.elem_size as i64, 64, IntSignedness::Unsigned, o!());
+            self.builder
+                .mul(idx.into(), elem_size.into(), int_ann_for_bytes(8), o!())
+                .raw()
+        };
+        let elem_addr = self
+            .builder
+            .ptradd(slot.into(), byte_off.into(), 0, o!())
+            .raw();
+        self.current_mem = self
+            .builder
+            .store(
+                value.into(),
+                elem_addr.into(),
+                vec_info.elem_size,
+                self.current_mem.into(),
+                o!(),
+            )
+            .raw();
+
+        let result = self.simd_result_from_stack(slot, vec_bytes);
+        self.locals.set(destination_local, result);
+    }
+
+    fn emit_simd_fma(
+        &mut self,
+        ir_args: &[ValueRef],
+        destination_local: mir::Local,
+        simd_bytes: u32,
+        elem_info: (u32, Option<FloatType>),
+    ) {
+        macro_rules! o {
+            () => {
+                Origin::synthetic()
+            };
+        }
+        let (elem_size, float_ty) = elem_info;
+        let float_ty = float_ty.unwrap_or_else(|| {
+            self.tcx.dcx().fatal(format!(
+                "simd_fma requires floating-point lanes in {:?}",
+                self.instance
+            ))
+        });
+        let a_ptr = self.ensure_simd_on_stack(ir_args[0], simd_bytes);
+        let b_ptr = self.ensure_simd_on_stack(ir_args[1], simd_bytes);
+        let c_ptr = self.ensure_simd_on_stack(ir_args[2], simd_bytes);
+        let slot = self.builder.stack_slot(simd_bytes.max(8), 0, o!());
+        let n_lanes = simd_bytes / elem_size;
+        let load_ty = Type::Float(float_ty);
+        let flags = FpRewriteFlags::default();
+
+        for i in 0..n_lanes {
+            let byte_off = (i * elem_size) as i64;
+            let a_addr = if i == 0 {
+                a_ptr
+            } else {
+                let off = self
+                    .builder
+                    .iconst(byte_off, 64, IntSignedness::Unsigned, o!());
+                self.builder.ptradd(a_ptr.into(), off.into(), 0, o!()).raw()
+            };
+            let b_addr = if i == 0 {
+                b_ptr
+            } else {
+                let off = self
+                    .builder
+                    .iconst(byte_off, 64, IntSignedness::Unsigned, o!());
+                self.builder.ptradd(b_ptr.into(), off.into(), 0, o!()).raw()
+            };
+            let c_addr = if i == 0 {
+                c_ptr
+            } else {
+                let off = self
+                    .builder
+                    .iconst(byte_off, 64, IntSignedness::Unsigned, o!());
+                self.builder.ptradd(c_ptr.into(), off.into(), 0, o!()).raw()
+            };
+            let dst_addr = if i == 0 {
+                slot
+            } else {
+                let off = self
+                    .builder
+                    .iconst(byte_off, 64, IntSignedness::Unsigned, o!());
+                self.builder.ptradd(slot.into(), off.into(), 0, o!()).raw()
+            };
+            let a_val = self.builder.load(
+                a_addr.into(),
+                elem_size,
+                load_ty.clone(),
+                self.current_mem.into(),
+                None,
+                o!(),
+            );
+            let b_val = self.builder.load(
+                b_addr.into(),
+                elem_size,
+                load_ty.clone(),
+                self.current_mem.into(),
+                None,
+                o!(),
+            );
+            let c_val = self.builder.load(
+                c_addr.into(),
+                elem_size,
+                load_ty.clone(),
+                self.current_mem.into(),
+                None,
+                o!(),
+            );
+            let product =
+                self.builder
+                    .fmul(a_val.into(), b_val.into(), flags, load_ty.clone(), o!());
+            let result =
+                self.builder
+                    .fadd(product.into(), c_val.into(), flags, load_ty.clone(), o!());
+            self.current_mem = self
+                .builder
+                .store(
+                    result.raw().into(),
+                    dst_addr.into(),
+                    elem_size,
+                    self.current_mem.into(),
+                    o!(),
+                )
+                .raw();
+        }
+
+        let result = self.simd_result_from_stack(slot, simd_bytes);
+        self.locals.set(destination_local, result);
+    }
+
+    fn emit_simd_float_unary_libcall(
+        &mut self,
+        ir_args: &[ValueRef],
+        destination_local: mir::Local,
+        op_name: &str,
+        simd_bytes: u32,
+        elem_info: (u32, Option<FloatType>),
+    ) {
+        macro_rules! o {
+            () => {
+                Origin::synthetic()
+            };
+        }
+        let (elem_size, float_ty) = elem_info;
+        let float_ty = float_ty.unwrap_or_else(|| {
+            self.tcx.dcx().fatal(format!(
+                "{op_name} requires floating-point lanes in {:?}",
+                self.instance
+            ))
+        });
+        let scalar_intrinsic = match (op_name, float_ty) {
+            ("simd_ceil", FloatType::F32) => "ceilf32",
+            ("simd_ceil", FloatType::F64) => "ceilf64",
+            ("simd_floor", FloatType::F32) => "floorf32",
+            ("simd_floor", FloatType::F64) => "floorf64",
+            ("simd_round", FloatType::F32) => "roundf32",
+            ("simd_round", FloatType::F64) => "roundf64",
+            ("simd_round_ties_even", FloatType::F32) => "round_ties_even_f32",
+            ("simd_round_ties_even", FloatType::F64) => "round_ties_even_f64",
+            ("simd_trunc", FloatType::F32) => "truncf32",
+            ("simd_trunc", FloatType::F64) => "truncf64",
+            ("simd_fsqrt", FloatType::F32) => "sqrtf32",
+            ("simd_fsqrt", FloatType::F64) => "sqrtf64",
+            ("simd_fsin", FloatType::F32) => "sinf32",
+            ("simd_fsin", FloatType::F64) => "sinf64",
+            ("simd_fcos", FloatType::F32) => "cosf32",
+            ("simd_fcos", FloatType::F64) => "cosf64",
+            ("simd_fexp", FloatType::F32) => "expf32",
+            ("simd_fexp", FloatType::F64) => "expf64",
+            ("simd_fexp2", FloatType::F32) => "exp2f32",
+            ("simd_fexp2", FloatType::F64) => "exp2f64",
+            ("simd_flog10", FloatType::F32) => "log10f32",
+            ("simd_flog10", FloatType::F64) => "log10f64",
+            ("simd_flog2", FloatType::F32) => "log2f32",
+            ("simd_flog2", FloatType::F64) => "log2f64",
+            ("simd_flog", FloatType::F32) => "logf32",
+            ("simd_flog", FloatType::F64) => "logf64",
+            _ => self.tcx.dcx().fatal(format!(
+                "unsupported {op_name} float type {float_ty:?} in {:?}",
+                self.instance
+            )),
+        };
+        let libc_sym = intrinsic_to_libc(scalar_intrinsic).unwrap_or_else(|| {
+            self.tcx.dcx().fatal(format!(
+                "missing libc mapping for {scalar_intrinsic} in {:?}",
+                self.instance
+            ))
+        });
+        let sym_id = self.symbols.intern(libc_sym);
+        let callee = self.builder.symbol_addr(sym_id, o!());
+        let src_ptr = self.ensure_simd_on_stack(ir_args[0], simd_bytes);
+        let slot = self.builder.stack_slot(simd_bytes.max(8), 0, o!());
+        let n_lanes = simd_bytes / elem_size;
+        let load_ty = Type::Float(float_ty);
+
+        for i in 0..n_lanes {
+            let byte_off = (i * elem_size) as i64;
+            let src_addr = if i == 0 {
+                src_ptr
+            } else {
+                let off = self
+                    .builder
+                    .iconst(byte_off, 64, IntSignedness::Unsigned, o!());
+                self.builder
+                    .ptradd(src_ptr.into(), off.into(), 0, o!())
+                    .raw()
+            };
+            let dst_addr = if i == 0 {
+                slot
+            } else {
+                let off = self
+                    .builder
+                    .iconst(byte_off, 64, IntSignedness::Unsigned, o!());
+                self.builder.ptradd(slot.into(), off.into(), 0, o!()).raw()
+            };
+            let arg = self.builder.load(
+                src_addr.into(),
+                elem_size,
+                load_ty.clone(),
+                self.current_mem.into(),
+                None,
+                o!(),
+            );
+            let (call_mem, data) = self.builder.call(
+                callee.into(),
+                vec![arg.into()],
+                load_ty.clone(),
+                self.current_mem.into(),
+                None,
+                None,
+                o!(),
+            );
+            let data = data.unwrap_or_else(|| {
+                self.tcx.dcx().fatal(format!(
+                    "{op_name} libcall returned no value in {:?}",
+                    self.instance
+                ))
+            });
+            self.current_mem = self
+                .builder
+                .store(
+                    data.into(),
+                    dst_addr.into(),
+                    elem_size,
+                    call_mem.into(),
+                    o!(),
+                )
+                .raw();
         }
 
         let result = self.simd_result_from_stack(slot, simd_bytes);

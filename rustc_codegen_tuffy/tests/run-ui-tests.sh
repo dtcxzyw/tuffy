@@ -126,7 +126,7 @@ for test_file in "${tests[@]}"; do
 
     # Skip tests whose compile-flags conflict with --crate-type lib or
     # require infrastructure the runner doesn't provide.
-    if grep -qE '//@ compile-flags:.*(\-\-test|--error-format|--json|--emit=metadata|--env-set|--extern|\{\{|-lstatic|-lrust)' "$test_file" 2>/dev/null; then
+    if grep -qE '//@ compile-flags:.*(\-\-test|--error-format|--json|--emit=metadata|--env-set|--extern|\{\{|-lstatic|-lrust|-Cinstrument-coverage|-Zinstrument-coverage)' "$test_file" 2>/dev/null; then
         skip=$((skip + 1))
         continue
     fi

@@ -648,7 +648,11 @@ pub fn lower_isel_result(isel_result: &IselResult<VInst>) -> Vec<PInst> {
 pub struct X86Backend;
 
 impl Backend for X86Backend {
-    fn compile_function(&self, func: &Function, symbols: &SymbolTable) -> Option<CompiledFunction> {
+    fn compile_function(
+        &self,
+        func: &Function,
+        symbols: &SymbolTable,
+    ) -> Result<CompiledFunction, String> {
         // 1. Instruction selection → MInst<VReg>
         let isel_result = isel::isel(func, symbols)?;
 
@@ -699,7 +703,7 @@ impl Backend for X86Backend {
             .map(|p| preg_to_dwarf(*p))
             .collect();
 
-        Some(CompiledFunction {
+        Ok(CompiledFunction {
             name: isel_result.name,
             code: enc.code,
             relocations: enc.relocations,

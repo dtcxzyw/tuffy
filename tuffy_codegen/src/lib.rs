@@ -70,12 +70,15 @@ impl CodegenSession {
         &self,
         func: &Function,
         symbols: &mut SymbolTable,
-    ) -> Option<CompiledFunction> {
+    ) -> Result<CompiledFunction, String> {
         match &self.inner {
             CodegenInner::X86(backend) => {
                 let legality = X86LegalityInfo;
                 let legalized = legalize::legalize(func, &legality, symbols);
-                let func_ref = legalized.as_ref().unwrap_or(func);
+                let func_ref = match legalized.as_ref() {
+                    Some(legalized) => legalized,
+                    None => func,
+                };
                 backend.compile_function(func_ref, symbols)
             }
         }
@@ -104,5 +107,39 @@ impl CodegenSession {
         match &self.inner {
             CodegenInner::X86(backend) => backend.generate_entry_point(main_sym, start_sym),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CodegenSession;
+    use tuffy_ir::builder::Builder;
+    use tuffy_ir::function::{Function, RegionKind};
+    use tuffy_ir::instruction::Origin;
+    use tuffy_ir::module::SymbolTable;
+
+    #[test]
+    fn compile_function_fails_fast_on_unsupported_ir() {
+        let mut symbols = SymbolTable::new();
+        let name = symbols.intern("continue_fail");
+        let mut func = Function::new(name, vec![], vec![], vec![], None, None);
+        let mut builder = Builder::new(&mut func);
+
+        let root = builder.create_region(RegionKind::Function);
+        builder.enter_region(root);
+
+        let entry = builder.create_block();
+        builder.switch_to_block(entry);
+        builder.continue_(vec![], Origin::synthetic());
+
+        builder.exit_region();
+
+        let session = CodegenSession::new("x86_64-unknown-linux-gnu");
+        let err = match session.compile_function(&func, &mut symbols) {
+            Ok(_) => panic!("unsupported IR must fail fast"),
+            Err(err) => err,
+        };
+        assert!(err.contains("instruction selection failed"));
+        assert!(err.contains("Continue"));
     }
 }
