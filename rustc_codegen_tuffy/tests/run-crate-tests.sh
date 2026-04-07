@@ -1,6 +1,7 @@
 #!/bin/bash
 # Third-party crate tests for rustc_codegen_tuffy.
-# Runs: bitflags cargo test and syn cargo test (building each with the tuffy backend).
+# Runs: bitflags cargo test, syn cargo test, and hashbrown release-focused tests
+# (building each with the tuffy backend).
 # These are separated from run-quick-tests.sh because they are slow.
 #
 # Temporary output: scratch/rustc_codegen_tuffy_test/ (cleared before each run).
@@ -24,14 +25,16 @@ if [ -n "${BACKEND:-}" ]; then
     echo "=== Using pre-built backend ==="
 else
     echo "=== Build ==="
-    cargo build --manifest-path "$CRATE_ROOT/Cargo.toml"
-    BACKEND="$CRATE_ROOT/target/debug/librustc_codegen_tuffy.so"
+    cargo build --manifest-path "$CRATE_ROOT/Cargo.toml" --release
+    BACKEND="$CRATE_ROOT/target/release/librustc_codegen_tuffy.so"
 fi
 
 if [ ! -f "$BACKEND" ]; then
     echo "ERROR: Backend not found at $BACKEND"
     exit 1
 fi
+
+BACKEND="$(realpath "$BACKEND")"
 
 echo "Backend: $BACKEND"
 echo ""
@@ -89,6 +92,43 @@ if RUSTC_WRAPPER="$WRAPPER_EXEC" \
    TUFFY_CRATE="syn" \
    TUFFY_SRC_DIR="$SYN_DIR" \
    cargo test --manifest-path "$SYN_DIR/Cargo.toml" --all-features; then
+    overall_pass=$((overall_pass + 1))
+else
+    overall_fail=$((overall_fail + 1))
+fi
+echo ""
+
+# ── Hashbrown release-focused tests ───────────────────────────────────────────
+# Use an isolated working copy outside /tuffy so Cargo doesn't try to inherit
+# the parent workspace.
+
+HASHBROWN_SRC="$REPO_ROOT/scratch/hashbrown"
+if [ ! -d "$HASHBROWN_SRC" ]; then
+    echo "=== Cloning hashbrown ==="
+    git clone --filter=blob:none https://github.com/rust-lang/hashbrown.git "$HASHBROWN_SRC"
+fi
+HASHBROWN_DIR="/tmp/hashbrown-tuffy-work"
+HASHBROWN_TARGET_DIR="/tmp/hashbrown-tuffy-target"
+rm -rf "$HASHBROWN_DIR" "$HASHBROWN_TARGET_DIR"
+cp -a "$HASHBROWN_SRC" "$HASHBROWN_DIR"
+
+echo "=== Hashbrown release-focused tests ==="
+if CARGO_TARGET_DIR="$HASHBROWN_TARGET_DIR" \
+   RUSTFLAGS="-Zcodegen-backend=$BACKEND" \
+   RUSTDOCFLAGS="-Zcodegen-backend=$BACKEND" \
+   cargo +nightly-2026-03-28 build --manifest-path "$HASHBROWN_DIR/Cargo.toml" --target x86_64-unknown-linux-gnu --no-default-features \
+   && CARGO_TARGET_DIR="$HASHBROWN_TARGET_DIR" \
+      RUSTFLAGS="-Zcodegen-backend=$BACKEND" \
+      RUSTDOCFLAGS="-Zcodegen-backend=$BACKEND" \
+      cargo +nightly-2026-03-28 build --manifest-path "$HASHBROWN_DIR/Cargo.toml" --target x86_64-unknown-linux-gnu --release --no-default-features \
+   && CARGO_TARGET_DIR="$HASHBROWN_TARGET_DIR" \
+      RUSTFLAGS="-Zcodegen-backend=$BACKEND" \
+      RUSTDOCFLAGS="-Zcodegen-backend=$BACKEND" \
+      cargo +nightly-2026-03-28 test --manifest-path "$HASHBROWN_DIR/Cargo.toml" --target x86_64-unknown-linux-gnu --release --no-fail-fast \
+   && CARGO_TARGET_DIR="$HASHBROWN_TARGET_DIR" \
+      RUSTFLAGS="-Zcodegen-backend=$BACKEND" \
+      RUSTDOCFLAGS="-Zcodegen-backend=$BACKEND" \
+      cargo +nightly-2026-03-28 test --manifest-path "$HASHBROWN_DIR/Cargo.toml" --target x86_64-unknown-linux-gnu --release --features rustc-internal-api,serde,rayon,nightly --no-fail-fast; then
     overall_pass=$((overall_pass + 1))
 else
     overall_fail=$((overall_fail + 1))

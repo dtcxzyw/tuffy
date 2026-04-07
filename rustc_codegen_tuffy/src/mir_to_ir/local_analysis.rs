@@ -323,6 +323,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             // to be backed by stack slots so the address is stable.
             let mut addr_taken: std::collections::HashSet<mir::Local> =
                 std::collections::HashSet::new();
+            let mut ref_assign_bb: std::collections::HashMap<mir::Local, BasicBlock> =
+                std::collections::HashMap::new();
             for bb_data in self.mir.basic_blocks.iter() {
                 for stmt in &bb_data.statements {
                     if let StatementKind::Assign(box (_, rvalue)) = &stmt.kind
@@ -330,6 +332,86 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         && place.projection.is_empty()
                     {
                         addr_taken.insert(place.local);
+                    }
+                }
+            }
+            for (bb, bb_data) in self.mir.basic_blocks.iter_enumerated() {
+                for stmt in &bb_data.statements {
+                    if let StatementKind::Assign(box (dest, rvalue)) = &stmt.kind
+                        && let Rvalue::Ref(_, _, place) | Rvalue::RawPtr(_, place) = rvalue
+                        && place.projection.is_empty()
+                        && dest.projection.is_empty()
+                    {
+                        ref_assign_bb.entry(dest.local).or_insert(bb);
+                    }
+                }
+            }
+            let mut needs_preinit: std::collections::HashSet<mir::Local> =
+                std::collections::HashSet::new();
+            let mut note_use = |bb: BasicBlock, local: mir::Local| {
+                if let Some(def_bb) = ref_assign_bb.get(&local)
+                    && bb < *def_bb
+                {
+                    needs_preinit.insert(local);
+                }
+            };
+            for (bb, bb_data) in self.mir.basic_blocks.iter_enumerated() {
+                for stmt in &bb_data.statements {
+                    if let StatementKind::Assign(box (place, rvalue)) = &stmt.kind {
+                        if !place.projection.is_empty()
+                            && matches!(place.projection.first(), Some(mir::PlaceElem::Deref))
+                        {
+                            note_use(bb, place.local);
+                        }
+                        match rvalue {
+                            Rvalue::Use(op) | Rvalue::UnaryOp(_, op) | Rvalue::Cast(_, op, _) => {
+                                if let Operand::Copy(p) | Operand::Move(p) = op {
+                                    note_use(bb, p.local);
+                                }
+                            }
+                            Rvalue::BinaryOp(_, box (a, b)) => {
+                                if let Operand::Copy(p) | Operand::Move(p) = a {
+                                    note_use(bb, p.local);
+                                }
+                                if let Operand::Copy(p) | Operand::Move(p) = b {
+                                    note_use(bb, p.local);
+                                }
+                            }
+                            Rvalue::Aggregate(_, ops) => {
+                                for op in ops.iter() {
+                                    if let Operand::Copy(p) | Operand::Move(p) = op {
+                                        note_use(bb, p.local);
+                                    }
+                                }
+                            }
+                            Rvalue::Discriminant(place)
+                            | Rvalue::Ref(_, _, place)
+                            | Rvalue::RawPtr(_, place)
+                            | Rvalue::CopyForDeref(place) => {
+                                note_use(bb, place.local);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                if let Some(terminator) = &bb_data.terminator {
+                    match &terminator.kind {
+                        TerminatorKind::SwitchInt {
+                            discr: Operand::Copy(p) | Operand::Move(p),
+                            ..
+                        } => note_use(bb, p.local),
+                        TerminatorKind::Call { func, args, .. } => {
+                            if let Operand::Copy(p) | Operand::Move(p) = func {
+                                note_use(bb, p.local);
+                            }
+                            for arg in args {
+                                if let Operand::Copy(p) | Operand::Move(p) = &arg.node {
+                                    note_use(bb, p.local);
+                                }
+                            }
+                        }
+                        TerminatorKind::Return => note_use(bb, mir::Local::from_usize(0)),
+                        _ => {}
                     }
                 }
             }
@@ -344,6 +426,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             && place.projection.is_empty()
                             && dest.projection.is_empty()
                             && self.stack_locals.is_stack(place.local)
+                            && needs_preinit.contains(&dest.local)
                             && self.locals.get(dest.local).is_none()
                             && let Some(slot) = self.locals.get(place.local)
                         {
@@ -354,7 +437,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             // so that the spill slot is initialized at
                             // function entry rather than lazily in a
                             // later block.
-                            if addr_taken.contains(&dest.local) {
+                            if needs_preinit.contains(&dest.local)
+                                && addr_taken.contains(&dest.local)
+                            {
                                 let dest_ty =
                                     self.monomorphize(self.mir.local_decls[dest.local].ty);
                                 let dest_sz = type_size(self.tcx, dest_ty).unwrap_or(8) as u32;

@@ -12,6 +12,13 @@ const I64: IntAnnotation = IntAnnotation {
 };
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
+    fn rvalue_is_scalar_const(&self, rvalue: &Rvalue<'tcx>, dest_ty: ty::Ty<'tcx>) -> bool {
+        matches!(
+            rvalue,
+            Rvalue::Use(Operand::Constant(_)) | Rvalue::Cast(_, Operand::Constant(_), _)
+        ) && matches!(repr_kind(self.tcx, dest_ty), ReprKind::Scalar)
+    }
+
     pub(super) fn translate_statement(&mut self, stmt: &mir::Statement<'tcx>) {
         match &stmt.kind {
             StatementKind::Assign(box (place, rvalue)) => {
@@ -197,41 +204,52 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // ZST: nothing to store.
             } else if matches!(self.builder.value_type(val), Some(Type::Ptr(_)))
                 && bytes > 8
-                && !self.builder.is_memory_address(val)
                 && is_fat_ptr(self.tcx, dest_ty)
+                && let Some(fat_val) = self.extract_fat_component(rvalue)
             {
                 // Fat pointer value (e.g. &[u8]): val is the data
                 // pointer, metadata lives in fat_locals / extract_fat_component.
                 // Store both halves directly.
+                let data_ptr = if self.builder.is_local_memory_address(val)
+                    && self.builder.stack_slot_size(val).is_some()
+                {
+                    self.builder.load(
+                        val.into(),
+                        8,
+                        Type::Ptr(0),
+                        self.current_mem.into(),
+                        None,
+                        Origin::synthetic(),
+                    )
+                } else {
+                    val
+                };
                 self.current_mem = self
                     .builder
                     .store(
-                        val.into(),
+                        data_ptr.into(),
                         addr.into(),
                         8,
                         self.current_mem.into(),
                         Origin::synthetic(),
                     )
                     .raw();
-                let fat_val = self.extract_fat_component(rvalue);
-                if let Some(meta) = fat_val {
-                    let off =
-                        self.builder
-                            .iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
-                    let meta_addr =
-                        self.builder
-                            .ptradd(addr.into(), off.into(), 0, Origin::synthetic());
-                    self.current_mem = self
-                        .builder
-                        .store(
-                            meta.into(),
-                            meta_addr.into(),
-                            8,
-                            self.current_mem.into(),
-                            Origin::synthetic(),
-                        )
-                        .raw();
-                }
+                let off = self
+                    .builder
+                    .iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
+                let meta_addr =
+                    self.builder
+                        .ptradd(addr.into(), off.into(), 0, Origin::synthetic());
+                self.current_mem = self
+                    .builder
+                    .store(
+                        fat_val.into(),
+                        meta_addr.into(),
+                        8,
+                        self.current_mem.into(),
+                        Origin::synthetic(),
+                    )
+                    .raw();
             } else if matches!(self.builder.value_type(val), Some(Type::Ptr(_))) && bytes > 8 {
                 // Large aggregate: copy word by word
                 let words = bytes.div_ceil(8);
@@ -372,11 +390,28 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 ) || matches!(ty.kind(),
                     ty::RawPtr(inner, _) if inner.is_sized(self.tcx, typing_env)
                 ) || matches!(ty.kind(), ty::FnPtr(..));
+                let scalar_const_symbol = matches!(val_ty.as_ref(), Some(Type::Ptr(_)))
+                    && bytes <= 8
+                    && self.builder.is_symbol_addr(val)
+                    && self.rvalue_is_scalar_const(rvalue, ty);
                 if matches!(val_ty.as_ref(), Some(Type::Ptr(_)))
                     && bytes > 0
                     && !is_ref_rvalue
                     && !dest_is_ptr_ty
                 {
+                    if scalar_const_symbol {
+                        self.current_mem = self
+                            .builder
+                            .store(
+                                val.into(),
+                                slot.into(),
+                                bytes,
+                                self.current_mem.into(),
+                                Origin::synthetic(),
+                            )
+                            .raw();
+                        return;
+                    }
                     // When the Aggregate rvalue reused the
                     // destination slot, val == slot and the
                     // data is already in place — skip the copy.
@@ -506,19 +541,22 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             fat_src.or_else(|| self.extract_fat_component(rvalue))
                         };
                         if let Some(fat_val) = fat_src {
-                            // If the source operand is a stack local,
-                            // val is the slot address — load the data
-                            // pointer from it.  Otherwise val IS the
-                            // data pointer (e.g., Unsize cast from a
-                            // register holding a thin ref).
-                            let operand_is_stack = match rvalue {
+                            // Stack locals are split here:
+                            // - thin pointer locals: translate_operand already loaded the
+                            //   pointer value from the slot, so reloading would dereference
+                            //   through the pointee and corrupt the fat-pointer data word.
+                            // - fat / aggregate locals: translate_operand still returns the
+                            //   slot address, so we must load the first word from the slot.
+                            let operand_is_stack_local = match rvalue {
                                 Rvalue::Use(Operand::Copy(p) | Operand::Move(p))
                                 | Rvalue::Cast(_, Operand::Copy(p) | Operand::Move(p), _) => {
                                     p.projection.is_empty() && self.stack_locals.is_stack(p.local)
                                 }
                                 _ => false,
                             };
-                            let data_ptr = if operand_is_stack {
+                            let operand_uses_stack_slot =
+                                operand_is_stack_local && self.builder.is_local_memory_address(val);
+                            let data_ptr = if operand_uses_stack_slot {
                                 self.builder.load(
                                     val.into(),
                                     8,
@@ -569,7 +607,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             // bytes (thin→fat pointer), shifting subsequent
                             // fields. Copy remaining bytes from the source
                             // after the first 8 bytes to dest after 16 bytes.
-                            if operand_is_stack {
+                            if operand_is_stack_local {
                                 let src_place = match rvalue {
                                     Rvalue::Cast(
                                         mir::CastKind::PointerCoercion(
@@ -1259,7 +1297,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             let bytes = type_size(self.tcx, projected_ty).unwrap_or(8) as u32;
             let val_ty = self.builder.value_type(val).cloned();
             if matches!(val_ty.as_ref(), Some(Type::Ptr(_))) && bytes > 0 {
-                // Check if source is a non-stack fat pointer local.
                 let fat_src = match rvalue {
                     Rvalue::Use(Operand::Copy(src_place) | Operand::Move(src_place))
                         if src_place.projection.is_empty()
@@ -1269,7 +1306,51 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     }
                     _ => None,
                 };
-                if let Some(fat_val) = fat_src.filter(|_| bytes >= 16) {
+                if is_fat_ptr(self.tcx, projected_ty)
+                    && bytes >= 16
+                    && let Some(fat_val) = self.extract_fat_component(rvalue)
+                {
+                    let data_ptr = if self.builder.is_local_memory_address(val)
+                        && self.builder.stack_slot_size(val).is_some()
+                    {
+                        self.builder.load(
+                            val.into(),
+                            8,
+                            Type::Ptr(0),
+                            self.current_mem.into(),
+                            None,
+                            Origin::synthetic(),
+                        )
+                    } else {
+                        val
+                    };
+                    self.current_mem = self
+                        .builder
+                        .store(
+                            data_ptr.into(),
+                            addr.into(),
+                            8,
+                            self.current_mem.into(),
+                            Origin::synthetic(),
+                        )
+                        .raw();
+                    let off8 =
+                        self.builder
+                            .iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
+                    let hi_addr =
+                        self.builder
+                            .ptradd(addr.into(), off8.into(), 0, Origin::synthetic());
+                    self.current_mem = self
+                        .builder
+                        .store(
+                            fat_val.into(),
+                            hi_addr.into(),
+                            8,
+                            self.current_mem.into(),
+                            Origin::synthetic(),
+                        )
+                        .raw();
+                } else if let Some(fat_val) = fat_src.filter(|_| bytes >= 16) {
                     // Store data pointer into dst[0..8].
                     self.current_mem = self
                         .builder

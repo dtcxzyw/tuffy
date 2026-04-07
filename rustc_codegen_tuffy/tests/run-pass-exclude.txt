@@ -612,3 +612,25 @@ use/use-keyword.rs
 wasm/wasm-stable-target-features.rs
 # with the tuffy backend as of nightly 2026-02-20.
 zero-sized/zero-sized-binary-heap-push.rs
+
+# Current 1.93.1 UI tests that do not run cleanly against the pinned nightly
+# toolchain or currently unsupported backend/runtime behavior.
+associated-consts/assoc-const.rs
+associated-type-bounds/duplicate-bound.rs
+codegen/dynamic-size-of-prefix-correctly-36278.rs
+coroutine/uninhabited-field.rs
+delegation/explicit-paths-pass.rs
+deref-patterns/basic.rs
+dynamically-sized-types/dst-field-align.rs
+hashmap/hashmap-memory.rs
+intrinsics/always-gets-overridden.rs
+issues/issue-35815.rs
+lowering/issue-96847.rs
+mir/mir_assign_eval_order.rs
+mir/mir_constval_adts.rs
+regions/regions-bound-lists-feature-gate-2.rs
+regions/regions-bound-lists-feature-gate.rs
+resolve/primitive-usage.rs
+statics/static-function-pointer.rs
+stdlib-unit-tests/matches2021.rs
+traits/ice-with-dyn-pointee.rs

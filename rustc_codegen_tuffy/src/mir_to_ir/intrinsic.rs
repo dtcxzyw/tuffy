@@ -1098,8 +1098,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 }
             }
 
-            // write_via_move<T>(dst, src) — write src to *dst.
-            "write_via_move" => {
+            // write_via_move<T>(dst, src) / write_volatile<T>(dst, src)
+            // — write src to *dst. Tuffy does not model volatility
+            // separately yet, so lower both to the same memory effect.
+            "write_via_move" | "write_volatile" | "volatile_store" => {
                 if ir_args.len() < 2 {
                     return None;
                 }
@@ -1137,8 +1139,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 }
             }
 
-            // read_via_copy<T>(src) → *src
-            "read_via_copy" => {
+            // read_via_copy<T>(src) / read_volatile<T>(src) → *src
+            // Tuffy does not model volatility separately yet, so lower
+            // both to the same memory effect.
+            "read_via_copy" | "read_volatile" | "volatile_load" => {
                 if ir_args.is_empty() {
                     return None;
                 }

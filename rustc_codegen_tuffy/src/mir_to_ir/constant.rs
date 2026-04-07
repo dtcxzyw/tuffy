@@ -1,6 +1,7 @@
 use super::StaticDataVec;
-use super::types::{int_bitwidth, is_signed_int};
+use super::types::{int_annotation_for_bytes, int_bitwidth, is_fat_ptr, is_signed_int};
 use num_bigint::BigInt;
+use rustc_abi::BackendRepr;
 use rustc_middle::mir;
 use rustc_middle::ty::{self, Instance, TyCtxt};
 use tuffy_ir::builder::Builder;
@@ -190,20 +191,31 @@ pub(super) fn translate_const<'tcx>(
                     };
                     let sym_id = symbols.intern(&sym);
                     let base = builder.symbol_addr(sym_id, Origin::synthetic());
-                    if ptr_offset.bytes() > 0 {
+                    let addr = if ptr_offset.bytes() > 0 {
                         let off = builder.iconst(
                             ptr_offset.bytes() as i64,
                             64,
                             IntSignedness::DontCare,
                             Origin::synthetic(),
                         );
-                        Some(
-                            builder
-                                .ptradd(base.into(), off.into(), 0, Origin::synthetic())
-                                .raw(),
-                        )
+                        builder
+                            .ptradd(base.into(), off.into(), 0, Origin::synthetic())
+                            .raw()
                     } else {
-                        Some(base.raw())
+                        base.raw()
+                    };
+                    if is_fat_ptr(tcx, ty) {
+                        let loaded = builder.load(
+                            addr.into(),
+                            8,
+                            Type::Ptr(0),
+                            (*current_mem).into(),
+                            None,
+                            Origin::synthetic(),
+                        );
+                        Some(loaded)
+                    } else {
+                        Some(addr)
                     }
                 }
                 rustc_middle::mir::interpret::GlobalAlloc::Static(def_id) => {
@@ -407,13 +419,39 @@ pub(super) fn translate_const<'tcx>(
                 alloc_cache.insert(alloc_id, sym);
                 let base = builder.symbol_addr(sym_id, Origin::synthetic());
 
-                // For reference/pointer types, the Indirect constant contains
-                // the pointer value (or fat pointer data).  Load the actual
-                // pointer from the emitted static data so the local holds the
-                // pointer value, not a pointer-to-the-pointer.
-                // For fat pointers (&[T], &str), this loads only the data
-                // pointer (first 8 bytes); the length component is extracted
-                // separately by extract_fat_component.
+                let typing_env = ty::TypingEnv::fully_monomorphized();
+                if let Ok(layout) = tcx.layout_of(typing_env.as_query_input(ty))
+                    && let BackendRepr::Scalar(scalar) = layout.backend_repr
+                {
+                    let (load_ty, load_bytes, ann) = match scalar.primitive() {
+                        rustc_abi::Primitive::Pointer(_) => (Type::Ptr(0), 8, None),
+                        rustc_abi::Primitive::Int(int, _) => {
+                            let bytes = int.size().bytes() as u32;
+                            (Type::Int, bytes, int_annotation_for_bytes(bytes))
+                        }
+                        rustc_abi::Primitive::Float(float) => {
+                            let bytes = float.size().bytes() as u32;
+                            let float_ty = match bytes {
+                                2 => FloatType::F16,
+                                4 => FloatType::F32,
+                                8 => FloatType::F64,
+                                16 => FloatType::F128,
+                                _ => FloatType::F64,
+                            };
+                            (Type::Float(float_ty), bytes, None)
+                        }
+                    };
+                    let loaded = builder.load(
+                        base.raw().into(),
+                        load_bytes,
+                        load_ty,
+                        (*current_mem).into(),
+                        ann,
+                        Origin::synthetic(),
+                    );
+                    return Some(loaded);
+                }
+
                 if matches!(ty.kind(), ty::Ref(..) | ty::RawPtr(..)) {
                     let loaded = builder.load(
                         base.raw().into(),

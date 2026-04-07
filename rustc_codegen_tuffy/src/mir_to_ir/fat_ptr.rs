@@ -65,6 +65,30 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         );
                     }
                 }
+                if let Some(mir::ConstValue::Scalar(mir::interpret::Scalar::Ptr(ptr, _))) = resolved
+                    && is_fat_ptr(self.tcx, const_ty)
+                {
+                    let (prov, ptr_offset) = ptr.into_raw_parts();
+                    let alloc = self.tcx.global_alloc(prov.alloc_id());
+                    if let rustc_middle::mir::interpret::GlobalAlloc::Memory(mem_alloc) = alloc {
+                        let inner = mem_alloc.inner();
+                        let byte_offset = ptr_offset.bytes() as usize + 8;
+                        let len_bytes = inner.inspect_with_uninit_and_ptr_outside_interpreter(
+                            byte_offset..byte_offset + 8,
+                        );
+                        let len = u64::from_le_bytes(len_bytes.try_into().unwrap_or([0u8; 8]));
+                        return Some(
+                            self.builder
+                                .iconst(
+                                    len as i64,
+                                    64,
+                                    IntSignedness::DontCare,
+                                    Origin::synthetic(),
+                                )
+                                .raw(),
+                        );
+                    }
+                }
                 None
             }
             // Use of a fat local: propagate the fat component.

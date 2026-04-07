@@ -311,13 +311,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             let self_arg = &args[0].node;
             let vtable_ptr = match self_arg {
                 Operand::Copy(place) | Operand::Move(place) => {
-                    // First try fat_locals (set when the fat pointer was created
-                    // from a parameter or an Unsize coercion).
-                    if let Some(v) = self.fat_locals.get(place.local) {
-                        Some(v)
-                    } else if self.stack_locals.is_stack(place.local) && place.projection.is_empty()
-                    {
-                        // The fat pointer lives in a stack slot.  The vtable
+                    // For stack locals, always reload metadata from the slot.
+                    // Cached fat_locals values are not block-sensitive, so a
+                    // branch-assigned fat pointer local can otherwise pick up
+                    // the vtable from a different control-flow path.
+                    if self.stack_locals.is_stack(place.local) && place.projection.is_empty() {
+                        // The fat pointer lives in a stack slot. The vtable
                         // pointer is the second word (offset 8).
                         if let Some(base) = self.locals.get(place.local) {
                             let off8 = self.builder.iconst(
@@ -344,6 +343,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         } else {
                             None
                         }
+                    } else if let Some(v) = self.fat_locals.get(place.local) {
+                        Some(v)
                     } else {
                         // Projected place (e.g. (*_1).buf) — compute the
                         // address of the fat pointer field and load the

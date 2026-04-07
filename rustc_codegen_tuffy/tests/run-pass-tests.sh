@@ -36,7 +36,8 @@ EXCLUDE_FILE="$CRATE_ROOT/tests/run-pass-exclude.txt"
 OUT_DIR="/tmp/tuffy_run_pass"
 LOG_DIR="$OUT_DIR/logs"
 
-mkdir -p "$OUT_DIR" "$LOG_DIR"
+rm -rf "$OUT_DIR"
+mkdir -p "$LOG_DIR"
 
 if [ ! -d "$UI_DIR" ]; then
     echo "ERROR: UI test directory not found: $UI_DIR"
@@ -48,6 +49,8 @@ if [ ! -f "$BACKEND" ]; then
     echo "Run: cd rustc_codegen_tuffy && cargo build --release"
     exit 1
 fi
+
+BACKEND="$(realpath "$BACKEND")"
 
 # Load exclusion list
 declare -A excluded
@@ -85,8 +88,9 @@ for test_file in "${tests[@]}"; do
         continue
     fi
 
-    # Skip tests needing features we can't handle
-    if grep -qE '//@ (build-fail|run-fail|should-fail|ignore-|needs-asm|needs-llvm|needs-profiler|needs-sanitizer|only-windows|only-macos|only-aarch64|only-arm|only-32bit|revisions|compile-flags|aux-build|aux-crate)' "$test_file" 2>/dev/null; then
+    # Skip tests that are not intended to execute or require harness features
+    # this runner does not provide.
+    if grep -qE '//@ ?(build-pass|check-pass|build-fail|run-fail|should-fail|known-bug|failure-status:|ignore-|needs-asm|needs-llvm|needs-profiler|needs-sanitizer|only-windows|only-macos|only-aarch64|only-arm|only-32bit|revisions|compile-flags|aux-build|aux-crate|proc-macro:)' "$test_file" 2>/dev/null; then
         skip=$((skip + 1))
         continue
     fi

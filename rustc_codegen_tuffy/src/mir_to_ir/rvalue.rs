@@ -414,7 +414,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let (elem_size, n) = match dest_ty.kind() {
                     ty::Array(elem_ty, _) => {
                         let es = type_size(self.tcx, *elem_ty).unwrap_or(8);
-                        let cnt = count.try_to_target_usize(self.tcx).unwrap_or(0);
+                        // Const-generic array lengths can remain unevaluated here even after
+                        // monomorphization. Derive the instantiated length from the array layout
+                        // instead of silently treating it as zero.
+                        let cnt = array_len(self.tcx, dest_ty)
+                            .or_else(|| count.try_to_target_usize(self.tcx))
+                            .unwrap_or(0);
                         (es, cnt)
                     }
                     _ => return None,
@@ -2166,6 +2171,26 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         bytes: u32,
     ) {
         let is_ptr_val = matches!(self.builder.value_type(val), Some(Type::Ptr(_)));
+        let operand_ty =
+            operand_ty_projected(operand, self.mir, self.tcx).map(|ty| self.monomorphize(ty));
+        let operand_is_scalar =
+            operand_ty.is_some_and(|ty| matches!(repr_kind(self.tcx, ty), ReprKind::Scalar));
+        let val_is_stack_slot = self.builder.stack_slot_size(val).is_some()
+            && self.builder.is_local_memory_address(val);
+
+        if is_ptr_val && bytes <= 8 && operand_is_scalar && !val_is_stack_slot {
+            self.current_mem = self
+                .builder
+                .store(
+                    val.into(),
+                    dst_addr.into(),
+                    bytes,
+                    self.current_mem.into(),
+                    Origin::synthetic(),
+                )
+                .raw();
+            return;
+        }
 
         if bytes > 8
             && let Some(fat_val) = self.fat_metadata_for_operand(operand)
@@ -2297,6 +2322,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             && bytes <= 8
             && self.builder.is_symbol_addr(val)
             && self.is_indirect_nonref_const(operand)
+            && !operand_is_scalar
         {
             let loaded = self.builder.load(
                 val.into(),

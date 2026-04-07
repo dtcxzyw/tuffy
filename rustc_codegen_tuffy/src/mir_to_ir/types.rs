@@ -257,6 +257,14 @@ pub(super) fn type_size<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> Option<u64
     Some(mono_layout_of(tcx, ty)?.size.bytes())
 }
 
+/// Query the element count of a monomorphized array type.
+pub(super) fn array_len<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> Option<u64> {
+    match ty.kind() {
+        ty::Array(..) => Some(mono_layout_of(tcx, ty)?.fields.count() as u64),
+        _ => None,
+    }
+}
+
 /// For a ScalarPair type, return `(first_scalar_bytes, second_scalar_bytes, second_offset)`.
 /// Returns `None` if `ty` is not a ScalarPair.
 pub(super) fn scalar_pair_info<'tcx>(
