@@ -456,16 +456,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             .ptradd(slot.into(), off.into(), 0, Origin::synthetic())
                             .raw()
                     };
-                    self.current_mem = self
-                        .builder
-                        .store(
-                            elem_val.into(),
-                            dst.into(),
-                            store_size,
-                            self.current_mem.into(),
-                            Origin::synthetic(),
-                        )
-                        .raw();
+                    self.store_operand_value(operand, elem_val, dst, store_size);
                 }
                 // Only mark the local as stack when writing directly to it
                 // (no projection). For projected assignments like `(*ptr) = [v; n]`
@@ -2136,6 +2127,210 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         }
     }
 
+    fn operand_uses_stack_slot(&self, operand: &Operand<'tcx>) -> bool {
+        matches!(
+            operand,
+            Operand::Copy(place) | Operand::Move(place)
+                if place.projection.is_empty() && self.stack_locals.is_stack(place.local)
+        )
+    }
+
+    fn fat_metadata_for_operand(&mut self, operand: &Operand<'tcx>) -> Option<ValueRef> {
+        self.extract_fat_component(&Rvalue::Use(operand.clone()))
+    }
+
+    fn copy_source_addr_for_operand(
+        &mut self,
+        operand: &Operand<'tcx>,
+        val: ValueRef,
+    ) -> Option<ValueRef> {
+        match operand {
+            Operand::Copy(place) | Operand::Move(place) if !place.projection.is_empty() => self
+                .translate_place_to_addr(place)
+                .map(|(addr, _)| self.coerce_to_ptr(addr)),
+            Operand::Copy(place) | Operand::Move(place)
+                if place.projection.is_empty() && self.stack_locals.is_stack(place.local) =>
+            {
+                self.locals.get(place.local)
+            }
+            Operand::Constant(_) if self.builder.is_memory_address(val) => Some(val),
+            _ => None,
+        }
+    }
+
+    fn store_operand_value(
+        &mut self,
+        operand: &Operand<'tcx>,
+        val: ValueRef,
+        dst_addr: ValueRef,
+        bytes: u32,
+    ) {
+        let is_ptr_val = matches!(self.builder.value_type(val), Some(Type::Ptr(_)));
+
+        if bytes > 8
+            && let Some(fat_val) = self.fat_metadata_for_operand(operand)
+        {
+            let data_ptr = if self.operand_uses_stack_slot(operand) {
+                self.builder.load(
+                    val.into(),
+                    8,
+                    Type::Ptr(0),
+                    self.current_mem.into(),
+                    None,
+                    Origin::synthetic(),
+                )
+            } else {
+                val
+            };
+            self.current_mem = self
+                .builder
+                .store(
+                    data_ptr.into(),
+                    dst_addr.into(),
+                    8,
+                    self.current_mem.into(),
+                    Origin::synthetic(),
+                )
+                .raw();
+            let off8 = self
+                .builder
+                .iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
+            let meta_addr =
+                self.builder
+                    .ptradd(dst_addr.into(), off8.into(), 0, Origin::synthetic());
+            self.current_mem = self
+                .builder
+                .store(
+                    fat_val.into(),
+                    meta_addr.into(),
+                    8,
+                    self.current_mem.into(),
+                    Origin::synthetic(),
+                )
+                .raw();
+            return;
+        }
+
+        if is_ptr_val && bytes > 8 {
+            let src_base = self
+                .copy_source_addr_for_operand(operand, val)
+                .unwrap_or(val);
+            let num_words = (bytes as u64).div_ceil(8);
+            for w in 0..num_words {
+                let byte_off = w * 8;
+                let word_size = std::cmp::min(8, bytes as u64 - byte_off) as u32;
+                let src_addr = if byte_off == 0 {
+                    src_base
+                } else {
+                    let off = self.builder.iconst(
+                        byte_off as i64,
+                        64,
+                        IntSignedness::DontCare,
+                        Origin::synthetic(),
+                    );
+                    self.builder
+                        .ptradd(src_base.into(), off.into(), 0, Origin::synthetic())
+                        .raw()
+                };
+                let word = self.builder.load(
+                    src_addr.into(),
+                    word_size,
+                    Type::Int,
+                    self.current_mem.into(),
+                    int_annotation_for_bytes(word_size),
+                    Origin::synthetic(),
+                );
+                let chunk_dst = if byte_off == 0 {
+                    dst_addr
+                } else {
+                    let off = self.builder.iconst(
+                        byte_off as i64,
+                        64,
+                        IntSignedness::DontCare,
+                        Origin::synthetic(),
+                    );
+                    self.builder
+                        .ptradd(dst_addr.into(), off.into(), 0, Origin::synthetic())
+                        .raw()
+                };
+                self.current_mem = self
+                    .builder
+                    .store(
+                        word.into(),
+                        chunk_dst.into(),
+                        word_size,
+                        self.current_mem.into(),
+                        Origin::synthetic(),
+                    )
+                    .raw();
+            }
+            return;
+        }
+
+        if self.operand_uses_stack_slot(operand)
+            && is_ptr_val
+            && bytes <= 8
+            && self.builder.stack_slot_size(val).is_some()
+        {
+            let loaded = self.builder.load(
+                val.into(),
+                bytes,
+                Type::Int,
+                self.current_mem.into(),
+                int_annotation_for_bytes(bytes),
+                Origin::synthetic(),
+            );
+            self.current_mem = self
+                .builder
+                .store(
+                    loaded.into(),
+                    dst_addr.into(),
+                    bytes,
+                    self.current_mem.into(),
+                    Origin::synthetic(),
+                )
+                .raw();
+            return;
+        }
+
+        if is_ptr_val
+            && bytes <= 8
+            && self.builder.is_symbol_addr(val)
+            && self.is_indirect_nonref_const(operand)
+        {
+            let loaded = self.builder.load(
+                val.into(),
+                bytes,
+                Type::Int,
+                self.current_mem.into(),
+                int_annotation_for_bytes(bytes),
+                Origin::synthetic(),
+            );
+            self.current_mem = self
+                .builder
+                .store(
+                    loaded.into(),
+                    dst_addr.into(),
+                    bytes,
+                    self.current_mem.into(),
+                    Origin::synthetic(),
+                )
+                .raw();
+            return;
+        }
+
+        self.current_mem = self
+            .builder
+            .store(
+                val.into(),
+                dst_addr.into(),
+                bytes,
+                self.current_mem.into(),
+                Origin::synthetic(),
+            )
+            .raw();
+    }
+
     fn translate_aggregate(
         &mut self,
         kind: &mir::AggregateKind<'tcx>,
@@ -2269,13 +2464,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 field_offset(self.tcx, agg_ty, i).unwrap_or(i as u64 * 8)
             };
 
-            let is_stack_op = match op {
-                Operand::Copy(p) | Operand::Move(p) if p.projection.is_empty() => {
-                    self.stack_locals.is_stack(p.local)
-                }
-                _ => false,
-            };
-
             let dst_addr = if offset == 0 {
                 slot
             } else {
@@ -2289,219 +2477,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     .ptradd(slot.into(), off_val.into(), 0, Origin::synthetic())
                     .raw()
             };
-
-            let is_ptr_val = matches!(self.builder.value_type(val), Some(Type::Ptr(_)));
-            let fat_op = match op {
-                Operand::Copy(p) | Operand::Move(p)
-                    if p.projection.is_empty() && !self.stack_locals.is_stack(p.local) =>
-                {
-                    self.fat_locals.get(p.local)
-                }
-                Operand::Constant(c) if is_ptr_val && bytes > 8 => {
-                    let mono_const = self.tcx.instantiate_and_normalize_erasing_regions(
-                        self.instance.args,
-                        ty::TypingEnv::fully_monomorphized(),
-                        ty::EarlyBinder::bind(c.const_),
-                    );
-                    let resolved = match mono_const {
-                        mir::Const::Val(v, _) => Some(v),
-                        _ => {
-                            let typing_env = ty::TypingEnv::fully_monomorphized();
-                            mono_const.eval(self.tcx, typing_env, c.span).ok()
-                        }
-                    };
-                    if let Some(mir::ConstValue::Slice { meta, .. }) = resolved {
-                        Some(
-                            self.builder
-                                .iconst(
-                                    meta as i64,
-                                    64,
-                                    IntSignedness::DontCare,
-                                    Origin::synthetic(),
-                                )
-                                .raw(),
-                        )
-                    } else if let Some(mir::ConstValue::Indirect { alloc_id, offset }) = resolved {
-                        let const_ty = mono_const.ty();
-                        if is_fat_ptr(self.tcx, const_ty) {
-                            let alloc = self.tcx.global_alloc(alloc_id);
-                            if let rustc_middle::mir::interpret::GlobalAlloc::Memory(mem_alloc) =
-                                alloc
-                            {
-                                let inner = mem_alloc.inner();
-                                let byte_offset = offset.bytes() as usize + 8;
-                                let len_bytes = inner
-                                    .inspect_with_uninit_and_ptr_outside_interpreter(
-                                        byte_offset..byte_offset + 8,
-                                    );
-                                let len =
-                                    u64::from_le_bytes(len_bytes.try_into().unwrap_or([0u8; 8]));
-                                Some(
-                                    self.builder
-                                        .iconst(
-                                            len as i64,
-                                            64,
-                                            IntSignedness::DontCare,
-                                            Origin::synthetic(),
-                                        )
-                                        .raw(),
-                                )
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            };
-            if let Some(fat_val) = fat_op {
-                // Store data pointer into dst[0..8].
-                self.current_mem = self
-                    .builder
-                    .store(
-                        val.into(),
-                        dst_addr.into(),
-                        8,
-                        self.current_mem.into(),
-                        Origin::synthetic(),
-                    )
-                    .raw();
-                // Store fat component (length/vtable) into dst[8..16].
-                let off8 = self
-                    .builder
-                    .iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
-                let hi = self
-                    .builder
-                    .ptradd(dst_addr.into(), off8.into(), 0, Origin::synthetic());
-                self.current_mem = self
-                    .builder
-                    .store(
-                        fat_val.into(),
-                        hi.into(),
-                        8,
-                        self.current_mem.into(),
-                        Origin::synthetic(),
-                    )
-                    .raw();
-            } else if is_ptr_val && bytes > 8 {
-                // val is a pointer to multi-word data — copy word-by-word.
-                let num_words = (bytes as u64).div_ceil(8);
-                for w in 0..num_words {
-                    let byte_off = w * 8;
-                    let word_size = std::cmp::min(8, bytes as u64 - byte_off) as u32;
-                    let src = if byte_off == 0 {
-                        val
-                    } else {
-                        let off = self.builder.iconst(
-                            byte_off as i64,
-                            64,
-                            IntSignedness::DontCare,
-                            Origin::synthetic(),
-                        );
-                        self.builder
-                            .ptradd(val.into(), off.into(), 0, Origin::synthetic())
-                            .raw()
-                    };
-                    let word = self.builder.load(
-                        src.into(),
-                        word_size,
-                        Type::Int,
-                        self.current_mem.into(),
-                        int_annotation_for_bytes(word_size),
-                        Origin::synthetic(),
-                    );
-                    let dst = if byte_off == 0 {
-                        dst_addr
-                    } else {
-                        let off = self.builder.iconst(
-                            byte_off as i64,
-                            64,
-                            IntSignedness::DontCare,
-                            Origin::synthetic(),
-                        );
-                        self.builder
-                            .ptradd(dst_addr.into(), off.into(), 0, Origin::synthetic())
-                            .raw()
-                    };
-                    self.current_mem = self
-                        .builder
-                        .store(
-                            word.into(),
-                            dst.into(),
-                            word_size,
-                            self.current_mem.into(),
-                            Origin::synthetic(),
-                        )
-                        .raw();
-                }
-            } else if is_stack_op
-                && is_ptr_val
-                && bytes <= 8
-                && self.builder.stack_slot_size(val).is_some()
-            {
-                let loaded = self.builder.load(
-                    val.into(),
-                    bytes,
-                    Type::Int,
-                    self.current_mem.into(),
-                    int_annotation_for_bytes(bytes),
-                    Origin::synthetic(),
-                );
-                self.current_mem = self
-                    .builder
-                    .store(
-                        loaded.into(),
-                        dst_addr.into(),
-                        bytes,
-                        self.current_mem.into(),
-                        Origin::synthetic(),
-                    )
-                    .raw();
-            } else if is_ptr_val
-                && bytes <= 8
-                && self.builder.is_symbol_addr(val)
-                && self.is_indirect_nonref_const(op)
-            {
-                // Constant data pointer (e.g. symbol_addr for an
-                // Indirect const like `(TestFlags(0), true)`).
-                // `translate_const` returns `symbol_addr` for Indirect
-                // non-ref constants — the address of the data, not the
-                // data itself.  We need to load the actual value before
-                // storing it into the aggregate field.
-                let loaded = self.builder.load(
-                    val.into(),
-                    bytes,
-                    Type::Int,
-                    self.current_mem.into(),
-                    int_annotation_for_bytes(bytes),
-                    Origin::synthetic(),
-                );
-                self.current_mem = self
-                    .builder
-                    .store(
-                        loaded.into(),
-                        dst_addr.into(),
-                        bytes,
-                        self.current_mem.into(),
-                        Origin::synthetic(),
-                    )
-                    .raw();
-            } else {
-                self.current_mem = self
-                    .builder
-                    .store(
-                        val.into(),
-                        dst_addr.into(),
-                        bytes,
-                        self.current_mem.into(),
-                        Origin::synthetic(),
-                    )
-                    .raw();
-            }
+            self.store_operand_value(op, val, dst_addr, bytes);
         }
 
         // Write the discriminant tag for enum aggregates.
