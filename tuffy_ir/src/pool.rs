@@ -21,6 +21,8 @@ pub struct InstNode {
     pub use_list_head: Option<u32>,
     /// Head of the use-list for the secondary result (if any).
     pub secondary_use_list_head: Option<u32>,
+    /// Use-node ids for each operand used by this instruction, in operand order.
+    pub operand_use_ids: Vec<u32>,
 }
 
 /// Arena for instructions with O(1) alloc/free and linked-list threading.
@@ -128,8 +130,12 @@ impl Default for InstPool {
 /// an instruction operand. Uses for the same value form a doubly-linked list.
 #[derive(Debug, Clone)]
 pub struct UseNode {
+    /// The value referenced by this use edge.
+    pub value: crate::value::ValueRef,
     /// The instruction that contains this use.
     pub user: u32,
+    /// Operand slot within `user` that references `value`.
+    pub operand_index: u32,
     /// Next use of the same value (`None` if tail).
     pub next: Option<u32>,
     /// Previous use of the same value (`None` if head).

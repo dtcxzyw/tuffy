@@ -225,6 +225,7 @@ impl Function {
             parent_block: block,
             use_list_head: None,
             secondary_use_list_head: None,
+            operand_use_ids: Vec::new(),
         });
 
         // Link previous tail → new node
@@ -257,6 +258,7 @@ impl Function {
             parent_block: block,
             use_list_head: None,
             secondary_use_list_head: None,
+            operand_use_ids: Vec::new(),
         });
 
         // Fix prev → new
@@ -287,6 +289,7 @@ impl Function {
             parent_block: block,
             use_list_head: None,
             secondary_use_list_head: None,
+            operand_use_ids: Vec::new(),
         });
 
         // Fix after → new
@@ -341,36 +344,50 @@ impl Function {
     /// Register all value uses for an instruction that was just allocated.
     /// Call this after the instruction is fully linked into its block.
     pub(crate) fn register_uses(&mut self, inst_idx: u32) {
-        let refs = self.inst_pool.get(inst_idx).unwrap().inst.op.value_refs();
-        for vr in refs {
+        let refs = self
+            .inst_pool
+            .get(inst_idx)
+            .unwrap()
+            .inst
+            .op
+            .value_refs_with_indices();
+        let mut use_ids = Vec::with_capacity(refs.len());
+        for (operand_index, vr) in refs {
             let use_node = UseNode {
+                value: vr,
                 user: inst_idx,
+                operand_index,
                 next: None,
                 prev: None,
             };
             let use_id = self.use_pool.alloc(use_node);
             self.prepend_use(vr, use_id);
+            use_ids.push(use_id);
         }
+        self.inst_pool.get_mut(inst_idx).unwrap().operand_use_ids = use_ids;
     }
 
     /// Unregister all value uses for an instruction about to be removed/freed.
     pub(crate) fn unregister_uses(&mut self, inst_idx: u32) {
-        let node = match self.inst_pool.get(inst_idx) {
-            Some(n) => n,
+        let use_ids = match self.inst_pool.get_mut(inst_idx) {
+            Some(n) => core::mem::take(&mut n.operand_use_ids),
             None => return,
         };
-        let refs = node.inst.op.value_refs();
-        for vr in refs {
-            self.remove_uses_by(vr, inst_idx);
+        for use_id in use_ids {
+            self.unlink_use(use_id);
+            self.use_pool.free(use_id);
         }
     }
 
     /// Prepend a use-list node to the head of a value's use-list.
     fn prepend_use(&mut self, value: ValueRef, use_id: u32) {
         let old_head = self.use_list_head(value);
-        // Point the new node's next to the old head
-        self.use_pool.get_mut(use_id).unwrap().next = old_head;
-        self.use_pool.get_mut(use_id).unwrap().prev = None;
+        {
+            let node = self.use_pool.get_mut(use_id).unwrap();
+            node.value = value;
+            node.next = old_head;
+            node.prev = None;
+        }
         // Update old head's prev
         if let Some(old) = old_head {
             self.use_pool.get_mut(old).unwrap().prev = Some(use_id);
@@ -379,23 +396,10 @@ impl Function {
         self.set_use_list_head(value, Some(use_id));
     }
 
-    /// Remove all use-list entries for `value` whose `user` equals `inst_idx`.
-    fn remove_uses_by(&mut self, value: ValueRef, inst_idx: u32) {
-        let mut cur = self.use_list_head(value);
-        while let Some(uid) = cur {
-            let node = self.use_pool.get(uid).unwrap();
-            let next = node.next;
-            if node.user == inst_idx {
-                self.unlink_use(value, uid);
-                self.use_pool.free(uid);
-            }
-            cur = next;
-        }
-    }
-
     /// Unlink a use node from its value's doubly-linked use-list.
-    fn unlink_use(&mut self, value: ValueRef, use_id: u32) {
+    fn unlink_use(&mut self, use_id: u32) {
         let node = self.use_pool.get(use_id).unwrap();
+        let value = node.value;
         let prev = node.prev;
         let next = node.next;
         match (prev, next) {
@@ -414,6 +418,9 @@ impl Function {
                 self.set_use_list_head(value, None);
             }
         }
+        let node = self.use_pool.get_mut(use_id).unwrap();
+        node.prev = None;
+        node.next = None;
     }
 
     /// Get the head of the use-list for a value.
@@ -466,43 +473,42 @@ impl Function {
         self.uses_of(value).count()
     }
 
+    fn collect_use_ids(&self, value: ValueRef) -> Vec<u32> {
+        let mut use_ids = Vec::new();
+        let mut current = self.use_list_head(value);
+        while let Some(use_id) = current {
+            let node = self.use_pool.get(use_id).unwrap();
+            use_ids.push(use_id);
+            current = node.next;
+        }
+        use_ids
+    }
+
     /// Replace all uses of `old` with `new`. Updates operands in-place and
     /// moves use-list entries from `old` to `new`.
     pub fn replace_all_uses(&mut self, old: ValueRef, new: ValueRef) {
-        // Collect all user instructions (to avoid borrow issues)
-        let users: Vec<u32> = self.uses_of(old).map(|u| u.user).collect();
-
-        for inst_idx in &users {
-            // Rewrite operands in the instruction
-            if let Some(node) = self.inst_pool.get_mut(*inst_idx) {
-                node.inst.op.replace_value(old, new);
-            }
-        }
-
-        // Move the entire use-list from old to new
-        let old_head = self.use_list_head(old);
-        if old_head.is_none() {
+        if old == new {
             return;
         }
-
-        // Find the tail of old's use-list
-        let mut tail = old_head.unwrap();
-        loop {
-            let node = self.use_pool.get(tail).unwrap();
-            match node.next {
-                Some(n) => tail = n,
-                None => break,
-            }
+        let use_ids = self.collect_use_ids(old);
+        for use_id in use_ids {
+            let (user, operand_index) = {
+                let node = self.use_pool.get(use_id).unwrap();
+                debug_assert_eq!(node.value, old);
+                (node.user, node.operand_index)
+            };
+            let updated = self
+                .inst_pool
+                .inst_mut(user)
+                .op
+                .set_value_ref(operand_index, new);
+            assert!(
+                updated,
+                "invalid operand index {operand_index} for instruction {user}"
+            );
+            self.unlink_use(use_id);
+            self.prepend_use(new, use_id);
         }
-
-        // Splice old's list onto the front of new's list
-        let new_head = self.use_list_head(new);
-        self.use_pool.get_mut(tail).unwrap().next = new_head;
-        if let Some(nh) = new_head {
-            self.use_pool.get_mut(nh).unwrap().prev = Some(tail);
-        }
-        self.set_use_list_head(new, old_head);
-        self.set_use_list_head(old, None);
     }
 
     /// Rebuild all def-use chains from scratch. Call this after bulk
@@ -515,6 +521,7 @@ impl Function {
         for node in self.inst_pool.iter_mut() {
             node.use_list_head = None;
             node.secondary_use_list_head = None;
+            node.operand_use_ids.clear();
         }
         self.use_pool = UsePool::new();
 

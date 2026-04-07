@@ -714,6 +714,255 @@ impl Op {
         refs
     }
 
+    /// Collect all `ValueRef`s used by this instruction with their operand slots.
+    pub fn value_refs_with_indices(&self) -> Vec<(u32, ValueRef)> {
+        let mut refs = Vec::new();
+        let mut operand_index = 0;
+        self.for_each_value_ref(&mut |v| {
+            refs.push((operand_index, v));
+            operand_index += 1;
+        });
+        refs
+    }
+
+    /// Update the operand at `operand_index`, returning false if the slot is invalid.
+    pub fn set_value_ref(&mut self, operand_index: u32, new: ValueRef) -> bool {
+        use Op::*;
+
+        macro_rules! set_operand {
+            ($index:expr, $($slot:literal => $place:expr),+ $(,)?) => {
+                match $index {
+                    $(
+                        $slot => {
+                            $place = new;
+                            true
+                        }
+                    ),+,
+                    _ => false,
+                }
+            };
+        }
+
+        match self {
+            Param(_)
+            | Const(_)
+            | BConst(_)
+            | FConst(_)
+            | StackSlot(_, _)
+            | SymbolAddr(_)
+            | TlsSymbolAddr(_)
+            | Unreachable
+            | Trap
+            | LandingPad => false,
+
+            CountOnes(a)
+            | CountLeadingZeros(a, _)
+            | CountTrailingZeros(a)
+            | Bswap(a, _)
+            | BitReverse(a, _)
+            | Split(a, _)
+            | Sext(a, _)
+            | Zext(a, _)
+            | IntToPtr(a)
+            | SiToFp(a, _)
+            | UiToFp(a, _) => set_operand!(operand_index, 0 => a.0.value),
+
+            FpToSi(a) | FpToUi(a) | FpConvert(a) | FNeg(a) | FAbs(a) => {
+                set_operand!(operand_index, 0 => a.0.value)
+            }
+
+            PtrToInt(a) | PtrToAddr(a) => set_operand!(operand_index, 0 => a.0.value),
+
+            Bitcast(a) | ExtractValue(a, _) => set_operand!(operand_index, 0 => a.value),
+
+            Add(a, b)
+            | Sub(a, b)
+            | Mul(a, b)
+            | Div(a, b)
+            | Rem(a, b)
+            | And(a, b)
+            | Or(a, b)
+            | Xor(a, b)
+            | Shl(a, b)
+            | Shr(a, b)
+            | Min(a, b)
+            | Max(a, b)
+            | Clmul(a, b)
+            | Merge(a, b, _)
+            | RotateLeft(a, b, _)
+            | RotateRight(a, b, _)
+            | SaturatingAdd(a, b, _)
+            | SaturatingSub(a, b, _)
+            | SignedSaturatingAdd(a, b, _)
+            | SignedSaturatingSub(a, b, _)
+            | SAddWithOverflow(a, b, _)
+            | UAddWithOverflow(a, b, _)
+            | SSubWithOverflow(a, b, _)
+            | USubWithOverflow(a, b, _)
+            | SMulWithOverflow(a, b, _)
+            | UMulWithOverflow(a, b, _) => {
+                set_operand!(operand_index, 0 => a.0.value, 1 => b.0.value)
+            }
+
+            SCarryingMulAdd(a, b, carry, add, _) | UCarryingMulAdd(a, b, carry, add, _) => {
+                set_operand!(
+                    operand_index,
+                    0 => a.0.value,
+                    1 => b.0.value,
+                    2 => carry.0.value,
+                    3 => add.0.value
+                )
+            }
+
+            BAnd(a, b) | BOr(a, b) | BXor(a, b) => {
+                set_operand!(operand_index, 0 => a.0.value, 1 => b.0.value)
+            }
+
+            ICmp(_, a, b) => set_operand!(operand_index, 0 => a.0.value, 1 => b.0.value),
+            FCmp(_, a, b) => set_operand!(operand_index, 0 => a.0.value, 1 => b.0.value),
+
+            FAdd(a, b, _)
+            | FSub(a, b, _)
+            | FMul(a, b, _)
+            | FDiv(a, b, _)
+            | FRem(a, b, _)
+            | FMinNum(a, b)
+            | FMaxNum(a, b)
+            | CopySign(a, b) => set_operand!(operand_index, 0 => a.0.value, 1 => b.0.value),
+
+            PtrAdd(a, b) => set_operand!(operand_index, 0 => a.0.value, 1 => b.0.value),
+            PtrDiff(a, b) => set_operand!(operand_index, 0 => a.0.value, 1 => b.0.value),
+
+            Select(cond, t, e) => {
+                set_operand!(operand_index, 0 => cond.0.value, 1 => t.value, 2 => e.value)
+            }
+
+            Load(ptr, _, mem) => set_operand!(operand_index, 0 => ptr.0.value, 1 => mem.0.value),
+            Store(val, ptr, _, mem) => {
+                set_operand!(operand_index, 0 => val.value, 1 => ptr.0.value, 2 => mem.0.value)
+            }
+            MemCopy(dst, src, cnt, mem) | MemMove(dst, src, cnt, mem) => {
+                set_operand!(
+                    operand_index,
+                    0 => dst.0.value,
+                    1 => src.0.value,
+                    2 => cnt.0.value,
+                    3 => mem.0.value
+                )
+            }
+            MemSet(dst, val, cnt, mem) => {
+                set_operand!(
+                    operand_index,
+                    0 => dst.0.value,
+                    1 => val.value,
+                    2 => cnt.0.value,
+                    3 => mem.0.value
+                )
+            }
+
+            LoadAtomic(ptr, _, mem) => {
+                set_operand!(operand_index, 0 => ptr.0.value, 1 => mem.0.value)
+            }
+            StoreAtomic(val, ptr, _, mem) => {
+                set_operand!(operand_index, 0 => val.value, 1 => ptr.0.value, 2 => mem.0.value)
+            }
+            AtomicRmw(_, ptr, val, _, mem) => {
+                set_operand!(operand_index, 0 => ptr.0.value, 1 => val.value, 2 => mem.0.value)
+            }
+            AtomicCmpXchg(ptr, expected, desired, _, _, mem) => {
+                set_operand!(
+                    operand_index,
+                    0 => ptr.0.value,
+                    1 => expected.value,
+                    2 => desired.value,
+                    3 => mem.0.value
+                )
+            }
+            Fence(_, mem) => set_operand!(operand_index, 0 => mem.0.value),
+
+            Call(func_ptr, args, mem, _) => {
+                if operand_index == 0 {
+                    func_ptr.0.value = new;
+                    true
+                } else {
+                    let arg_index = operand_index - 1;
+                    if let Some(arg) = args.get_mut(arg_index as usize) {
+                        arg.value = new;
+                        true
+                    } else if arg_index == args.len() as u32 {
+                        mem.0.value = new;
+                        true
+                    } else {
+                        false
+                    }
+                }
+            }
+            CallRet2(mem) => set_operand!(operand_index, 0 => mem.0.value),
+
+            InsertValue(agg, val, _) => set_operand!(operand_index, 0 => agg.value, 1 => val.value),
+
+            Ret(val, ret2, mem) => {
+                let has_val = val.is_some();
+                let has_ret2 = ret2.is_some();
+                match operand_index {
+                    0 if has_val => {
+                        val.as_mut().unwrap().value = new;
+                        true
+                    }
+                    1 if has_val && has_ret2 => {
+                        ret2.as_mut().unwrap().value = new;
+                        true
+                    }
+                    0 if !has_val && has_ret2 => {
+                        ret2.as_mut().unwrap().value = new;
+                        true
+                    }
+                    idx if idx == has_val as u32 + has_ret2 as u32 => {
+                        mem.0.value = new;
+                        true
+                    }
+                    _ => false,
+                }
+            }
+            Br(_, args) => {
+                if let Some(arg) = args.get_mut(operand_index as usize) {
+                    arg.value = new;
+                    true
+                } else {
+                    false
+                }
+            }
+            BrIf(cond, _, then_args, _, else_args) => {
+                if operand_index == 0 {
+                    cond.0.value = new;
+                    true
+                } else {
+                    let arg_index = operand_index - 1;
+                    if let Some(arg) = then_args.get_mut(arg_index as usize) {
+                        arg.value = new;
+                        true
+                    } else {
+                        let else_index = arg_index - then_args.len() as u32;
+                        if let Some(arg) = else_args.get_mut(else_index as usize) {
+                            arg.value = new;
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                }
+            }
+            Continue(args) | RegionYield(args) => {
+                if let Some(arg) = args.get_mut(operand_index as usize) {
+                    arg.value = new;
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+    }
+
     /// Replace every occurrence of `old` with `new` in this Op's operands.
     pub fn replace_value(&mut self, old: ValueRef, new: ValueRef) {
         self.for_each_value_ref_mut(&mut |vr| {

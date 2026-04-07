@@ -2370,6 +2370,48 @@ fn def_use_basic_uses_of() {
 }
 
 #[test]
+fn def_use_uses_of_tracks_operand_indices() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("test");
+    let mut func = Function::new(
+        name,
+        vec![Type::Int, Type::Int],
+        vec![],
+        vec![],
+        Some(Type::Int),
+        None,
+    );
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+    let bb = builder.create_block();
+    builder.switch_to_block(bb);
+
+    let p0 = builder.param(0, Type::Int, None, Origin::synthetic());
+    let p1 = builder.param(1, Type::Int, None, Origin::synthetic());
+    let sum = builder.add(p0.into(), p1.into(), I64, Origin::synthetic());
+    let double = builder.add(p0.into(), p0.into(), I64, Origin::synthetic());
+
+    builder.exit_region();
+
+    let mut uses: Vec<_> = func
+        .uses_of(p0)
+        .map(|u| (u.user, u.operand_index))
+        .collect();
+    uses.sort_unstable();
+
+    assert_eq!(
+        uses,
+        vec![
+            (sum.raw().index(), 0),
+            (double.raw().index(), 0),
+            (double.raw().index(), 1),
+        ]
+    );
+}
+
+#[test]
 fn def_use_block_arg_uses() {
     let mut st = SymbolTable::new();
     let name = st.intern("test");
@@ -2437,6 +2479,30 @@ fn def_use_remove_inst_unregisters() {
 }
 
 #[test]
+fn def_use_remove_inst_unregisters_repeated_operand_uses() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("test");
+    let mut func = Function::new(name, vec![Type::Int], vec![], vec![], Some(Type::Int), None);
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+    let bb = builder.create_block();
+    builder.switch_to_block(bb);
+
+    let p0 = builder.param(0, Type::Int, None, Origin::synthetic());
+    let add = builder.add(p0.into(), p0.into(), I64, Origin::synthetic());
+
+    builder.exit_region();
+
+    assert_eq!(func.use_count(p0), 2);
+
+    func.remove_inst(add.raw().index());
+
+    assert_eq!(func.use_count(p0), 0);
+}
+
+#[test]
 fn def_use_replace_all_uses() {
     let mut st = SymbolTable::new();
     let name = st.intern("test");
@@ -2482,6 +2548,51 @@ fn def_use_replace_all_uses() {
 }
 
 #[test]
+fn def_use_replace_all_uses_secondary_result() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("test");
+    let mut func = Function::new(
+        name,
+        vec![Type::Int],
+        vec![],
+        vec![],
+        Some(Type::Bool),
+        None,
+    );
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+    let bb = builder.create_block();
+    builder.switch_to_block(bb);
+
+    let p0 = builder.param(0, Type::Int, None, Origin::synthetic());
+    let (_sum, overflow) =
+        builder.sadd_with_overflow(p0.into(), p0.into(), 64, Origin::synthetic());
+    let replacement = builder.bconst(false, Origin::synthetic());
+    let xor = builder.bxor(overflow.into(), overflow.into(), Origin::synthetic());
+
+    builder.exit_region();
+
+    assert_eq!(func.use_count(overflow.raw()), 2);
+    assert_eq!(func.use_count(replacement.raw()), 0);
+
+    func.replace_all_uses(overflow.raw(), replacement.raw());
+
+    assert_eq!(func.use_count(overflow.raw()), 0);
+    assert_eq!(func.use_count(replacement.raw()), 2);
+
+    let inst = func.inst(xor.raw().index());
+    match &inst.op {
+        Op::BXor(a, b) => {
+            assert_eq!(a.0.value, replacement.raw());
+            assert_eq!(b.0.value, replacement.raw());
+        }
+        _ => panic!("expected BXor"),
+    }
+}
+
+#[test]
 fn def_use_rebuild_use_lists() {
     let mut st = SymbolTable::new();
     let name = st.intern("test");
@@ -2513,6 +2624,50 @@ fn def_use_rebuild_use_lists() {
     func.rebuild_use_lists();
     assert_eq!(func.use_count(p0), 1, "p0 after rebuild");
     assert_eq!(func.use_count(p1), 1, "p1 after rebuild");
+}
+
+#[test]
+fn def_use_rebuild_use_lists_preserves_operand_indices() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("test");
+    let mut func = Function::new(
+        name,
+        vec![Type::Int, Type::Int],
+        vec![],
+        vec![],
+        Some(Type::Int),
+        None,
+    );
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+    let bb = builder.create_block();
+    builder.switch_to_block(bb);
+
+    let p0 = builder.param(0, Type::Int, None, Origin::synthetic());
+    let p1 = builder.param(1, Type::Int, None, Origin::synthetic());
+    let sum = builder.add(p0.into(), p1.into(), I64, Origin::synthetic());
+    let double = builder.add(p0.into(), p0.into(), I64, Origin::synthetic());
+
+    builder.exit_region();
+
+    func.rebuild_use_lists();
+
+    let mut uses: Vec<_> = func
+        .uses_of(p0)
+        .map(|u| (u.user, u.operand_index))
+        .collect();
+    uses.sort_unstable();
+
+    assert_eq!(
+        uses,
+        vec![
+            (sum.raw().index(), 0),
+            (double.raw().index(), 0),
+            (double.raw().index(), 1),
+        ]
+    );
 }
 
 #[test]
