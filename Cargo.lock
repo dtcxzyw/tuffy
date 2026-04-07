@@ -392,9 +392,17 @@ name = "tuffy_opt"
 version = "0.1.0"
 dependencies = [
  "num-bigint",
+ "tuffy_ir",
+ "tuffy_opt_gen",
+]
+
+[[package]]
+name = "tuffy_opt_gen"
+version = "0.1.0"
+dependencies = [
+ "num-bigint",
  "serde",
  "serde_json",
- "tuffy_ir",
 ]
 
 [[package]]

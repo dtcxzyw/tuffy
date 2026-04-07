@@ -1,12 +1,11 @@
 use tuffy_ir::parser::parse_module;
 use tuffy_ir::verifier::verify_module;
 
-use crate::{default_rule_set, optimize_module};
+use crate::{generated_rule_count, optimize_module};
 
 fn optimize(input: &str) -> (String, crate::PeepholeStats) {
     let mut module = parse_module(input).unwrap_or_else(|e| panic!("parse error: {e}"));
-    let rules = default_rule_set();
-    let stats = optimize_module(&mut module, &rules);
+    let stats = optimize_module(&mut module);
     let verify = verify_module(&module);
     assert!(verify.is_ok(), "optimized module should verify: {verify}");
     (format!("{module}"), stats)
@@ -22,8 +21,7 @@ fn normalize_ir(ir: &str) -> String {
 
 #[test]
 fn loads_default_rule_set() {
-    let rules = default_rule_set();
-    assert_eq!(rules.rules().len(), 4);
+    assert_eq!(generated_rule_count(), 4);
 }
 
 #[test]

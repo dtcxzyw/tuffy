@@ -8,8 +8,8 @@ This crate hosts IR-level optimization passes operating on `tuffy_ir::Module` / 
 
 - Lean-owned peephole framework is implemented.
 - Default peephole rules are exported from `lean/TuffyLean/Rewrites/Basic.lean`.
-- `build.rs` runs the Lean exporter at compile time and embeds the generated JSON from `OUT_DIR`.
-- The current executor supports local value rewrites and `brif` condition rewrites, iterating to a fixed point.
+- `build.rs` runs the Lean exporter, then invokes `tuffy_opt_gen` as a build-dependency library to generate Rust matcher code into `OUT_DIR`.
+- The optimizer runtime executes generated rule-specific match/apply functions rather than interpreting generic JSON at runtime.
 
 ## Dependencies
 

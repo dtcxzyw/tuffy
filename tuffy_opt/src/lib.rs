@@ -2,10 +2,7 @@
 
 mod peephole;
 
-pub use peephole::{
-    PeepholeLoadError, PeepholeRuleSet, PeepholeStats, default_rule_set, optimize_function,
-    optimize_module,
-};
+pub use peephole::{PeepholeStats, generated_rule_count, optimize_function, optimize_module};
 
 #[cfg(test)]
 mod tests;

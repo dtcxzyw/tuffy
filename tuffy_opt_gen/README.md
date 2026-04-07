@@ -1,0 +1,13 @@
+# tuffy_opt_gen
+
+Code generator for `tuffy_opt` peephole rules.
+
+This crate reads the Lean-exported peephole JSON schema and emits Rust matcher/rewrite code for the optimizer, similar to how `tuffy_isel_gen` emits generated instruction-selection code.
+
+## Usage
+
+```bash
+tuffy_opt_gen <input.json> <output.rs>
+```
+
+In normal builds, `tuffy_opt/build.rs` uses the library interface directly after running the Lean exporter.
