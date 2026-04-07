@@ -78,7 +78,9 @@ impl<'a> Builder<'a> {
         let region = self.current_region();
         self.func.blocks.push(BasicBlock {
             parent_region: region,
-            arg_start: self.func.block_args.len() as u32,
+            // Filled in when the first block arg is added. For arg-less blocks,
+            // the value is unused.
+            arg_start: 0,
             arg_count: 0,
             first_inst: None,
             last_inst: None,
@@ -219,12 +221,22 @@ impl<'a> Builder<'a> {
         annotation: Option<Annotation>,
     ) -> ValueRef {
         let arg_idx = self.func.block_args.len() as u32;
+        let bb = &mut self.func.blocks[block.index() as usize];
+        if bb.arg_count == 0 {
+            bb.arg_start = arg_idx;
+        } else {
+            assert_eq!(
+                bb.arg_start + bb.arg_count,
+                arg_idx,
+                "block args must be added contiguously for each block"
+            );
+        }
         self.func.block_args.push(BlockArg {
             ty,
             annotation,
             use_list_head: None,
         });
-        self.func.blocks[block.index() as usize].arg_count += 1;
+        bb.arg_count += 1;
         ValueRef::block_arg(arg_idx)
     }
 

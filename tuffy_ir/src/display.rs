@@ -68,7 +68,15 @@ impl<'a> DisplayCtx<'a> {
 
     /// Get the display number for a value.
     fn name(&self, vref: ValueRef) -> u32 {
-        self.value_names[&vref.raw()]
+        *self.value_names.get(&vref.raw()).unwrap_or_else(|| {
+            panic!(
+                "missing display name for value raw={:#x} index={} block_arg={} secondary={}",
+                vref.raw(),
+                vref.index(),
+                vref.is_block_arg(),
+                vref.is_secondary_result()
+            )
+        })
     }
 
     /// Format a value as "vN".
@@ -916,7 +924,7 @@ fn fmt_inst(
         }
         Op::Unreachable => "unreachable".to_string(),
         Op::Trap => "trap".to_string(),
-        Op::LandingPad => "landing_pad".to_string(),
+        Op::LandingPad => format!("{v} = landing_pad"),
     }
 }
 

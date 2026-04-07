@@ -346,6 +346,78 @@ fn display_nested_loop_region() {
 }
 
 #[test]
+fn display_landing_pad_result() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("landing_pad_result");
+    let mut func = Function::new(name, vec![], vec![], vec![], None, None);
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+
+    let entry = builder.create_block();
+    builder.switch_to_block(entry);
+
+    let mem0 = builder.add_block_arg(entry, Type::Mem, None);
+    let slot = builder.stack_slot(8, 8, Origin::synthetic());
+    let exc = builder.landing_pad(Origin::synthetic());
+    let mem1 = builder.store(exc.into(), slot.into(), 8, mem0.into(), Origin::synthetic());
+    builder.ret(None, None, mem1.into(), Origin::synthetic());
+    builder.exit_region();
+
+    let output = format!("{}", func.display(&st));
+    assert!(
+        output.contains("= landing_pad"),
+        "landing_pad result should be displayed with a value assignment:\n{output}"
+    );
+    assert!(
+        output.contains("store.8 v"),
+        "store should reference landing_pad result:\n{output}"
+    );
+}
+
+#[test]
+fn display_cleanup_landing_pad_wrapper() {
+    let mut st = SymbolTable::new();
+    let name = st.intern("cleanup_landing_pad_wrapper");
+    let mut func = Function::new(name, vec![], vec![], vec![], None, None);
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+
+    let wrapper = builder.create_block();
+    let cleanup = builder.create_block();
+
+    builder.switch_to_block(wrapper);
+    let mem0 = builder.add_block_arg(wrapper, Type::Mem, None);
+    let slot = builder.stack_slot(8, 8, Origin::synthetic());
+    let exc = builder.landing_pad(Origin::synthetic());
+    let mem1 = builder.store(exc.into(), slot.into(), 8, mem0.into(), Origin::synthetic());
+    builder.br(cleanup, vec![mem1.into()], Origin::synthetic());
+
+    builder.switch_to_block(cleanup);
+    let mem2 = builder.add_block_arg(cleanup, Type::Mem, None);
+    let exc2 = builder.landing_pad(Origin::synthetic());
+    let mem3 = builder.store(
+        exc2.into(),
+        slot.into(),
+        8,
+        mem2.into(),
+        Origin::synthetic(),
+    );
+    builder.ret(None, None, mem3.into(), Origin::synthetic());
+    builder.exit_region();
+
+    let output = format!("{}", func.display(&st));
+    assert_eq!(
+        output.matches("= landing_pad").count(),
+        2,
+        "both landing_pad results should be rendered:\n{output}"
+    );
+}
+
+#[test]
 fn build_bitwise_ops() {
     let mut st = SymbolTable::new();
     let name = st.intern("bitwise");
