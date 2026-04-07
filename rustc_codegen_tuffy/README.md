@@ -14,14 +14,19 @@ This crate is **not** part of the Cargo workspace — it has its own `Cargo.toml
 
 ## Architecture
 
-### `lib.rs` — Backend Entry Point
+### Backend Shell
 
-Implements `CodegenBackend` for `TuffyCodegenBackend`:
+Top-level backend responsibilities are split across small modules:
 
-- Iterates over `MonoItem`s (functions, statics, global ASM).
-- Translates each function's MIR into tuffy IR via `mir_to_ir`.
-- Delegates to `CodegenSession` for machine code generation and object file emission.
-- Handles allocator shim generation and entry point synthesis.
+| Module            | Purpose                                                   |
+|-------------------|-----------------------------------------------------------|
+| `lib.rs`          | Thin `CodegenBackend` facade and rustc entry point        |
+| `driver/aot.rs`   | AOT crate codegen pipeline, CGU iteration, inline fixpoint|
+| `config.rs`       | Backend option parsing and target feature reporting       |
+| `allocator.rs`    | Allocator shim emission                                   |
+| `main_shim.rs`    | C `main` / `lang_start` shim emission                     |
+| `rust_try.rs`     | `__rust_try` unwind helper emission                       |
+| `static_data.rs`  | Static allocation relocation lowering helpers             |
 
 ### `mir_to_ir/` — MIR-to-IR Translation
 
