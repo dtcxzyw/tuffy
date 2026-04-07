@@ -36,6 +36,17 @@ lake env lean --run TuffyLean/Export/Json.lean --target x86
 
 - Do not rely on implicit defaults in automation scripts.
 
+## Peephole Export Conventions
+
+- Production peephole rules live under `TuffyLean/Rewrites/`.
+- `TuffyLean/Export/Json.lean` also exports the peephole rule set:
+
+```bash
+lake env lean --run TuffyLean/Export/Json.lean --kind peephole
+```
+
+- The exported JSON is the interface consumed by `tuffy_opt`; do not hand-maintain Rust copies of production rules.
+
 ## Key Distinction: Rewrites vs Prototyping
 
 - **`Rewrites/`** — Production rewrite rules with formal correctness proofs. These feed into the actual compiler optimization pipeline.
