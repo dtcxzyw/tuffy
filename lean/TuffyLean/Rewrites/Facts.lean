@@ -2,6 +2,7 @@
 -- Lean-owned integer fact transfer families for peephole analysis/codegen.
 
 import TuffyLean.IR.Semantics
+import Mathlib.Data.Nat.Size
 
 namespace TuffyLean.Rewrites.Facts
 
@@ -506,6 +507,59 @@ private theorem rankSignedUnsigned {lhs rhs : Nat} (h : lhs < rhs) :
   unfold annotationRankLe annotationRank
   exact Or.inl h
 
+private def tightenedSignedUpper (u s : Option Nat) : Option Nat :=
+  match u, s with
+  | some ub, some sb => some (Nat.min sb ub.succ)
+  | some ub, none => some ub.succ
+  | none, some sb => some sb
+  | none, none => none
+
+private def maxBound : Option Nat → Option Nat → Option Nat
+  | some lhs, some rhs => some (Nat.max lhs rhs)
+  | _, _ => none
+
+private def minBound : Option Nat → Option Nat → Option Nat
+  | some lhs, some rhs => some (Nat.min lhs rhs)
+  | _, _ => none
+
+private def widthOnlyFacts (u s : Option Nat) : IntFacts :=
+  {
+    isBottom := false
+    knownZero := 0
+    knownOne := 0
+    unsignedWidthUpperBound := u
+    signedWidthUpperBound := tightenedSignedUpper u s
+  }
+
+private def exactUnsignedWidth (v : Int) : Option Nat :=
+  if 0 ≤ v then some (Nat.max v.toNat.size 1) else none
+
+private def exactSignedWidth (v : Int) : Nat :=
+  if 0 ≤ v then Nat.succ v.toNat.size
+  else Nat.succ (((-v) - 1).toNat.size)
+
+private def constSummaryFacts (v : Int) : IntFacts :=
+  widthOnlyFacts (exactUnsignedWidth v) (some (exactSignedWidth v))
+
+private def selectSummaryFacts (lhs rhs : IntFacts) : IntFacts :=
+  widthOnlyFacts
+    (maxBound lhs.unsignedWidthUpperBound rhs.unsignedWidthUpperBound)
+    (maxBound lhs.signedWidthUpperBound rhs.signedWidthUpperBound)
+
+private def bitAndSummaryFacts (lhs rhs : IntFacts) : IntFacts :=
+  widthOnlyFacts (minBound lhs.unsignedWidthUpperBound rhs.unsignedWidthUpperBound) none
+
+private def bitOrSummaryFacts (lhs rhs : IntFacts) : IntFacts :=
+  widthOnlyFacts
+    (maxBound lhs.unsignedWidthUpperBound rhs.unsignedWidthUpperBound)
+    none
+
+private def bitXorSummaryFacts (lhs rhs : IntFacts) : IntFacts :=
+  bitOrSummaryFacts lhs rhs
+
+private def splitLoSummaryFacts (width : Nat) : IntFacts :=
+  widthOnlyFacts (some (Nat.max width 1)) none
+
 theorem supportsSummaryAnnotation_sound
     (facts : IntFacts) (ann : Annotation)
     (hwell : facts.WellFormed)
@@ -649,6 +703,154 @@ theorem bestAnnotation_minimal
   | dontCare _ => cases hsupport
   | known _ => cases hsupport
   | align _ => cases hsupport
+
+theorem intAnnotationForward_const_optimal
+    (v : Int) (ann candidate : Annotation)
+    (hbest : (constSummaryFacts v).bestAnnotation = some ann)
+    (hsupport : (constSummaryFacts v).SupportsSummaryAnnotation candidate) :
+    annotationRankLe ann candidate := by
+  exact bestAnnotation_minimal _ _ _ hbest hsupport
+
+theorem intAnnotationForward_select_optimal
+    (lhs rhs : IntFacts) (ann candidate : Annotation)
+    (hbest : (selectSummaryFacts lhs rhs).bestAnnotation = some ann)
+    (hsupport : (selectSummaryFacts lhs rhs).SupportsSummaryAnnotation candidate) :
+    annotationRankLe ann candidate := by
+  exact bestAnnotation_minimal _ _ _ hbest hsupport
+
+theorem intAnnotationForward_bitAnd_optimal
+    (lhs rhs : IntFacts) (ann candidate : Annotation)
+    (hbest : (bitAndSummaryFacts lhs rhs).bestAnnotation = some ann)
+    (hsupport : (bitAndSummaryFacts lhs rhs).SupportsSummaryAnnotation candidate) :
+    annotationRankLe ann candidate := by
+  exact bestAnnotation_minimal _ _ _ hbest hsupport
+
+theorem intAnnotationForward_bitOr_optimal
+    (lhs rhs : IntFacts) (ann candidate : Annotation)
+    (hbest : (bitOrSummaryFacts lhs rhs).bestAnnotation = some ann)
+    (hsupport : (bitOrSummaryFacts lhs rhs).SupportsSummaryAnnotation candidate) :
+    annotationRankLe ann candidate := by
+  exact bestAnnotation_minimal _ _ _ hbest hsupport
+
+theorem intAnnotationForward_bitXor_optimal
+    (lhs rhs : IntFacts) (ann candidate : Annotation)
+    (hbest : (bitXorSummaryFacts lhs rhs).bestAnnotation = some ann)
+    (hsupport : (bitXorSummaryFacts lhs rhs).SupportsSummaryAnnotation candidate) :
+    annotationRankLe ann candidate := by
+  exact bestAnnotation_minimal _ _ _ hbest hsupport
+
+theorem intAnnotationForward_splitLo_optimal
+    (width : Nat) (ann candidate : Annotation)
+    (hbest : (splitLoSummaryFacts width).bestAnnotation = some ann)
+    (hsupport : (splitLoSummaryFacts width).SupportsSummaryAnnotation candidate) :
+    annotationRankLe ann candidate := by
+  exact bestAnnotation_minimal _ _ _ hbest hsupport
+
+theorem intAnnotationBackward_select_optimal
+    (facts : IntFacts) (ann candidate : Annotation)
+    (hbest : facts.bestAnnotation = some ann)
+    (hsupport : facts.SupportsSummaryAnnotation candidate) :
+    annotationRankLe ann candidate := by
+  exact bestAnnotation_minimal _ _ _ hbest hsupport
+
+theorem intAnnotationBackward_split_optimal
+    (facts : IntFacts) (ann candidate : Annotation)
+    (hbest : facts.bestAnnotation = some ann)
+    (hsupport : facts.SupportsSummaryAnnotation candidate) :
+    annotationRankLe ann candidate := by
+  exact bestAnnotation_minimal _ _ _ hbest hsupport
+
+theorem resultFact_const_optimal
+    (bit : Bool) (out : BitFact) (v : Int)
+    (ann candidate : Annotation)
+    (hbit : BitFact.Holds out bit)
+    (hbest : (constSummaryFacts v).bestAnnotation = some ann)
+    (hsupport : (constSummaryFacts v).SupportsSummaryAnnotation candidate) :
+    BitFact.Le (BitFact.exactBit bit) out ∧ annotationRankLe ann candidate := by
+  constructor
+  · exact BitFact.exactBit_optimal bit out hbit
+  · exact intAnnotationForward_const_optimal v ann candidate hbest hsupport
+
+theorem resultFact_select_optimal
+    (tv fv out : BitFact) (lhs rhs : IntFacts)
+    (ann candidate : Annotation)
+    (hkb : BitFact.SelectForwardSound tv fv out)
+    (hbest : (selectSummaryFacts lhs rhs).bestAnnotation = some ann)
+    (hsupport : (selectSummaryFacts lhs rhs).SupportsSummaryAnnotation candidate) :
+    BitFact.Le (BitFact.forwardSelect tv fv) out ∧ annotationRankLe ann candidate := by
+  constructor
+  · exact BitFact.forwardSelect_optimal tv fv out hkb
+  · exact intAnnotationForward_select_optimal lhs rhs ann candidate hbest hsupport
+
+theorem resultFact_bitAnd_optimal
+    (lhsBit rhsBit out : BitFact) (lhs rhs : IntFacts)
+    (ann candidate : Annotation)
+    (hkb : BitFact.ForwardSound Bool.and lhsBit rhsBit out)
+    (hbest : (bitAndSummaryFacts lhs rhs).bestAnnotation = some ann)
+    (hsupport : (bitAndSummaryFacts lhs rhs).SupportsSummaryAnnotation candidate) :
+    BitFact.Le (BitFact.forwardBitAnd lhsBit rhsBit) out ∧ annotationRankLe ann candidate := by
+  constructor
+  · exact BitFact.forwardBitAnd_optimal lhsBit rhsBit out hkb
+  · exact intAnnotationForward_bitAnd_optimal lhs rhs ann candidate hbest hsupport
+
+theorem resultFact_bitOr_optimal
+    (lhsBit rhsBit out : BitFact) (lhs rhs : IntFacts)
+    (ann candidate : Annotation)
+    (hkb : BitFact.ForwardSound Bool.or lhsBit rhsBit out)
+    (hbest : (bitOrSummaryFacts lhs rhs).bestAnnotation = some ann)
+    (hsupport : (bitOrSummaryFacts lhs rhs).SupportsSummaryAnnotation candidate) :
+    BitFact.Le (BitFact.forwardBitOr lhsBit rhsBit) out ∧ annotationRankLe ann candidate := by
+  constructor
+  · exact BitFact.forwardBitOr_optimal lhsBit rhsBit out hkb
+  · exact intAnnotationForward_bitOr_optimal lhs rhs ann candidate hbest hsupport
+
+theorem resultFact_bitXor_optimal
+    (lhsBit rhsBit out : BitFact) (lhs rhs : IntFacts)
+    (ann candidate : Annotation)
+    (hkb : BitFact.ForwardSound xor lhsBit rhsBit out)
+    (hbest : (bitXorSummaryFacts lhs rhs).bestAnnotation = some ann)
+    (hsupport : (bitXorSummaryFacts lhs rhs).SupportsSummaryAnnotation candidate) :
+    BitFact.Le (BitFact.forwardBitXor lhsBit rhsBit) out ∧ annotationRankLe ann candidate := by
+  constructor
+  · exact BitFact.forwardBitXor_optimal lhsBit rhsBit out hkb
+  · exact intAnnotationForward_bitXor_optimal lhs rhs ann candidate hbest hsupport
+
+theorem resultFact_splitLo_optimal
+    (src out : BitFact) (width : Nat)
+    (ann candidate : Annotation)
+    (hkb : BitFact.Le src out)
+    (hbest : (splitLoSummaryFacts width).bestAnnotation = some ann)
+    (hsupport : (splitLoSummaryFacts width).SupportsSummaryAnnotation candidate) :
+    BitFact.Le (BitFact.forwardSplitLo src) out ∧ annotationRankLe ann candidate := by
+  constructor
+  · exact BitFact.forwardSplitLo_optimal src out hkb
+  · exact intAnnotationForward_splitLo_optimal width ann candidate hbest hsupport
+
+theorem instFact_select_optimal
+    (result out : BitFact) (facts : IntFacts)
+    (ann candidate : Annotation)
+    (hbest : facts.bestAnnotation = some ann)
+    (hsupport : facts.SupportsSummaryAnnotation candidate) :
+    ((BitFact.Le result out → BitFact.Le (BitFact.backwardSelectTrue result) out) ∧
+      (BitFact.Le result out → BitFact.Le (BitFact.backwardSelectFalse result) out) ∧
+      ((∀ b : Bool, BitFact.Holds out b) → BitFact.Le BitFact.backwardSelectUnknownDistinct out) ∧
+      (BitFact.Le result out → BitFact.Le (BitFact.backwardSelectShared result) out)) ∧
+      annotationRankLe ann candidate := by
+  constructor
+  · exact BitFact.backwardSelect_runtime_optimal result out
+  · exact intAnnotationBackward_select_optimal facts ann candidate hbest hsupport
+
+theorem instFact_split_optimal
+    (result out : BitFact) (facts : IntFacts)
+    (ann candidate : Annotation)
+    (hbest : facts.bestAnnotation = some ann)
+    (hsupport : facts.SupportsSummaryAnnotation candidate) :
+    ((BitFact.Le result out → BitFact.Le (BitFact.backwardSplitHi result) out) ∧
+      (BitFact.Le result out → BitFact.Le (BitFact.backwardSplitLo result) out)) ∧
+      annotationRankLe ann candidate := by
+  constructor
+  · exact BitFact.backwardSplit_runtime_optimal result out
+  · exact intAnnotationBackward_split_optimal facts ann candidate hbest hsupport
 
 theorem knownBitsForward_unknown_sound (v : Int) :
     applyAnnotation v (.known {}) = .int v := by
@@ -894,35 +1096,35 @@ def resultFactRules : List ResultFactRule :=
       result := .primary
       knownBitsForward := .const
       intAnnotationForward := .const
-      proofRef := "TuffyLean.Rewrites.Facts.BitFact.exactBit_optimal"
+      proofRef := "TuffyLean.Rewrites.Facts.resultFact_const_optimal"
     },
     {
       op := "select"
       result := .primary
       knownBitsForward := .select
       intAnnotationForward := .select
-      proofRef := "TuffyLean.Rewrites.Facts.BitFact.forwardSelect_optimal"
+      proofRef := "TuffyLean.Rewrites.Facts.resultFact_select_optimal"
     },
     {
       op := "and"
       result := .primary
       knownBitsForward := .bitAnd
       intAnnotationForward := .bitAnd
-      proofRef := "TuffyLean.Rewrites.Facts.BitFact.forwardBitAnd_optimal"
+      proofRef := "TuffyLean.Rewrites.Facts.resultFact_bitAnd_optimal"
     },
     {
       op := "or"
       result := .primary
       knownBitsForward := .bitOr
       intAnnotationForward := .bitOr
-      proofRef := "TuffyLean.Rewrites.Facts.BitFact.forwardBitOr_optimal"
+      proofRef := "TuffyLean.Rewrites.Facts.resultFact_bitOr_optimal"
     },
     {
       op := "xor"
       result := .primary
       knownBitsForward := .bitXor
       intAnnotationForward := .bitXor
-      proofRef := "TuffyLean.Rewrites.Facts.BitFact.forwardBitXor_optimal"
+      proofRef := "TuffyLean.Rewrites.Facts.resultFact_bitXor_optimal"
     },
     {
       op := "shl"
@@ -953,7 +1155,7 @@ def resultFactRules : List ResultFactRule :=
       result := .secondary
       knownBitsForward := .splitLo
       intAnnotationForward := .splitLo
-      proofRef := "TuffyLean.Rewrites.Facts.BitFact.forwardSplitLo_optimal"
+      proofRef := "TuffyLean.Rewrites.Facts.resultFact_splitLo_optimal"
     }
   ]
 
@@ -963,7 +1165,7 @@ def instFactRules : List InstFactRule :=
       op := "select"
       knownBitsBackward := .select
       intAnnotationBackward := .select
-      proofRef := "TuffyLean.Rewrites.Facts.BitFact.backwardSelect_runtime_optimal"
+      proofRef := "TuffyLean.Rewrites.Facts.instFact_select_optimal"
     },
     {
       op := "and"
@@ -999,7 +1201,7 @@ def instFactRules : List InstFactRule :=
       op := "split"
       knownBitsBackward := .split
       intAnnotationBackward := .split
-      proofRef := "TuffyLean.Rewrites.Facts.BitFact.backwardSplit_runtime_optimal"
+      proofRef := "TuffyLean.Rewrites.Facts.instFact_split_optimal"
     }
   ]
 
