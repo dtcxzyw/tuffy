@@ -826,6 +826,69 @@ theorem resultFact_splitLo_optimal
   · exact BitFact.forwardSplitLo_optimal src out hkb
   · exact intAnnotationForward_splitLo_optimal width ann candidate hbest hsupport
 
+theorem resultFact_shl_optimal
+    (fillsZero : Bool) (src out : BitFact)
+    (hkb : if fillsZero then BitFact.Holds out false else BitFact.Le src out) :
+    BitFact.Le (BitFact.forwardShiftLeft fillsZero src) out := by
+  exact BitFact.forwardShiftLeft_optimal fillsZero src out hkb
+
+theorem resultFact_shr_optimal
+    (src out : BitFact)
+    (hkb : BitFact.Le src out) :
+    BitFact.Le (BitFact.forwardShiftRight src) out := by
+  exact BitFact.forwardShiftRight_optimal src out hkb
+
+theorem resultFact_merge_optimal
+    (takeLow : Bool) (hi lo out : BitFact)
+    (hkb : if takeLow then BitFact.Le lo out else BitFact.Le hi out) :
+    BitFact.Le (BitFact.forwardMerge takeLow hi lo) out := by
+  exact BitFact.forwardMerge_optimal takeLow hi lo out hkb
+
+theorem resultFact_splitHi_optimal
+    (src out : BitFact)
+    (hkb : BitFact.Le src out) :
+    BitFact.Le (BitFact.forwardSplitHi src) out := by
+  exact BitFact.forwardSplitHi_optimal src out hkb
+
+theorem instFact_bitAnd_optimal
+    (rhs result out : BitFact)
+    (hex : ∃ a b : Bool, BitFact.Holds rhs b ∧ BitFact.Holds result (Bool.and a b))
+    (hsound : BitFact.BackwardSoundL Bool.and rhs result out) :
+    BitFact.Le (BitFact.backwardBitAndL rhs result) out := by
+  exact BitFact.backwardBitAndL_optimal rhs result out hex hsound
+
+theorem instFact_bitOr_optimal
+    (rhs result out : BitFact)
+    (hex : ∃ a b : Bool, BitFact.Holds rhs b ∧ BitFact.Holds result (Bool.or a b))
+    (hsound : BitFact.BackwardSoundL Bool.or rhs result out) :
+    BitFact.Le (BitFact.backwardBitOrL rhs result) out := by
+  exact BitFact.backwardBitOrL_optimal rhs result out hex hsound
+
+theorem instFact_bitXor_optimal
+    (rhs result out : BitFact)
+    (hex : ∃ a b : Bool, BitFact.Holds rhs b ∧ BitFact.Holds result (xor a b))
+    (hsound : BitFact.BackwardSoundL xor rhs result out) :
+    BitFact.Le (BitFact.backwardBitXorL rhs result) out := by
+  exact BitFact.backwardBitXorL_optimal rhs result out hex hsound
+
+theorem instFact_shl_optimal
+    (result out : BitFact)
+    (hkb : BitFact.Le result out) :
+    BitFact.Le (BitFact.backwardShiftLeft result) out := by
+  exact BitFact.backwardShiftLeft_optimal result out hkb
+
+theorem instFact_shr_optimal
+    (result out : BitFact)
+    (hkb : BitFact.Le result out) :
+    BitFact.Le (BitFact.backwardShiftRight result) out := by
+  exact BitFact.backwardShiftRight_optimal result out hkb
+
+theorem instFact_merge_optimal
+    (result out : BitFact) :
+    (BitFact.Le result out → BitFact.Le (BitFact.backwardMergeHi result) out) ∧
+      (BitFact.Le result out → BitFact.Le (BitFact.backwardMergeLo result) out) := by
+  exact BitFact.backwardMerge_runtime_optimal result out
+
 theorem instFact_select_optimal
     (result out : BitFact) (facts : IntFacts)
     (ann candidate : Annotation)
@@ -1130,25 +1193,25 @@ def resultFactRules : List ResultFactRule :=
       op := "shl"
       result := .primary
       knownBitsForward := .shl
-      proofRef := "TuffyLean.Rewrites.Facts.BitFact.forwardShiftLeft_optimal"
+      proofRef := "TuffyLean.Rewrites.Facts.resultFact_shl_optimal"
     },
     {
       op := "shr"
       result := .primary
       knownBitsForward := .shr
-      proofRef := "TuffyLean.Rewrites.Facts.BitFact.forwardShiftRight_optimal"
+      proofRef := "TuffyLean.Rewrites.Facts.resultFact_shr_optimal"
     },
     {
       op := "merge"
       result := .primary
       knownBitsForward := .merge
-      proofRef := "TuffyLean.Rewrites.Facts.BitFact.forwardMerge_optimal"
+      proofRef := "TuffyLean.Rewrites.Facts.resultFact_merge_optimal"
     },
     {
       op := "split"
       result := .primary
       knownBitsForward := .splitHi
-      proofRef := "TuffyLean.Rewrites.Facts.BitFact.forwardSplitHi_optimal"
+      proofRef := "TuffyLean.Rewrites.Facts.resultFact_splitHi_optimal"
     },
     {
       op := "split"
@@ -1170,32 +1233,32 @@ def instFactRules : List InstFactRule :=
     {
       op := "and"
       knownBitsBackward := .bitAnd
-      proofRef := "TuffyLean.Rewrites.Facts.BitFact.backwardBitAndL_optimal"
+      proofRef := "TuffyLean.Rewrites.Facts.instFact_bitAnd_optimal"
     },
     {
       op := "or"
       knownBitsBackward := .bitOr
-      proofRef := "TuffyLean.Rewrites.Facts.BitFact.backwardBitOrL_optimal"
+      proofRef := "TuffyLean.Rewrites.Facts.instFact_bitOr_optimal"
     },
     {
       op := "xor"
       knownBitsBackward := .bitXor
-      proofRef := "TuffyLean.Rewrites.Facts.BitFact.backwardBitXorL_optimal"
+      proofRef := "TuffyLean.Rewrites.Facts.instFact_bitXor_optimal"
     },
     {
       op := "shl"
       knownBitsBackward := .shl
-      proofRef := "TuffyLean.Rewrites.Facts.BitFact.backwardShiftLeft_optimal"
+      proofRef := "TuffyLean.Rewrites.Facts.instFact_shl_optimal"
     },
     {
       op := "shr"
       knownBitsBackward := .shr
-      proofRef := "TuffyLean.Rewrites.Facts.BitFact.backwardShiftRight_optimal"
+      proofRef := "TuffyLean.Rewrites.Facts.instFact_shr_optimal"
     },
     {
       op := "merge"
       knownBitsBackward := .merge
-      proofRef := "TuffyLean.Rewrites.Facts.BitFact.backwardMerge_runtime_optimal"
+      proofRef := "TuffyLean.Rewrites.Facts.instFact_merge_optimal"
     },
     {
       op := "split"
