@@ -1221,12 +1221,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         signedness: IntSignedness::DontCare,
                     });
                 self.builder
-                    .shr(
-                        l_op.into(),
-                        masked_op.into(),
-                        int_ann,
-                        Origin::synthetic(),
-                    )
+                    .shr(l_op.into(), masked_op.into(), int_ann, Origin::synthetic())
                     .raw()
             }
             BinOp::Div => {

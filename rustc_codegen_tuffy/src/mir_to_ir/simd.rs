@@ -1347,17 +1347,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     o!(),
                 );
                 let result = match op_name {
-                    "simd_mul" => {
-                        self.builder
-                            .mul(a_val.into(), b_val.into(), int_ann, o!())
-                    }
-                    "simd_sub" => {
-                        self.builder
-                            .sub(a_val.into(), b_val.into(), int_ann, o!())
-                    }
-                    _ => self
-                        .builder
-                        .mul(a_val.into(), b_val.into(), int_ann, o!()),
+                    "simd_mul" => self.builder.mul(a_val.into(), b_val.into(), int_ann, o!()),
+                    "simd_sub" => self.builder.sub(a_val.into(), b_val.into(), int_ann, o!()),
+                    _ => self.builder.mul(a_val.into(), b_val.into(), int_ann, o!()),
                 };
                 self.current_mem = self
                     .builder
@@ -1447,14 +1439,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 lane_ann.clone(),
                 o!(),
             );
-            let a_op = IntOperand::from(IrOperand::annotated(
-                a_val,
-                Annotation::Int(elem_ann),
-            ));
-            let b_op = IntOperand::from(IrOperand::annotated(
-                b_val,
-                Annotation::Int(elem_ann),
-            ));
+            let a_op = IntOperand::from(IrOperand::annotated(a_val, Annotation::Int(elem_ann)));
+            let b_op = IntOperand::from(IrOperand::annotated(b_val, Annotation::Int(elem_ann)));
             let result = match op_name {
                 "simd_shl" => self.builder.shl(a_op, b_op, elem_ann, o!()),
                 "simd_shr" => self.builder.shr(a_op, b_op, elem_ann, o!()),
@@ -2169,9 +2155,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let zero = self
                     .builder
                     .iconst(0, elem_size * 8, IntSignedness::DontCare, o!());
-                let result = self
-                    .builder
-                    .sub(zero.into(), a_val.into(), int_ann, o!());
+                let result = self.builder.sub(zero.into(), a_val.into(), int_ann, o!());
                 self.current_mem = self
                     .builder
                     .store(

@@ -166,7 +166,7 @@ fn emit_backward_arm(out: &mut String, rule: &InstFactRule) -> Result<(), Genera
     let helper = backward_helper_name(rule)?;
     let line = match rule.op.as_str() {
         "select" => format!(
-            "        // {}\n        Op::Select(_, true_value, false_value) => {helper}(true_value, false_value, primary_result),",
+            "        // {}\n        Op::Select(cond, true_value, false_value) => {helper}(func, cond, true_value, false_value, primary_result),",
             rule.proof_ref
         ),
         "and" => format!(

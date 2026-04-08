@@ -109,6 +109,15 @@ fn bound_int_constant(func: &Function, value: ValueRef) -> Option<&BigInt> {
     }
 }
 
+fn bound_bool_constant(func: &Function, value: ValueRef) -> Option<bool> {
+    let idx = primary_inst_index(value)?;
+    let node = func.inst_pool.get(idx)?;
+    match &node.inst.op {
+        Op::BConst(value) => Some(*value),
+        _ => None,
+    }
+}
+
 #[allow(dead_code)]
 fn bigint_is_odd(value: &BigInt) -> bool {
     let modulus = BigInt::from(2u8);
@@ -910,20 +919,27 @@ struct BackwardFactUpdate {
 }
 
 fn backward_select(
+    func: &Function,
+    cond: &tuffy_ir::typed::BoolOperand,
     true_value: &Operand,
     false_value: &Operand,
     result: &IntFacts,
 ) -> Vec<BackwardFactUpdate> {
-    vec![
-        BackwardFactUpdate {
+    match bound_bool_constant(func, cond.clone().raw().value) {
+        Some(true) => vec![BackwardFactUpdate {
             value: true_value.value,
             facts: result.clone(),
-        },
-        BackwardFactUpdate {
+        }],
+        Some(false) => vec![BackwardFactUpdate {
             value: false_value.value,
             facts: result.clone(),
-        },
-    ]
+        }],
+        None if true_value.value == false_value.value => vec![BackwardFactUpdate {
+            value: true_value.value,
+            facts: result.clone(),
+        }],
+        None => Vec::new(),
+    }
 }
 
 fn backward_bitand(
@@ -1535,3 +1551,123 @@ fn instruction_results_unused(func: &Function, idx: u32, has_secondary_result: b
 
 include!(concat!(env!("OUT_DIR"), "/peephole_facts_gen.rs"));
 include!(concat!(env!("OUT_DIR"), "/peephole_gen.rs"));
+
+#[cfg(test)]
+mod fact_tests {
+    use super::*;
+    use tuffy_ir::parser::parse_module;
+
+    fn single_function(input: &str) -> Function {
+        let module = parse_module(input).unwrap_or_else(|e| panic!("parse error: {e}"));
+        module
+            .functions
+            .into_iter()
+            .next()
+            .expect("module should contain one function")
+    }
+
+    fn select_operands(
+        func: &Function,
+        inst_idx: u32,
+    ) -> (&tuffy_ir::typed::BoolOperand, &Operand, &Operand) {
+        match &func.inst(inst_idx).op {
+            Op::Select(cond, true_value, false_value) => (cond, true_value, false_value),
+            other => panic!("expected select, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn best_annotation_prefers_unsigned_when_widths_tie() {
+        let mut facts = IntFacts::unknown();
+        facts.unsigned_width_upper_bound = Some(8);
+        facts.signed_width_upper_bound = Some(8);
+        assert_eq!(
+            facts.best_annotation(),
+            Some(IntAnnotation {
+                bit_width: 8,
+                signedness: IntSignedness::Unsigned,
+            })
+        );
+    }
+
+    #[test]
+    fn best_annotation_prefers_narrower_signed_width() {
+        let mut facts = IntFacts::unknown();
+        facts.unsigned_width_upper_bound = Some(8);
+        facts.signed_width_upper_bound = Some(4);
+        assert_eq!(
+            facts.best_annotation(),
+            Some(IntAnnotation {
+                bit_width: 4,
+                signedness: IntSignedness::Signed,
+            })
+        );
+    }
+
+    #[test]
+    fn backward_select_only_updates_taken_const_branch() {
+        let func = single_function(
+            r#"
+func @const_true_select() {
+  bb0:
+    v0: bool = bconst true
+    v1: int:u8 = iconst 1
+    v2: int:u8 = iconst 2
+    v3: int:u8 = select v0, v1, v2
+    unreachable
+}
+"#,
+        );
+        let (cond, true_value, false_value) = select_operands(&func, 3);
+        let mut result = IntFacts::unknown();
+        result.set_known_one(0);
+        let updates = backward_select(&func, cond, true_value, false_value, &result);
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].value, true_value.value);
+    }
+
+    #[test]
+    fn backward_select_skips_unknown_distinct_branches() {
+        let func = single_function(
+            r#"
+func @unknown_select(bool, int:u8, int:u8) {
+  bb0:
+    v0: bool = param 0
+    v1: int:u8 = param 1
+    v2: int:u8 = param 2
+    v3: int:u8 = select v0, v1, v2
+    unreachable
+}
+"#,
+        );
+        let (cond, true_value, false_value) = select_operands(&func, 3);
+        let result = IntFacts::from_int_annotation(&IntAnnotation {
+            bit_width: 8,
+            signedness: IntSignedness::Unsigned,
+        });
+        let updates = backward_select(&func, cond, true_value, false_value, &result);
+        assert!(updates.is_empty());
+    }
+
+    #[test]
+    fn backward_select_updates_unknown_shared_value() {
+        let func = single_function(
+            r#"
+func @unknown_shared(bool, int:u8) {
+  bb0:
+    v0: bool = param 0
+    v1: int:u8 = param 1
+    v2: int:u8 = select v0, v1, v1
+    unreachable
+}
+"#,
+        );
+        let (cond, true_value, false_value) = select_operands(&func, 2);
+        let mut result = IntFacts::unknown();
+        result.set_known_zero(0);
+        let updates = backward_select(&func, cond, true_value, false_value, &result);
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].value, true_value.value);
+        assert!(updates[0].facts.bit_known_zero(0));
+    }
+}

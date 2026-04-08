@@ -106,9 +106,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             .zext(b.into(), ann.bit_width, Origin::synthetic())
                             .raw();
                     }
-                    let result =
-                        self.builder
-                            .or(a.into(), b.into(), ann, Origin::synthetic());
+                    let result = self
+                        .builder
+                        .or(a.into(), b.into(), ann, Origin::synthetic());
                     self.locals.set(destination_local, result.raw());
                 }
                 true
@@ -1992,12 +1992,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         tuffy_ir::instruction::Operand::annotated(ir_args[0], full_ann.clone());
                     let b_op =
                         tuffy_ir::instruction::Operand::annotated(ir_args[1], full_ann.clone());
-                    let result = self.builder.div(
-                        a_op.into(),
-                        b_op.into(),
-                        ann,
-                        Origin::synthetic(),
-                    );
+                    let result =
+                        self.builder
+                            .div(a_op.into(), b_op.into(), ann, Origin::synthetic());
                     self.locals.set(destination_local, result.raw());
                 }
                 true
@@ -2124,12 +2121,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         );
                         let (hi, lo, is_shl) = if name == "unchecked_funnel_shl" {
                             (
-                                self.builder.shl(
-                                    a.into(),
-                                    c.into(),
-                                    int_ann,
-                                    Origin::synthetic(),
-                                ),
+                                self.builder
+                                    .shl(a.into(), c.into(), int_ann, Origin::synthetic()),
                                 self.builder.shr(
                                     b.into(),
                                     complement.into(),
@@ -2146,12 +2139,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     int_ann,
                                     Origin::synthetic(),
                                 ),
-                                self.builder.shr(
-                                    b.into(),
-                                    c.into(),
-                                    int_ann,
-                                    Origin::synthetic(),
-                                ),
+                                self.builder
+                                    .shr(b.into(), c.into(), int_ann, Origin::synthetic()),
                                 false,
                             )
                         };
@@ -2215,12 +2204,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         );
                         let (hi, lo, is_shl) = if name == "unchecked_funnel_shl" {
                             (
-                                self.builder.shl(
-                                    a.into(),
-                                    c.into(),
-                                    int_ann,
-                                    Origin::synthetic(),
-                                ),
+                                self.builder
+                                    .shl(a.into(), c.into(), int_ann, Origin::synthetic()),
                                 self.builder.shr(
                                     b.into(),
                                     complement.into(),
@@ -2237,12 +2222,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     int_ann,
                                     Origin::synthetic(),
                                 ),
-                                self.builder.shr(
-                                    b.into(),
-                                    c.into(),
-                                    int_ann,
-                                    Origin::synthetic(),
-                                ),
+                                self.builder
+                                    .shr(b.into(), c.into(), int_ann, Origin::synthetic()),
                                 false,
                             )
                         };
