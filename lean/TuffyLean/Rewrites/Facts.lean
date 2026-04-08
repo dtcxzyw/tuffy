@@ -220,6 +220,24 @@ def forwardBitXor : BitFact → BitFact → BitFact
   | .one, .zero => .one
   | _, _ => .unknown
 
+def exactBit (b : Bool) : BitFact :=
+  if b then .one else .zero
+
+def forwardShiftLeft (fillsZero : Bool) (src : BitFact) : BitFact :=
+  if fillsZero then .zero else src
+
+def forwardShiftRight (src : BitFact) : BitFact :=
+  src
+
+def forwardMerge (takeLow : Bool) (hi lo : BitFact) : BitFact :=
+  if takeLow then lo else hi
+
+def forwardSplitHi (src : BitFact) : BitFact :=
+  src
+
+def forwardSplitLo (src : BitFact) : BitFact :=
+  src
+
 def backwardBitAndL : BitFact → BitFact → BitFact
   | _, .one => .one
   | .one, .zero => .zero
@@ -236,6 +254,36 @@ def backwardBitXorL : BitFact → BitFact → BitFact
   | .zero, .one => .one
   | .one, .one => .zero
   | _, _ => .unknown
+
+def backwardSelectTrue (result : BitFact) : BitFact :=
+  result
+
+def backwardSelectFalse (result : BitFact) : BitFact :=
+  result
+
+def backwardSelectUnknownDistinct : BitFact :=
+  .unknown
+
+def backwardSelectShared (result : BitFact) : BitFact :=
+  result
+
+def backwardShiftLeft (result : BitFact) : BitFact :=
+  result
+
+def backwardShiftRight (result : BitFact) : BitFact :=
+  result
+
+def backwardMergeHi (result : BitFact) : BitFact :=
+  result
+
+def backwardMergeLo (result : BitFact) : BitFact :=
+  result
+
+def backwardSplitHi (result : BitFact) : BitFact :=
+  result
+
+def backwardSplitLo (result : BitFact) : BitFact :=
+  result
 
 def ForwardSound (eval : Bool → Bool → Bool) (lhs rhs out : BitFact) : Prop :=
   ∀ a b : Bool, Holds lhs a → Holds rhs b → Holds out (eval a b)
@@ -287,6 +335,32 @@ theorem forwardBitXor_optimal (lhs rhs out : BitFact) :
     ForwardSound xor lhs rhs out → Le (forwardBitXor lhs rhs) out := by
   cases lhs <;> cases rhs <;> cases out <;> decide
 
+theorem exactBit_optimal (bit : Bool) (out : BitFact) :
+    Holds out bit → Le (exactBit bit) out := by
+  cases bit <;> cases out <;> decide
+
+theorem forwardShiftLeft_optimal (fillsZero : Bool) (src out : BitFact) :
+    (if fillsZero then Holds out false else Le src out) →
+      Le (forwardShiftLeft fillsZero src) out := by
+  cases fillsZero <;> cases src <;> cases out <;> decide
+
+theorem forwardShiftRight_optimal (src out : BitFact) :
+    Le src out → Le (forwardShiftRight src) out := by
+  simpa [forwardShiftRight]
+
+theorem forwardMerge_optimal (takeLow : Bool) (hi lo out : BitFact) :
+    (if takeLow then Le lo out else Le hi out) →
+      Le (forwardMerge takeLow hi lo) out := by
+  cases takeLow <;> cases hi <;> cases lo <;> cases out <;> decide
+
+theorem forwardSplitHi_optimal (src out : BitFact) :
+    Le src out → Le (forwardSplitHi src) out := by
+  simpa [forwardSplitHi]
+
+theorem forwardSplitLo_optimal (src out : BitFact) :
+    Le src out → Le (forwardSplitLo src) out := by
+  simpa [forwardSplitLo]
+
 theorem backwardBitAndL_optimal (rhs result out : BitFact) :
     (∃ a b : Bool, Holds rhs b ∧ Holds result (Bool.and a b)) →
       BackwardSoundL Bool.and rhs result out →
@@ -304,6 +378,81 @@ theorem backwardBitXorL_optimal (rhs result out : BitFact) :
       BackwardSoundL xor rhs result out →
         Le (backwardBitXorL rhs result) out := by
   cases rhs <;> cases result <;> cases out <;> decide
+
+theorem backwardSelectTrue_optimal (result out : BitFact) :
+    Le result out → Le (backwardSelectTrue result) out := by
+  simpa [backwardSelectTrue]
+
+theorem backwardSelectFalse_optimal (result out : BitFact) :
+    Le result out → Le (backwardSelectFalse result) out := by
+  simpa [backwardSelectFalse]
+
+theorem backwardSelectUnknownDistinct_optimal (out : BitFact) :
+    (∀ b : Bool, Holds out b) → Le backwardSelectUnknownDistinct out := by
+  intro hall
+  cases out
+  · have h := hall true
+    simp [Holds] at h
+    cases h
+  · have h := hall false
+    simp [Holds] at h
+    cases h
+  · simpa [backwardSelectUnknownDistinct, Le, Holds]
+
+theorem backwardSelectShared_optimal (result out : BitFact) :
+    Le result out → Le (backwardSelectShared result) out := by
+  simpa [backwardSelectShared]
+
+theorem backwardShiftLeft_optimal (result out : BitFact) :
+    Le result out → Le (backwardShiftLeft result) out := by
+  simpa [backwardShiftLeft]
+
+theorem backwardShiftRight_optimal (result out : BitFact) :
+    Le result out → Le (backwardShiftRight result) out := by
+  simpa [backwardShiftRight]
+
+theorem backwardMergeHi_optimal (result out : BitFact) :
+    Le result out → Le (backwardMergeHi result) out := by
+  simpa [backwardMergeHi]
+
+theorem backwardMergeLo_optimal (result out : BitFact) :
+    Le result out → Le (backwardMergeLo result) out := by
+  simpa [backwardMergeLo]
+
+theorem backwardSplitHi_optimal (result out : BitFact) :
+    Le result out → Le (backwardSplitHi result) out := by
+  simpa [backwardSplitHi]
+
+theorem backwardSplitLo_optimal (result out : BitFact) :
+    Le result out → Le (backwardSplitLo result) out := by
+  simpa [backwardSplitLo]
+
+theorem backwardSelect_runtime_optimal (result out : BitFact) :
+    (Le result out → Le (backwardSelectTrue result) out) ∧
+      (Le result out → Le (backwardSelectFalse result) out) ∧
+      ((∀ b : Bool, Holds out b) → Le backwardSelectUnknownDistinct out) ∧
+      (Le result out → Le (backwardSelectShared result) out) := by
+  constructor
+  · exact backwardSelectTrue_optimal result out
+  constructor
+  · exact backwardSelectFalse_optimal result out
+  constructor
+  · exact backwardSelectUnknownDistinct_optimal out
+  · exact backwardSelectShared_optimal result out
+
+theorem backwardMerge_runtime_optimal (result out : BitFact) :
+    (Le result out → Le (backwardMergeHi result) out) ∧
+      (Le result out → Le (backwardMergeLo result) out) := by
+  constructor
+  · exact backwardMergeHi_optimal result out
+  · exact backwardMergeLo_optimal result out
+
+theorem backwardSplit_runtime_optimal (result out : BitFact) :
+    (Le result out → Le (backwardSplitHi result) out) ∧
+      (Le result out → Le (backwardSplitLo result) out) := by
+  constructor
+  · exact backwardSplitHi_optimal result out
+  · exact backwardSplitLo_optimal result out
 
 end BitFact
 
@@ -745,7 +894,7 @@ def resultFactRules : List ResultFactRule :=
       result := .primary
       knownBitsForward := .const
       intAnnotationForward := .const
-      proofRef := "TuffyLean.Rewrites.Facts.knownBitsForward_const_sound"
+      proofRef := "TuffyLean.Rewrites.Facts.BitFact.exactBit_optimal"
     },
     {
       op := "select"
@@ -779,32 +928,32 @@ def resultFactRules : List ResultFactRule :=
       op := "shl"
       result := .primary
       knownBitsForward := .shl
-      proofRef := "TuffyLean.Rewrites.Facts.knownBitsForward_shl_sound"
+      proofRef := "TuffyLean.Rewrites.Facts.BitFact.forwardShiftLeft_optimal"
     },
     {
       op := "shr"
       result := .primary
       knownBitsForward := .shr
-      proofRef := "TuffyLean.Rewrites.Facts.knownBitsForward_shr_sound"
+      proofRef := "TuffyLean.Rewrites.Facts.BitFact.forwardShiftRight_optimal"
     },
     {
       op := "merge"
       result := .primary
       knownBitsForward := .merge
-      proofRef := "TuffyLean.Rewrites.Facts.knownBitsForward_merge_sound"
+      proofRef := "TuffyLean.Rewrites.Facts.BitFact.forwardMerge_optimal"
     },
     {
       op := "split"
       result := .primary
       knownBitsForward := .splitHi
-      proofRef := "TuffyLean.Rewrites.Facts.knownBitsForward_splitHi_sound"
+      proofRef := "TuffyLean.Rewrites.Facts.BitFact.forwardSplitHi_optimal"
     },
     {
       op := "split"
       result := .secondary
       knownBitsForward := .splitLo
       intAnnotationForward := .splitLo
-      proofRef := "TuffyLean.Rewrites.Facts.knownBitsForward_splitLo_sound"
+      proofRef := "TuffyLean.Rewrites.Facts.BitFact.forwardSplitLo_optimal"
     }
   ]
 
@@ -814,7 +963,7 @@ def instFactRules : List InstFactRule :=
       op := "select"
       knownBitsBackward := .select
       intAnnotationBackward := .select
-      proofRef := "TuffyLean.Rewrites.Facts.knownBitsBackward_select_sound"
+      proofRef := "TuffyLean.Rewrites.Facts.BitFact.backwardSelect_runtime_optimal"
     },
     {
       op := "and"
@@ -834,23 +983,23 @@ def instFactRules : List InstFactRule :=
     {
       op := "shl"
       knownBitsBackward := .shl
-      proofRef := "TuffyLean.Rewrites.Facts.knownBitsBackward_shl_sound"
+      proofRef := "TuffyLean.Rewrites.Facts.BitFact.backwardShiftLeft_optimal"
     },
     {
       op := "shr"
       knownBitsBackward := .shr
-      proofRef := "TuffyLean.Rewrites.Facts.knownBitsBackward_shr_sound"
+      proofRef := "TuffyLean.Rewrites.Facts.BitFact.backwardShiftRight_optimal"
     },
     {
       op := "merge"
       knownBitsBackward := .merge
-      proofRef := "TuffyLean.Rewrites.Facts.knownBitsBackward_merge_sound"
+      proofRef := "TuffyLean.Rewrites.Facts.BitFact.backwardMerge_runtime_optimal"
     },
     {
       op := "split"
       knownBitsBackward := .split
       intAnnotationBackward := .split
-      proofRef := "TuffyLean.Rewrites.Facts.knownBitsBackward_split_sound"
+      proofRef := "TuffyLean.Rewrites.Facts.BitFact.backwardSplit_runtime_optimal"
     }
   ]
 
