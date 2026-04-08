@@ -102,7 +102,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         8,
                         Type::Int,
                         self.current_mem.into(),
-                        u64_opt,
+                        u64_opt.clone(),
                         o!(),
                     );
                     let masked = self.builder.and(word.into(), mask_c.into(), u64_int, o!());
@@ -251,7 +251,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     8,
                     Type::Int,
                     self.current_mem.into(),
-                    u64_opt,
+                    u64_opt.clone(),
                     o!(),
                 );
                 let mut acc: ValueRef = first;
@@ -265,7 +265,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         8,
                         Type::Int,
                         self.current_mem.into(),
-                        u64_opt,
+                        u64_opt.clone(),
                         o!(),
                     );
                     acc = self
@@ -419,7 +419,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     8,
                     Type::Int,
                     self.current_mem.into(),
-                    u64_opt,
+                    u64_opt.clone(),
                     o!(),
                 );
                 let mut acc: ValueRef = first;
@@ -433,7 +433,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         8,
                         Type::Int,
                         self.current_mem.into(),
-                        u64_opt,
+                        u64_opt.clone(),
                         o!(),
                     );
                     acc = self
@@ -487,7 +487,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     8,
                     Type::Int,
                     self.current_mem.into(),
-                    u64_opt,
+                    u64_opt.clone(),
                     o!(),
                 );
                 let mut acc: ValueRef = first;
@@ -501,7 +501,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         8,
                         Type::Int,
                         self.current_mem.into(),
-                        u64_opt,
+                        u64_opt.clone(),
                         o!(),
                     );
                     acc = self
@@ -608,7 +608,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             load_size,
                             Type::Int,
                             self.current_mem.into(),
-                            u64_opt,
+                            u64_opt.clone(),
                             o!(),
                         );
                         let dst_off = if w == 0 {
@@ -654,7 +654,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             load_size,
                             Type::Int,
                             self.current_mem.into(),
-                            u64_opt,
+                            u64_opt.clone(),
                             o!(),
                         );
                         let dest_byte_off = input_simd_bytes + w * 8;
@@ -734,7 +734,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             elem_size,
                             Type::Int,
                             self.current_mem.into(),
-                            u64_opt,
+                            u64_opt.clone(),
                             o!(),
                         );
                         let dst_elem = if i == 0 {
@@ -930,7 +930,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 8,
                 Type::Int,
                 self.current_mem.into(),
-                u64_opt,
+                u64_opt.clone(),
                 o!(),
             )
         } else {
@@ -984,7 +984,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 1,
                 Type::Int,
                 self.current_mem.into(),
-                s8_opt,
+                s8_opt.clone(),
                 o!(),
             );
             let b_byte = self.builder.load(
@@ -992,11 +992,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 1,
                 Type::Int,
                 self.current_mem.into(),
-                s8_opt,
+                s8_opt.clone(),
                 o!(),
             );
-            let a_op = IntOperand::from(IrOperand::annotated(a_byte, s8_annotation));
-            let b_op = IntOperand::from(IrOperand::annotated(b_byte, s8_annotation));
+            let a_op = IntOperand::from(IrOperand::annotated(a_byte, s8_annotation.clone()));
+            let b_op = IntOperand::from(IrOperand::annotated(b_byte, s8_annotation.clone()));
             let cmp = self.builder.icmp(op, a_op, b_op, o!());
             let ff = self.builder.iconst(-1i64, 8, IntSignedness::Signed, o!());
             let zero_byte = self.builder.iconst(0i64, 8, IntSignedness::Signed, o!());
@@ -1005,7 +1005,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 ff.raw().into(),
                 zero_byte.raw().into(),
                 Type::Int,
-                s8_opt,
+                s8_opt.clone(),
                 o!(),
             );
 
@@ -1080,7 +1080,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 8,
                 Type::Int,
                 self.current_mem.into(),
-                u64_opt,
+                u64_opt.clone(),
                 o!(),
             );
             let b_val = self.builder.load(
@@ -1088,7 +1088,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 8,
                 Type::Int,
                 self.current_mem.into(),
-                u64_opt,
+                u64_opt.clone(),
                 o!(),
             );
 
@@ -1181,7 +1181,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 8,
                 Type::Int,
                 self.current_mem.into(),
-                u64_opt,
+                u64_opt.clone(),
                 o!(),
             );
             let b_val = self.builder.load(
@@ -1189,7 +1189,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 8,
                 Type::Int,
                 self.current_mem.into(),
-                u64_opt,
+                u64_opt.clone(),
                 o!(),
             );
 
@@ -1335,7 +1335,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     elem_size,
                     Type::Int,
                     self.current_mem.into(),
-                    ann_opt,
+                    ann_opt.clone(),
                     o!(),
                 );
                 let b_val = self.builder.load(
@@ -1343,13 +1343,21 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     elem_size,
                     Type::Int,
                     self.current_mem.into(),
-                    ann_opt,
+                    ann_opt.clone(),
                     o!(),
                 );
                 let result = match op_name {
-                    "simd_mul" => self.builder.mul(a_val.into(), b_val.into(), int_ann, o!()),
-                    "simd_sub" => self.builder.sub(a_val.into(), b_val.into(), int_ann, o!()),
-                    _ => self.builder.mul(a_val.into(), b_val.into(), int_ann, o!()),
+                    "simd_mul" => {
+                        self.builder
+                            .mul(a_val.into(), b_val.into(), int_ann, o!())
+                    }
+                    "simd_sub" => {
+                        self.builder
+                            .sub(a_val.into(), b_val.into(), int_ann, o!())
+                    }
+                    _ => self
+                        .builder
+                        .mul(a_val.into(), b_val.into(), int_ann, o!()),
                 };
                 self.current_mem = self
                     .builder
@@ -1428,7 +1436,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 elem_size,
                 Type::Int,
                 self.current_mem.into(),
-                lane_ann,
+                lane_ann.clone(),
                 o!(),
             );
             let b_val = self.builder.load(
@@ -1436,11 +1444,17 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 elem_size,
                 Type::Int,
                 self.current_mem.into(),
-                lane_ann,
+                lane_ann.clone(),
                 o!(),
             );
-            let a_op = IntOperand::from(IrOperand::annotated(a_val, Annotation::Int(elem_ann)));
-            let b_op = IntOperand::from(IrOperand::annotated(b_val, Annotation::Int(elem_ann)));
+            let a_op = IntOperand::from(IrOperand::annotated(
+                a_val,
+                Annotation::Int(elem_ann),
+            ));
+            let b_op = IntOperand::from(IrOperand::annotated(
+                b_val,
+                Annotation::Int(elem_ann),
+            ));
             let result = match op_name {
                 "simd_shl" => self.builder.shl(a_op, b_op, elem_ann, o!()),
                 "simd_shr" => self.builder.shr(a_op, b_op, elem_ann, o!()),
@@ -2149,13 +2163,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     elem_size,
                     Type::Int,
                     self.current_mem.into(),
-                    ann_opt,
+                    ann_opt.clone(),
                     o!(),
                 );
                 let zero = self
                     .builder
                     .iconst(0, elem_size * 8, IntSignedness::DontCare, o!());
-                let result = self.builder.sub(zero.into(), a_val.into(), int_ann, o!());
+                let result = self
+                    .builder
+                    .sub(zero.into(), a_val.into(), int_ann, o!());
                 self.current_mem = self
                     .builder
                     .store(

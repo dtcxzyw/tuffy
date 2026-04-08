@@ -445,7 +445,7 @@ fn build_annotated_wide_call_func() -> (Function, SymbolTable) {
         vec![],
         vec![],
         Some(ret_type.clone()),
-        wide_ann,
+        wide_ann.clone(),
     );
     let mut builder = Builder::new(&mut func);
 
@@ -463,7 +463,7 @@ fn build_annotated_wide_call_func() -> (Function, SymbolTable) {
         ret_type,
         mem0.into(),
         None,
-        wide_ann,
+        wide_ann.clone(),
         Origin::synthetic(),
     );
     let call_data = call_data.expect("non-void call should produce data result");
@@ -494,7 +494,7 @@ fn build_extend_func(name: &str, ann: IntAnnotation, is_sext: bool) -> (Function
     let mut func = Function::new(
         sym,
         vec![src_type.clone()],
-        vec![src_ann],
+        vec![src_ann.clone()],
         vec![],
         Some(i64_type.clone()),
         i64_ann,
@@ -508,7 +508,7 @@ fn build_extend_func(name: &str, ann: IntAnnotation, is_sext: bool) -> (Function
     builder.switch_to_block(entry);
 
     let mem0 = builder.add_block_arg(entry, Type::Mem, None);
-    let a = builder.param(0, src_type, src_ann, Origin::synthetic());
+    let a = builder.param(0, src_type, src_ann.clone(), Origin::synthetic());
     let extended = if is_sext {
         builder.sext(Operand::new(a).into(), 64, Origin::synthetic())
     } else {

@@ -106,9 +106,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             .zext(b.into(), ann.bit_width, Origin::synthetic())
                             .raw();
                     }
-                    let result = self
-                        .builder
-                        .or(a.into(), b.into(), ann, Origin::synthetic());
+                    let result =
+                        self.builder
+                            .or(a.into(), b.into(), ann, Origin::synthetic());
                     self.locals.set(destination_local, result.raw());
                 }
                 true
@@ -167,7 +167,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         true_val.into(),
                         false_val.into(),
                         result_ty,
-                        ann,
+                        ann.clone(),
                         Origin::synthetic(),
                     );
                     self.locals.set(destination_local, result);
@@ -997,7 +997,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         Type::Int,
                         ordering,
                         current_mem.into(),
-                        elem_ann,
+                        elem_ann.clone(),
                         Origin::synthetic(),
                     );
 
@@ -1029,7 +1029,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             old.into(),
                             operand.into(),
                             Type::Int,
-                            elem_ann,
+                            elem_ann.clone(),
                             Origin::synthetic(),
                         )
                     } else if name.starts_with("atomic_umin") {
@@ -1044,7 +1044,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             old.into(),
                             operand.into(),
                             Type::Int,
-                            elem_ann,
+                            elem_ann.clone(),
                             Origin::synthetic(),
                         )
                     } else if name.starts_with("atomic_max") {
@@ -1054,8 +1054,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         });
                         let gt = self.builder.icmp(
                             ICmpOp::Gt,
-                            IrOperand::annotated(old, signed_ann).into(),
-                            IrOperand::annotated(operand, signed_ann).into(),
+                            IrOperand::annotated(old, signed_ann.clone()).into(),
+                            IrOperand::annotated(operand, signed_ann.clone()).into(),
                             Origin::synthetic(),
                         );
                         self.builder.select(
@@ -1063,7 +1063,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             old.into(),
                             operand.into(),
                             Type::Int,
-                            elem_ann,
+                            elem_ann.clone(),
                             Origin::synthetic(),
                         )
                     } else {
@@ -1074,8 +1074,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         });
                         let lt = self.builder.icmp(
                             ICmpOp::Lt,
-                            IrOperand::annotated(old, signed_ann).into(),
-                            IrOperand::annotated(operand, signed_ann).into(),
+                            IrOperand::annotated(old, signed_ann.clone()).into(),
+                            IrOperand::annotated(operand, signed_ann.clone()).into(),
                             Origin::synthetic(),
                         );
                         self.builder.select(
@@ -1083,7 +1083,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             old.into(),
                             operand.into(),
                             Type::Int,
-                            elem_ann,
+                            elem_ann.clone(),
                             Origin::synthetic(),
                         )
                     };
@@ -1184,7 +1184,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         load_size,
                         Type::Int,
                         current_mem.into(),
-                        ann,
+                        ann.clone(),
                         Origin::synthetic(),
                     );
                     self.locals.set(destination_local, val);
@@ -1988,11 +1988,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // Annotate operands so legalization picks the correct
                     // library call (signed vs unsigned) for wide integer types.
                     let full_ann = Annotation::Int(ann);
-                    let a_op = tuffy_ir::instruction::Operand::annotated(ir_args[0], full_ann);
-                    let b_op = tuffy_ir::instruction::Operand::annotated(ir_args[1], full_ann);
-                    let result =
-                        self.builder
-                            .div(a_op.into(), b_op.into(), ann, Origin::synthetic());
+                    let a_op =
+                        tuffy_ir::instruction::Operand::annotated(ir_args[0], full_ann.clone());
+                    let b_op =
+                        tuffy_ir::instruction::Operand::annotated(ir_args[1], full_ann.clone());
+                    let result = self.builder.div(
+                        a_op.into(),
+                        b_op.into(),
+                        ann,
+                        Origin::synthetic(),
+                    );
                     self.locals.set(destination_local, result.raw());
                 }
                 true
@@ -2119,8 +2124,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         );
                         let (hi, lo, is_shl) = if name == "unchecked_funnel_shl" {
                             (
-                                self.builder
-                                    .shl(a.into(), c.into(), int_ann, Origin::synthetic()),
+                                self.builder.shl(
+                                    a.into(),
+                                    c.into(),
+                                    int_ann,
+                                    Origin::synthetic(),
+                                ),
                                 self.builder.shr(
                                     b.into(),
                                     complement.into(),
@@ -2137,8 +2146,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     int_ann,
                                     Origin::synthetic(),
                                 ),
-                                self.builder
-                                    .shr(b.into(), c.into(), int_ann, Origin::synthetic()),
+                                self.builder.shr(
+                                    b.into(),
+                                    c.into(),
+                                    int_ann,
+                                    Origin::synthetic(),
+                                ),
                                 false,
                             )
                         };
@@ -2202,8 +2215,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         );
                         let (hi, lo, is_shl) = if name == "unchecked_funnel_shl" {
                             (
-                                self.builder
-                                    .shl(a.into(), c.into(), int_ann, Origin::synthetic()),
+                                self.builder.shl(
+                                    a.into(),
+                                    c.into(),
+                                    int_ann,
+                                    Origin::synthetic(),
+                                ),
                                 self.builder.shr(
                                     b.into(),
                                     complement.into(),
@@ -2220,8 +2237,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                     int_ann,
                                     Origin::synthetic(),
                                 ),
-                                self.builder
-                                    .shr(b.into(), c.into(), int_ann, Origin::synthetic()),
+                                self.builder.shr(
+                                    b.into(),
+                                    c.into(),
+                                    int_ann,
+                                    Origin::synthetic(),
+                                ),
                                 false,
                             )
                         };
@@ -2238,7 +2259,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 zero.into(),
                                 lo.raw().into(),
                                 Type::Int,
-                                ann128,
+                                ann128.clone(),
                                 Origin::synthetic(),
                             );
                             (hi.raw(), lo_fixed)
@@ -2248,7 +2269,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 zero.into(),
                                 hi.raw().into(),
                                 Type::Int,
-                                ann128,
+                                ann128.clone(),
                                 Origin::synthetic(),
                             );
                             (hi_fixed, lo.raw())
@@ -2361,8 +2382,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let a_lt = self.builder.fcmp(FCmpOp::OLt, a.into(), b.into(), o());
                 let a_gt = self.builder.fcmp(FCmpOp::OGt, a.into(), b.into(), o());
                 // Tie-break for ±0: minimum → pick -0 → OR of bit patterns
-                let a_bits = self.builder.bitcast(a.into(), Type::Int, int_ann, o());
-                let b_bits = self.builder.bitcast(b.into(), Type::Int, int_ann, o());
+                let a_bits = self
+                    .builder
+                    .bitcast(a.into(), Type::Int, int_ann.clone(), o());
+                let b_bits = self
+                    .builder
+                    .bitcast(b.into(), Type::Int, int_ann.clone(), o());
                 let or_bits = self.builder.or(a_bits.into(), b_bits.into(), iann, o());
                 let tie = self
                     .builder
@@ -2434,8 +2459,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 let a_gt = self.builder.fcmp(FCmpOp::OGt, a.into(), b.into(), o());
                 let a_lt = self.builder.fcmp(FCmpOp::OLt, a.into(), b.into(), o());
                 // Tie-break for ±0: maximum → pick +0 → AND of bit patterns
-                let a_bits = self.builder.bitcast(a.into(), Type::Int, int_ann, o());
-                let b_bits = self.builder.bitcast(b.into(), Type::Int, int_ann, o());
+                let a_bits = self
+                    .builder
+                    .bitcast(a.into(), Type::Int, int_ann.clone(), o());
+                let b_bits = self
+                    .builder
+                    .bitcast(b.into(), Type::Int, int_ann.clone(), o());
                 let and_bits = self.builder.and(a_bits.into(), b_bits.into(), iann, o());
                 let tie = self
                     .builder

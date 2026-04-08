@@ -99,8 +99,8 @@ impl VMap {
     }
     fn remap_op(&self, op: &Operand) -> Operand {
         let v = self.one(op.value);
-        match op.annotation {
-            Some(a) => Operand::annotated(v, a),
+        match &op.annotation {
+            Some(a) => Operand::annotated(v, a.clone()),
             None => Operand::new(v),
         }
     }
@@ -291,7 +291,7 @@ fn has_wide_values(func: &Function, legality: &impl LegalityInfo) -> bool {
         }
         // Check primary result annotation
         if matches!(inst.ty, Type::Int)
-            && let Some(Annotation::Int(ia)) = &inst.result_annotation
+            && let Some(Annotation::Int(ia)) = &inst.result_annotation.clone()
             && ia.bit_width > legality.max_int_width()
         {
             return true;
@@ -461,15 +461,19 @@ fn build_new_func(old: &Function, legality: &impl LegalityInfo) -> (Function, St
     let ret_ty = old.ret_ty.clone();
     let ret_ann = if let Some(ref ty) = ret_ty {
         if is_wide_width(type_width(ty), legality)
-            || is_wide_int_with_annotation_limit(ty, &old.ret_annotation, legality.max_int_width())
+            || is_wide_int_with_annotation_limit(
+                ty,
+                &old.ret_annotation.clone(),
+                legality.max_int_width(),
+            )
             || matches!(ty, Type::Float(FloatType::F128))
         {
             None
         } else {
-            old.ret_annotation
+            old.ret_annotation.clone()
         }
     } else {
-        old.ret_annotation
+        old.ret_annotation.clone()
     };
 
     let wide = collect_wide_values(old, legality);
@@ -499,7 +503,7 @@ fn collect_wide_values(old: &Function, legality: &impl LegalityInfo) -> HashSet<
         if is_wide_width(type_width(&inst.ty), legality)
             || is_wide_int_with_annotation_limit(
                 &inst.ty,
-                &inst.result_annotation,
+                &inst.result_annotation.clone(),
                 legality.max_int_width(),
             )
             || matches!(inst.ty, Type::Float(FloatType::F128))
@@ -699,7 +703,7 @@ fn precreate_blocks(
                 let old_ba_idx = old_bb.arg_start + i;
                 let old_ba_ref = ValueRef::block_arg(old_ba_idx);
                 let ba_ty = old.block_args[old_ba_idx as usize].ty.clone();
-                let ba_ann = old.block_args[old_ba_idx as usize].annotation;
+                let ba_ann = old.block_args[old_ba_idx as usize].annotation.clone();
 
                 if s.wide.contains(&old_ba_ref.raw()) {
                     let lo = b.add_block_arg(new_blk, I64_TYPE, Some(Annotation::Int(I64)));
@@ -1247,7 +1251,7 @@ fn legalize_inst(
         }
         Op::Ret(val, ret2, mem)
             if old.ret_ty.as_ref().is_some_and(|t| {
-                is_wide_int_with_annotation_limit(t, &old.ret_annotation, s.part_bits)
+                is_wide_int_with_annotation_limit(t, &old.ret_annotation.clone(), s.part_bits)
                     || matches!(t, Type::Float(FloatType::F128))
             }) =>
         {
@@ -1302,7 +1306,7 @@ fn legalize_inst(
             let v = b.bitcast(
                 Operand::new(lo),
                 inst.ty.clone(),
-                inst.result_annotation,
+                inst.result_annotation.clone(),
                 o(),
             );
             s.vmap.set(old_vref, Mapped::One(v));
@@ -1491,7 +1495,7 @@ fn copy_inst(
     inst: &tuffy_ir::instruction::Instruction,
     symbols: &mut SymbolTable,
 ) {
-    let ann = inst.result_annotation;
+    let ann = inst.result_annotation.clone();
     let int_ann = match ann {
         Some(Annotation::Int(ia)) => ia,
         _ => IntAnnotation {
@@ -2045,7 +2049,7 @@ fn copy_inst(
             remap_op(s, tv),
             remap_op(s, fv),
             inst.ty.clone(),
-            inst.result_annotation,
+            inst.result_annotation.clone(),
             o(),
         ),
         Op::Load(ptr, bytes, mem) => {
@@ -2309,7 +2313,7 @@ fn copy_inst(
                 inst.secondary_ty.clone().unwrap_or(I64_TYPE),
                 *ord,
                 remap_op(s, &mem.clone().raw()).into(),
-                inst.result_annotation,
+                inst.result_annotation.clone(),
                 o(),
             );
             s.vmap.set(old_vref, Mapped::One(primary.into()));
@@ -2334,7 +2338,7 @@ fn copy_inst(
                 inst.secondary_ty.clone().unwrap_or(I64_TYPE),
                 *ord,
                 remap_op(s, &mem.clone().raw()).into(),
-                inst.result_annotation,
+                inst.result_annotation.clone(),
                 o(),
             );
             s.vmap.set(old_vref, Mapped::One(primary.into()));
@@ -2351,7 +2355,7 @@ fn copy_inst(
                 *s_ord,
                 *f_ord,
                 remap_op(s, &mem.clone().raw()).into(),
-                inst.result_annotation,
+                inst.result_annotation.clone(),
                 o(),
             );
             s.vmap.set(old_vref, Mapped::One(primary.into()));
@@ -2365,7 +2369,7 @@ fn copy_inst(
         Op::CallRet2(mem) => b.call_ret2(
             remap_op(s, &mem.clone().raw()).into(),
             inst.ty.clone(),
-            inst.result_annotation,
+            inst.result_annotation.clone(),
             o(),
         ),
         Op::Merge(a, b_op, width) => b
@@ -2413,7 +2417,7 @@ fn leg_param(s: &mut State, b: &mut Builder, old_vref: ValueRef, lo_idx: u32, hi
         bit_width: 64,
         signedness: IntSignedness::Unsigned,
     }));
-    let lo = b.param(lo_idx, I64_TYPE, ann64, o());
+    let lo = b.param(lo_idx, I64_TYPE, ann64.clone(), o());
     let hi = b.param(hi_idx, I64_TYPE, ann64, o());
     s.vmap.set(old_vref, Mapped::Pair(lo, hi));
 }
@@ -5003,7 +5007,7 @@ fn leg_smul_with_overflow_wide(
         Operand::new(b_lo),
         z.clone(),
         Type::Int,
-        ann64,
+        ann64.clone(),
         o(),
     );
     let sub_b_hi = b.select(
@@ -5011,7 +5015,7 @@ fn leg_smul_with_overflow_wide(
         Operand::new(b_hi),
         z.clone(),
         Type::Int,
-        ann64,
+        ann64.clone(),
         o(),
     );
     let sub_a_lo = b.select(
@@ -5019,10 +5023,17 @@ fn leg_smul_with_overflow_wide(
         Operand::new(a_lo),
         z.clone(),
         Type::Int,
-        ann64,
+        ann64.clone(),
         o(),
     );
-    let sub_a_hi = b.select(b_neg.into(), Operand::new(a_hi), z, Type::Int, ann64, o());
+    let sub_a_hi = b.select(
+        b_neg.into(),
+        Operand::new(a_hi),
+        z,
+        Type::Int,
+        ann64.clone(),
+        o(),
+    );
 
     // Subtract the first correction vector from the upper half.
     let t_lo = b.sub(w2_sum.into(), sub_b_lo.into(), I64, o());
@@ -7033,7 +7044,7 @@ fn leg_call(
     let ann = if double_width_ret {
         None
     } else {
-        inst.result_annotation
+        inst.result_annotation.clone()
     };
 
     let cleanup_label = match &inst.op {
@@ -7185,19 +7196,19 @@ mod tests {
         let add = b.iconst(7i64, bits, sign, o());
         if signed {
             let _ = b.s_carrying_mul_add(
-                Operand::annotated(lhs.raw(), ann).into(),
-                Operand::annotated(rhs.raw(), ann).into(),
-                Operand::annotated(carry.raw(), ann).into(),
-                Operand::annotated(add.raw(), ann).into(),
+                Operand::annotated(lhs.raw(), ann.clone()).into(),
+                Operand::annotated(rhs.raw(), ann.clone()).into(),
+                Operand::annotated(carry.raw(), ann.clone()).into(),
+                Operand::annotated(add.raw(), ann.clone()).into(),
                 bits,
                 o(),
             );
         } else {
             let _ = b.u_carrying_mul_add(
-                Operand::annotated(lhs.raw(), ann).into(),
-                Operand::annotated(rhs.raw(), ann).into(),
-                Operand::annotated(carry.raw(), ann).into(),
-                Operand::annotated(add.raw(), ann).into(),
+                Operand::annotated(lhs.raw(), ann.clone()).into(),
+                Operand::annotated(rhs.raw(), ann.clone()).into(),
+                Operand::annotated(carry.raw(), ann.clone()).into(),
+                Operand::annotated(add.raw(), ann.clone()).into(),
                 bits,
                 o(),
             );
@@ -7246,19 +7257,19 @@ mod tests {
         let add = b.iconst(add, bits, sign, o());
         let (lo, hi) = if signed {
             b.s_carrying_mul_add(
-                Operand::annotated(a.raw(), ann).into(),
-                Operand::annotated(op_b.raw(), ann).into(),
-                Operand::annotated(carry.raw(), ann).into(),
-                Operand::annotated(add.raw(), ann).into(),
+                Operand::annotated(a.raw(), ann.clone()).into(),
+                Operand::annotated(op_b.raw(), ann.clone()).into(),
+                Operand::annotated(carry.raw(), ann.clone()).into(),
+                Operand::annotated(add.raw(), ann.clone()).into(),
                 bits,
                 o(),
             )
         } else {
             b.u_carrying_mul_add(
-                Operand::annotated(a.raw(), ann).into(),
-                Operand::annotated(op_b.raw(), ann).into(),
-                Operand::annotated(carry.raw(), ann).into(),
-                Operand::annotated(add.raw(), ann).into(),
+                Operand::annotated(a.raw(), ann.clone()).into(),
+                Operand::annotated(op_b.raw(), ann.clone()).into(),
+                Operand::annotated(carry.raw(), ann.clone()).into(),
+                Operand::annotated(add.raw(), ann.clone()).into(),
                 bits,
                 o(),
             )
@@ -7267,14 +7278,14 @@ mod tests {
         let expected_hi = b.iconst(expected_hi, bits, IntSignedness::Unsigned, o());
         let lo_ok = b.icmp(
             ICmpOp::Eq,
-            Operand::annotated(lo.raw(), unsigned_ann).into(),
-            Operand::annotated(expected_lo.raw(), unsigned_ann).into(),
+            Operand::annotated(lo.raw(), unsigned_ann.clone()).into(),
+            Operand::annotated(expected_lo.raw(), unsigned_ann.clone()).into(),
             o(),
         );
         let hi_ok = b.icmp(
             ICmpOp::Eq,
-            Operand::annotated(hi.raw(), unsigned_ann).into(),
-            Operand::annotated(expected_hi.raw(), unsigned_ann).into(),
+            Operand::annotated(hi.raw(), unsigned_ann.clone()).into(),
+            Operand::annotated(expected_hi.raw(), unsigned_ann.clone()).into(),
             o(),
         );
         let ok = b.band(lo_ok.into(), hi_ok.into(), o());
@@ -7341,26 +7352,26 @@ mod tests {
         let rhs = b.iconst(2i64, bits, sign, o());
         let _ = match (signed, is_mul) {
             (true, true) => b.smul_with_overflow(
-                Operand::annotated(lhs.raw(), ann).into(),
-                Operand::annotated(rhs.raw(), ann).into(),
+                Operand::annotated(lhs.raw(), ann.clone()).into(),
+                Operand::annotated(rhs.raw(), ann.clone()).into(),
                 bits,
                 o(),
             ),
             (false, true) => b.umul_with_overflow(
-                Operand::annotated(lhs.raw(), ann).into(),
-                Operand::annotated(rhs.raw(), ann).into(),
+                Operand::annotated(lhs.raw(), ann.clone()).into(),
+                Operand::annotated(rhs.raw(), ann.clone()).into(),
                 bits,
                 o(),
             ),
             (true, false) => b.sadd_with_overflow(
-                Operand::annotated(lhs.raw(), ann).into(),
-                Operand::annotated(rhs.raw(), ann).into(),
+                Operand::annotated(lhs.raw(), ann.clone()).into(),
+                Operand::annotated(rhs.raw(), ann.clone()).into(),
                 bits,
                 o(),
             ),
             (false, false) => b.uadd_with_overflow(
-                Operand::annotated(lhs.raw(), ann).into(),
-                Operand::annotated(rhs.raw(), ann).into(),
+                Operand::annotated(lhs.raw(), ann.clone()).into(),
+                Operand::annotated(rhs.raw(), ann.clone()).into(),
                 bits,
                 o(),
             ),
@@ -7692,7 +7703,12 @@ mod tests {
         b.switch_to_block(bb);
         let mem0 = b.add_block_arg(bb, Type::Mem, None);
         let val = b.iconst(value, bits, IntSignedness::Unsigned, o());
-        let clz = b.count_leading_zeros(Operand::annotated(val.raw(), ann).into(), bits, 64, o());
+        let clz = b.count_leading_zeros(
+            Operand::annotated(val.raw(), ann.clone()).into(),
+            bits,
+            64,
+            o(),
+        );
         let expected = b.iconst(expected as i64, 64, IntSignedness::Unsigned, o());
         let ok = b.icmp(ICmpOp::Eq, clz.into(), expected.into(), o());
         b.ret(Some(ok.into()), None, mem0.into(), o());
@@ -7710,7 +7726,7 @@ mod tests {
                 !matches!(inst.op, Op::SCarryingMulAdd(..) | Op::UCarryingMulAdd(..)),
                 "carrying_mul_add op should be fully lowered"
             );
-            if let Some(Annotation::Int(ann)) = &inst.result_annotation {
+            if let Some(Annotation::Int(ann)) = &inst.result_annotation.clone() {
                 assert!(ann.bit_width <= 64, "primary width must be legalized");
             }
             if let Some(Annotation::Int(ann)) = &inst.secondary_result_annotation {
@@ -7739,7 +7755,7 @@ mod tests {
         let legalized =
             legalize(&func, &X86LegalityInfo, &mut symbols).expect("expected legalization");
         for (_, inst) in legalized.inst_pool.iter_insts() {
-            if let Some(Annotation::Int(ann)) = &inst.result_annotation {
+            if let Some(Annotation::Int(ann)) = &inst.result_annotation.clone() {
                 assert!(ann.bit_width <= 64);
             }
         }
@@ -7757,7 +7773,7 @@ mod tests {
             let legalized = legalize(&func, &X86LegalityInfo, &mut symbols)
                 .expect("expected overflow legalization");
             for (_, inst) in legalized.inst_pool.iter_insts() {
-                if let Some(Annotation::Int(ann)) = &inst.result_annotation {
+                if let Some(Annotation::Int(ann)) = &inst.result_annotation.clone() {
                     assert!(ann.bit_width <= 64);
                 }
             }
@@ -7771,7 +7787,7 @@ mod tests {
             let legalized = legalize(&func, &X86LegalityInfo, &mut symbols)
                 .expect("expected shift/rotate legalization");
             for (_, inst) in legalized.inst_pool.iter_insts() {
-                if let Some(Annotation::Int(ann)) = &inst.result_annotation {
+                if let Some(Annotation::Int(ann)) = &inst.result_annotation.clone() {
                     assert!(ann.bit_width <= 64);
                 }
             }
@@ -7785,7 +7801,7 @@ mod tests {
             let legalized = legalize(&func, &X86LegalityInfo, &mut symbols)
                 .expect("expected div/rem legalization");
             for (_, inst) in legalized.inst_pool.iter_insts() {
-                if let Some(Annotation::Int(ann)) = &inst.result_annotation {
+                if let Some(Annotation::Int(ann)) = &inst.result_annotation.clone() {
                     assert!(ann.bit_width <= 64);
                 }
             }
@@ -7804,7 +7820,7 @@ mod tests {
             let legalized = legalize(&func, &X86LegalityInfo, &mut symbols)
                 .expect("expected wide div/rem legalization");
             for (_, inst) in legalized.inst_pool.iter_insts() {
-                if let Some(Annotation::Int(ann)) = &inst.result_annotation {
+                if let Some(Annotation::Int(ann)) = &inst.result_annotation.clone() {
                     assert!(ann.bit_width <= 64);
                 }
             }
@@ -7818,7 +7834,7 @@ mod tests {
             let legalized = legalize(&func, &X86LegalityInfo, &mut symbols)
                 .expect("expected int-to-fp legalization");
             for (_, inst) in legalized.inst_pool.iter_insts() {
-                if let Some(Annotation::Int(ann)) = &inst.result_annotation {
+                if let Some(Annotation::Int(ann)) = &inst.result_annotation.clone() {
                     assert!(ann.bit_width <= 64);
                 }
             }
@@ -7839,7 +7855,7 @@ mod tests {
                 "wider-than-double-width int-to-fp should not rely on compiler-rt helpers"
             );
             for (_, inst) in legalized.inst_pool.iter_insts() {
-                if let Some(Annotation::Int(ann)) = &inst.result_annotation {
+                if let Some(Annotation::Int(ann)) = &inst.result_annotation.clone() {
                     assert!(ann.bit_width <= 64);
                 }
             }
@@ -7859,7 +7875,7 @@ mod tests {
             let legalized = legalize(&func, &X86LegalityInfo, &mut symbols)
                 .expect("expected fp-to-int legalization");
             for (_, inst) in legalized.inst_pool.iter_insts() {
-                if let Some(Annotation::Int(ann)) = &inst.result_annotation {
+                if let Some(Annotation::Int(ann)) = &inst.result_annotation.clone() {
                     assert!(ann.bit_width <= 64);
                 }
             }
@@ -7911,7 +7927,7 @@ mod tests {
             let legalized = legalize(&func, &X86LegalityInfo, &mut symbols)
                 .expect("expected icmp legalization");
             for (_, inst) in legalized.inst_pool.iter_insts() {
-                if let Some(Annotation::Int(ann)) = &inst.result_annotation {
+                if let Some(Annotation::Int(ann)) = &inst.result_annotation.clone() {
                     assert!(ann.bit_width <= 64);
                 }
             }
@@ -7946,8 +7962,8 @@ mod tests {
             o(),
         );
         let (prod, ov) = b.smul_with_overflow(
-            Operand::annotated(a.raw(), ann).into(),
-            Operand::annotated(c.raw(), ann).into(),
+            Operand::annotated(a.raw(), ann.clone()).into(),
+            Operand::annotated(c.raw(), ann.clone()).into(),
             128,
             o(),
         );
@@ -7959,8 +7975,8 @@ mod tests {
         );
         let prod_ok = b.icmp(
             ICmpOp::Eq,
-            Operand::annotated(prod.raw(), ann).into(),
-            Operand::annotated(expected.raw(), ann).into(),
+            Operand::annotated(prod.raw(), ann.clone()).into(),
+            Operand::annotated(expected.raw(), ann.clone()).into(),
             o(),
         );
         let result = b.band(prod_ok.into(), ov.into(), o());

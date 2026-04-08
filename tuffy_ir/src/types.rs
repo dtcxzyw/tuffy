@@ -6,6 +6,8 @@
 //! - `Ptr(as)`: pointer with address space
 //! - `Float(ft)`: floating point type
 
+use num_bigint::BigUint;
+
 /// Floating point type variants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FloatType {
@@ -63,6 +65,111 @@ pub enum IntSignedness {
 pub struct IntAnnotation {
     pub bit_width: u32,
     pub signedness: IntSignedness,
+}
+
+/// Per-bit four-state annotation.
+///
+/// `ones`, `zeros`, and `demanded` are all finite masks over the low bits of an
+/// infinite-precision integer value. Bits not present in `demanded` are treated
+/// as don't-care (`x` in the text format).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+pub struct KnownBits {
+    pub ones: BigUint,
+    pub zeros: BigUint,
+    pub demanded: BigUint,
+}
+
+impl KnownBits {
+    /// Parse a `known(...)` ternary payload.
+    ///
+    /// The rightmost character is bit 0. `_` separators are ignored.
+    pub fn from_ternary_str(input: &str) -> Result<Self, String> {
+        let mut ones = BigUint::default();
+        let mut zeros = BigUint::default();
+        let mut demanded = BigUint::default();
+        let mut bit = 0usize;
+
+        for ch in input.chars().rev() {
+            match ch {
+                '_' => continue,
+                '1' => {
+                    let mask = BigUint::from(1u8) << bit;
+                    ones |= &mask;
+                    demanded |= mask;
+                    bit += 1;
+                }
+                '0' => {
+                    let mask = BigUint::from(1u8) << bit;
+                    zeros |= &mask;
+                    demanded |= mask;
+                    bit += 1;
+                }
+                '?' => {
+                    demanded |= BigUint::from(1u8) << bit;
+                    bit += 1;
+                }
+                'x' | 'X' => {
+                    bit += 1;
+                }
+                other => {
+                    return Err(format!("invalid known bits character `{other}`"));
+                }
+            }
+        }
+
+        let known = Self {
+            ones,
+            zeros,
+            demanded,
+        };
+        if known.is_well_formed() {
+            Ok(known)
+        } else {
+            Err("known bits masks are inconsistent".to_string())
+        }
+    }
+
+    /// Format this known-bits mask as the payload of `known(...)`.
+    pub fn to_ternary_string(&self) -> String {
+        let width = self.highest_relevant_bit().unwrap_or(0) + 1;
+        let mut out = String::with_capacity(width.max(1));
+        for bit in (0..width).rev() {
+            let mask = BigUint::from(1u8) << bit;
+            let is_demanded = (&self.demanded & &mask) != BigUint::default();
+            let is_one = (&self.ones & &mask) != BigUint::default();
+            let is_zero = (&self.zeros & &mask) != BigUint::default();
+            let ch = match (is_demanded, is_one, is_zero) {
+                (_, true, false) => '1',
+                (_, false, true) => '0',
+                (true, false, false) => '?',
+                (false, false, false) => 'x',
+                _ => '?',
+            };
+            out.push(ch);
+        }
+        if out.is_empty() {
+            out.push('x');
+        }
+        out
+    }
+
+    /// Check the representation invariant.
+    pub fn is_well_formed(&self) -> bool {
+        let overlap = &self.ones & &self.zeros;
+        let known = &self.ones | &self.zeros;
+        overlap == BigUint::default() && (&known & &self.demanded) == known
+    }
+
+    /// Return the highest bit used by any mask.
+    pub fn highest_relevant_bit(&self) -> Option<usize> {
+        let combined = (&self.ones | &self.zeros) | &self.demanded;
+        let bits = combined.bits();
+        if bits == 0 {
+            None
+        } else {
+            Some(bits as usize - 1)
+        }
+    }
 }
 
 /// A type in the tuffy IR.
@@ -182,12 +289,14 @@ pub enum MemoryOrdering {
 ///
 /// Result-side violation: the defining instruction produces poison.
 /// Use-side violation: the consuming instruction produces poison.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Annotation {
     /// `:align<N>` — pointer alignment in bytes.
     Align(u32),
     /// Integer refinement: narrows bit width and/or signedness at use site.
     Int(IntAnnotation),
+    /// `:known(<ternary>)` — per-bit four-state constraint on integer values.
+    KnownBits(KnownBits),
     /// C ABI byval: the pointer argument actually references a struct that
     /// the callee expects *on the stack* (SysV MEMORY-class parameter).
     /// The ISel must copy `size` bytes from the pointed-to memory onto the

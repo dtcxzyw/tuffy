@@ -14,6 +14,18 @@ fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("missing OUT_DIR"));
     let json_path = out_dir.join("peephole_rules.json");
     let rust_path = out_dir.join("peephole_gen.rs");
+    let facts_json_path = out_dir.join("peephole_facts.json");
+    let facts_rust_path = out_dir.join("peephole_facts_gen.rs");
+
+    let build_status = Command::new("lake")
+        .args(["build", "TuffyLean.Export.Json"])
+        .current_dir(&lean_dir)
+        .status()
+        .expect("failed to invoke lake build for Lean export modules");
+
+    if !build_status.success() {
+        panic!("lake build TuffyLean.Export.Json failed");
+    }
 
     let output = Command::new("lake")
         .args([
@@ -40,4 +52,33 @@ fn main() {
         .expect("generated peephole JSON should satisfy the generator schema");
     let rust_src = tuffy_opt_gen::generate(&spec).expect("peephole Rust generation should succeed");
     fs::write(&rust_path, rust_src).expect("failed to write generated peephole Rust");
+
+    let facts_output = Command::new("lake")
+        .args([
+            "env",
+            "lean",
+            "--run",
+            "TuffyLean/Export/Json.lean",
+            "--kind",
+            "peephole_facts",
+        ])
+        .current_dir(&lean_dir)
+        .output()
+        .expect("failed to invoke Lean peephole fact exporter");
+
+    if !facts_output.status.success() {
+        let stderr = String::from_utf8_lossy(&facts_output.stderr);
+        panic!("Lean peephole fact exporter failed:\n{stderr}");
+    }
+
+    fs::write(&facts_json_path, &facts_output.stdout).expect("failed to write peephole fact JSON");
+
+    let facts_json_str =
+        String::from_utf8(facts_output.stdout).expect("peephole fact JSON must be utf-8");
+    let facts_spec = tuffy_opt_gen::load_facts_spec_from_json_str(&facts_json_str)
+        .expect("generated peephole fact JSON should satisfy the generator schema");
+    let facts_rust_src = tuffy_opt_gen::generate_facts(&facts_spec)
+        .expect("peephole fact Rust generation should succeed");
+    fs::write(&facts_rust_path, facts_rust_src)
+        .expect("failed to write generated peephole fact Rust");
 }

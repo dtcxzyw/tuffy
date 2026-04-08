@@ -1,21 +1,28 @@
 //! Generate Rust peephole matcher code from Lean-exported JSON rules.
 
 mod codegen;
+mod facts_codegen;
+mod facts_schema;
 mod schema;
 
 use std::fmt;
 
 pub use codegen::generate;
+pub use facts_codegen::generate as generate_facts;
+pub use facts_schema::FactSpec;
 pub use schema::PeepholeSpec;
 
 #[derive(Debug)]
 pub enum GenerateError {
     Json(serde_json::Error),
     UnsupportedFormatVersion(u32),
+    UnsupportedFactsFormatVersion(u32),
     UnsupportedKind(String),
+    UnsupportedFactsKind(String),
     UnsupportedTransformKind(String),
     UnsupportedRootRewrite { rule: String, message: String },
     UnsupportedPattern(String),
+    UnsupportedFactsRule(String),
     IllTypedReplacement { rule: String, message: String },
     MissingReplacementBinding { rule: String, binding: String },
     MissingSideConditionBinding { rule: String, binding: String },
@@ -30,8 +37,14 @@ impl fmt::Display for GenerateError {
             GenerateError::UnsupportedFormatVersion(version) => {
                 write!(f, "unsupported peephole format version: {version}")
             }
+            GenerateError::UnsupportedFactsFormatVersion(version) => {
+                write!(f, "unsupported peephole facts format version: {version}")
+            }
             GenerateError::UnsupportedKind(kind) => {
                 write!(f, "unsupported peephole kind: {kind}")
+            }
+            GenerateError::UnsupportedFactsKind(kind) => {
+                write!(f, "unsupported peephole facts kind: {kind}")
             }
             GenerateError::UnsupportedTransformKind(kind) => {
                 write!(f, "unsupported transform kind: {kind}")
@@ -41,6 +54,9 @@ impl fmt::Display for GenerateError {
             }
             GenerateError::UnsupportedPattern(msg) => {
                 write!(f, "unsupported peephole pattern: {msg}")
+            }
+            GenerateError::UnsupportedFactsRule(msg) => {
+                write!(f, "unsupported peephole fact rule: {msg}")
             }
             GenerateError::IllTypedReplacement { rule, message } => {
                 write!(f, "rule `{rule}` uses an ill-typed replacement: {message}")
@@ -84,9 +100,18 @@ pub fn load_spec_from_json_str(json: &str) -> Result<PeepholeSpec, GenerateError
     Ok(spec)
 }
 
+pub fn load_facts_spec_from_json_str(json: &str) -> Result<FactSpec, GenerateError> {
+    let spec: FactSpec = serde_json::from_str(json)?;
+    facts_schema::validate_spec(&spec)?;
+    Ok(spec)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{GenerateError, generate, load_spec_from_json_str};
+    use super::{
+        GenerateError, generate, generate_facts, load_facts_spec_from_json_str,
+        load_spec_from_json_str,
+    };
 
     const SAMPLE_JSON: &str = r#"{
   "format_version": 4,
@@ -202,6 +227,34 @@ mod tests {
   ]
 }"#;
 
+    const FACT_TRANSFER_JSON: &str = r#"{
+  "format_version": 1,
+  "kind": "peephole_facts",
+  "defaults": {
+    "known_bits_forward": "unknown",
+    "int_annotation_forward": "unknown",
+    "known_bits_backward": "none",
+    "int_annotation_backward": "none"
+  },
+  "result_rules": [
+    {
+      "op": "and",
+      "result": "primary",
+      "known_bits_forward": "bit_and",
+      "int_annotation_forward": "bit_and",
+      "proof_ref": "TuffyLean.Rewrites.Facts.knownBitsForward_bitAnd_sound"
+    }
+  ],
+  "inst_rules": [
+    {
+      "op": "and",
+      "known_bits_backward": "bit_and",
+      "int_annotation_backward": "none",
+      "proof_ref": "TuffyLean.Rewrites.Facts.knownBitsBackward_bitAnd_sound"
+    }
+  ]
+}"#;
+
     #[test]
     fn parses_and_generates_dispatch_code() {
         let spec = load_spec_from_json_str(SAMPLE_JSON).expect("sample JSON should parse");
@@ -266,5 +319,17 @@ mod tests {
         let err =
             load_spec_from_json_str(&json).expect_err("bool_not over int binding should fail");
         assert!(matches!(err, GenerateError::IllTypedReplacement { .. }));
+    }
+
+    #[test]
+    fn parses_and_generates_fact_transfer_code() {
+        let spec =
+            load_facts_spec_from_json_str(FACT_TRANSFER_JSON).expect("fact transfer JSON parses");
+        let rust = generate_facts(&spec).expect("fact transfer JSON generates Rust");
+
+        assert!(rust.contains("generated_forward_int_facts"));
+        assert!(rust.contains("forward_bitand"));
+        assert!(rust.contains("generated_backward_int_facts"));
+        assert!(rust.contains("backward_bitand"));
     }
 }

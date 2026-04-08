@@ -482,7 +482,7 @@ fn select_double_width_int_op(
     op: &Op,
     func: &Function,
 ) -> Option<()> {
-    let _ann = func.inst(vref.index()).result_annotation;
+    let _ann = func.inst(vref.index()).result_annotation.clone();
     match op {
         Op::Add(lhs, rhs)
         | Op::Sub(lhs, rhs)
@@ -3975,8 +3975,9 @@ fn select_sext(ctx: &mut IselCtx, vref: ValueRef, val: &Operand, func: &Function
     // Prefer operand's use-site annotation over the def-site annotation.
     let src_ann = val
         .annotation
+        .as_ref()
         .and_then(|a| match a {
-            Annotation::Int(ia) => Some(ia),
+            Annotation::Int(ia) => Some(*ia),
             _ => None,
         })
         .or_else(|| get_int_annotation(func, val.value));
@@ -4047,8 +4048,9 @@ fn select_zext(ctx: &mut IselCtx, vref: ValueRef, val: &Operand, func: &Function
     // Prefer operand's use-site annotation over the def-site annotation.
     let src_ann = val
         .annotation
+        .as_ref()
         .and_then(|a| match a {
-            Annotation::Int(ia) => Some(ia),
+            Annotation::Int(ia) => Some(*ia),
             _ => None,
         })
         .or_else(|| get_int_annotation(func, val.value));

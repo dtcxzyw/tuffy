@@ -17,8 +17,8 @@ use crate::instruction::{
 use crate::module::{Module, SymbolId, SymbolTable};
 use crate::typed::MemOperand;
 use crate::types::{
-    Annotation, FloatType, FpRewriteFlags, IntAnnotation, IntSignedness, MemoryOrdering, Type,
-    VectorType,
+    Annotation, FloatType, FpRewriteFlags, IntAnnotation, IntSignedness, KnownBits, MemoryOrdering,
+    Type, VectorType,
 };
 use crate::value::{BlockRef, RegionRef, ValueRef};
 
@@ -593,12 +593,49 @@ impl<'a> Parser<'a> {
                         bit_width: n,
                         signedness: IntSignedness::DontCare,
                     }))
+                } else if s == "known" {
+                    self.advance();
+                    self.expect(&Token::LParen)?;
+                    let ternary = self.parse_known_bits_payload()?;
+                    self.expect(&Token::RParen)?;
+                    let known = KnownBits::from_ternary_str(&ternary)
+                        .map_err(|err| self.error(format!("invalid known annotation: {err}")))?;
+                    Ok(Annotation::KnownBits(known))
                 } else {
                     Err(self.error(format!("unknown annotation: {}", s)))
                 }
             }
             other => Err(self.error(format!("expected annotation after ':', got {:?}", other))),
         }
+    }
+
+    fn parse_known_bits_payload(&mut self) -> Result<String, ParseError> {
+        let mut payload = String::new();
+        while self.current != Token::RParen {
+            match &self.current {
+                Token::Integer(s) | Token::Ident(s) => {
+                    if !s
+                        .chars()
+                        .all(|ch| matches!(ch, '0' | '1' | '?' | 'x' | 'X' | '_'))
+                    {
+                        return Err(
+                            self.error(format!("invalid known bits token `{s}` in annotation"))
+                        );
+                    }
+                    payload.push_str(s);
+                    self.advance();
+                }
+                Token::Eof => {
+                    return Err(self.error("unterminated known annotation".to_string()));
+                }
+                other => {
+                    return Err(
+                        self.error(format!("invalid token in known annotation: {:?}", other))
+                    );
+                }
+            }
+        }
+        Ok(payload)
     }
 
     /// Parse `type` optionally followed by `:annotation`.
@@ -1372,7 +1409,13 @@ impl<'a> Parser<'a> {
             Option<Annotation>,
         ) {
             if let Some((_, sec_ty, sec_ann)) = multi {
-                (op, primary_ty, primary_ann, Some(sec_ty.clone()), *sec_ann)
+                (
+                    op,
+                    primary_ty,
+                    primary_ann,
+                    Some(sec_ty.clone()),
+                    sec_ann.clone(),
+                )
             } else {
                 (op, primary_ty, primary_ann, None, None)
             }
@@ -1410,7 +1453,7 @@ impl<'a> Parser<'a> {
                     "copysign" => Op::CopySign(a.into(), b.into()),
                     _ => unreachable!(),
                 };
-                Ok(single(op, primary_ty.clone(), *primary_ann))
+                Ok(single(op, primary_ty.clone(), primary_ann.clone()))
             }
 
             // Binary with dot-suffix width: opcode.N v0, v1
@@ -1430,7 +1473,7 @@ impl<'a> Parser<'a> {
                     "ssaturating_sub" => Op::SignedSaturatingSub(a.into(), b.into(), width),
                     _ => unreachable!(),
                 };
-                Ok(single(op, primary_ty.clone(), *primary_ann))
+                Ok(single(op, primary_ty.clone(), primary_ann.clone()))
             }
 
             // Binary with overflow (multi-result): opcode.N v0, v1
@@ -1449,7 +1492,12 @@ impl<'a> Parser<'a> {
                     "umul_overflow" => Op::UMulWithOverflow(a.into(), b.into(), width),
                     _ => unreachable!(),
                 };
-                Ok(multi_result(op, multi, primary_ty.clone(), *primary_ann))
+                Ok(multi_result(
+                    op,
+                    multi,
+                    primary_ty.clone(),
+                    primary_ann.clone(),
+                ))
             }
 
             "scarrying_mul_add" | "ucarrying_mul_add" => {
@@ -1470,7 +1518,12 @@ impl<'a> Parser<'a> {
                     }
                     _ => unreachable!(),
                 };
-                Ok(multi_result(op, multi, primary_ty.clone(), *primary_ann))
+                Ok(multi_result(
+                    op,
+                    multi,
+                    primary_ty.clone(),
+                    primary_ann.clone(),
+                ))
             }
 
             // FP binary with optional flags: fadd [reassoc] [contract] v0, v1
@@ -1487,7 +1540,7 @@ impl<'a> Parser<'a> {
                     "frem" => Op::FRem(a.into(), b.into(), flags),
                     _ => unreachable!(),
                 };
-                Ok(single(op, primary_ty.clone(), *primary_ann))
+                Ok(single(op, primary_ty.clone(), primary_ann.clone()))
             }
 
             // Unary ops: opcode v0
@@ -1517,7 +1570,7 @@ impl<'a> Parser<'a> {
                     "inttoptr" => Op::IntToPtr(a.into()),
                     _ => unreachable!(),
                 };
-                Ok(single(op, primary_ty.clone(), *primary_ann))
+                Ok(single(op, primary_ty.clone(), primary_ann.clone()))
             }
 
             // Unary with dot-suffix: opcode.N v0
@@ -1530,7 +1583,7 @@ impl<'a> Parser<'a> {
                     "bit_reverse" => Op::BitReverse(a.into(), width),
                     _ => unreachable!(),
                 };
-                Ok(single(op, primary_ty.clone(), *primary_ann))
+                Ok(single(op, primary_ty.clone(), primary_ann.clone()))
             }
 
             // Split: multi-result unary with dot-suffix
@@ -1538,7 +1591,12 @@ impl<'a> Parser<'a> {
                 let width = self.parse_dot_u32()?;
                 let a = self.parse_operand()?;
                 let op = Op::Split(a.into(), width);
-                Ok(multi_result(op, multi, primary_ty.clone(), *primary_ann))
+                Ok(multi_result(
+                    op,
+                    multi,
+                    primary_ty.clone(),
+                    primary_ann.clone(),
+                ))
             }
 
             // Comparison: icmp.op v0, v1
@@ -1554,7 +1612,7 @@ impl<'a> Parser<'a> {
                 Ok(single(
                     Op::ICmp(cmp_op, a.into(), b.into()),
                     primary_ty.clone(),
-                    *primary_ann,
+                    primary_ann.clone(),
                 ))
             }
 
@@ -1570,7 +1628,7 @@ impl<'a> Parser<'a> {
                 Ok(single(
                     Op::FCmp(cmp_op, a.into(), b.into()),
                     primary_ty.clone(),
-                    *primary_ann,
+                    primary_ann.clone(),
                 ))
             }
 
@@ -1584,7 +1642,7 @@ impl<'a> Parser<'a> {
                 Ok(single(
                     Op::Select(cond.into(), tv, fv),
                     primary_ty.clone(),
-                    *primary_ann,
+                    primary_ann.clone(),
                 ))
             }
 
@@ -1607,7 +1665,7 @@ impl<'a> Parser<'a> {
                             Op::LoadAtomic(ptr.into(), ordering, mem.into()),
                             multi,
                             primary_ty.clone(),
-                            *primary_ann,
+                            primary_ann.clone(),
                         ))
                     }
                     _ => {
@@ -1633,7 +1691,7 @@ impl<'a> Parser<'a> {
                         Ok(single(
                             Op::Load(ptr.into(), bytes, mem.into()),
                             primary_ty.clone(),
-                            *primary_ann,
+                            primary_ann.clone(),
                         ))
                     }
                 }
@@ -1658,7 +1716,7 @@ impl<'a> Parser<'a> {
                         Ok(single(
                             Op::StoreAtomic(val, ptr.into(), ordering, mem.into()),
                             primary_ty.clone(),
-                            *primary_ann,
+                            primary_ann.clone(),
                         ))
                     }
                     _ => {
@@ -1686,7 +1744,7 @@ impl<'a> Parser<'a> {
                         Ok(single(
                             Op::Store(val, ptr.into(), bytes, mem.into()),
                             primary_ty.clone(),
-                            *primary_ann,
+                            primary_ann.clone(),
                         ))
                     }
                 }
@@ -1703,7 +1761,7 @@ impl<'a> Parser<'a> {
                 Ok(single(
                     Op::StackSlot(bytes, align),
                     primary_ty.clone(),
-                    *primary_ann,
+                    primary_ann.clone(),
                 ))
             }
 
@@ -1718,7 +1776,7 @@ impl<'a> Parser<'a> {
                 Ok(single(
                     Op::MemCopy(dst.into(), src.into(), count.into(), mem.into()),
                     primary_ty.clone(),
-                    *primary_ann,
+                    primary_ann.clone(),
                 ))
             }
 
@@ -1733,7 +1791,7 @@ impl<'a> Parser<'a> {
                 Ok(single(
                     Op::MemMove(dst.into(), src.into(), count.into(), mem.into()),
                     primary_ty.clone(),
-                    *primary_ann,
+                    primary_ann.clone(),
                 ))
             }
 
@@ -1748,7 +1806,7 @@ impl<'a> Parser<'a> {
                 Ok(single(
                     Op::MemSet(dst.into(), val, count.into(), mem.into()),
                     primary_ty.clone(),
-                    *primary_ann,
+                    primary_ann.clone(),
                 ))
             }
 
@@ -1771,7 +1829,7 @@ impl<'a> Parser<'a> {
                     Op::AtomicRmw(rmw_op, ptr.into(), val, ordering, mem.into()),
                     multi,
                     primary_ty.clone(),
-                    *primary_ann,
+                    primary_ann.clone(),
                 ))
             }
 
@@ -1803,7 +1861,7 @@ impl<'a> Parser<'a> {
                     ),
                     multi,
                     primary_ty.clone(),
-                    *primary_ann,
+                    primary_ann.clone(),
                 ))
             }
 
@@ -1817,7 +1875,7 @@ impl<'a> Parser<'a> {
                 Ok(single(
                     Op::Fence(ordering, mem.into()),
                     primary_ty.clone(),
-                    *primary_ann,
+                    primary_ann.clone(),
                 ))
             }
 
@@ -1828,7 +1886,7 @@ impl<'a> Parser<'a> {
                 Ok(single(
                     Op::SymbolAddr(sym_id),
                     primary_ty.clone(),
-                    *primary_ann,
+                    primary_ann.clone(),
                 ))
             }
 
@@ -1853,11 +1911,12 @@ impl<'a> Parser<'a> {
                     // The display format puts the return annotation in the
                     // `-> type:ann` suffix. Fall back to the multi-result
                     // binding annotation for compatibility with older dumps.
-                    let effective_ann = ret_ann.or_else(|| multi.as_ref().and_then(|(_, _, a)| *a));
+                    let effective_ann =
+                        ret_ann.or_else(|| multi.as_ref().and_then(|(_, _, a)| a.clone()));
                     Ok((
                         Op::Call(callee.into(), args, mem.into(), None),
                         primary_ty.clone(),
-                        *primary_ann,
+                        primary_ann.clone(),
                         Some(ret_ty),
                         effective_ann,
                     ))
@@ -1866,7 +1925,7 @@ impl<'a> Parser<'a> {
                     Ok(single(
                         Op::Call(callee.into(), args, mem.into(), None),
                         primary_ty.clone(),
-                        *primary_ann,
+                        primary_ann.clone(),
                     ))
                 }
             }
@@ -1876,7 +1935,7 @@ impl<'a> Parser<'a> {
                 Ok(single(
                     Op::CallRet2(mem.into()),
                     primary_ty.clone(),
-                    *primary_ann,
+                    primary_ann.clone(),
                 ))
             }
 
@@ -1888,7 +1947,7 @@ impl<'a> Parser<'a> {
                 Ok(single(
                     Op::Sext(src.into(), bits),
                     primary_ty.clone(),
-                    *primary_ann,
+                    primary_ann.clone(),
                 ))
             }
 
@@ -1900,7 +1959,7 @@ impl<'a> Parser<'a> {
                 Ok(single(
                     Op::Zext(src.into(), bits),
                     primary_ty.clone(),
-                    *primary_ann,
+                    primary_ann.clone(),
                 ))
             }
 
@@ -1914,7 +1973,7 @@ impl<'a> Parser<'a> {
                 Ok(single(
                     Op::SiToFp(src.into(), ft),
                     primary_ty.clone(),
-                    *primary_ann,
+                    primary_ann.clone(),
                 ))
             }
 
@@ -1928,7 +1987,7 @@ impl<'a> Parser<'a> {
                 Ok(single(
                     Op::UiToFp(src.into(), ft),
                     primary_ty.clone(),
-                    *primary_ann,
+                    primary_ann.clone(),
                 ))
             }
 
@@ -1950,7 +2009,11 @@ impl<'a> Parser<'a> {
                     }
                     other => return Err(self.error(format!("expected integer, got {:?}", other))),
                 };
-                Ok(single(Op::Const(val), primary_ty.clone(), *primary_ann))
+                Ok(single(
+                    Op::Const(val),
+                    primary_ty.clone(),
+                    primary_ann.clone(),
+                ))
             }
 
             "bconst" => {
@@ -1962,7 +2025,11 @@ impl<'a> Parser<'a> {
                         return Err(self.error(format!("expected true/false, got {}", val_s)));
                     }
                 };
-                Ok(single(Op::BConst(val), primary_ty.clone(), *primary_ann))
+                Ok(single(
+                    Op::BConst(val),
+                    primary_ty.clone(),
+                    primary_ann.clone(),
+                ))
             }
 
             // fconst.type hex
@@ -1995,7 +2062,7 @@ impl<'a> Parser<'a> {
                 Ok(single(
                     Op::FConst(FloatConst::from_bits(ft, bits)),
                     primary_ty.clone(),
-                    *primary_ann,
+                    primary_ann.clone(),
                 ))
             }
 
@@ -2014,11 +2081,19 @@ impl<'a> Parser<'a> {
                             .ok_or_else(|| {
                                 self.error(format!("unknown parameter name: %{}", name))
                             })? as u32;
-                        Ok(single(Op::Param(idx), primary_ty.clone(), *primary_ann))
+                        Ok(single(
+                            Op::Param(idx),
+                            primary_ty.clone(),
+                            primary_ann.clone(),
+                        ))
                     }
                     Token::Integer(_) => {
                         let idx = self.expect_u32()?;
-                        Ok(single(Op::Param(idx), primary_ty.clone(), *primary_ann))
+                        Ok(single(
+                            Op::Param(idx),
+                            primary_ty.clone(),
+                            primary_ann.clone(),
+                        ))
                     }
                     other => Err(self.error(format!(
                         "expected parameter index or %name, got {:?}",
@@ -2035,7 +2110,7 @@ impl<'a> Parser<'a> {
                 Ok(single(
                     Op::ExtractValue(agg, indices),
                     primary_ty.clone(),
-                    *primary_ann,
+                    primary_ann.clone(),
                 ))
             }
 
@@ -2048,7 +2123,7 @@ impl<'a> Parser<'a> {
                 Ok(single(
                     Op::InsertValue(agg, val, indices),
                     primary_ty.clone(),
-                    *primary_ann,
+                    primary_ann.clone(),
                 ))
             }
 

@@ -3,12 +3,14 @@
 -- Target-specific isel encoding lives under TuffyLean/Target/*.
 
 import TuffyLean.Rewrites.Basic
+import TuffyLean.Rewrites.Facts
 import TuffyLean.Target.X86.Export
 
 namespace TuffyLean.Export
 
 open TuffyLean.IR
 open TuffyLean.Rewrites
+open TuffyLean.Rewrites.Facts
 
 private def quote (s : String) : String := s!"\"{s}\""
 
@@ -94,7 +96,15 @@ private def intPredicateToJson : IntPredicate → String
   | .isOne => quote "is_one"
   | .isOdd => quote "is_odd"
 
-private def intAnnotationToJson : Annotation → String
+private def knownBitsToJson (known : KnownBits) : String :=
+  jsonObj [
+    ("kind", quote "known_bits"),
+    ("ones", quote (toString known.ones)),
+    ("zeros", quote (toString known.zeros)),
+    ("demanded", quote (toString known.demanded))
+  ]
+
+private def annotationToJson : Annotation → String
   | .signed bits =>
     jsonObj [
       ("kind", quote "signed"),
@@ -110,6 +120,7 @@ private def intAnnotationToJson : Annotation → String
       ("kind", quote "dont_care"),
       ("bits", toString bits)
     ]
+  | .known known => knownBitsToJson known
   | .align bytes =>
     jsonObj [
       ("kind", quote "align"),
@@ -127,7 +138,7 @@ private def sideConditionToJson : SideCondition → String
     jsonObj [
       ("kind", quote "best_int_annotation"),
       ("binding", quote binding),
-      ("annotation", intAnnotationToJson annotation)
+      ("annotation", annotationToJson annotation)
     ]
   | .knownOne binding bit =>
     jsonObj [
@@ -264,9 +275,86 @@ private def exportPeepholeSpec : String :=
     ("rules", jsonArr (allPeepholeRules.map peepholeRuleToJson))
   ]
 
+private def factResultToJson : FactResult → String
+  | .primary => quote "primary"
+  | .secondary => quote "secondary"
+
+private def knownBitsForwardKindToJson : KnownBitsForwardKind → String
+  | .unknown => quote "unknown"
+  | .const => quote "const"
+  | .select => quote "select"
+  | .bitAnd => quote "bit_and"
+  | .bitOr => quote "bit_or"
+  | .bitXor => quote "bit_xor"
+  | .shl => quote "shl"
+  | .shr => quote "shr"
+  | .merge => quote "merge"
+  | .splitHi => quote "split_hi"
+  | .splitLo => quote "split_lo"
+
+private def intAnnotationForwardKindToJson : IntAnnotationForwardKind → String
+  | .unknown => quote "unknown"
+  | .const => quote "const"
+  | .select => quote "select"
+  | .bitAnd => quote "bit_and"
+  | .bitOr => quote "bit_or"
+  | .bitXor => quote "bit_xor"
+  | .splitLo => quote "split_lo"
+
+private def knownBitsBackwardKindToJson : KnownBitsBackwardKind → String
+  | .none => quote "none"
+  | .select => quote "select"
+  | .bitAnd => quote "bit_and"
+  | .bitOr => quote "bit_or"
+  | .bitXor => quote "bit_xor"
+  | .shl => quote "shl"
+  | .shr => quote "shr"
+  | .merge => quote "merge"
+  | .split => quote "split"
+
+private def intAnnotationBackwardKindToJson : IntAnnotationBackwardKind → String
+  | .none => quote "none"
+  | .select => quote "select"
+  | .split => quote "split"
+
+private def resultFactRuleToJson (rule : ResultFactRule) : String :=
+  jsonObj [
+    ("op", quote rule.op),
+    ("result", factResultToJson rule.result),
+    ("known_bits_forward", knownBitsForwardKindToJson rule.knownBitsForward),
+    ("int_annotation_forward", intAnnotationForwardKindToJson rule.intAnnotationForward),
+    ("proof_ref", quote rule.proofRef)
+  ]
+
+private def instFactRuleToJson (rule : InstFactRule) : String :=
+  jsonObj [
+    ("op", quote rule.op),
+    ("known_bits_backward", knownBitsBackwardKindToJson rule.knownBitsBackward),
+    ("int_annotation_backward", intAnnotationBackwardKindToJson rule.intAnnotationBackward),
+    ("proof_ref", quote rule.proofRef)
+  ]
+
+private def factDefaultsToJson (defaults : FactDefaults) : String :=
+  jsonObj [
+    ("known_bits_forward", knownBitsForwardKindToJson defaults.knownBitsForward),
+    ("int_annotation_forward", intAnnotationForwardKindToJson defaults.intAnnotationForward),
+    ("known_bits_backward", knownBitsBackwardKindToJson defaults.knownBitsBackward),
+    ("int_annotation_backward", intAnnotationBackwardKindToJson defaults.intAnnotationBackward)
+  ]
+
+private def exportPeepholeFactSpec : String :=
+  jsonObj [
+    ("format_version", "1"),
+    ("kind", quote "peephole_facts"),
+    ("defaults", factDefaultsToJson factDefaults),
+    ("result_rules", jsonArr (resultFactRules.map resultFactRuleToJson)),
+    ("inst_rules", jsonArr (instFactRules.map instFactRuleToJson))
+  ]
+
 private inductive ExportRequest where
   | target (name : String)
   | peephole
+  | peepholeFacts
 
 private def usage : String :=
   String.intercalate "\n"
@@ -276,7 +364,9 @@ private def usage : String :=
       "  lean --run TuffyLean/Export/Json.lean <target>",
       "  lean --run TuffyLean/Export/Json.lean --target <target>",
       "  lean --run TuffyLean/Export/Json.lean peephole",
-      "  lean --run TuffyLean/Export/Json.lean --kind peephole"
+      "  lean --run TuffyLean/Export/Json.lean --kind peephole",
+      "  lean --run TuffyLean/Export/Json.lean peephole_facts",
+      "  lean --run TuffyLean/Export/Json.lean --kind peephole_facts"
     ]
 
 private def parseRequest (args : List String) : Except String ExportRequest :=
@@ -284,12 +374,15 @@ private def parseRequest (args : List String) : Except String ExportRequest :=
   | [] => .ok (.target "x86")
   | ["peephole"] => .ok .peephole
   | ["--kind", "peephole"] => .ok .peephole
+  | ["peephole_facts"] => .ok .peepholeFacts
+  | ["--kind", "peephole_facts"] => .ok .peepholeFacts
   | [target] => .ok (.target target)
   | ["--target", target] => .ok (.target target)
   | _ => .error usage
 
 private def exportForRequest? : ExportRequest → Option String
   | .peephole => some exportPeepholeSpec
+  | .peepholeFacts => some exportPeepholeFactSpec
   | .target "x86" => some TuffyLean.Target.X86.Export.exportIselSpec
   | .target _ => none
 
@@ -304,6 +397,7 @@ def main (args : List String) : IO Unit := do
   | none =>
     match request with
     | .peephole => throw <| IO.userError "unknown peephole export request"
+    | .peepholeFacts => throw <| IO.userError "unknown peephole fact export request"
     | .target target => throw <| IO.userError s!"unknown target: {target}"
 
 end TuffyLean.Export

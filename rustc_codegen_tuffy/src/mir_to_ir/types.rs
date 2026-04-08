@@ -23,7 +23,7 @@ impl IntAnn {
                 IntSignedness::Unsigned => IntAnn::Unsigned(int_ann.bit_width),
                 IntSignedness::DontCare => IntAnn::DontCare(int_ann.bit_width),
             }),
-            Annotation::Align(_) | Annotation::Byval(_) => None,
+            Annotation::Align(_) | Annotation::KnownBits(_) | Annotation::Byval(_) => None,
         }
     }
 

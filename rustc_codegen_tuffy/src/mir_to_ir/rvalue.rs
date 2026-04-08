@@ -595,8 +595,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         // projections (e.g. `RET.fld1` where RET is a struct but
         // fld1 is i128).  The MIR types computed above resolve
         // through projections correctly.
-        let l_ann = translate_annotation(lhs_mir_ty).or(l_ann);
-        let r_ann = translate_annotation(rhs_mir_ty).or(r_ann);
+        let l_ann = translate_annotation(lhs_mir_ty).or(l_ann.clone());
+        let r_ann = translate_annotation(rhs_mir_ty).or(r_ann.clone());
 
         // Coerce pointer operands to integers — needed for both
         // arithmetic/bitwise ops and comparisons.
@@ -604,16 +604,17 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let r = self.coerce_to_int(r_raw);
         let l_op = IrOperand {
             value: l,
-            annotation: l_ann,
+            annotation: l_ann.clone(),
         };
         let r_op = IrOperand {
             value: r,
-            annotation: r_ann,
+            annotation: r_ann.clone(),
         };
         let res_ann = Some(
             l_ann
+                .clone()
                 .and_then(|a| IntAnn::from_annotation(&a))
-                .or_else(|| r_ann.and_then(|a| IntAnn::from_annotation(&a)))
+                .or_else(|| r_ann.clone().and_then(|a| IntAnn::from_annotation(&a)))
                 .or_else(|| {
                     // Fallback: use destination type
                     let dest_ty = dest_place.ty(&self.mir.local_decls, self.tcx).ty;
@@ -1220,7 +1221,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         signedness: IntSignedness::DontCare,
                     });
                 self.builder
-                    .shr(l_op.into(), masked_op.into(), int_ann, Origin::synthetic())
+                    .shr(
+                        l_op.into(),
+                        masked_op.into(),
+                        int_ann,
+                        Origin::synthetic(),
+                    )
                     .raw()
             }
             BinOp::Div => {
@@ -1348,7 +1354,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         src_size as u32,
                         Type::Int,
                         self.current_mem.into(),
-                        ann,
+                        ann.clone(),
                         Origin::synthetic(),
                     );
                     return Some(loaded);
@@ -1809,7 +1815,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             src_size as u32,
                             Type::Int,
                             self.current_mem.into(),
-                            ann,
+                            ann.clone(),
                             Origin::synthetic(),
                         )
                     } else {
@@ -1919,7 +1925,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 target_size as u32,
                                 ir_ty,
                                 self.current_mem.into(),
-                                ann,
+                                ann.clone(),
                                 Origin::synthetic(),
                             );
                             return Some(data);
@@ -1966,7 +1972,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             target_size as u32,
                             load_ty,
                             self.current_mem.into(),
-                            ann,
+                            ann.clone(),
                             Origin::synthetic(),
                         );
                         return Some(loaded);
@@ -2048,7 +2054,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             size,
                             Type::Int,
                             self.current_mem.into(),
-                            ann,
+                            ann.clone(),
                             Origin::synthetic(),
                         );
                         return Some(loaded);
@@ -2121,7 +2127,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             target_size as u32,
                             Type::Int,
                             self.current_mem.into(),
-                            ann,
+                            ann.clone(),
                             Origin::synthetic(),
                         );
                         return Some(loaded);

@@ -125,10 +125,29 @@ structure FpRewriteFlags where
 
 /-- Range annotation on a value definition or use edge.
     Integer-only; float constraints use `FpClassMask` separately. -/
+structure KnownBits where
+  ones : Nat := 0
+  zeros : Nat := 0
+  demanded : Nat := 0
+  deriving DecidableEq, Repr
+
+/-- `KnownBits` representation invariant. -/
+def KnownBits.WellFormed (known : KnownBits) : Prop :=
+  Nat.land known.ones known.zeros = 0 ∧
+    Nat.land (Nat.lor known.ones known.zeros) known.demanded =
+      Nat.lor known.ones known.zeros
+
+/-- Executable check for the `KnownBits` representation invariant. -/
+def KnownBits.wellFormedB (known : KnownBits) : Bool :=
+  Nat.land known.ones known.zeros == 0 &&
+    Nat.land (Nat.lor known.ones known.zeros) known.demanded ==
+      Nat.lor known.ones known.zeros
+
 inductive Annotation where
   | signed (bits : Nat)    -- :s<N> — value in [-2^(N-1), 2^(N-1)-1]
   | unsigned (bits : Nat)  -- :u<N> — value in [0, 2^N-1]
   | dontCare (bits : Nat)  -- :dc<N> — only low N bits meaningful, high bits undef
+  | known (known : KnownBits) -- :known(...) — per-bit four-state constraint
   | align (bytes : Nat)    -- :align<N> — pointer alignment in bytes
   deriving DecidableEq, Repr
 

@@ -185,6 +185,26 @@ fn test_shr() {
     assert_eq!(unwrap_int(r), 8);
 }
 
+#[test]
+fn test_known_bits_result_annotation_accepts_matching_value() {
+    let r = run("func @main() -> int:known(1?0) {
+  bb0(v0: mem):
+    v1: int:known(1?0) = iconst 6
+    ret v1, v0
+}");
+    assert_eq!(unwrap_int(r), 6);
+}
+
+#[test]
+fn test_known_bits_result_annotation_rejects_mismatching_value() {
+    let r = run("func @main() -> int:known(1?0) {
+  bb0(v0: mem):
+    v1: int:known(1?0) = iconst 2
+    ret v1, v0
+}");
+    assert_ub(r);
+}
+
 // ──────────────────────────────────────────────────────────────────────
 // Boolean operations
 // ──────────────────────────────────────────────────────────────────────

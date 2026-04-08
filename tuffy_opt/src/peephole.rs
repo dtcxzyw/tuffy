@@ -1,12 +1,12 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
-use num_bigint::{BigInt, Sign};
+use num_bigint::{BigInt, BigUint, Sign};
 use tuffy_ir::function::Function;
 use tuffy_ir::instruction::{ICmpOp, Instruction, Op, Operand, Origin};
 use tuffy_ir::module::Module;
 use tuffy_ir::typed::{BoolOperand, BoolValue};
-use tuffy_ir::types::{Annotation, IntAnnotation, IntSignedness, Type};
+use tuffy_ir::types::{Annotation, IntAnnotation, IntSignedness, KnownBits, Type};
 use tuffy_ir::value::BlockRef;
 use tuffy_ir::value::ValueRef;
 use tuffy_ir_interp::exec::{
@@ -16,6 +16,7 @@ use tuffy_ir_interp::memory::Memory;
 use tuffy_ir_interp::value::{AllocId, Value};
 
 const MAX_ITERATIONS: usize = 32;
+const MAX_FACT_ITERATIONS: usize = 64;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PeepholeStats {
@@ -121,11 +122,11 @@ fn parse_decimal_bigint(value: &str) -> BigInt {
         .unwrap_or_else(|_| panic!("invalid generated bigint literal: {value}"))
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct IntFacts {
-    exact_const: Option<BigInt>,
-    known_zero: u64,
-    known_one: u64,
+    is_bottom: bool,
+    known_zero: BigUint,
+    known_one: BigUint,
     unsigned_width_upper_bound: Option<u32>,
     signed_width_upper_bound: Option<u32>,
 }
@@ -135,62 +136,150 @@ impl IntFacts {
         Self::default()
     }
 
-    fn from_exact_const(value: &BigInt) -> Self {
+    fn bottom() -> Self {
         Self {
-            exact_const: Some(value.clone()),
-            known_zero: !low_bits_u64(value),
-            known_one: low_bits_u64(value),
-            unsigned_width_upper_bound: exact_unsigned_width(value),
-            signed_width_upper_bound: Some(exact_signed_width(value)),
+            is_bottom: true,
+            ..Self::default()
         }
     }
 
-    fn refine_with_annotation(mut self, annotation: &IntAnnotation) -> Self {
-        if let Some(value) = &self.exact_const {
-            self = match apply_annotation(value, annotation) {
-                Value::Int(value) => Self::from_exact_const(&value),
-                Value::Poison => Self::unknown(),
-                _ => unreachable!("integer annotation should not produce non-int values"),
-            };
-            return self;
+    fn from_exact_const(value: &BigInt) -> Self {
+        let mut facts = Self {
+            is_bottom: false,
+            known_zero: BigUint::default(),
+            known_one: BigUint::default(),
+            unsigned_width_upper_bound: exact_unsigned_width(value),
+            signed_width_upper_bound: Some(exact_signed_width(value)),
+        };
+        let width = facts
+            .unsigned_width_upper_bound
+            .or(facts.signed_width_upper_bound)
+            .unwrap_or(1) as usize;
+        for bit in 0..width.max(1) {
+            if exact_bit_is_one(value, bit as u32) {
+                facts.set_known_one(bit);
+            } else {
+                facts.set_known_zero(bit);
+            }
         }
+        facts.tighten_from_unsigned();
+        facts
+    }
 
+    fn from_int_annotation(annotation: &IntAnnotation) -> Self {
+        let mut facts = Self::unknown();
         match annotation.signedness {
             IntSignedness::Signed => {
-                self.signed_width_upper_bound =
-                    min_bound(self.signed_width_upper_bound, Some(annotation.bit_width));
+                facts.signed_width_upper_bound = Some(annotation.bit_width);
             }
             IntSignedness::Unsigned | IntSignedness::DontCare => {
-                self.unsigned_width_upper_bound =
-                    min_bound(self.unsigned_width_upper_bound, Some(annotation.bit_width));
-                self.signed_width_upper_bound = min_bound(
-                    self.signed_width_upper_bound,
-                    Some(annotation.bit_width.saturating_add(1)),
-                );
-                self.add_known_zero_above(annotation.bit_width);
+                facts.unsigned_width_upper_bound = Some(annotation.bit_width);
             }
         }
+        facts.tighten_from_unsigned();
+        facts
+    }
 
-        self
+    fn from_known_bits(known: &KnownBits) -> Self {
+        let mut facts = Self {
+            is_bottom: false,
+            known_zero: known.zeros.clone(),
+            known_one: known.ones.clone(),
+            unsigned_width_upper_bound: None,
+            signed_width_upper_bound: None,
+        };
+        facts.normalize();
+        facts
+    }
+
+    fn meet_with(&mut self, other: &Self) -> bool {
+        let original = self.clone();
+        if self.is_bottom || other.is_bottom {
+            self.is_bottom = true;
+            self.known_zero = BigUint::default();
+            self.known_one = BigUint::default();
+            self.unsigned_width_upper_bound = None;
+            self.signed_width_upper_bound = None;
+            return *self != original;
+        }
+
+        self.known_zero |= &other.known_zero;
+        self.known_one |= &other.known_one;
+        self.unsigned_width_upper_bound = min_bound(
+            self.unsigned_width_upper_bound,
+            other.unsigned_width_upper_bound,
+        );
+        self.signed_width_upper_bound = min_bound(
+            self.signed_width_upper_bound,
+            other.signed_width_upper_bound,
+        );
+        self.tighten_from_unsigned();
+        self.normalize();
+        *self != original
+    }
+
+    fn normalize(&mut self) {
+        if (&self.known_zero & &self.known_one) != BigUint::default() {
+            *self = Self::bottom();
+        }
+    }
+
+    fn refine_with_annotation(&mut self, annotation: &Annotation) {
+        let update = match annotation {
+            Annotation::Int(annotation) => Self::from_int_annotation(annotation),
+            Annotation::KnownBits(known) => Self::from_known_bits(known),
+            _ => return,
+        };
+        let _ = self.meet_with(&update);
     }
 
     fn tighten_from_unsigned(&mut self) {
         if let Some(bits) = self.unsigned_width_upper_bound {
             self.signed_width_upper_bound =
                 min_bound(self.signed_width_upper_bound, Some(bits.saturating_add(1)));
-            self.add_known_zero_above(bits);
         }
     }
 
-    fn add_known_zero_above(&mut self, bits: u32) {
-        if bits >= 64 {
-            return;
+    fn set_known_zero(&mut self, bit: usize) {
+        self.known_zero |= bit_mask(bit);
+        self.normalize();
+    }
+
+    fn set_known_one(&mut self, bit: usize) {
+        self.known_one |= bit_mask(bit);
+        self.normalize();
+    }
+
+    fn bit_known_zero(&self, bit: usize) -> bool {
+        if self.is_bottom {
+            return false;
         }
-        let upper_zero_mask = !((1u64 << bits) - 1);
-        self.known_zero |= upper_zero_mask;
+        mask_has_bit(&self.known_zero, bit)
+            || self
+                .unsigned_width_upper_bound
+                .is_some_and(|width| bit >= width as usize)
+    }
+
+    fn bit_known_one(&self, bit: usize) -> bool {
+        !self.is_bottom && mask_has_bit(&self.known_one, bit)
+    }
+
+    fn relevant_bit_width(&self) -> usize {
+        let mask_bits = highest_mask_bit(&(&self.known_zero | &self.known_one)).map(|bit| bit + 1);
+        let width_bits = self
+            .unsigned_width_upper_bound
+            .map(|bits| bits as usize)
+            .into_iter()
+            .chain(self.signed_width_upper_bound.map(|bits| bits as usize))
+            .max();
+        mask_bits.into_iter().chain(width_bits).max().unwrap_or(1)
     }
 
     fn best_annotation(&self) -> Option<IntAnnotation> {
+        if self.is_bottom {
+            return None;
+        }
+
         let mut best: Option<IntAnnotation> = None;
 
         if let Some(bit_width) = self.unsigned_width_upper_bound {
@@ -220,7 +309,8 @@ impl IntFacts {
 
 #[derive(Default)]
 pub(super) struct IntFactCache {
-    entries: BTreeMap<u32, Option<IntFacts>>,
+    entries: BTreeMap<u32, IntFacts>,
+    computed: bool,
 }
 
 fn annotation_rank(annotation: IntAnnotation) -> (u32, u8) {
@@ -248,11 +338,21 @@ fn max_bound(lhs: Option<u32>, rhs: Option<u32>) -> Option<u32> {
     }
 }
 
-fn low_bits_u64(value: &BigInt) -> u64 {
-    let modulus = BigInt::from(1u8) << 64;
-    let truncated: BigInt = ((value % &modulus) + &modulus) % &modulus;
-    let (_, digits) = truncated.to_u64_digits();
-    digits.first().copied().unwrap_or(0)
+fn bit_mask(bit: usize) -> BigUint {
+    BigUint::from(1u8) << bit
+}
+
+fn mask_has_bit(mask: &BigUint, bit: usize) -> bool {
+    (mask & bit_mask(bit)) != BigUint::default()
+}
+
+fn highest_mask_bit(mask: &BigUint) -> Option<usize> {
+    let bits = mask.bits();
+    if bits == 0 {
+        None
+    } else {
+        Some(bits as usize - 1)
+    }
 }
 
 fn exact_unsigned_width(value: &BigInt) -> Option<u32> {
@@ -349,20 +449,10 @@ fn best_int_annotation_matches(
 }
 
 fn known_one(func: &Function, fact_cache: &mut IntFactCache, value: ValueRef, bit: u32) -> bool {
-    if bit >= 64 {
-        return int_facts(func, fact_cache, value)
-            .and_then(|facts| facts.exact_const)
-            .is_some_and(|value| exact_bit_is_one(&value, bit));
-    }
-
-    int_facts(func, fact_cache, value).is_some_and(|facts| (facts.known_one & (1u64 << bit)) != 0)
+    int_facts(func, fact_cache, value).is_some_and(|facts| facts.bit_known_one(bit as usize))
 }
 
 fn exact_bit_is_one(value: &BigInt, bit: u32) -> bool {
-    if bit < 64 {
-        return (low_bits_u64(value) & (1u64 << bit)) != 0;
-    }
-
     let modulus = BigInt::from(1u8) << (bit as usize + 1);
     let truncated = ((value % &modulus) + &modulus) % &modulus;
     let shifted = truncated >> bit as usize;
@@ -370,131 +460,739 @@ fn exact_bit_is_one(value: &BigInt, bit: u32) -> bool {
 }
 
 fn int_facts(func: &Function, fact_cache: &mut IntFactCache, value: ValueRef) -> Option<IntFacts> {
-    if let Some(cached) = fact_cache.entries.get(&value.raw()) {
-        return cached.clone();
-    }
-
-    let computed = compute_int_facts(func, fact_cache, value);
-    fact_cache.entries.insert(value.raw(), computed.clone());
-    computed
-}
-
-fn compute_int_facts(
-    func: &Function,
-    fact_cache: &mut IntFactCache,
-    value: ValueRef,
-) -> Option<IntFacts> {
     if !matches!(func.value_type(value), Some(Type::Int)) {
         return None;
     }
 
-    let mut facts = if value.is_block_arg() || value.is_secondary_result() {
-        IntFacts::unknown()
-    } else {
-        let idx = value.index();
-        let node = func.inst_pool.get(idx)?;
-        match &node.inst.op {
-            Op::Const(value) => IntFacts::from_exact_const(value),
-            Op::Select(_, true_value, false_value) => {
-                let true_facts = int_facts(func, fact_cache, true_value.value);
-                let false_facts = int_facts(func, fact_cache, false_value.value);
-                merge_select_facts(true_facts, false_facts)
-            }
-            Op::And(lhs, rhs) => {
-                let lhs = int_facts(func, fact_cache, lhs.clone().raw().value);
-                let rhs = int_facts(func, fact_cache, rhs.clone().raw().value);
-                merge_and_facts(lhs, rhs)
-            }
-            Op::Xor(lhs, rhs) => {
-                let lhs = int_facts(func, fact_cache, lhs.clone().raw().value);
-                let rhs = int_facts(func, fact_cache, rhs.clone().raw().value);
-                merge_xor_facts(lhs, rhs)
-            }
-            _ => IntFacts::unknown(),
-        }
-    };
-
-    if let Some(Annotation::Int(annotation)) = definition_annotation(func, value) {
-        facts = facts.refine_with_annotation(&annotation);
-    }
-
-    facts.tighten_from_unsigned();
-    Some(facts)
+    ensure_int_facts(func, fact_cache);
+    Some(
+        fact_cache
+            .entries
+            .get(&value.raw())
+            .cloned()
+            .unwrap_or_else(IntFacts::unknown),
+    )
 }
 
-fn merge_select_facts(lhs: Option<IntFacts>, rhs: Option<IntFacts>) -> IntFacts {
-    let (Some(lhs), Some(rhs)) = (lhs, rhs) else {
-        return IntFacts::unknown();
-    };
-
-    let exact_const = match (&lhs.exact_const, &rhs.exact_const) {
-        (Some(lhs), Some(rhs)) if lhs == rhs => Some(lhs.clone()),
-        _ => None,
-    };
-
-    if let Some(value) = exact_const {
-        return IntFacts::from_exact_const(&value);
+fn ensure_int_facts(func: &Function, fact_cache: &mut IntFactCache) {
+    if fact_cache.computed {
+        return;
     }
 
+    let int_values = collect_int_values(func);
+    fact_cache.entries.clear();
+    for value in &int_values {
+        fact_cache
+            .entries
+            .insert(value.raw(), seed_int_facts_for_value(func, *value));
+    }
+
+    for _ in 0..MAX_FACT_ITERATIONS {
+        let mut changed = false;
+        let snapshot = fact_cache.entries.clone();
+
+        for value in &int_values {
+            if value.is_block_arg() {
+                continue;
+            }
+            let mut forward = generated_forward_int_facts(func, *value, &snapshot)
+                .unwrap_or_else(IntFacts::unknown);
+            let seed = seed_int_facts_for_value(func, *value);
+            let _ = forward.meet_with(&seed);
+            changed |= update_fact_entry(&mut fact_cache.entries, *value, &forward);
+        }
+
+        let snapshot = fact_cache.entries.clone();
+        for (idx, inst) in func.inst_pool.iter_insts() {
+            let primary_value = ValueRef::inst_result(idx);
+            let secondary_value = ValueRef::inst_secondary_result(idx);
+            let primary_is_int = matches!(inst.ty, Type::Int);
+            let secondary_is_int = matches!(inst.secondary_ty, Some(Type::Int));
+            if !primary_is_int && !secondary_is_int {
+                continue;
+            }
+
+            let primary_facts = snapshot
+                .get(&primary_value.raw())
+                .cloned()
+                .unwrap_or_else(IntFacts::unknown);
+            let secondary_facts = if secondary_is_int {
+                Some(
+                    snapshot
+                        .get(&secondary_value.raw())
+                        .cloned()
+                        .unwrap_or_else(IntFacts::unknown),
+                )
+            } else {
+                None
+            };
+
+            for update in generated_backward_int_facts(
+                func,
+                idx,
+                &primary_facts,
+                secondary_facts.as_ref(),
+                &snapshot,
+            ) {
+                if !matches!(func.value_type(update.value), Some(Type::Int)) {
+                    continue;
+                }
+                changed |= update_fact_entry(&mut fact_cache.entries, update.value, &update.facts);
+            }
+        }
+
+        if !changed {
+            break;
+        }
+    }
+
+    fact_cache.computed = true;
+}
+
+fn collect_int_values(func: &Function) -> Vec<ValueRef> {
+    let mut values = Vec::new();
+    for (idx, arg) in func.block_args.iter().enumerate() {
+        if matches!(arg.ty, Type::Int) {
+            values.push(ValueRef::block_arg(idx as u32));
+        }
+    }
+    for (idx, inst) in func.inst_pool.iter_insts() {
+        if matches!(inst.ty, Type::Int) {
+            values.push(ValueRef::inst_result(idx));
+        }
+        if matches!(inst.secondary_ty, Some(Type::Int)) {
+            values.push(ValueRef::inst_secondary_result(idx));
+        }
+    }
+    values
+}
+
+fn update_fact_entry(
+    entries: &mut BTreeMap<u32, IntFacts>,
+    value: ValueRef,
+    update: &IntFacts,
+) -> bool {
+    let entry = entries.entry(value.raw()).or_insert_with(IntFacts::unknown);
+    entry.meet_with(update)
+}
+
+fn seed_int_facts_for_value(func: &Function, value: ValueRef) -> IntFacts {
+    let mut facts = IntFacts::unknown();
+    if !value.is_block_arg()
+        && !value.is_secondary_result()
+        && let Some(node) = func.inst_pool.get(value.index())
+        && let Op::Const(value) = &node.inst.op
+    {
+        let const_facts = IntFacts::from_exact_const(value);
+        let _ = facts.meet_with(&const_facts);
+    }
+    if let Some(annotation) = definition_annotation(func, value) {
+        facts.refine_with_annotation(&annotation);
+    }
+    facts
+}
+
+fn value_facts_from_snapshot(current: &BTreeMap<u32, IntFacts>, value: ValueRef) -> IntFacts {
+    current
+        .get(&value.raw())
+        .cloned()
+        .unwrap_or_else(IntFacts::unknown)
+}
+
+fn operand_input_facts(
+    _func: &Function,
+    current: &BTreeMap<u32, IntFacts>,
+    operand: &Operand,
+) -> IntFacts {
+    let mut facts = value_facts_from_snapshot(current, operand.value);
+    if let Some(annotation) = &operand.annotation {
+        facts.refine_with_annotation(annotation);
+    }
+    facts
+}
+
+fn forward_unknown() -> IntFacts {
+    IntFacts::unknown()
+}
+
+fn forward_const(value: &BigInt) -> IntFacts {
+    IntFacts::from_exact_const(value)
+}
+
+fn forward_select(
+    func: &Function,
+    current: &BTreeMap<u32, IntFacts>,
+    true_value: &Operand,
+    false_value: &Operand,
+) -> IntFacts {
+    let true_facts = operand_input_facts(func, current, true_value);
+    let false_facts = operand_input_facts(func, current, false_value);
     let mut facts = IntFacts {
-        exact_const: None,
-        known_zero: lhs.known_zero & rhs.known_zero,
-        known_one: lhs.known_one & rhs.known_one,
+        is_bottom: false,
+        known_zero: BigUint::default(),
+        known_one: BigUint::default(),
         unsigned_width_upper_bound: max_bound(
-            lhs.unsigned_width_upper_bound,
-            rhs.unsigned_width_upper_bound,
+            true_facts.unsigned_width_upper_bound,
+            false_facts.unsigned_width_upper_bound,
         ),
         signed_width_upper_bound: max_bound(
-            lhs.signed_width_upper_bound,
-            rhs.signed_width_upper_bound,
+            true_facts.signed_width_upper_bound,
+            false_facts.signed_width_upper_bound,
         ),
     };
+    let width = true_facts
+        .relevant_bit_width()
+        .max(false_facts.relevant_bit_width());
+    for bit in 0..width {
+        if true_facts.bit_known_zero(bit) && false_facts.bit_known_zero(bit) {
+            facts.set_known_zero(bit);
+        }
+        if true_facts.bit_known_one(bit) && false_facts.bit_known_one(bit) {
+            facts.set_known_one(bit);
+        }
+    }
     facts.tighten_from_unsigned();
     facts
 }
 
-fn merge_and_facts(lhs: Option<IntFacts>, rhs: Option<IntFacts>) -> IntFacts {
-    let lhs = lhs.unwrap_or_else(IntFacts::unknown);
-    let rhs = rhs.unwrap_or_else(IntFacts::unknown);
-
-    if let (Some(lhs), Some(rhs)) = (&lhs.exact_const, &rhs.exact_const) {
-        return IntFacts::from_exact_const(&(lhs & rhs));
-    }
-
+fn forward_bitand(
+    func: &Function,
+    current: &BTreeMap<u32, IntFacts>,
+    lhs: &Operand,
+    rhs: &Operand,
+) -> IntFacts {
+    let lhs = operand_input_facts(func, current, lhs);
+    let rhs = operand_input_facts(func, current, rhs);
     let mut facts = IntFacts {
-        exact_const: None,
-        known_zero: lhs.known_zero | rhs.known_zero,
-        known_one: lhs.known_one & rhs.known_one,
+        is_bottom: false,
+        known_zero: BigUint::default(),
+        known_one: BigUint::default(),
         unsigned_width_upper_bound: min_bound(
             lhs.unsigned_width_upper_bound,
             rhs.unsigned_width_upper_bound,
         ),
         signed_width_upper_bound: None,
     };
+    let width = lhs.relevant_bit_width().max(rhs.relevant_bit_width());
+    for bit in 0..width {
+        if lhs.bit_known_zero(bit) || rhs.bit_known_zero(bit) {
+            facts.set_known_zero(bit);
+        }
+        if lhs.bit_known_one(bit) && rhs.bit_known_one(bit) {
+            facts.set_known_one(bit);
+        }
+    }
     facts.tighten_from_unsigned();
     facts
 }
 
-fn merge_xor_facts(lhs: Option<IntFacts>, rhs: Option<IntFacts>) -> IntFacts {
-    let lhs = lhs.unwrap_or_else(IntFacts::unknown);
-    let rhs = rhs.unwrap_or_else(IntFacts::unknown);
-
-    if let (Some(lhs), Some(rhs)) = (&lhs.exact_const, &rhs.exact_const) {
-        return IntFacts::from_exact_const(&(lhs ^ rhs));
-    }
-
+fn forward_bitor(
+    func: &Function,
+    current: &BTreeMap<u32, IntFacts>,
+    lhs: &Operand,
+    rhs: &Operand,
+) -> IntFacts {
+    let lhs = operand_input_facts(func, current, lhs);
+    let rhs = operand_input_facts(func, current, rhs);
     let mut facts = IntFacts {
-        exact_const: None,
-        known_zero: (lhs.known_zero & rhs.known_zero) | (lhs.known_one & rhs.known_one),
-        known_one: (lhs.known_zero & rhs.known_one) | (lhs.known_one & rhs.known_zero),
+        is_bottom: false,
+        known_zero: BigUint::default(),
+        known_one: BigUint::default(),
         unsigned_width_upper_bound: max_bound(
             lhs.unsigned_width_upper_bound,
             rhs.unsigned_width_upper_bound,
         ),
         signed_width_upper_bound: None,
     };
+    let width = lhs.relevant_bit_width().max(rhs.relevant_bit_width());
+    for bit in 0..width {
+        if lhs.bit_known_zero(bit) && rhs.bit_known_zero(bit) {
+            facts.set_known_zero(bit);
+        }
+        if lhs.bit_known_one(bit) || rhs.bit_known_one(bit) {
+            facts.set_known_one(bit);
+        }
+    }
     facts.tighten_from_unsigned();
     facts
+}
+
+fn forward_bitxor(
+    func: &Function,
+    current: &BTreeMap<u32, IntFacts>,
+    lhs: &Operand,
+    rhs: &Operand,
+) -> IntFacts {
+    let lhs = operand_input_facts(func, current, lhs);
+    let rhs = operand_input_facts(func, current, rhs);
+    let mut facts = IntFacts {
+        is_bottom: false,
+        known_zero: BigUint::default(),
+        known_one: BigUint::default(),
+        unsigned_width_upper_bound: max_bound(
+            lhs.unsigned_width_upper_bound,
+            rhs.unsigned_width_upper_bound,
+        ),
+        signed_width_upper_bound: None,
+    };
+    let width = lhs.relevant_bit_width().max(rhs.relevant_bit_width());
+    for bit in 0..width {
+        if (lhs.bit_known_zero(bit) && rhs.bit_known_zero(bit))
+            || (lhs.bit_known_one(bit) && rhs.bit_known_one(bit))
+        {
+            facts.set_known_zero(bit);
+        }
+        if (lhs.bit_known_zero(bit) && rhs.bit_known_one(bit))
+            || (lhs.bit_known_one(bit) && rhs.bit_known_zero(bit))
+        {
+            facts.set_known_one(bit);
+        }
+    }
+    facts.tighten_from_unsigned();
+    facts
+}
+
+fn forward_shl(
+    func: &Function,
+    current: &BTreeMap<u32, IntFacts>,
+    lhs: &Operand,
+    rhs: &Operand,
+) -> IntFacts {
+    let lhs_facts = operand_input_facts(func, current, lhs);
+    let Some(shift) = bound_int_constant(func, rhs.value).and_then(bigint_to_nonnegative_u32)
+    else {
+        return IntFacts::unknown();
+    };
+
+    let mut facts = IntFacts::unknown();
+    let width = lhs_facts.relevant_bit_width() + shift as usize;
+    for bit in 0..width {
+        if bit < shift as usize {
+            facts.set_known_zero(bit);
+            continue;
+        }
+        let src_bit = bit - shift as usize;
+        if lhs_facts.bit_known_zero(src_bit) {
+            facts.set_known_zero(bit);
+        }
+        if lhs_facts.bit_known_one(src_bit) {
+            facts.set_known_one(bit);
+        }
+    }
+    facts.unsigned_width_upper_bound = lhs_facts
+        .unsigned_width_upper_bound
+        .map(|bits| bits.saturating_add(shift));
+    facts.tighten_from_unsigned();
+    facts
+}
+
+fn forward_shr(
+    func: &Function,
+    current: &BTreeMap<u32, IntFacts>,
+    lhs: &Operand,
+    rhs: &Operand,
+) -> IntFacts {
+    let lhs_facts = operand_input_facts(func, current, lhs);
+    let Some(shift) = bound_int_constant(func, rhs.value).and_then(bigint_to_nonnegative_u32)
+    else {
+        return IntFacts::unknown();
+    };
+
+    let mut facts = IntFacts::unknown();
+    let width = lhs_facts
+        .relevant_bit_width()
+        .saturating_sub(shift as usize)
+        .max(1);
+    for bit in 0..width {
+        let src_bit = bit + shift as usize;
+        if lhs_facts.bit_known_zero(src_bit) {
+            facts.set_known_zero(bit);
+        }
+        if lhs_facts.bit_known_one(src_bit) {
+            facts.set_known_one(bit);
+        }
+    }
+    facts.unsigned_width_upper_bound = lhs_facts
+        .unsigned_width_upper_bound
+        .map(|bits| if shift >= bits { 1 } else { bits - shift });
+    facts.tighten_from_unsigned();
+    facts
+}
+
+fn forward_merge(
+    func: &Function,
+    current: &BTreeMap<u32, IntFacts>,
+    lhs: &Operand,
+    rhs: &Operand,
+    width: u32,
+) -> IntFacts {
+    let lhs_facts = operand_input_facts(func, current, lhs);
+    let rhs_facts = operand_input_facts(func, current, rhs);
+    let mut facts = IntFacts::unknown();
+    let total_width = lhs_facts.relevant_bit_width().max(
+        rhs_facts
+            .relevant_bit_width()
+            .saturating_add(width as usize),
+    );
+    for bit in 0..total_width {
+        if bit < width as usize {
+            if rhs_facts.bit_known_zero(bit) {
+                facts.set_known_zero(bit);
+            }
+            if rhs_facts.bit_known_one(bit) {
+                facts.set_known_one(bit);
+            }
+        } else {
+            if lhs_facts.bit_known_zero(bit) {
+                facts.set_known_zero(bit);
+            }
+            if lhs_facts.bit_known_one(bit) {
+                facts.set_known_one(bit);
+            }
+        }
+    }
+    facts
+}
+
+fn forward_split_hi(
+    func: &Function,
+    current: &BTreeMap<u32, IntFacts>,
+    src: &Operand,
+    width: u32,
+) -> IntFacts {
+    let src_facts = operand_input_facts(func, current, src);
+    let mut facts = IntFacts::unknown();
+    let out_width = src_facts
+        .relevant_bit_width()
+        .saturating_sub(width as usize)
+        .max(1);
+    for bit in 0..out_width {
+        let src_bit = bit + width as usize;
+        if src_facts.bit_known_zero(src_bit) {
+            facts.set_known_zero(bit);
+        }
+        if src_facts.bit_known_one(src_bit) {
+            facts.set_known_one(bit);
+        }
+    }
+    facts.unsigned_width_upper_bound = src_facts
+        .unsigned_width_upper_bound
+        .map(|bits| if width >= bits { 1 } else { bits - width });
+    facts.tighten_from_unsigned();
+    facts
+}
+
+fn forward_split_lo(
+    func: &Function,
+    current: &BTreeMap<u32, IntFacts>,
+    src: &Operand,
+    width: u32,
+) -> IntFacts {
+    let src_facts = operand_input_facts(func, current, src);
+    let mut facts = IntFacts::unknown();
+    for bit in 0..width as usize {
+        if src_facts.bit_known_zero(bit) {
+            facts.set_known_zero(bit);
+        }
+        if src_facts.bit_known_one(bit) {
+            facts.set_known_one(bit);
+        }
+    }
+    facts.unsigned_width_upper_bound = Some(width.max(1));
+    facts.tighten_from_unsigned();
+    facts
+}
+
+#[derive(Clone)]
+struct BackwardFactUpdate {
+    value: ValueRef,
+    facts: IntFacts,
+}
+
+fn backward_select(
+    true_value: &Operand,
+    false_value: &Operand,
+    result: &IntFacts,
+) -> Vec<BackwardFactUpdate> {
+    vec![
+        BackwardFactUpdate {
+            value: true_value.value,
+            facts: result.clone(),
+        },
+        BackwardFactUpdate {
+            value: false_value.value,
+            facts: result.clone(),
+        },
+    ]
+}
+
+fn backward_bitand(
+    func: &Function,
+    current: &BTreeMap<u32, IntFacts>,
+    lhs: &Operand,
+    rhs: &Operand,
+    result: &IntFacts,
+) -> Vec<BackwardFactUpdate> {
+    let lhs_facts = operand_input_facts(func, current, lhs);
+    let rhs_facts = operand_input_facts(func, current, rhs);
+    let width = lhs_facts
+        .relevant_bit_width()
+        .max(rhs_facts.relevant_bit_width())
+        .max(result.relevant_bit_width());
+    let mut lhs_update = IntFacts::unknown();
+    let mut rhs_update = IntFacts::unknown();
+    for bit in 0..width {
+        if result.bit_known_one(bit) {
+            lhs_update.set_known_one(bit);
+            rhs_update.set_known_one(bit);
+        }
+        if result.bit_known_zero(bit) && rhs_facts.bit_known_one(bit) {
+            lhs_update.set_known_zero(bit);
+        }
+        if result.bit_known_zero(bit) && lhs_facts.bit_known_one(bit) {
+            rhs_update.set_known_zero(bit);
+        }
+    }
+    vec![
+        BackwardFactUpdate {
+            value: lhs.value,
+            facts: lhs_update,
+        },
+        BackwardFactUpdate {
+            value: rhs.value,
+            facts: rhs_update,
+        },
+    ]
+}
+
+fn backward_bitor(
+    func: &Function,
+    current: &BTreeMap<u32, IntFacts>,
+    lhs: &Operand,
+    rhs: &Operand,
+    result: &IntFacts,
+) -> Vec<BackwardFactUpdate> {
+    let lhs_facts = operand_input_facts(func, current, lhs);
+    let rhs_facts = operand_input_facts(func, current, rhs);
+    let width = lhs_facts
+        .relevant_bit_width()
+        .max(rhs_facts.relevant_bit_width())
+        .max(result.relevant_bit_width());
+    let mut lhs_update = IntFacts::unknown();
+    let mut rhs_update = IntFacts::unknown();
+    for bit in 0..width {
+        if result.bit_known_zero(bit) {
+            lhs_update.set_known_zero(bit);
+            rhs_update.set_known_zero(bit);
+        }
+        if result.bit_known_one(bit) && rhs_facts.bit_known_zero(bit) {
+            lhs_update.set_known_one(bit);
+        }
+        if result.bit_known_one(bit) && lhs_facts.bit_known_zero(bit) {
+            rhs_update.set_known_one(bit);
+        }
+    }
+    vec![
+        BackwardFactUpdate {
+            value: lhs.value,
+            facts: lhs_update,
+        },
+        BackwardFactUpdate {
+            value: rhs.value,
+            facts: rhs_update,
+        },
+    ]
+}
+
+fn backward_bitxor(
+    func: &Function,
+    current: &BTreeMap<u32, IntFacts>,
+    lhs: &Operand,
+    rhs: &Operand,
+    result: &IntFacts,
+) -> Vec<BackwardFactUpdate> {
+    let lhs_facts = operand_input_facts(func, current, lhs);
+    let rhs_facts = operand_input_facts(func, current, rhs);
+    let width = lhs_facts
+        .relevant_bit_width()
+        .max(rhs_facts.relevant_bit_width())
+        .max(result.relevant_bit_width());
+    let mut lhs_update = IntFacts::unknown();
+    let mut rhs_update = IntFacts::unknown();
+    for bit in 0..width {
+        if result.bit_known_zero(bit) {
+            if rhs_facts.bit_known_zero(bit) {
+                lhs_update.set_known_zero(bit);
+            }
+            if rhs_facts.bit_known_one(bit) {
+                lhs_update.set_known_one(bit);
+            }
+            if lhs_facts.bit_known_zero(bit) {
+                rhs_update.set_known_zero(bit);
+            }
+            if lhs_facts.bit_known_one(bit) {
+                rhs_update.set_known_one(bit);
+            }
+        }
+        if result.bit_known_one(bit) {
+            if rhs_facts.bit_known_zero(bit) {
+                lhs_update.set_known_one(bit);
+            }
+            if rhs_facts.bit_known_one(bit) {
+                lhs_update.set_known_zero(bit);
+            }
+            if lhs_facts.bit_known_zero(bit) {
+                rhs_update.set_known_one(bit);
+            }
+            if lhs_facts.bit_known_one(bit) {
+                rhs_update.set_known_zero(bit);
+            }
+        }
+    }
+    vec![
+        BackwardFactUpdate {
+            value: lhs.value,
+            facts: lhs_update,
+        },
+        BackwardFactUpdate {
+            value: rhs.value,
+            facts: rhs_update,
+        },
+    ]
+}
+
+fn backward_shl(
+    func: &Function,
+    _current: &BTreeMap<u32, IntFacts>,
+    lhs: &Operand,
+    rhs: &Operand,
+    result: &IntFacts,
+) -> Vec<BackwardFactUpdate> {
+    let Some(shift) = bound_int_constant(func, rhs.value).and_then(bigint_to_nonnegative_u32)
+    else {
+        return Vec::new();
+    };
+    let mut lhs_update = IntFacts::unknown();
+    for bit in shift as usize..result.relevant_bit_width() {
+        let dst_bit = bit - shift as usize;
+        if result.bit_known_zero(bit) {
+            lhs_update.set_known_zero(dst_bit);
+        }
+        if result.bit_known_one(bit) {
+            lhs_update.set_known_one(dst_bit);
+        }
+    }
+    vec![BackwardFactUpdate {
+        value: lhs.value,
+        facts: lhs_update,
+    }]
+}
+
+fn backward_shr(
+    func: &Function,
+    _current: &BTreeMap<u32, IntFacts>,
+    lhs: &Operand,
+    rhs: &Operand,
+    result: &IntFacts,
+) -> Vec<BackwardFactUpdate> {
+    let Some(shift) = bound_int_constant(func, rhs.value).and_then(bigint_to_nonnegative_u32)
+    else {
+        return Vec::new();
+    };
+    let mut lhs_update = IntFacts::unknown();
+    for bit in 0..result.relevant_bit_width() {
+        let dst_bit = bit + shift as usize;
+        if result.bit_known_zero(bit) {
+            lhs_update.set_known_zero(dst_bit);
+        }
+        if result.bit_known_one(bit) {
+            lhs_update.set_known_one(dst_bit);
+        }
+    }
+    vec![BackwardFactUpdate {
+        value: lhs.value,
+        facts: lhs_update,
+    }]
+}
+
+fn backward_merge(
+    func: &Function,
+    _current: &BTreeMap<u32, IntFacts>,
+    lhs: &Operand,
+    rhs: &Operand,
+    width: u32,
+    result: &IntFacts,
+) -> Vec<BackwardFactUpdate> {
+    let _ = func;
+    let mut lhs_update = IntFacts::unknown();
+    let mut rhs_update = IntFacts::unknown();
+    for bit in 0..result.relevant_bit_width() {
+        if bit < width as usize {
+            if result.bit_known_zero(bit) {
+                rhs_update.set_known_zero(bit);
+            }
+            if result.bit_known_one(bit) {
+                rhs_update.set_known_one(bit);
+            }
+        } else {
+            if result.bit_known_zero(bit) {
+                lhs_update.set_known_zero(bit);
+            }
+            if result.bit_known_one(bit) {
+                lhs_update.set_known_one(bit);
+            }
+        }
+    }
+    vec![
+        BackwardFactUpdate {
+            value: lhs.value,
+            facts: lhs_update,
+        },
+        BackwardFactUpdate {
+            value: rhs.value,
+            facts: rhs_update,
+        },
+    ]
+}
+
+fn backward_split(
+    _func: &Function,
+    _current: &BTreeMap<u32, IntFacts>,
+    src: &Operand,
+    width: u32,
+    primary_result: &IntFacts,
+    secondary_result: &IntFacts,
+) -> Vec<BackwardFactUpdate> {
+    let mut src_update = IntFacts::unknown();
+    for bit in 0..primary_result.relevant_bit_width() {
+        let src_bit = bit + width as usize;
+        if primary_result.bit_known_zero(bit) {
+            src_update.set_known_zero(src_bit);
+        }
+        if primary_result.bit_known_one(bit) {
+            src_update.set_known_one(src_bit);
+        }
+    }
+    for bit in 0..width as usize {
+        if secondary_result.bit_known_zero(bit) {
+            src_update.set_known_zero(bit);
+        }
+        if secondary_result.bit_known_one(bit) {
+            src_update.set_known_one(bit);
+        }
+    }
+    vec![BackwardFactUpdate {
+        value: src.value,
+        facts: src_update,
+    }]
+}
+
+fn bigint_to_nonnegative_u32(value: &BigInt) -> Option<u32> {
+    if value.sign() == Sign::Minus {
+        None
+    } else {
+        value.try_into().ok()
+    }
 }
 
 fn apply_value_root_rewrite(
@@ -553,7 +1251,7 @@ fn build_const_rewrite_instruction(
         ty,
         secondary_ty: None,
         origin: merged_origin(func, root_idx, matched_insts),
-        result_annotation: root_inst.result_annotation,
+        result_annotation: root_inst.result_annotation.clone(),
         secondary_result_annotation: None,
     }
 }
@@ -703,6 +1401,10 @@ fn apply_operand_annotation_for_fold(value: Value, annotation: &Option<Annotatio
     match (value, annotation) {
         (Value::Poison, _) => Value::Poison,
         (Value::Int(value), Some(Annotation::Int(int_ann))) => apply_annotation(&value, int_ann),
+        (Value::Int(value), Some(Annotation::KnownBits(known))) => apply_result_annotation(
+            Value::Int(value),
+            &Some(Annotation::KnownBits(known.clone())),
+        ),
         (value, _) => value,
     }
 }
@@ -711,15 +1413,15 @@ fn definition_annotation(func: &Function, value: ValueRef) -> Option<Annotation>
     if value.is_block_arg() {
         func.block_args
             .get(value.index() as usize)
-            .and_then(|arg| arg.annotation)
+            .and_then(|arg| arg.annotation.clone())
     } else if value.is_secondary_result() {
         func.inst_pool
             .get(value.inst_index())
-            .and_then(|node| node.inst.secondary_result_annotation)
+            .and_then(|node| node.inst.secondary_result_annotation.clone())
     } else {
         func.inst_pool
             .get(value.index())
-            .and_then(|node| node.inst.result_annotation)
+            .and_then(|node| node.inst.result_annotation.clone())
     }
 }
 
@@ -831,4 +1533,5 @@ fn instruction_results_unused(func: &Function, idx: u32, has_secondary_result: b
     true
 }
 
+include!(concat!(env!("OUT_DIR"), "/peephole_facts_gen.rs"));
 include!(concat!(env!("OUT_DIR"), "/peephole_gen.rs"));

@@ -407,11 +407,37 @@ def checkUnsignedRange (v : Int) (n : Nat) : Value :=
   if 0 ≤ v ∧ v < 2 ^ n then .int v else .poison
 
 /-- Apply an annotation to a value. Returns poison on violation. -/
+def knownBitIsOne (v : Int) (bit : Nat) : Prop :=
+  Int.land v (2 ^ bit : Int) ≠ 0
+
+def knownBitIsOneB (v : Int) (bit : Nat) : Bool :=
+  Int.land v (2 ^ bit : Int) != 0
+
+def natBitWidth : Nat → Nat
+  | 0 => 0
+  | n + 1 => 1 + natBitWidth ((n + 1) / 2)
+
+def checkKnownBitsAux (v : Int) (known : KnownBits) : Nat → Bool
+  | 0 => true
+  | n + 1 =>
+      let bit := n
+      let bitOk :=
+        if Nat.testBit known.demanded bit then
+          (!Nat.testBit known.ones bit || knownBitIsOneB v bit) &&
+            (!Nat.testBit known.zeros bit || !knownBitIsOneB v bit)
+        else true
+      checkKnownBitsAux v known n && bitOk
+
+def checkKnownBits (v : Int) (known : KnownBits) : Value :=
+  if known.wellFormedB && checkKnownBitsAux v known (natBitWidth known.demanded)
+  then .int v else .poison
+
 def applyAnnotation (v : Int) (ann : Annotation) : Value :=
   match ann with
   | .signed n => checkSignedRange v n
   | .unsigned n => checkUnsignedRange v n
   | .dontCare n => .int (v % (2 ^ n))
+  | .known known => checkKnownBits v known
   | .align _ => .int v
 
 -- Memory load/store semantics

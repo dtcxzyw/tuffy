@@ -9,7 +9,7 @@ use num_traits::{One, Signed, ToPrimitive, Zero};
 use rustc_apfloat::ieee::{Double, Half, Quad, Single};
 use rustc_apfloat::{Float, FloatConvert, StatusAnd};
 use tuffy_ir::instruction::{FCmpOp, FloatConst, ICmpOp, Op, Operand};
-use tuffy_ir::types::{Annotation, FloatType, IntAnnotation, IntSignedness, Type};
+use tuffy_ir::types::{Annotation, FloatType, IntAnnotation, IntSignedness, KnownBits, Type};
 use tuffy_ir::value::ValueRef;
 
 use crate::memory::Memory;
@@ -139,11 +139,49 @@ pub fn apply_annotation(val: &BigInt, ann: &IntAnnotation) -> Value {
     }
 }
 
+fn int_bit_is_one(value: &BigInt, bit: u64) -> bool {
+    let modulus = BigInt::one() << (bit as usize + 1);
+    let truncated = ((value % &modulus) + &modulus) % &modulus;
+    let shifted = truncated >> bit as usize;
+    (&shifted % BigInt::from(2u8)) != BigInt::zero()
+}
+
+fn matches_known_bits(value: &BigInt, known: &KnownBits) -> bool {
+    if !known.is_well_formed() {
+        return false;
+    }
+
+    let demanded_bits = known.demanded.bits();
+    for bit in 0..demanded_bits {
+        let mask = num_bigint::BigUint::from(1u8) << bit;
+        if (&known.demanded & &mask) == num_bigint::BigUint::default() {
+            continue;
+        }
+
+        let is_one = int_bit_is_one(value, bit);
+        if (&known.ones & &mask) != num_bigint::BigUint::default() && !is_one {
+            return false;
+        }
+        if (&known.zeros & &mask) != num_bigint::BigUint::default() && is_one {
+            return false;
+        }
+    }
+
+    true
+}
+
 /// Apply a result annotation to a value. Returns the (possibly poisoned) value.
 pub fn apply_result_annotation(val: Value, ann: &Option<Annotation>) -> Value {
     match (&val, ann) {
         (Value::Poison, _) => Value::Poison,
         (Value::Int(n), Some(Annotation::Int(int_ann))) => apply_annotation(n, int_ann),
+        (Value::Int(n), Some(Annotation::KnownBits(known))) => {
+            if matches_known_bits(n, known) {
+                val
+            } else {
+                Value::Poison
+            }
+        }
         _ => val,
     }
 }
@@ -153,6 +191,13 @@ fn resolve_operand(val: &Value, ann: &Option<Annotation>) -> Value {
     match (val, ann) {
         (Value::Poison, _) => Value::Poison,
         (Value::Int(n), Some(Annotation::Int(int_ann))) => apply_annotation(n, int_ann),
+        (Value::Int(n), Some(Annotation::KnownBits(known))) => {
+            if matches_known_bits(n, known) {
+                val.clone()
+            } else {
+                Value::Poison
+            }
+        }
         _ => val.clone(),
     }
 }

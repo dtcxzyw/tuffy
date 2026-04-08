@@ -105,7 +105,7 @@ impl<'a> CallFrame<'a> {
     }
 
     fn get_def_annotation(&self, vref: ValueRef) -> Option<Annotation> {
-        self.env.get(&vref.raw()).and_then(|(_, ann)| *ann)
+        self.env.get(&vref.raw()).and_then(|(_, ann)| ann.clone())
     }
 }
 
@@ -681,7 +681,7 @@ impl<'a> Interpreter<'a> {
                 } else {
                     val
                 };
-                frame.set_value_with_ann(vref, val, inst.result_annotation);
+                frame.set_value_with_ann(vref, val, inst.result_annotation.clone());
                 continue;
             }
 
@@ -712,13 +712,13 @@ impl<'a> Interpreter<'a> {
 
                 // Look up the function by pointer.
                 let call_result = self.resolve_call(&vp, arg_vals_with_ann, depth)?;
-                frame.set_value_with_ann(vref, Value::Mem, inst.result_annotation); // Primary result is Mem token
+                frame.set_value_with_ann(vref, Value::Mem, inst.result_annotation.clone()); // Primary result is Mem token
                 if let Some(_sec_ty) = &inst.secondary_ty {
                     let sec_vref = ValueRef::inst_secondary_result(inst_idx);
                     frame.set_value_with_ann(
                         sec_vref,
                         call_result.unwrap_or(Value::Unit),
-                        inst.secondary_result_annotation,
+                        inst.secondary_result_annotation.clone(),
                     );
                 } else {
                     // Single-result call: the result is the return value, type permitting
@@ -726,7 +726,7 @@ impl<'a> Interpreter<'a> {
                         frame.set_value_with_ann(
                             vref,
                             call_result.unwrap_or(Value::Unit),
-                            inst.result_annotation,
+                            inst.result_annotation.clone(),
                         );
                     }
                 }
@@ -737,9 +737,9 @@ impl<'a> Interpreter<'a> {
             // Clone the op and relevant fields to avoid borrowing `frame` across the execute call.
             let inst_op = inst.op.clone();
             let inst_ty = inst.ty.clone();
-            let inst_result_ann = inst.result_annotation;
+            let inst_result_ann = inst.result_annotation.clone();
             let inst_secondary_ty = inst.secondary_ty.clone();
-            let inst_secondary_result_ann = inst.secondary_result_annotation;
+            let inst_secondary_result_ann = inst.secondary_result_annotation.clone();
 
             // Snapshot the values needed by the instruction from the environment.
             let env_snapshot = frame.env.clone();
@@ -818,7 +818,7 @@ impl<'a> Interpreter<'a> {
                 |_size: usize| -> AllocId { unreachable!("StackSlot handled above") };
 
             let def_annotation = |v: ValueRef| -> Option<Annotation> {
-                env_snapshot.get(&v.raw()).and_then(|(_, ann)| *ann)
+                env_snapshot.get(&v.raw()).and_then(|(_, ann)| ann.clone())
             };
 
             let result = execute_instruction(

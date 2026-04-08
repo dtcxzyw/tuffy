@@ -37,7 +37,7 @@ impl<'a> Builder<'a> {
     /// Create a new region and return its reference. Does NOT enter it.
     pub fn create_region(&mut self, kind: RegionKind) -> RegionRef {
         let idx = self.func.regions.len() as u32;
-        let parent = self.region_stack.last().copied();
+        let parent = self.region_stack.last().cloned();
         self.func.regions.push(Region {
             kind,
             parent,
@@ -299,7 +299,7 @@ impl<'a> Builder<'a> {
             self.func
                 .param_annotations
                 .get(index as usize)
-                .copied()
+                .cloned()
                 .flatten()
         });
         self.push_inst(Op::Param(index), ty, None, origin, ann)
@@ -557,7 +557,7 @@ impl<'a> Builder<'a> {
     ) -> IntValue {
         let res_ann = Some(Annotation::Int(int_ann));
         let mut a_op = a.raw();
-        a_op.annotation = res_ann;
+        a_op.annotation = res_ann.clone();
         let v = self.push_inst(
             Op::Min(a_op.into(), b.raw().into()),
             Type::Int,
@@ -578,7 +578,7 @@ impl<'a> Builder<'a> {
     ) -> IntValue {
         let res_ann = Some(Annotation::Int(int_ann));
         let mut a_op = a.raw();
-        a_op.annotation = res_ann;
+        a_op.annotation = res_ann.clone();
         let v = self.push_inst(
             Op::Max(a_op.into(), b.raw().into()),
             Type::Int,
@@ -1164,7 +1164,7 @@ impl<'a> Builder<'a> {
             Type::Int,
             Type::Int,
             origin,
-            Some(ann),
+            Some(ann.clone()),
             Some(ann),
         );
         let secondary = ValueRef::inst_secondary_result(primary.index());
@@ -1195,7 +1195,7 @@ impl<'a> Builder<'a> {
             Type::Int,
             Type::Int,
             origin,
-            Some(ann),
+            Some(ann.clone()),
             Some(ann),
         );
         let secondary = ValueRef::inst_secondary_result(primary.index());

@@ -327,6 +327,20 @@ impl<'a> FuncVerifier<'a> {
                     );
                 }
             }
+            Annotation::KnownBits(known) => {
+                if !matches!(ty, Type::Int) {
+                    self.result.error(
+                        loc.clone(),
+                        format!("{ctx}: known bits annotation on non-Int type {ty:?}"),
+                    );
+                }
+                if !known.is_well_formed() {
+                    self.result.error(
+                        loc.clone(),
+                        format!("{ctx}: known bits annotation is not well-formed"),
+                    );
+                }
+            }
             Annotation::Byval(_) => {
                 // Byval annotations are only meaningful on Call arguments;
                 // the verifier does not enforce further constraints here.
@@ -1473,7 +1487,7 @@ impl FuncVerifier<'_> {
                     .func
                     .param_annotations
                     .get(i)
-                    .and_then(|a| *a)
+                    .and_then(|a| a.clone())
                     .is_none()
                 {
                     self.result

@@ -103,7 +103,7 @@ impl<'a> DisplayCtx<'a> {
                         let inst_idx = op.value.index();
                         let inst = func.inst(inst_idx);
                         // Only display if different from instruction's annotation
-                        inst.result_annotation != Some(*a)
+                        inst.result_annotation.as_ref() != Some(a)
                     } else {
                         true // Block arg, display annotation
                     }
@@ -172,6 +172,7 @@ fn fmt_annotation(ann: &Annotation) -> String {
     match ann {
         Annotation::Align(n) => format!(":align{n}"),
         Annotation::Int(int_ann) => format!(":{}", fmt_int_annotation(int_ann)),
+        Annotation::KnownBits(known) => format!(":known({})", known.to_ternary_string()),
         Annotation::Byval(sz) => format!(":byval{sz}"),
     }
 }
