@@ -10,6 +10,7 @@ use rustc_middle::dep_graph::{WorkProduct, WorkProductId};
 use rustc_middle::mir::mono::MonoItem;
 use rustc_middle::ty::{self, Instance, TyCtxt, TypeVisitableExt};
 use tuffy_codegen::CodegenSession;
+use tuffy_opt::PeepholeStats;
 use tuffy_target::reloc::{RelocKind, Relocation};
 use tuffy_target::types::{CompiledFunction, StaticData};
 
@@ -275,6 +276,9 @@ impl<'tcx> AotCodegen<'tcx> {
         if let Err(err) = verify_translation_result(&result) {
             self.fatal_instance(instance, &err);
         }
+        if let Err(err) = optimize_translation_result(&mut result, self.config.run_tuffy_opt) {
+            self.fatal_instance(instance, &err);
+        }
         append_translation_static_data(&mut artifacts.static_data, &result);
 
         let compiled = self
@@ -501,6 +505,25 @@ fn verify_translation_result(result: &mir_to_ir::TranslationResult<'_>) -> Resul
     Ok(())
 }
 
+fn optimize_translation_result(
+    result: &mut mir_to_ir::TranslationResult<'_>,
+    enabled: bool,
+) -> Result<Option<PeepholeStats>, String> {
+    if !enabled {
+        return Ok(None);
+    }
+
+    let stats = tuffy_opt::optimize_function(&mut result.func);
+    let verification = tuffy_ir::verifier::verify_function(&result.func, &result.symbols);
+    if !verification.is_ok() {
+        let func_name = result.symbols.resolve(result.func.name);
+        return Err(format!(
+            "optimized IR verification failed for {func_name}: {verification}"
+        ));
+    }
+    Ok(Some(stats))
+}
+
 fn append_translation_static_data(
     all_static_data: &mut Vec<StaticData>,
     result: &mir_to_ir::TranslationResult<'_>,
@@ -548,4 +571,70 @@ fn is_weak_linkage(linkage: Linkage) -> bool {
             | Linkage::LinkOnceAny
             | Linkage::WeakAny
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::optimize_translation_result;
+    use crate::mir_to_ir::TranslationResult;
+    use tuffy_ir::parser::parse_module;
+
+    fn parse_result(input: &str) -> TranslationResult<'static> {
+        let mut module = parse_module(input).unwrap_or_else(|e| panic!("parse error: {e}"));
+        let func = module
+            .functions
+            .pop()
+            .expect("module should contain one function");
+        TranslationResult {
+            func,
+            symbols: module.symbols,
+            static_data: vec![],
+            referenced_instances: vec![],
+            weak_undefined_symbols: Default::default(),
+        }
+    }
+
+    #[test]
+    fn optimize_translation_result_runs_tuffy_opt_when_enabled() {
+        let mut result = parse_result(
+            r#"
+func @mask_i1(int:i1) {
+  bb0:
+    v0: int:i1 = param 0
+    v1: int:u8 = iconst 255
+    v2: int:i1 = and v0, v1
+    v3: int:i1 = add v2, v0
+    unreachable
+}
+"#,
+        );
+
+        let stats = optimize_translation_result(&mut result, true)
+            .expect("optimization should verify")
+            .expect("optimization should run");
+        assert!(stats.rewrites > 0, "expected at least one peephole rewrite");
+        let printed = format!("{}", result.func.display(&result.symbols));
+        assert!(printed.contains("add v0, v0"));
+    }
+
+    #[test]
+    fn optimize_translation_result_skips_when_disabled() {
+        let mut result = parse_result(
+            r#"
+func @mask_i1(int:i1) {
+  bb0:
+    v0: int:i1 = param 0
+    v1: int:u8 = iconst 255
+    v2: int:i1 = and v0, v1
+    v3: int:i1 = add v2, v0
+    unreachable
+}
+"#,
+        );
+
+        let stats = optimize_translation_result(&mut result, false).expect("skip should succeed");
+        assert!(stats.is_none(), "optimization should be skipped");
+        let printed = format!("{}", result.func.display(&result.symbols));
+        assert!(printed.contains("and v0, v1"));
+    }
 }

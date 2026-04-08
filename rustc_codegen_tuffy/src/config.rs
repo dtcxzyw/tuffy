@@ -2,13 +2,14 @@ use std::path::PathBuf;
 
 use rustc_codegen_ssa::TargetConfig;
 use rustc_session::Session;
-use rustc_session::config::{InstrumentCoverage, Lto};
+use rustc_session::config::{InstrumentCoverage, Lto, OptLevel};
 use rustc_span::Symbol;
 
 #[derive(Clone, Debug)]
 pub(crate) struct BackendOptions {
     pub dump_ir: bool,
     pub dump_module_path: Option<PathBuf>,
+    pub run_tuffy_opt: bool,
 }
 
 impl BackendOptions {
@@ -21,10 +22,12 @@ impl BackendOptions {
             .iter()
             .find_map(|arg| arg.strip_prefix("dump-module="))
             .map(PathBuf::from);
+        let run_tuffy_opt = sess.opts.optimize != OptLevel::No;
 
         Self {
             dump_ir,
             dump_module_path,
+            run_tuffy_opt,
         }
     }
 }

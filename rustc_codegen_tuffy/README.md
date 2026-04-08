@@ -50,6 +50,16 @@ The core translation layer, organized into submodules by concern:
 | `intrinsic.rs`     | Scalar intrinsic function lowering                   |
 | `simd.rs`          | SIMD intrinsic lowering                              |
 
+### Optimization Hook
+
+After MIR-to-IR translation succeeds, the backend now runs `tuffy_opt` on each translated
+function before handing it to `tuffy_codegen`, but only when rustc codegen optimization is enabled
+(`-C opt-level` other than `0`). This keeps debug-style builds close to raw translation while
+allowing optimized builds to benefit from the Lean-owned peephole pipeline.
+
+`dump-ir` continues to print the post-translation, pre-optimization IR so the existing codegen
+tests remain focused on MIR lowering rather than backend-local optimization effects.
+
 ## Boundary Rule
 
 This crate is the **sole boundary** between rustc and the Tuffy compiler infrastructure. All Rust-specific semantics, ABI conventions, MIR quirks, and language-level workarounds must be fully resolved here before emitting tuffy IR.
@@ -217,6 +227,7 @@ Unsupported MIR constructs (rvalue kinds, statement kinds, terminator kinds, int
 ## Dependencies
 
 - `tuffy_ir` — IR definitions
+- `tuffy_opt` — Lean-owned peephole optimizer run before backend codegen
 - `tuffy_target` — backend trait
 - `tuffy_codegen` — target-dispatching facade
 - `num-bigint` — arbitrary-precision integer constants
