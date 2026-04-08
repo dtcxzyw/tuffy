@@ -41,6 +41,11 @@ pub enum MatchRoot {
         operands: Vec<Pattern>,
         successor_count: usize,
     },
+    ConstFold {
+        op: String,
+        #[serde(default)]
+        attrs: Vec<PatternAttr>,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -54,6 +59,7 @@ pub enum RootReplacement {
         operands: Vec<Replacement>,
         successors: Vec<usize>,
     },
+    ConstFold,
 }
 
 #[derive(Debug, Deserialize)]
@@ -168,7 +174,7 @@ enum BindingKind {
 }
 
 pub fn validate_spec(spec: &PeepholeSpec) -> Result<(), GenerateError> {
-    if spec.format_version != 2 {
+    if spec.format_version != 3 {
         return Err(GenerateError::UnsupportedFormatVersion(spec.format_version));
     }
     if spec.kind != "peephole" {
@@ -240,8 +246,21 @@ pub fn validate_spec(spec: &PeepholeSpec) -> Result<(), GenerateError> {
                     }
                 }
             }
+            (MatchRoot::ConstFold { op, attrs }, RootReplacement::ConstFold) => {
+                if !rule.side_conditions.is_empty() {
+                    return Err(GenerateError::UnsupportedRootRewrite {
+                        rule: rule.name.clone(),
+                        message: "const-fold roots do not support side conditions".to_string(),
+                    });
+                }
+                validate_const_fold(op, attrs, &rule.name)?;
+            }
             (MatchRoot::Value { .. }, RootReplacement::Terminator { .. })
-            | (MatchRoot::Terminator { .. }, RootReplacement::Value { .. }) => {
+            | (MatchRoot::Value { .. }, RootReplacement::ConstFold)
+            | (MatchRoot::Terminator { .. }, RootReplacement::Value { .. })
+            | (MatchRoot::Terminator { .. }, RootReplacement::ConstFold)
+            | (MatchRoot::ConstFold { .. }, RootReplacement::Value { .. })
+            | (MatchRoot::ConstFold { .. }, RootReplacement::Terminator { .. }) => {
                 return Err(GenerateError::UnsupportedRootRewrite {
                     rule: rule.name.clone(),
                     message: "root kind and replacement kind must match".to_string(),
@@ -340,5 +359,62 @@ fn validate_side_condition(
             Ok(())
         }
         SideCondition::Not { condition } => validate_side_condition(condition, binding_kinds, rule),
+    }
+}
+
+fn validate_const_fold(op: &str, attrs: &[PatternAttr], rule: &str) -> Result<(), GenerateError> {
+    match op {
+        "add"
+        | "sub"
+        | "mul"
+        | "div"
+        | "rem"
+        | "and"
+        | "or"
+        | "xor"
+        | "band"
+        | "bor"
+        | "bxor"
+        | "shl"
+        | "shr"
+        | "min"
+        | "max"
+        | "count_ones"
+        | "count_leading_zeros"
+        | "count_trailing_zeros"
+        | "bswap"
+        | "bit_reverse"
+        | "rotate_left"
+        | "rotate_right"
+        | "select"
+            if attrs.is_empty() =>
+        {
+            Ok(())
+        }
+        "icmp" => match attrs {
+            [PatternAttr::IcmpPred { value }]
+                if matches!(value.as_str(), "eq" | "ne" | "lt" | "le" | "gt" | "ge") =>
+            {
+                Ok(())
+            }
+            [PatternAttr::IcmpPred { value }] => Err(GenerateError::UnsupportedPattern(format!(
+                "unsupported const-fold icmp predicate `{value}`"
+            ))),
+            [] => Err(GenerateError::UnsupportedRootRewrite {
+                rule: rule.to_string(),
+                message: "const-fold icmp requires a predicate attribute".to_string(),
+            }),
+            _ => Err(GenerateError::UnsupportedRootRewrite {
+                rule: rule.to_string(),
+                message: "const-fold icmp uses unsupported attribute set".to_string(),
+            }),
+        },
+        _ if attrs.is_empty() => Err(GenerateError::UnsupportedPattern(format!(
+            "unsupported const-fold op `{op}`"
+        ))),
+        _ => Err(GenerateError::UnsupportedRootRewrite {
+            rule: rule.to_string(),
+            message: format!("const-fold op `{op}` uses unsupported attributes"),
+        }),
     }
 }

@@ -393,6 +393,7 @@ version = "0.1.0"
 dependencies = [
  "num-bigint",
  "tuffy_ir",
+ "tuffy_ir_interp",
  "tuffy_opt_gen",
 ]
 

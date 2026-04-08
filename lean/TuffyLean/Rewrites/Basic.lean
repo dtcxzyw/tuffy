@@ -27,6 +27,20 @@ inductive TerminatorOpcode where
   | brif
   deriving DecidableEq, Repr
 
+/-- Generic value-root constant-fold op families supported by the peephole DSL. -/
+inductive ConstFoldOpcode where
+  | add | sub | mul | div | rem
+  | and | or | xor
+  | band | bor | bxor
+  | shl | shr
+  | min | max
+  | countOnes | countLeadingZeros | countTrailingZeros
+  | bswap | bitReverse
+  | rotateLeft | rotateRight
+  | select
+  | icmp (pred : ICmpOp)
+  deriving DecidableEq, Repr
+
 /-- Attributes attached to an instruction pattern. -/
 inductive PatternAttr where
   | icmpPred (pred : ICmpOp)
@@ -70,12 +84,14 @@ inductive SideCondition where
 inductive MatchRoot where
   | value (root : Pattern)
   | terminator (opcode : TerminatorOpcode) (operands : List Pattern) (successorCount : Nat)
+  | constFold (opcode : ConstFoldOpcode)
   deriving Repr
 
 /-- Root replacement forms supported by the peephole DSL. -/
 inductive RootReplacement where
   | value (replacement : Replacement)
   | terminator (opcode : TerminatorOpcode) (operands : List Replacement) (successors : List Nat)
+  | constFold
   deriving Repr
 
 /-- Generic local root rewrite. -/
@@ -161,6 +177,9 @@ theorem icmp_eq_select_bool_to_int_is_zero (b : Bool) (cmpConst : Int) (hCmp : c
   subst hCmp
   exact icmp_eq_select_bool_to_int_zero b
 
+/-- Generic soundness witness for rules that fold an already-evaluated constant result. -/
+theorem constFoldValue_sound (v : Value) : v = v := rfl
+
 private def selectBoolToInt (boolName : String) : Pattern :=
   .inst .select [] [
     .capture boolName (.some .bool),
@@ -185,6 +204,19 @@ private def isOne (binding : String) : SideCondition :=
 
 private def isOdd (binding : String) : SideCondition :=
   .intPredicate binding .isOdd
+
+private def constFoldRule (name : String) (opcode : ConstFoldOpcode) : PeepholeRule :=
+  {
+    name := name
+    proofRef := "TuffyLean.Rewrites.constFoldValue_sound"
+    body := {
+      matchRoot := .constFold opcode
+      replacement := .constFold
+    }
+  }
+
+private def constFoldIcmpRule (suffix : String) (pred : ICmpOp) : PeepholeRule :=
+  constFoldRule s!"const_fold_icmp_{suffix}" (.icmp pred)
 
 /-- `and (select %b, 1, 0), C -> select %b, 1, 0` for odd `C`. -/
 def andSelectBoolToIntOddMaskRule : PeepholeRule :=
@@ -241,6 +273,39 @@ def brifIcmpEqXorSelectBoolToIntIsOneIsOneRule : PeepholeRule :=
     }
   }
 
+private def allConstFoldRules : List PeepholeRule :=
+  [
+    constFoldRule "const_fold_add" .add,
+    constFoldRule "const_fold_sub" .sub,
+    constFoldRule "const_fold_mul" .mul,
+    constFoldRule "const_fold_div" .div,
+    constFoldRule "const_fold_rem" .rem,
+    constFoldRule "const_fold_and" .and,
+    constFoldRule "const_fold_or" .or,
+    constFoldRule "const_fold_xor" .xor,
+    constFoldRule "const_fold_band" .band,
+    constFoldRule "const_fold_bor" .bor,
+    constFoldRule "const_fold_bxor" .bxor,
+    constFoldRule "const_fold_shl" .shl,
+    constFoldRule "const_fold_shr" .shr,
+    constFoldRule "const_fold_min" .min,
+    constFoldRule "const_fold_max" .max,
+    constFoldRule "const_fold_count_ones" .countOnes,
+    constFoldRule "const_fold_count_leading_zeros" .countLeadingZeros,
+    constFoldRule "const_fold_count_trailing_zeros" .countTrailingZeros,
+    constFoldRule "const_fold_bswap" .bswap,
+    constFoldRule "const_fold_bit_reverse" .bitReverse,
+    constFoldRule "const_fold_rotate_left" .rotateLeft,
+    constFoldRule "const_fold_rotate_right" .rotateRight,
+    constFoldRule "const_fold_select" .select,
+    constFoldIcmpRule "eq" .eq,
+    constFoldIcmpRule "ne" .ne,
+    constFoldIcmpRule "lt" .lt,
+    constFoldIcmpRule "le" .le,
+    constFoldIcmpRule "gt" .gt,
+    constFoldIcmpRule "ge" .ge
+  ]
+
 /-- Seed rules for the first exported peephole batch. -/
 def allPeepholeRules : List PeepholeRule :=
   [
@@ -248,6 +313,6 @@ def allPeepholeRules : List PeepholeRule :=
     brifIcmpEqSelectBoolToIntIsOneRule,
     brifIcmpEqSelectBoolToIntIsZeroRule,
     brifIcmpEqXorSelectBoolToIntIsOneIsOneRule
-  ]
+  ] ++ allConstFoldRules
 
 end TuffyLean.Rewrites

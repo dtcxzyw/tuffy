@@ -32,6 +32,45 @@ private def patternOpcodeToJson : PatternOpcode → String
 private def terminatorOpcodeToJson : TerminatorOpcode → String
   | .brif => quote "brif"
 
+private def constFoldOpcodeToJsonParts : ConstFoldOpcode → String × List String
+  | ConstFoldOpcode.add => (quote "add", [])
+  | ConstFoldOpcode.sub => (quote "sub", [])
+  | ConstFoldOpcode.mul => (quote "mul", [])
+  | ConstFoldOpcode.div => (quote "div", [])
+  | ConstFoldOpcode.rem => (quote "rem", [])
+  | ConstFoldOpcode.and => (quote "and", [])
+  | ConstFoldOpcode.or => (quote "or", [])
+  | ConstFoldOpcode.xor => (quote "xor", [])
+  | ConstFoldOpcode.band => (quote "band", [])
+  | ConstFoldOpcode.bor => (quote "bor", [])
+  | ConstFoldOpcode.bxor => (quote "bxor", [])
+  | ConstFoldOpcode.shl => (quote "shl", [])
+  | ConstFoldOpcode.shr => (quote "shr", [])
+  | ConstFoldOpcode.min => (quote "min", [])
+  | ConstFoldOpcode.max => (quote "max", [])
+  | ConstFoldOpcode.countOnes => (quote "count_ones", [])
+  | ConstFoldOpcode.countLeadingZeros => (quote "count_leading_zeros", [])
+  | ConstFoldOpcode.countTrailingZeros => (quote "count_trailing_zeros", [])
+  | ConstFoldOpcode.bswap => (quote "bswap", [])
+  | ConstFoldOpcode.bitReverse => (quote "bit_reverse", [])
+  | ConstFoldOpcode.rotateLeft => (quote "rotate_left", [])
+  | ConstFoldOpcode.rotateRight => (quote "rotate_right", [])
+  | ConstFoldOpcode.select => (quote "select", [])
+  | ConstFoldOpcode.icmp pred =>
+    let predJson :=
+      match pred with
+      | .eq => quote "eq"
+      | .ne => quote "ne"
+      | .lt => quote "lt"
+      | .le => quote "le"
+      | .gt => quote "gt"
+      | .ge => quote "ge"
+    (quote "icmp",
+      [jsonObj [
+        ("kind", quote "icmp_pred"),
+        ("value", predJson)
+      ]])
+
 private def icmpPredToJson : ICmpOp → String
   | .eq => quote "eq"
   | .ne => quote "ne"
@@ -121,31 +160,42 @@ private def replacementToJson : Replacement → String
     ]
 
 private def matchRootToJson : MatchRoot → String
-  | .value root =>
+  | MatchRoot.value root =>
     jsonObj [
       ("kind", quote "value"),
       ("root", patternToJson root)
     ]
-  | .terminator opcode operands successorCount =>
+  | MatchRoot.terminator opcode operands successorCount =>
     jsonObj [
       ("kind", quote "terminator"),
       ("op", terminatorOpcodeToJson opcode),
       ("operands", jsonArr (operands.map patternToJson)),
       ("successor_count", toString successorCount)
     ]
+  | MatchRoot.constFold opcode =>
+    let (op, attrs) := constFoldOpcodeToJsonParts opcode
+    jsonObj [
+      ("kind", quote "const_fold"),
+      ("op", op),
+      ("attrs", jsonArr attrs)
+    ]
 
 private def rootReplacementToJson : RootReplacement → String
-  | .value replacement =>
+  | RootReplacement.value replacement =>
     jsonObj [
       ("kind", quote "value"),
       ("value", replacementToJson replacement)
     ]
-  | .terminator opcode operands successors =>
+  | RootReplacement.terminator opcode operands successors =>
     jsonObj [
       ("kind", quote "terminator"),
       ("op", terminatorOpcodeToJson opcode),
       ("operands", jsonArr (operands.map replacementToJson)),
       ("successors", jsonArr (successors.map toString))
+    ]
+  | RootReplacement.constFold =>
+    jsonObj [
+      ("kind", quote "const_fold")
     ]
 
 private def rewriteBodyToJson (body : RewriteBody) : String :=
@@ -165,7 +215,7 @@ private def peepholeRuleToJson (rule : PeepholeRule) : String :=
 
 private def exportPeepholeSpec : String :=
   jsonObj [
-    ("format_version", "2"),
+    ("format_version", "3"),
     ("kind", quote "peephole"),
     ("rules", jsonArr (allPeepholeRules.map peepholeRuleToJson))
   ]

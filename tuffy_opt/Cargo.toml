@@ -8,6 +8,7 @@ build = "build.rs"
 [dependencies]
 num-bigint = "0.4"
 tuffy_ir = { path = "../tuffy_ir" }
+tuffy_ir_interp = { path = "../tuffy_ir_interp" }
 
 [build-dependencies]
 tuffy_opt_gen = { path = "../tuffy_opt_gen" }

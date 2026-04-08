@@ -63,6 +63,7 @@ fn generate_rule_fn(out: &mut String, rule: &PeepholeRule) -> Result<(), Generat
                 operand.collect_bindings(&mut bindings);
             }
         }
+        MatchRoot::ConstFold { .. } => {}
     }
 
     writeln!(
@@ -75,27 +76,19 @@ fn generate_rule_fn(out: &mut String, rule: &PeepholeRule) -> Result<(), Generat
         "fn try_apply_{ident}(func: &mut Function, root_idx: u32, stats: &mut PeepholeStats) -> bool {{"
     )
     .unwrap();
-    for binding in &bindings {
-        writeln!(out, "    let mut bind_{binding}: Option<ValueRef> = None;").unwrap();
-    }
-    writeln!(out, "    let mut matched_insts = BTreeSet::new();").unwrap();
-    let replacement_ty = match &rule.rewrite.replacement {
-        RootReplacement::Value { .. } => "ValueRef",
-        RootReplacement::Terminator { .. } => "ReplacementTerminator",
-    };
-    writeln!(
-        out,
-        "    let replacement = (|| -> Option<{replacement_ty}> {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let Some(root_node) = func.inst_pool.get(root_idx) else {{ return None; }};"
-    )
-    .unwrap();
-    writeln!(out, "        let root_block = root_node.parent_block;").unwrap();
     match (&rule.rewrite.match_root, &rule.rewrite.replacement) {
         (MatchRoot::Value { root }, RootReplacement::Value { value: replacement }) => {
+            for binding in &bindings {
+                writeln!(out, "    let mut bind_{binding}: Option<ValueRef> = None;").unwrap();
+            }
+            writeln!(out, "    let mut matched_insts = BTreeSet::new();").unwrap();
+            writeln!(out, "    let replacement = (|| -> Option<ValueRewrite> {{").unwrap();
+            writeln!(
+                out,
+                "        let Some(root_node) = func.inst_pool.get(root_idx) else {{ return None; }};"
+            )
+            .unwrap();
+            writeln!(out, "        let root_block = root_node.parent_block;").unwrap();
             writeln!(
                 out,
                 "        let root_value = ValueRef::inst_result(root_idx);"
@@ -106,11 +99,22 @@ fn generate_rule_fn(out: &mut String, rule: &PeepholeRule) -> Result<(), Generat
             emit_side_condition_checks(out, &rule.side_conditions)?;
             writeln!(
                 out,
-                "        let replacement = bind_{}?;",
+                "        let replacement = ValueRewrite::Existing(bind_{}?);",
                 replacement.binding_name()
             )
             .unwrap();
             writeln!(out, "        Some(replacement)").unwrap();
+            writeln!(out, "    }})();").unwrap();
+            writeln!(
+                out,
+                "    let Some(replacement) = replacement else {{ return false; }};"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "    apply_value_root_rewrite(func, root_idx, replacement, &matched_insts);"
+            )
+            .unwrap();
         }
         (
             MatchRoot::Terminator {
@@ -134,37 +138,55 @@ fn generate_rule_fn(out: &mut String, rule: &PeepholeRule) -> Result<(), Generat
                     ),
                 });
             }
+            for binding in &bindings {
+                writeln!(out, "    let mut bind_{binding}: Option<ValueRef> = None;").unwrap();
+            }
+            writeln!(out, "    let mut matched_insts = BTreeSet::new();").unwrap();
+            writeln!(
+                out,
+                "    let replacement = (|| -> Option<ReplacementTerminator> {{"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "        let Some(root_node) = func.inst_pool.get(root_idx) else {{ return None; }};"
+            )
+            .unwrap();
+            writeln!(out, "        let root_block = root_node.parent_block;").unwrap();
             emit_terminator_root_match(out, terminator_kind, operands)?;
             emit_side_condition_checks(out, &rule.side_conditions)?;
             emit_terminator_replacement(out, replacement_kind, replacement_operands, successors)?;
+            writeln!(out, "    }})();").unwrap();
+            writeln!(
+                out,
+                "    let Some(replacement) = replacement else {{ return false; }};"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "    apply_terminator_root_rewrite(func, root_idx, replacement, &matched_insts);"
+            )
+            .unwrap();
+        }
+        (MatchRoot::ConstFold { op, attrs }, RootReplacement::ConstFold) => {
+            let kind = classify_const_fold(op, attrs)?;
+            writeln!(
+                out,
+                "    let Some(fold_match) = try_fold_constant_root(func, root_idx, {}) else {{ return false; }};",
+                const_fold_kind_expr(kind)
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "    apply_value_root_rewrite(func, root_idx, fold_match.replacement, &fold_match.matched_insts);"
+            )
+            .unwrap();
         }
         _ => {
             return Err(GenerateError::UnsupportedRootRewrite {
                 rule: rule.name.clone(),
                 message: "root kind and replacement kind must match".to_string(),
             });
-        }
-    }
-    writeln!(out, "    }})();").unwrap();
-    writeln!(
-        out,
-        "    let Some(replacement) = replacement else {{ return false; }};"
-    )
-    .unwrap();
-    match &rule.rewrite.replacement {
-        RootReplacement::Value { .. } => {
-            writeln!(
-                out,
-                "    apply_value_root_rewrite(func, root_idx, replacement, &matched_insts);"
-            )
-            .unwrap();
-        }
-        RootReplacement::Terminator { .. } => {
-            writeln!(
-                out,
-                "    apply_terminator_root_rewrite(func, root_idx, replacement, &matched_insts);"
-            )
-            .unwrap();
         }
     }
     writeln!(out, "    stats.record({:?});", rule.name).unwrap();
@@ -615,6 +637,120 @@ fn classify_pattern_inst(
         other => Err(GenerateError::UnsupportedPattern(format!(
             "unsupported pattern op `{other}`"
         ))),
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ConstFoldKind {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+    And,
+    Or,
+    Xor,
+    BAnd,
+    BOr,
+    BXor,
+    Shl,
+    Shr,
+    Min,
+    Max,
+    CountOnes,
+    CountLeadingZeros,
+    CountTrailingZeros,
+    Bswap,
+    BitReverse,
+    RotateLeft,
+    RotateRight,
+    Select,
+    ICmpEq,
+    ICmpNe,
+    ICMPLt,
+    ICmpLe,
+    ICmpGt,
+    ICmpGe,
+}
+
+fn classify_const_fold(op: &str, attrs: &[PatternAttr]) -> Result<ConstFoldKind, GenerateError> {
+    match op {
+        "add" if attrs.is_empty() => Ok(ConstFoldKind::Add),
+        "sub" if attrs.is_empty() => Ok(ConstFoldKind::Sub),
+        "mul" if attrs.is_empty() => Ok(ConstFoldKind::Mul),
+        "div" if attrs.is_empty() => Ok(ConstFoldKind::Div),
+        "rem" if attrs.is_empty() => Ok(ConstFoldKind::Rem),
+        "and" if attrs.is_empty() => Ok(ConstFoldKind::And),
+        "or" if attrs.is_empty() => Ok(ConstFoldKind::Or),
+        "xor" if attrs.is_empty() => Ok(ConstFoldKind::Xor),
+        "band" if attrs.is_empty() => Ok(ConstFoldKind::BAnd),
+        "bor" if attrs.is_empty() => Ok(ConstFoldKind::BOr),
+        "bxor" if attrs.is_empty() => Ok(ConstFoldKind::BXor),
+        "shl" if attrs.is_empty() => Ok(ConstFoldKind::Shl),
+        "shr" if attrs.is_empty() => Ok(ConstFoldKind::Shr),
+        "min" if attrs.is_empty() => Ok(ConstFoldKind::Min),
+        "max" if attrs.is_empty() => Ok(ConstFoldKind::Max),
+        "count_ones" if attrs.is_empty() => Ok(ConstFoldKind::CountOnes),
+        "count_leading_zeros" if attrs.is_empty() => Ok(ConstFoldKind::CountLeadingZeros),
+        "count_trailing_zeros" if attrs.is_empty() => Ok(ConstFoldKind::CountTrailingZeros),
+        "bswap" if attrs.is_empty() => Ok(ConstFoldKind::Bswap),
+        "bit_reverse" if attrs.is_empty() => Ok(ConstFoldKind::BitReverse),
+        "rotate_left" if attrs.is_empty() => Ok(ConstFoldKind::RotateLeft),
+        "rotate_right" if attrs.is_empty() => Ok(ConstFoldKind::RotateRight),
+        "select" if attrs.is_empty() => Ok(ConstFoldKind::Select),
+        "icmp" => match attrs {
+            [PatternAttr::IcmpPred { value }] => match value.as_str() {
+                "eq" => Ok(ConstFoldKind::ICmpEq),
+                "ne" => Ok(ConstFoldKind::ICmpNe),
+                "lt" => Ok(ConstFoldKind::ICMPLt),
+                "le" => Ok(ConstFoldKind::ICmpLe),
+                "gt" => Ok(ConstFoldKind::ICmpGt),
+                "ge" => Ok(ConstFoldKind::ICmpGe),
+                _ => Err(GenerateError::UnsupportedPattern(format!(
+                    "unsupported const-fold icmp predicate `{value}`"
+                ))),
+            },
+            _ => Err(GenerateError::UnsupportedPattern(
+                "const-fold icmp uses unsupported attribute set".to_string(),
+            )),
+        },
+        other => Err(GenerateError::UnsupportedPattern(format!(
+            "unsupported const-fold op `{other}`"
+        ))),
+    }
+}
+
+fn const_fold_kind_expr(kind: ConstFoldKind) -> &'static str {
+    match kind {
+        ConstFoldKind::Add => "ConstFoldKind::Add",
+        ConstFoldKind::Sub => "ConstFoldKind::Sub",
+        ConstFoldKind::Mul => "ConstFoldKind::Mul",
+        ConstFoldKind::Div => "ConstFoldKind::Div",
+        ConstFoldKind::Rem => "ConstFoldKind::Rem",
+        ConstFoldKind::And => "ConstFoldKind::And",
+        ConstFoldKind::Or => "ConstFoldKind::Or",
+        ConstFoldKind::Xor => "ConstFoldKind::Xor",
+        ConstFoldKind::BAnd => "ConstFoldKind::BAnd",
+        ConstFoldKind::BOr => "ConstFoldKind::BOr",
+        ConstFoldKind::BXor => "ConstFoldKind::BXor",
+        ConstFoldKind::Shl => "ConstFoldKind::Shl",
+        ConstFoldKind::Shr => "ConstFoldKind::Shr",
+        ConstFoldKind::Min => "ConstFoldKind::Min",
+        ConstFoldKind::Max => "ConstFoldKind::Max",
+        ConstFoldKind::CountOnes => "ConstFoldKind::CountOnes",
+        ConstFoldKind::CountLeadingZeros => "ConstFoldKind::CountLeadingZeros",
+        ConstFoldKind::CountTrailingZeros => "ConstFoldKind::CountTrailingZeros",
+        ConstFoldKind::Bswap => "ConstFoldKind::Bswap",
+        ConstFoldKind::BitReverse => "ConstFoldKind::BitReverse",
+        ConstFoldKind::RotateLeft => "ConstFoldKind::RotateLeft",
+        ConstFoldKind::RotateRight => "ConstFoldKind::RotateRight",
+        ConstFoldKind::Select => "ConstFoldKind::Select",
+        ConstFoldKind::ICmpEq => "ConstFoldKind::ICmp(ICmpOp::Eq)",
+        ConstFoldKind::ICmpNe => "ConstFoldKind::ICmp(ICmpOp::Ne)",
+        ConstFoldKind::ICMPLt => "ConstFoldKind::ICmp(ICmpOp::Lt)",
+        ConstFoldKind::ICmpLe => "ConstFoldKind::ICmp(ICmpOp::Le)",
+        ConstFoldKind::ICmpGt => "ConstFoldKind::ICmp(ICmpOp::Gt)",
+        ConstFoldKind::ICmpGe => "ConstFoldKind::ICmp(ICmpOp::Ge)",
     }
 }
 

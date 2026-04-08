@@ -21,7 +21,7 @@ fn normalize_ir(ir: &str) -> String {
 
 #[test]
 fn loads_default_rule_set() {
-    assert_eq!(generated_rule_count(), 4);
+    assert_eq!(generated_rule_count(), 33);
 }
 
 #[test]
@@ -126,9 +126,9 @@ func @branch_and_mask() {
 #[test]
 fn generalizes_mask_cleanup_to_non_255_odd_masks() {
     let input = r#"
-func @branch_and_mask_three() {
+func @branch_and_mask_three(bool) {
   bb0:
-    v0: bool = bconst true
+    v0: bool = param 0
     v1: int:s32 = iconst 1
     v2: int:s32 = iconst 0
     v3: int:s32 = select v0, v1, v2
@@ -139,9 +139,9 @@ func @branch_and_mask_three() {
 }
 "#;
     let (output, stats) = optimize(input);
-    let expected = r#"func @branch_and_mask_three() {
+    let expected = r#"func @branch_and_mask_three(bool) {
   bb0:
-    v0: bool = bconst true
+    v0: bool = param 0
     v1: int:s32 = iconst 1
     v2: int:s32 = iconst 0
     v3: int:s32 = select v0, v1, v2
@@ -155,9 +155,9 @@ func @branch_and_mask_three() {
 #[test]
 fn does_not_rewrite_even_masks() {
     let input = r#"
-func @branch_and_mask_two() {
+func @branch_and_mask_two(bool) {
   bb0:
-    v0: bool = bconst true
+    v0: bool = param 0
     v1: int:s32 = iconst 1
     v2: int:s32 = iconst 0
     v3: int:s32 = select v0, v1, v2
@@ -212,9 +212,9 @@ func @branch_xor_invert() {
 #[test]
 fn keeps_shared_select_alive_when_only_mask_is_removed() {
     let input = r#"
-func @mask_value() {
+func @mask_value(bool) {
   bb0:
-    v0: bool = bconst true
+    v0: bool = param 0
     v1: int:s32 = iconst 1
     v2: int:s32 = iconst 0
     v3: int:s32 = select v0, v1, v2
@@ -225,9 +225,9 @@ func @mask_value() {
 }
 "#;
     let (output, stats) = optimize(input);
-    let expected = r#"func @mask_value() {
+    let expected = r#"func @mask_value(bool) {
   bb0:
-    v0: bool = bconst true
+    v0: bool = param 0
     v1: int:s32 = iconst 1
     v2: int:s32 = iconst 0
     v3: int:s32 = select v0, v1, v2
@@ -236,4 +236,114 @@ func @mask_value() {
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
     assert_eq!(stats.per_rule["and_select_bool_to_int_odd_mask"], 1);
+}
+
+#[test]
+fn folds_integer_constant_chains() {
+    let input = r#"
+func @fold_integer_chain() {
+  bb0:
+    v0: int:s32 = iconst 2
+    v1: int:s32 = iconst 3
+    v2: int:s32 = add v0, v1
+    v3: int:s32 = iconst 4
+    v4: int:s32 = mul v2, v3
+    unreachable
+}
+"#;
+    let (output, stats) = optimize(input);
+    let expected = r#"func @fold_integer_chain() {
+  bb0:
+    v0: int:s32 = iconst 20
+    unreachable
+}"#;
+    assert_eq!(normalize_ir(&output), normalize_ir(expected));
+    assert_eq!(stats.per_rule["const_fold_add"], 1);
+    assert_eq!(stats.per_rule["const_fold_mul"], 1);
+}
+
+#[test]
+fn folds_select_with_constant_condition() {
+    let input = r#"
+func @fold_select(int:s32) {
+  bb0:
+    v0: bool = bconst true
+    v1: int:s32 = iconst 7
+    v2: int:s32 = param 0
+    v3: int:s32 = select v0, v1, v2
+    unreachable
+}
+"#;
+    let (output, stats) = optimize(input);
+    let expected = r#"func @fold_select(int:s32) {
+  bb0:
+    v0: int:s32 = param 0
+    v1: int:s32 = iconst 7
+    unreachable
+}"#;
+    assert_eq!(normalize_ir(&output), normalize_ir(expected));
+    assert_eq!(stats.per_rule["const_fold_select"], 1);
+}
+
+#[test]
+fn folds_annotated_results() {
+    let input = r#"
+func @fold_annotated_add() {
+  bb0:
+    v0: int:u8 = iconst 255
+    v1: int:u8 = iconst 2
+    v2: int:u8 = add v0, v1
+    unreachable
+}
+"#;
+    let (output, stats) = optimize(input);
+    let expected = r#"func @fold_annotated_add() {
+  bb0:
+    v0: int:u8 = iconst 1
+    unreachable
+}"#;
+    assert_eq!(normalize_ir(&output), normalize_ir(expected));
+    assert_eq!(stats.per_rule["const_fold_add"], 1);
+}
+
+#[test]
+fn folds_width_sensitive_bit_ops() {
+    let input = r#"
+func @fold_bit_ops() {
+  bb0:
+    v0: int:s32 = iconst 3
+    v1: int:s32 = count_leading_zeros.8 v0
+    v2: int:s32 = iconst 129
+    v3: int:s32 = iconst 1
+    v4: int:s32 = rotate_left.8 v2, v3
+    v5: int:s32 = add v1, v4
+    unreachable
+}
+"#;
+    let (output, stats) = optimize(input);
+    let expected = r#"func @fold_bit_ops() {
+  bb0:
+    v0: int:s32 = iconst 9
+    unreachable
+}"#;
+    assert_eq!(normalize_ir(&output), normalize_ir(expected));
+    assert_eq!(stats.per_rule["const_fold_count_leading_zeros"], 1);
+    assert_eq!(stats.per_rule["const_fold_rotate_left"], 1);
+    assert_eq!(stats.per_rule["const_fold_add"], 1);
+}
+
+#[test]
+fn skips_poisoning_constant_folds() {
+    let input = r#"
+func @skip_div_zero() {
+  bb0:
+    v0: int:s32 = iconst 1
+    v1: int:s32 = iconst 0
+    v2: int:s32 = div v0, v1
+    unreachable
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert_eq!(normalize_ir(&output), normalize_ir(input));
+    assert_eq!(stats.rewrites, 0);
 }

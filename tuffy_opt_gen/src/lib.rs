@@ -85,7 +85,7 @@ mod tests {
     use super::{GenerateError, generate, load_spec_from_json_str};
 
     const SAMPLE_JSON: &str = r#"{
-  "format_version": 2,
+  "format_version": 3,
   "kind": "peephole",
   "rules": [
     {
@@ -136,6 +136,29 @@ mod tests {
   ]
 }"#;
 
+    const CONST_FOLD_JSON: &str = r#"{
+  "format_version": 3,
+  "kind": "peephole",
+  "rules": [
+    {
+      "name": "const_fold_add",
+      "transform_kind": "equivalence",
+      "proof_ref": "TuffyLean.Rewrites.constFoldValue_sound",
+      "side_conditions": [],
+      "rewrite": {
+        "match_root": {
+          "kind": "const_fold",
+          "op": "add",
+          "attrs": []
+        },
+        "replacement": {
+          "kind": "const_fold"
+        }
+      }
+    }
+  ]
+}"#;
+
     #[test]
     fn parses_and_generates_dispatch_code() {
         let spec = load_spec_from_json_str(SAMPLE_JSON).expect("sample JSON should parse");
@@ -147,6 +170,16 @@ mod tests {
         assert!(rust.contains("apply_terminator_root_rewrite"));
         assert!(rust.contains("TerminatorOpcode::BrIf"));
         assert!(rust.contains("bound_int_constant(func, bind_cmp_const?)"));
+    }
+
+    #[test]
+    fn parses_and_generates_const_fold_dispatch_code() {
+        let spec = load_spec_from_json_str(CONST_FOLD_JSON).expect("const-fold JSON should parse");
+        let rust = generate(&spec).expect("const-fold JSON should generate Rust");
+
+        assert!(rust.contains("fn try_apply_const_fold_add"));
+        assert!(rust.contains("try_fold_constant_root(func, root_idx, ConstFoldKind::Add)"));
+        assert!(rust.contains("fold_match.replacement"));
     }
 
     #[test]

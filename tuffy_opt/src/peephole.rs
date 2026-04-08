@@ -1,13 +1,19 @@
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use num_bigint::BigInt;
 use tuffy_ir::function::Function;
-use tuffy_ir::instruction::{ICmpOp, Op, Operand, Origin};
+use tuffy_ir::instruction::{ICmpOp, Instruction, Op, Operand, Origin};
 use tuffy_ir::module::Module;
 use tuffy_ir::typed::{BoolOperand, BoolValue};
-use tuffy_ir::types::Type;
+use tuffy_ir::types::{Annotation, Type};
 use tuffy_ir::value::BlockRef;
 use tuffy_ir::value::ValueRef;
+use tuffy_ir_interp::exec::{
+    ExecResult, apply_annotation, apply_result_annotation, execute_instruction,
+};
+use tuffy_ir_interp::memory::Memory;
+use tuffy_ir_interp::value::{AllocId, Value};
 
 const MAX_ITERATIONS: usize = 32;
 
@@ -52,7 +58,8 @@ pub fn optimize_function(func: &mut Function) -> PeepholeStats {
     while iterations < MAX_ITERATIONS {
         iterations += 1;
         let mut changed = false;
-        let candidates: Vec<u32> = func.inst_pool.iter_insts().map(|(idx, _)| idx).collect();
+        let mut candidates: Vec<u32> = func.inst_pool.iter_insts().map(|(idx, _)| idx).collect();
+        candidates.reverse();
 
         'candidate: for idx in candidates {
             if func.inst_pool.get(idx).is_none() {
@@ -129,19 +136,224 @@ struct MatchedSuccessor {
     args: Vec<Operand>,
 }
 
+enum ValueRewrite {
+    Existing(ValueRef),
+    ConstInt(BigInt),
+    ConstBool(bool),
+}
+
+#[derive(Clone, Copy)]
+enum ConstFoldKind {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+    And,
+    Or,
+    Xor,
+    BAnd,
+    BOr,
+    BXor,
+    Shl,
+    Shr,
+    Min,
+    Max,
+    CountOnes,
+    CountLeadingZeros,
+    CountTrailingZeros,
+    Bswap,
+    BitReverse,
+    RotateLeft,
+    RotateRight,
+    Select,
+    ICmp(ICmpOp),
+}
+
+struct ConstantFoldMatch {
+    replacement: ValueRewrite,
+    matched_insts: BTreeSet<u32>,
+}
+
 fn apply_value_root_rewrite(
     func: &mut Function,
     root_idx: u32,
-    replacement: ValueRef,
+    replacement: ValueRewrite,
     matched_insts: &BTreeSet<u32>,
 ) {
     let root_value = ValueRef::inst_result(root_idx);
-    if replacement == root_value {
-        return;
-    }
+    let replacement = match replacement {
+        ValueRewrite::Existing(value) => {
+            if value == root_value {
+                return;
+            }
+            value
+        }
+        ValueRewrite::ConstInt(value) => {
+            let new_inst = build_const_rewrite_instruction(
+                func,
+                root_idx,
+                matched_insts,
+                Op::Const(value),
+                Type::Int,
+            );
+            let new_idx = func.insert_inst_before(root_idx, new_inst);
+            ValueRef::inst_result(new_idx)
+        }
+        ValueRewrite::ConstBool(value) => {
+            let new_inst = build_const_rewrite_instruction(
+                func,
+                root_idx,
+                matched_insts,
+                Op::BConst(value),
+                Type::Bool,
+            );
+            let new_idx = func.insert_inst_before(root_idx, new_inst);
+            ValueRef::inst_result(new_idx)
+        }
+    };
     func.replace_all_uses(root_value, replacement);
     func.remove_inst(root_idx);
     cleanup_dead_instructions(func, matched_insts);
+}
+
+fn build_const_rewrite_instruction(
+    func: &Function,
+    root_idx: u32,
+    matched_insts: &BTreeSet<u32>,
+    op: Op,
+    ty: Type,
+) -> Instruction {
+    let root_inst = func.inst(root_idx).clone();
+    Instruction {
+        op,
+        ty,
+        secondary_ty: None,
+        origin: merged_origin(func, root_idx, matched_insts),
+        result_annotation: root_inst.result_annotation,
+        secondary_result_annotation: None,
+    }
+}
+
+fn try_fold_constant_root(
+    func: &Function,
+    root_idx: u32,
+    kind: ConstFoldKind,
+) -> Option<ConstantFoldMatch> {
+    let node = func.inst_pool.get(root_idx)?;
+    if !root_matches_const_fold_kind(&node.inst.op, kind) {
+        return None;
+    }
+
+    let matched_insts = RefCell::new(BTreeSet::new());
+    let resolve_value = |value: ValueRef| {
+        constant_value_for_fold(func, value, &matched_insts).unwrap_or(Value::Poison)
+    };
+    let resolve_operand_value = |operand: &Operand| {
+        apply_operand_annotation_for_fold(resolve_value(operand.value), &operand.annotation)
+    };
+    let resolve_symbol = |_symbol| Value::Poison;
+    let def_annotation = |value: ValueRef| definition_annotation(func, value);
+    let mut memory = Memory::new();
+    let mut alloc_stack_slot = |_bytes: usize| AllocId(0);
+
+    let result = execute_instruction(
+        &node.inst.op,
+        &node.inst.ty,
+        &node.inst.result_annotation,
+        &node.inst.secondary_ty,
+        &node.inst.secondary_result_annotation,
+        &resolve_value,
+        &resolve_operand_value,
+        &mut memory,
+        &mut alloc_stack_slot,
+        &resolve_symbol,
+        &def_annotation,
+    )
+    .ok()?;
+
+    let replacement = match result {
+        ExecResult::Value(Value::Int(value)) => ValueRewrite::ConstInt(value),
+        ExecResult::Value(Value::Bool(value)) => ValueRewrite::ConstBool(value),
+        _ => return None,
+    };
+
+    Some(ConstantFoldMatch {
+        replacement,
+        matched_insts: matched_insts.into_inner(),
+    })
+}
+
+fn root_matches_const_fold_kind(op: &Op, kind: ConstFoldKind) -> bool {
+    match (kind, op) {
+        (ConstFoldKind::Add, Op::Add(_, _))
+        | (ConstFoldKind::Sub, Op::Sub(_, _))
+        | (ConstFoldKind::Mul, Op::Mul(_, _))
+        | (ConstFoldKind::Div, Op::Div(_, _))
+        | (ConstFoldKind::Rem, Op::Rem(_, _))
+        | (ConstFoldKind::And, Op::And(_, _))
+        | (ConstFoldKind::Or, Op::Or(_, _))
+        | (ConstFoldKind::Xor, Op::Xor(_, _))
+        | (ConstFoldKind::BAnd, Op::BAnd(_, _))
+        | (ConstFoldKind::BOr, Op::BOr(_, _))
+        | (ConstFoldKind::BXor, Op::BXor(_, _))
+        | (ConstFoldKind::Shl, Op::Shl(_, _))
+        | (ConstFoldKind::Shr, Op::Shr(_, _))
+        | (ConstFoldKind::Min, Op::Min(_, _))
+        | (ConstFoldKind::Max, Op::Max(_, _))
+        | (ConstFoldKind::CountOnes, Op::CountOnes(_))
+        | (ConstFoldKind::CountLeadingZeros, Op::CountLeadingZeros(_, _))
+        | (ConstFoldKind::CountTrailingZeros, Op::CountTrailingZeros(_))
+        | (ConstFoldKind::Bswap, Op::Bswap(_, _))
+        | (ConstFoldKind::BitReverse, Op::BitReverse(_, _))
+        | (ConstFoldKind::RotateLeft, Op::RotateLeft(_, _, _))
+        | (ConstFoldKind::RotateRight, Op::RotateRight(_, _, _))
+        | (ConstFoldKind::Select, Op::Select(_, _, _)) => true,
+        (ConstFoldKind::ICmp(expected), Op::ICmp(actual, _, _)) => *actual == expected,
+        _ => false,
+    }
+}
+
+fn constant_value_for_fold(
+    func: &Function,
+    value: ValueRef,
+    matched_insts: &RefCell<BTreeSet<u32>>,
+) -> Option<Value> {
+    let idx = primary_inst_index(value)?;
+    let node = func.inst_pool.get(idx)?;
+    let resolved = match &node.inst.op {
+        Op::Const(value) => {
+            apply_result_annotation(Value::Int(value.clone()), &node.inst.result_annotation)
+        }
+        Op::BConst(value) => Value::Bool(*value),
+        _ => return None,
+    };
+    matched_insts.borrow_mut().insert(idx);
+    Some(resolved)
+}
+
+fn apply_operand_annotation_for_fold(value: Value, annotation: &Option<Annotation>) -> Value {
+    match (value, annotation) {
+        (Value::Poison, _) => Value::Poison,
+        (Value::Int(value), Some(Annotation::Int(int_ann))) => apply_annotation(&value, int_ann),
+        (value, _) => value,
+    }
+}
+
+fn definition_annotation(func: &Function, value: ValueRef) -> Option<Annotation> {
+    if value.is_block_arg() {
+        func.block_args
+            .get(value.index() as usize)
+            .and_then(|arg| arg.annotation)
+    } else if value.is_secondary_result() {
+        func.inst_pool
+            .get(value.inst_index())
+            .and_then(|node| node.inst.secondary_result_annotation)
+    } else {
+        func.inst_pool
+            .get(value.index())
+            .and_then(|node| node.inst.result_annotation)
+    }
 }
 
 fn apply_terminator_root_rewrite(
