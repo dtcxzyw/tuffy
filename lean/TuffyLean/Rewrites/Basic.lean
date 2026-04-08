@@ -58,6 +58,8 @@ inductive Pattern where
 /-- Replacement references an already-matched binding. -/
 inductive Replacement where
   | binding (name : String)
+  | boolConst (value : Bool)
+  | boolNot (value : Replacement)
   deriving DecidableEq, Repr
 
 /-- v1 only exports equivalence-preserving local rewrites. -/
@@ -75,6 +77,8 @@ inductive IntPredicate where
 /-- Structured side conditions attached to exported peephole rules. -/
 inductive SideCondition where
   | intPredicate (binding : String) (predicate : IntPredicate)
+  | bestIntAnnotation (binding : String) (annotation : Annotation)
+  | knownOne (binding : String) (bit : Nat)
   | allOf (conditions : List SideCondition)
   | anyOf (conditions : List SideCondition)
   | not (condition : SideCondition)
@@ -150,12 +154,15 @@ private theorem evalAnd_one_of_odd (mask : Int) (hmask : mask % 2 = 1) :
     simpa [evalAnd] using evalAnd_zero tail
   simp [hzero, Int.bit]
 
-/-- Masking the canonical 0/1 integer encoding with any odd integer is an identity. -/
-theorem and_select_bool_to_int_odd_mask (b : Bool) (mask : Int) (hmask : mask % 2 = 1) :
-    evalAnd (boolToInt b) mask = boolToInt b := by
-  cases b
-  · simpa [boolToInt] using evalAnd_zero mask
-  · simpa [boolToInt] using evalAnd_one_of_odd mask hmask
+/-- Masking any unsigned 1-bit integer with a value whose low bit is known one is an identity. -/
+theorem and_u1_lowbit_one_identity
+    (x mask : Int) (hxLo : 0 ≤ x) (hxHi : x < 2) (hmask : mask % 2 = 1) :
+    evalAnd x mask = x := by
+  have hxCases : x = 0 ∨ x = 1 := by
+    omega
+  rcases hxCases with rfl | rfl
+  · simpa using evalAnd_zero mask
+  · simpa using evalAnd_one_of_odd mask hmask
 
 /-- Integer-encoded Bool inversion via `xor 1` flips the canonical 0/1 encoding. -/
 theorem icmp_eq_xor_select_bool_to_int_is_one_is_one
@@ -190,12 +197,6 @@ private def selectBoolToInt (boolName : String) : Pattern :=
 private def bindSelectBoolToInt (bindName boolName : String) : Pattern :=
   .bind bindName (selectBoolToInt boolName)
 
-private def brifRoot (condition : Pattern) : MatchRoot :=
-  .terminator .brif [condition] 2
-
-private def brifReplacement (condition : Replacement) (successors : List Nat) : RootReplacement :=
-  .terminator .brif [condition] successors
-
 private def isZero (binding : String) : SideCondition :=
   .intPredicate binding .isZero
 
@@ -204,6 +205,12 @@ private def isOne (binding : String) : SideCondition :=
 
 private def isOdd (binding : String) : SideCondition :=
   .intPredicate binding .isOdd
+
+private def bestIntAnnotation (binding : String) (annotation : Annotation) : SideCondition :=
+  .bestIntAnnotation binding annotation
+
+private def knownOne (binding : String) (bit : Nat) : SideCondition :=
+  .knownOne binding bit
 
 private def constFoldRule (name : String) (opcode : ConstFoldOpcode) : PeepholeRule :=
   {
@@ -218,58 +225,58 @@ private def constFoldRule (name : String) (opcode : ConstFoldOpcode) : PeepholeR
 private def constFoldIcmpRule (suffix : String) (pred : ICmpOp) : PeepholeRule :=
   constFoldRule s!"const_fold_icmp_{suffix}" (.icmp pred)
 
-/-- `and (select %b, 1, 0), C -> select %b, 1, 0` for odd `C`. -/
-def andSelectBoolToIntOddMaskRule : PeepholeRule :=
+/-- `and %x, %mask -> %x` when `%x` is unsigned 1-bit and `%mask` preserves bit 0. -/
+def andActiveBitsAtMostOneLowBitOneRule : PeepholeRule :=
   {
-    name := "and_select_bool_to_int_odd_mask"
-    proofRef := "TuffyLean.Rewrites.and_select_bool_to_int_odd_mask"
-    sideConditions := [isOdd "mask"]
+    name := "and_best_int_annotation_u1_lowbit_one"
+    proofRef := "TuffyLean.Rewrites.and_u1_lowbit_one_identity"
+    sideConditions := [bestIntAnnotation "x" (.unsigned 1), knownOne "mask" 0]
     body := {
       matchRoot := .value
-        (.inst .and [] [bindSelectBoolToInt "bool_int" "b", .intConstBinding "mask"])
-      replacement := .value (.binding "bool_int")
+        (.inst .and [] [.capture "x" (.some .int), .capture "mask" (.some .int)])
+      replacement := .value (.binding "x")
     }
   }
 
-/-- `brif (icmp.eq (select %b, 1, 0), C) -> brif %b` for `C = 1`. -/
-def brifIcmpEqSelectBoolToIntIsOneRule : PeepholeRule :=
+/-- `icmp.eq (select %b, 1, 0), C -> %b` for `C = 1`. -/
+def icmpEqSelectBoolToIntIsOneRule : PeepholeRule :=
   {
-    name := "brif_icmp_eq_select_bool_to_int_is_one"
+    name := "icmp_eq_select_bool_to_int_is_one"
     proofRef := "TuffyLean.Rewrites.icmp_eq_select_bool_to_int_is_one"
     sideConditions := [isOne "cmp_const"]
     body := {
-      matchRoot := brifRoot
+      matchRoot := .value
         (.inst .icmp [.icmpPred .eq] [selectBoolToInt "b", .intConstBinding "cmp_const"])
-      replacement := brifReplacement (.binding "b") [0, 1]
+      replacement := .value (.binding "b")
     }
   }
 
-/-- `brif (icmp.eq (select %b, 1, 0), C) -> brif !%b` for `C = 0`. -/
-def brifIcmpEqSelectBoolToIntIsZeroRule : PeepholeRule :=
+/-- `icmp.eq (select %b, 1, 0), C -> !%b` for `C = 0`. -/
+def icmpEqSelectBoolToIntIsZeroRule : PeepholeRule :=
   {
-    name := "brif_icmp_eq_select_bool_to_int_is_zero"
+    name := "icmp_eq_select_bool_to_int_is_zero"
     proofRef := "TuffyLean.Rewrites.icmp_eq_select_bool_to_int_is_zero"
     sideConditions := [isZero "cmp_const"]
     body := {
-      matchRoot := brifRoot
+      matchRoot := .value
         (.inst .icmp [.icmpPred .eq] [selectBoolToInt "b", .intConstBinding "cmp_const"])
-      replacement := brifReplacement (.binding "b") [1, 0]
+      replacement := .value (.boolNot (.binding "b"))
     }
   }
 
-/-- `brif (icmp.eq (xor (select %b, 1, 0), X), C) -> brif !%b` for `X = 1` and `C = 1`. -/
-def brifIcmpEqXorSelectBoolToIntIsOneIsOneRule : PeepholeRule :=
+/-- `icmp.eq (xor (select %b, 1, 0), X), C -> !%b` for `X = 1` and `C = 1`. -/
+def icmpEqXorSelectBoolToIntIsOneIsOneRule : PeepholeRule :=
   {
-    name := "brif_icmp_eq_xor_select_bool_to_int_is_one_is_one"
+    name := "icmp_eq_xor_select_bool_to_int_is_one_is_one"
     proofRef := "TuffyLean.Rewrites.icmp_eq_xor_select_bool_to_int_is_one_is_one"
     sideConditions := [isOne "xor_mask", isOne "cmp_const"]
     body := {
-      matchRoot := brifRoot
+      matchRoot := .value
         (.inst .icmp [.icmpPred .eq] [
           .inst .xor [] [selectBoolToInt "b", .intConstBinding "xor_mask"],
           .intConstBinding "cmp_const"
         ])
-      replacement := brifReplacement (.binding "b") [1, 0]
+      replacement := .value (.boolNot (.binding "b"))
     }
   }
 
@@ -309,10 +316,10 @@ private def allConstFoldRules : List PeepholeRule :=
 /-- Seed rules for the first exported peephole batch. -/
 def allPeepholeRules : List PeepholeRule :=
   [
-    andSelectBoolToIntOddMaskRule,
-    brifIcmpEqSelectBoolToIntIsOneRule,
-    brifIcmpEqSelectBoolToIntIsZeroRule,
-    brifIcmpEqXorSelectBoolToIntIsOneIsOneRule
+    andActiveBitsAtMostOneLowBitOneRule,
+    icmpEqSelectBoolToIntIsOneRule,
+    icmpEqSelectBoolToIntIsZeroRule,
+    icmpEqXorSelectBoolToIntIsOneIsOneRule
   ] ++ allConstFoldRules
 
 end TuffyLean.Rewrites

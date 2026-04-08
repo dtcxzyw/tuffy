@@ -16,6 +16,7 @@ pub enum GenerateError {
     UnsupportedTransformKind(String),
     UnsupportedRootRewrite { rule: String, message: String },
     UnsupportedPattern(String),
+    IllTypedReplacement { rule: String, message: String },
     MissingReplacementBinding { rule: String, binding: String },
     MissingSideConditionBinding { rule: String, binding: String },
     IllTypedSideCondition { rule: String, message: String },
@@ -40,6 +41,9 @@ impl fmt::Display for GenerateError {
             }
             GenerateError::UnsupportedPattern(msg) => {
                 write!(f, "unsupported peephole pattern: {msg}")
+            }
+            GenerateError::IllTypedReplacement { rule, message } => {
+                write!(f, "rule `{rule}` uses an ill-typed replacement: {message}")
             }
             GenerateError::MissingReplacementBinding { rule, binding } => {
                 write!(
@@ -85,13 +89,13 @@ mod tests {
     use super::{GenerateError, generate, load_spec_from_json_str};
 
     const SAMPLE_JSON: &str = r#"{
-  "format_version": 3,
+  "format_version": 4,
   "kind": "peephole",
   "rules": [
     {
-      "name": "brif_icmp_eq_select_bool_to_int_is_one",
+      "name": "icmp_eq_select_bool_to_int_is_zero",
       "transform_kind": "equivalence",
-      "proof_ref": "TuffyLean.Rewrites.icmp_eq_select_bool_to_int_is_one",
+      "proof_ref": "TuffyLean.Rewrites.icmp_eq_select_bool_to_int_is_zero",
       "side_conditions": [
         {
           "kind": "int_predicate",
@@ -101,35 +105,32 @@ mod tests {
       ],
       "rewrite": {
         "match_root": {
-          "kind": "terminator",
-          "op": "brif",
-          "operands": [
-            {
-              "kind": "inst",
-              "op": "icmp",
-              "attrs": [{ "kind": "icmp_pred", "value": "eq" }],
-              "args": [
-                {
-                  "kind": "inst",
-                  "op": "select",
-                  "attrs": [],
-                  "args": [
-                    { "kind": "capture", "name": "b", "ty": "bool" },
-                    { "kind": "int_const", "value": "1" },
-                    { "kind": "int_const", "value": "0" }
-                  ]
-                },
-                { "kind": "int_const_binding", "name": "cmp_const" }
-              ]
-            }
-          ],
-          "successor_count": 2
+          "kind": "value",
+          "root": {
+            "kind": "inst",
+            "op": "icmp",
+            "attrs": [{ "kind": "icmp_pred", "value": "eq" }],
+            "args": [
+              {
+                "kind": "inst",
+                "op": "select",
+                "attrs": [],
+                "args": [
+                  { "kind": "capture", "name": "b", "ty": "bool" },
+                  { "kind": "int_const", "value": "1" },
+                  { "kind": "int_const", "value": "0" }
+                ]
+              },
+              { "kind": "int_const_binding", "name": "cmp_const" }
+            ]
+          }
         },
         "replacement": {
-          "kind": "terminator",
-          "op": "brif",
-          "operands": [{ "kind": "binding", "name": "b" }],
-          "successors": [0, 1]
+          "kind": "value",
+          "value": {
+            "kind": "bool_not",
+            "value": { "kind": "binding", "name": "b" }
+          }
         }
       }
     }
@@ -137,7 +138,7 @@ mod tests {
 }"#;
 
     const CONST_FOLD_JSON: &str = r#"{
-  "format_version": 3,
+  "format_version": 4,
   "kind": "peephole",
   "rules": [
     {
@@ -159,16 +160,58 @@ mod tests {
   ]
 }"#;
 
+    const FACT_JSON: &str = r#"{
+  "format_version": 4,
+  "kind": "peephole",
+  "rules": [
+    {
+      "name": "and_best_int_annotation_u1_lowbit_one",
+      "transform_kind": "equivalence",
+      "proof_ref": "TuffyLean.Rewrites.and_u1_lowbit_one_identity",
+      "side_conditions": [
+        {
+          "kind": "best_int_annotation",
+          "binding": "x",
+          "annotation": { "kind": "unsigned", "bits": 1 }
+        },
+        {
+          "kind": "known_one",
+          "binding": "mask",
+          "bit": 0
+        }
+      ],
+      "rewrite": {
+        "match_root": {
+          "kind": "value",
+          "root": {
+            "kind": "inst",
+            "op": "and",
+            "attrs": [],
+            "args": [
+              { "kind": "capture", "name": "x", "ty": "int" },
+              { "kind": "capture", "name": "mask", "ty": "int" }
+            ]
+          }
+        },
+        "replacement": {
+          "kind": "value",
+          "value": { "kind": "binding", "name": "x" }
+        }
+      }
+    }
+  ]
+}"#;
+
     #[test]
     fn parses_and_generates_dispatch_code() {
         let spec = load_spec_from_json_str(SAMPLE_JSON).expect("sample JSON should parse");
         let rust = generate(&spec).expect("sample JSON should generate Rust");
 
         assert!(rust.contains("pub(super) const GENERATED_RULE_COUNT: usize = 1;"));
-        assert!(rust.contains("fn try_apply_brif_icmp_eq_select_bool_to_int_is_one"));
+        assert!(rust.contains("fn try_apply_icmp_eq_select_bool_to_int_is_zero"));
         assert!(rust.contains("Op::Select(cond, t, e)"));
-        assert!(rust.contains("apply_terminator_root_rewrite"));
-        assert!(rust.contains("TerminatorOpcode::BrIf"));
+        assert!(rust.contains("ValueRewrite::Expr"));
+        assert!(rust.contains("ReplacementExpr::BoolNot"));
         assert!(rust.contains("bound_int_constant(func, bind_cmp_const?)"));
     }
 
@@ -180,6 +223,16 @@ mod tests {
         assert!(rust.contains("fn try_apply_const_fold_add"));
         assert!(rust.contains("try_fold_constant_root(func, root_idx, ConstFoldKind::Add)"));
         assert!(rust.contains("fold_match.replacement"));
+    }
+
+    #[test]
+    fn parses_and_generates_fact_side_conditions() {
+        let spec = load_spec_from_json_str(FACT_JSON).expect("fact JSON should parse");
+        let rust = generate(&spec).expect("fact JSON should generate Rust");
+
+        assert!(rust.contains("best_int_annotation_matches"));
+        assert!(rust.contains("known_one(func, fact_cache, bind_mask?, 0)"));
+        assert!(rust.contains("IntSignedness::Unsigned"));
     }
 
     #[test]
@@ -202,5 +255,16 @@ mod tests {
         let err = load_spec_from_json_str(&json)
             .expect_err("non-const side-condition binding should fail");
         assert!(matches!(err, GenerateError::IllTypedSideCondition { .. }));
+    }
+
+    #[test]
+    fn rejects_ill_typed_bool_not_replacement() {
+        let json = SAMPLE_JSON.replace(
+            "{ \"kind\": \"binding\", \"name\": \"b\" }",
+            "{ \"kind\": \"binding\", \"name\": \"cmp_const\" }",
+        );
+        let err =
+            load_spec_from_json_str(&json).expect_err("bool_not over int binding should fail");
+        assert!(matches!(err, GenerateError::IllTypedReplacement { .. }));
     }
 }

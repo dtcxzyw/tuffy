@@ -4,8 +4,8 @@ use num_bigint::BigInt;
 
 use crate::GenerateError;
 use crate::schema::{
-    IntPredicate, MatchRoot, Pattern, PatternAttr, PeepholeRule, PeepholeSpec, Replacement,
-    RootReplacement, SideCondition, ValueType,
+    IntAnnotationSpec, IntPredicate, MatchRoot, Pattern, PatternAttr, PeepholeRule, PeepholeSpec,
+    Replacement, RootReplacement, SideCondition, ValueType,
 };
 
 pub fn generate(spec: &PeepholeSpec) -> Result<String, GenerateError> {
@@ -33,18 +33,18 @@ fn generate_dispatch(out: &mut String, rules: &[PeepholeRule]) {
     writeln!(out, "#[allow(clippy::question_mark)]").unwrap();
     writeln!(
         out,
-        "pub(super) fn try_apply_generated_rule(func: &mut Function, root_idx: u32, stats: &mut PeepholeStats) -> bool {{"
+        "pub(super) fn try_apply_generated_rule(func: &mut Function, root_idx: u32, stats: &mut PeepholeStats, fact_cache: &mut IntFactCache) -> bool {{"
     )
     .unwrap();
     if rules.is_empty() {
-        writeln!(out, "    let _ = (func, root_idx, stats);").unwrap();
+        writeln!(out, "    let _ = (func, root_idx, stats, fact_cache);").unwrap();
         writeln!(out, "    false").unwrap();
     } else {
         for rule in rules {
             let ident = rule_ident(&rule.name);
             writeln!(
                 out,
-                "    if try_apply_{ident}(func, root_idx, stats) {{ return true; }}"
+                "    if try_apply_{ident}(func, root_idx, stats, fact_cache) {{ return true; }}"
             )
             .unwrap();
         }
@@ -73,9 +73,10 @@ fn generate_rule_fn(out: &mut String, rule: &PeepholeRule) -> Result<(), Generat
     .unwrap();
     writeln!(
         out,
-        "fn try_apply_{ident}(func: &mut Function, root_idx: u32, stats: &mut PeepholeStats) -> bool {{"
+        "fn try_apply_{ident}(func: &mut Function, root_idx: u32, stats: &mut PeepholeStats, fact_cache: &mut IntFactCache) -> bool {{"
     )
     .unwrap();
+    writeln!(out, "    let _ = &mut *fact_cache;").unwrap();
     match (&rule.rewrite.match_root, &rule.rewrite.replacement) {
         (MatchRoot::Value { root }, RootReplacement::Value { value: replacement }) => {
             for binding in &bindings {
@@ -99,8 +100,8 @@ fn generate_rule_fn(out: &mut String, rule: &PeepholeRule) -> Result<(), Generat
             emit_side_condition_checks(out, &rule.side_conditions)?;
             writeln!(
                 out,
-                "        let replacement = ValueRewrite::Existing(bind_{}?);",
-                replacement.binding_name()
+                "        let replacement = {};",
+                value_rewrite_expr(replacement)?
             )
             .unwrap();
             writeln!(out, "        Some(replacement)").unwrap();
@@ -263,6 +264,9 @@ fn emit_terminator_replacement(
 fn replacement_expr(replacement: &Replacement) -> String {
     match replacement {
         Replacement::Binding { name } => format!("bind_{name}?"),
+        Replacement::BoolConst { .. } | Replacement::BoolNot { .. } => {
+            unreachable!("terminator replacements only support direct bindings")
+        }
     }
 }
 
@@ -297,6 +301,16 @@ fn side_condition_expr(condition: &SideCondition) -> Result<String, GenerateErro
             };
             Ok(expr)
         }
+        SideCondition::BestIntAnnotation {
+            binding,
+            annotation,
+        } => Ok(format!(
+            "best_int_annotation_matches(func, fact_cache, bind_{binding}?, &{})",
+            int_annotation_expr(*annotation)
+        )),
+        SideCondition::KnownOne { binding, bit } => Ok(format!(
+            "known_one(func, fact_cache, bind_{binding}?, {bit})"
+        )),
         SideCondition::AllOf { conditions } => combine_side_conditions(conditions, "&&"),
         SideCondition::AnyOf { conditions } => combine_side_conditions(conditions, "||"),
         SideCondition::Not { condition } => Ok(format!("!({})", side_condition_expr(condition)?)),
@@ -358,6 +372,7 @@ impl PatternGen {
                         "if !bind_value_slot(&mut bind_{name}, {value_expr}) {{ return None; }}"
                     ),
                 );
+                self.emit_track_primary_inst(out, value_expr);
             }
             Pattern::Bind { name, pattern } => {
                 self.line(
@@ -366,6 +381,7 @@ impl PatternGen {
                         "if !bind_value_slot(&mut bind_{name}, {value_expr}) {{ return None; }}"
                     ),
                 );
+                self.emit_track_primary_inst(out, value_expr);
                 self.emit_pattern(out, pattern, value_expr)?;
             }
             Pattern::IntConst { value } => {
@@ -569,6 +585,28 @@ impl PatternGen {
         let local = format!("{prefix}_{}", self.next_local);
         self.next_local += 1;
         local
+    }
+
+    fn emit_track_primary_inst(&mut self, out: &mut String, value_expr: &str) {
+        let inst_idx = self.local("captured_inst_idx");
+        let node = self.local("captured_node");
+        self.line(
+            out,
+            &format!("if let Some({inst_idx}) = primary_inst_index({value_expr}) {{"),
+        );
+        self.indent += 1;
+        self.line(
+            out,
+            &format!("let Some({node}) = func.inst_pool.get({inst_idx}) else {{ return None; }};"),
+        );
+        self.line(
+            out,
+            &format!(
+                "if {node}.parent_block == root_block {{ matched_insts.insert({inst_idx}); }}"
+            ),
+        );
+        self.indent -= 1;
+        self.line(out, "}");
     }
 
     fn line(&self, out: &mut String, text: &str) {
@@ -798,6 +836,37 @@ fn bigint_expr(value: &str) -> Result<String, GenerateError> {
         .parse()
         .map_err(|_| GenerateError::InvalidIntConstant(value.to_string()))?;
     Ok(format!("parse_decimal_bigint({value:?})"))
+}
+
+fn value_rewrite_expr(replacement: &Replacement) -> Result<String, GenerateError> {
+    match replacement {
+        Replacement::Binding { name } => Ok(format!("ValueRewrite::Existing(bind_{name}?)")),
+        Replacement::BoolConst { value } => Ok(format!("ValueRewrite::ConstBool({value})")),
+        Replacement::BoolNot { value } => Ok(format!(
+            "ValueRewrite::Expr(ReplacementExpr::BoolNot(Box::new({})))",
+            replacement_expr_tree(value)?
+        )),
+    }
+}
+
+fn replacement_expr_tree(replacement: &Replacement) -> Result<String, GenerateError> {
+    match replacement {
+        Replacement::Binding { name } => Ok(format!("ReplacementExpr::Value(bind_{name}?)")),
+        Replacement::BoolConst { value } => Ok(format!("ReplacementExpr::ConstBool({value})")),
+        Replacement::BoolNot { value } => Ok(format!(
+            "ReplacementExpr::BoolNot(Box::new({}))",
+            replacement_expr_tree(value)?
+        )),
+    }
+}
+
+fn int_annotation_expr(annotation: IntAnnotationSpec) -> String {
+    let (bit_width, signedness) = match annotation {
+        IntAnnotationSpec::Signed { bits } => (bits, "IntSignedness::Signed"),
+        IntAnnotationSpec::Unsigned { bits } => (bits, "IntSignedness::Unsigned"),
+        IntAnnotationSpec::DontCare { bits } => (bits, "IntSignedness::DontCare"),
+    };
+    format!("IntAnnotation {{ bit_width: {bit_width}, signedness: {signedness} }}")
 }
 
 fn rule_ident(name: &str) -> String {

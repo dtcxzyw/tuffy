@@ -53,7 +53,7 @@ func @branch_eq_one() {
     trap
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
-    assert_eq!(stats.per_rule["brif_icmp_eq_select_bool_to_int_is_one"], 1);
+    assert_eq!(stats.per_rule["icmp_eq_select_bool_to_int_is_one"], 1);
 }
 
 #[test]
@@ -77,15 +77,16 @@ func @branch_eq_zero() {
     let (output, stats) = optimize(input);
     let expected = r#"func @branch_eq_zero() {
   bb0:
-    v0: bool = bconst false
-    brif v0, bb2, bb1
+    v0: bool = bconst true
+    brif v0, bb1, bb2
   bb1:
     trap
   bb2:
     trap
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
-    assert_eq!(stats.per_rule["brif_icmp_eq_select_bool_to_int_is_zero"], 1);
+    assert_eq!(stats.per_rule["icmp_eq_select_bool_to_int_is_zero"], 1);
+    assert_eq!(stats.per_rule["const_fold_bxor"], 1);
 }
 
 #[test]
@@ -111,16 +112,17 @@ func @branch_and_mask() {
     let (output, stats) = optimize(input);
     let expected = r#"func @branch_and_mask() {
   bb0:
-    v0: bool = bconst true
-    brif v0, bb2, bb1
+    v0: bool = bconst false
+    brif v0, bb1, bb2
   bb1:
     trap
   bb2:
     trap
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
-    assert_eq!(stats.per_rule["and_select_bool_to_int_odd_mask"], 1);
-    assert_eq!(stats.per_rule["brif_icmp_eq_select_bool_to_int_is_zero"], 1);
+    assert_eq!(stats.per_rule["and_best_int_annotation_u1_lowbit_one"], 1);
+    assert_eq!(stats.per_rule["icmp_eq_select_bool_to_int_is_zero"], 1);
+    assert_eq!(stats.per_rule["const_fold_bxor"], 1);
 }
 
 #[test]
@@ -149,7 +151,7 @@ func @branch_and_mask_three(bool) {
     unreachable
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
-    assert_eq!(stats.per_rule["and_select_bool_to_int_odd_mask"], 1);
+    assert_eq!(stats.per_rule["and_best_int_annotation_u1_lowbit_one"], 1);
 }
 
 #[test]
@@ -195,8 +197,8 @@ func @branch_xor_invert() {
     let (output, stats) = optimize(input);
     let expected = r#"func @branch_xor_invert() {
   bb0:
-    v0: bool = bconst true
-    brif v0, bb2, bb1
+    v0: bool = bconst false
+    brif v0, bb1, bb2
   bb1:
     trap
   bb2:
@@ -204,9 +206,10 @@ func @branch_xor_invert() {
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
     assert_eq!(
-        stats.per_rule["brif_icmp_eq_xor_select_bool_to_int_is_one_is_one"],
+        stats.per_rule["icmp_eq_xor_select_bool_to_int_is_one_is_one"],
         1
     );
+    assert_eq!(stats.per_rule["const_fold_bxor"], 1);
 }
 
 #[test]
@@ -235,7 +238,73 @@ func @mask_value(bool) {
     unreachable
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
-    assert_eq!(stats.per_rule["and_select_bool_to_int_odd_mask"], 1);
+    assert_eq!(stats.per_rule["and_best_int_annotation_u1_lowbit_one"], 1);
+}
+
+#[test]
+fn simplifies_icmp_value_roots_without_branch_matching() {
+    let input = r#"
+func @icmp_value_root(bool) {
+  bb0:
+    v0: bool = param 0
+    v1: int = iconst 1
+    v2: int = iconst 0
+    v3: int = select v0, v1, v2
+    v4: int = iconst 1
+    v5: bool = icmp.eq v3, v4
+    v6: bool = bxor v5, v0
+    unreachable
+}
+"#;
+    let (output, stats) = optimize(input);
+    let expected = r#"func @icmp_value_root(bool) {
+  bb0:
+    v0: bool = param 0
+    v1: bool = bxor v0, v0
+    unreachable
+}"#;
+    assert_eq!(normalize_ir(&output), normalize_ir(expected));
+    assert_eq!(stats.per_rule["icmp_eq_select_bool_to_int_is_one"], 1);
+}
+
+#[test]
+fn generalizes_mask_cleanup_to_best_u1_annotation() {
+    let input = r#"
+func @mask_i1(int:i1) {
+  bb0:
+    v0: int:i1 = param 0
+    v1: int:u8 = iconst 255
+    v2: int:i1 = and v0, v1
+    v3: int:i1 = add v2, v0
+    unreachable
+}
+"#;
+    let (output, stats) = optimize(input);
+    let expected = r#"func @mask_i1(int:i1) {
+  bb0:
+    v0: int:i1 = param 0
+    v1: int:i1 = add v0, v0
+    unreachable
+}"#;
+    assert_eq!(normalize_ir(&output), normalize_ir(expected));
+    assert_eq!(stats.per_rule["and_best_int_annotation_u1_lowbit_one"], 1);
+}
+
+#[test]
+fn does_not_rewrite_signed_one_bit_values() {
+    let input = r#"
+func @mask_s1(int:s1) {
+  bb0:
+    v0: int:s1 = param 0
+    v1: int:u1 = iconst 1
+    v2: int:s1 = and v0, v1
+    v3: int:s1 = add v2, v0
+    unreachable
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert_eq!(normalize_ir(&output), normalize_ir(input));
+    assert_eq!(stats.rewrites, 0);
 }
 
 #[test]

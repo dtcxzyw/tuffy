@@ -1,12 +1,12 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
-use num_bigint::BigInt;
+use num_bigint::{BigInt, Sign};
 use tuffy_ir::function::Function;
 use tuffy_ir::instruction::{ICmpOp, Instruction, Op, Operand, Origin};
 use tuffy_ir::module::Module;
 use tuffy_ir::typed::{BoolOperand, BoolValue};
-use tuffy_ir::types::{Annotation, Type};
+use tuffy_ir::types::{Annotation, IntAnnotation, IntSignedness, Type};
 use tuffy_ir::value::BlockRef;
 use tuffy_ir::value::ValueRef;
 use tuffy_ir_interp::exec::{
@@ -58,6 +58,7 @@ pub fn optimize_function(func: &mut Function) -> PeepholeStats {
     while iterations < MAX_ITERATIONS {
         iterations += 1;
         let mut changed = false;
+        let mut fact_cache = IntFactCache::default();
         let mut candidates: Vec<u32> = func.inst_pool.iter_insts().map(|(idx, _)| idx).collect();
         candidates.reverse();
 
@@ -65,7 +66,7 @@ pub fn optimize_function(func: &mut Function) -> PeepholeStats {
             if func.inst_pool.get(idx).is_none() {
                 continue;
             }
-            if try_apply_generated_rule(func, idx, &mut stats) {
+            if try_apply_generated_rule(func, idx, &mut stats, &mut fact_cache) {
                 changed = true;
                 break 'candidate;
             }
@@ -107,6 +108,7 @@ fn bound_int_constant(func: &Function, value: ValueRef) -> Option<&BigInt> {
     }
 }
 
+#[allow(dead_code)]
 fn bigint_is_odd(value: &BigInt) -> bool {
     let modulus = BigInt::from(2u8);
     (value % &modulus) != BigInt::from(0u8)
@@ -119,11 +121,163 @@ fn parse_decimal_bigint(value: &str) -> BigInt {
         .unwrap_or_else(|_| panic!("invalid generated bigint literal: {value}"))
 }
 
+#[derive(Clone, Debug, Default)]
+struct IntFacts {
+    exact_const: Option<BigInt>,
+    known_zero: u64,
+    known_one: u64,
+    unsigned_width_upper_bound: Option<u32>,
+    signed_width_upper_bound: Option<u32>,
+}
+
+impl IntFacts {
+    fn unknown() -> Self {
+        Self::default()
+    }
+
+    fn from_exact_const(value: &BigInt) -> Self {
+        Self {
+            exact_const: Some(value.clone()),
+            known_zero: !low_bits_u64(value),
+            known_one: low_bits_u64(value),
+            unsigned_width_upper_bound: exact_unsigned_width(value),
+            signed_width_upper_bound: Some(exact_signed_width(value)),
+        }
+    }
+
+    fn refine_with_annotation(mut self, annotation: &IntAnnotation) -> Self {
+        if let Some(value) = &self.exact_const {
+            self = match apply_annotation(value, annotation) {
+                Value::Int(value) => Self::from_exact_const(&value),
+                Value::Poison => Self::unknown(),
+                _ => unreachable!("integer annotation should not produce non-int values"),
+            };
+            return self;
+        }
+
+        match annotation.signedness {
+            IntSignedness::Signed => {
+                self.signed_width_upper_bound =
+                    min_bound(self.signed_width_upper_bound, Some(annotation.bit_width));
+            }
+            IntSignedness::Unsigned | IntSignedness::DontCare => {
+                self.unsigned_width_upper_bound =
+                    min_bound(self.unsigned_width_upper_bound, Some(annotation.bit_width));
+                self.signed_width_upper_bound = min_bound(
+                    self.signed_width_upper_bound,
+                    Some(annotation.bit_width.saturating_add(1)),
+                );
+                self.add_known_zero_above(annotation.bit_width);
+            }
+        }
+
+        self
+    }
+
+    fn tighten_from_unsigned(&mut self) {
+        if let Some(bits) = self.unsigned_width_upper_bound {
+            self.signed_width_upper_bound =
+                min_bound(self.signed_width_upper_bound, Some(bits.saturating_add(1)));
+            self.add_known_zero_above(bits);
+        }
+    }
+
+    fn add_known_zero_above(&mut self, bits: u32) {
+        if bits >= 64 {
+            return;
+        }
+        let upper_zero_mask = !((1u64 << bits) - 1);
+        self.known_zero |= upper_zero_mask;
+    }
+
+    fn best_annotation(&self) -> Option<IntAnnotation> {
+        let mut best: Option<IntAnnotation> = None;
+
+        if let Some(bit_width) = self.unsigned_width_upper_bound {
+            best = Some(IntAnnotation {
+                bit_width,
+                signedness: IntSignedness::Unsigned,
+            });
+        }
+
+        if let Some(bit_width) = self.signed_width_upper_bound {
+            let candidate = IntAnnotation {
+                bit_width,
+                signedness: IntSignedness::Signed,
+            };
+            let should_replace = match best {
+                Some(current) => annotation_rank(candidate) < annotation_rank(current),
+                None => true,
+            };
+            if should_replace {
+                best = Some(candidate);
+            }
+        }
+
+        best
+    }
+}
+
+#[derive(Default)]
+pub(super) struct IntFactCache {
+    entries: BTreeMap<u32, Option<IntFacts>>,
+}
+
+fn annotation_rank(annotation: IntAnnotation) -> (u32, u8) {
+    let signedness_rank = match annotation.signedness {
+        IntSignedness::Unsigned => 0,
+        IntSignedness::Signed => 1,
+        IntSignedness::DontCare => 2,
+    };
+    (annotation.bit_width, signedness_rank)
+}
+
+fn min_bound(lhs: Option<u32>, rhs: Option<u32>) -> Option<u32> {
+    match (lhs, rhs) {
+        (Some(lhs), Some(rhs)) => Some(lhs.min(rhs)),
+        (Some(lhs), None) => Some(lhs),
+        (None, Some(rhs)) => Some(rhs),
+        (None, None) => None,
+    }
+}
+
+fn max_bound(lhs: Option<u32>, rhs: Option<u32>) -> Option<u32> {
+    match (lhs, rhs) {
+        (Some(lhs), Some(rhs)) => Some(lhs.max(rhs)),
+        _ => None,
+    }
+}
+
+fn low_bits_u64(value: &BigInt) -> u64 {
+    let modulus = BigInt::from(1u8) << 64;
+    let truncated: BigInt = ((value % &modulus) + &modulus) % &modulus;
+    let (_, digits) = truncated.to_u64_digits();
+    digits.first().copied().unwrap_or(0)
+}
+
+fn exact_unsigned_width(value: &BigInt) -> Option<u32> {
+    if value.sign() == Sign::Minus {
+        None
+    } else {
+        Some((value.bits() as u32).max(1))
+    }
+}
+
+fn exact_signed_width(value: &BigInt) -> u32 {
+    if value.sign() == Sign::Minus {
+        (((-value) - BigInt::from(1u8)).bits() as u32) + 1
+    } else {
+        (value.bits() as u32).saturating_add(1).max(1)
+    }
+}
+
 #[derive(Clone, Copy)]
+#[allow(dead_code)]
 enum TerminatorOpcode {
     BrIf,
 }
 
+#[allow(dead_code)]
 struct ReplacementTerminator {
     opcode: TerminatorOpcode,
     operands: Vec<ValueRef>,
@@ -131,6 +285,7 @@ struct ReplacementTerminator {
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 struct MatchedSuccessor {
     block: BlockRef,
     args: Vec<Operand>,
@@ -140,6 +295,13 @@ enum ValueRewrite {
     Existing(ValueRef),
     ConstInt(BigInt),
     ConstBool(bool),
+    Expr(ReplacementExpr),
+}
+
+enum ReplacementExpr {
+    Value(ValueRef),
+    ConstBool(bool),
+    BoolNot(Box<ReplacementExpr>),
 }
 
 #[derive(Clone, Copy)]
@@ -173,6 +335,166 @@ enum ConstFoldKind {
 struct ConstantFoldMatch {
     replacement: ValueRewrite,
     matched_insts: BTreeSet<u32>,
+}
+
+fn best_int_annotation_matches(
+    func: &Function,
+    fact_cache: &mut IntFactCache,
+    value: ValueRef,
+    expected: &IntAnnotation,
+) -> bool {
+    int_facts(func, fact_cache, value)
+        .and_then(|facts| facts.best_annotation())
+        .is_some_and(|annotation| annotation == *expected)
+}
+
+fn known_one(func: &Function, fact_cache: &mut IntFactCache, value: ValueRef, bit: u32) -> bool {
+    if bit >= 64 {
+        return int_facts(func, fact_cache, value)
+            .and_then(|facts| facts.exact_const)
+            .is_some_and(|value| exact_bit_is_one(&value, bit));
+    }
+
+    int_facts(func, fact_cache, value).is_some_and(|facts| (facts.known_one & (1u64 << bit)) != 0)
+}
+
+fn exact_bit_is_one(value: &BigInt, bit: u32) -> bool {
+    if bit < 64 {
+        return (low_bits_u64(value) & (1u64 << bit)) != 0;
+    }
+
+    let modulus = BigInt::from(1u8) << (bit as usize + 1);
+    let truncated = ((value % &modulus) + &modulus) % &modulus;
+    let shifted = truncated >> bit as usize;
+    (&shifted % BigInt::from(2u8)) != BigInt::from(0u8)
+}
+
+fn int_facts(func: &Function, fact_cache: &mut IntFactCache, value: ValueRef) -> Option<IntFacts> {
+    if let Some(cached) = fact_cache.entries.get(&value.raw()) {
+        return cached.clone();
+    }
+
+    let computed = compute_int_facts(func, fact_cache, value);
+    fact_cache.entries.insert(value.raw(), computed.clone());
+    computed
+}
+
+fn compute_int_facts(
+    func: &Function,
+    fact_cache: &mut IntFactCache,
+    value: ValueRef,
+) -> Option<IntFacts> {
+    if !matches!(func.value_type(value), Some(Type::Int)) {
+        return None;
+    }
+
+    let mut facts = if value.is_block_arg() || value.is_secondary_result() {
+        IntFacts::unknown()
+    } else {
+        let idx = value.index();
+        let node = func.inst_pool.get(idx)?;
+        match &node.inst.op {
+            Op::Const(value) => IntFacts::from_exact_const(value),
+            Op::Select(_, true_value, false_value) => {
+                let true_facts = int_facts(func, fact_cache, true_value.value);
+                let false_facts = int_facts(func, fact_cache, false_value.value);
+                merge_select_facts(true_facts, false_facts)
+            }
+            Op::And(lhs, rhs) => {
+                let lhs = int_facts(func, fact_cache, lhs.clone().raw().value);
+                let rhs = int_facts(func, fact_cache, rhs.clone().raw().value);
+                merge_and_facts(lhs, rhs)
+            }
+            Op::Xor(lhs, rhs) => {
+                let lhs = int_facts(func, fact_cache, lhs.clone().raw().value);
+                let rhs = int_facts(func, fact_cache, rhs.clone().raw().value);
+                merge_xor_facts(lhs, rhs)
+            }
+            _ => IntFacts::unknown(),
+        }
+    };
+
+    if let Some(Annotation::Int(annotation)) = definition_annotation(func, value) {
+        facts = facts.refine_with_annotation(&annotation);
+    }
+
+    facts.tighten_from_unsigned();
+    Some(facts)
+}
+
+fn merge_select_facts(lhs: Option<IntFacts>, rhs: Option<IntFacts>) -> IntFacts {
+    let (Some(lhs), Some(rhs)) = (lhs, rhs) else {
+        return IntFacts::unknown();
+    };
+
+    let exact_const = match (&lhs.exact_const, &rhs.exact_const) {
+        (Some(lhs), Some(rhs)) if lhs == rhs => Some(lhs.clone()),
+        _ => None,
+    };
+
+    if let Some(value) = exact_const {
+        return IntFacts::from_exact_const(&value);
+    }
+
+    let mut facts = IntFacts {
+        exact_const: None,
+        known_zero: lhs.known_zero & rhs.known_zero,
+        known_one: lhs.known_one & rhs.known_one,
+        unsigned_width_upper_bound: max_bound(
+            lhs.unsigned_width_upper_bound,
+            rhs.unsigned_width_upper_bound,
+        ),
+        signed_width_upper_bound: max_bound(
+            lhs.signed_width_upper_bound,
+            rhs.signed_width_upper_bound,
+        ),
+    };
+    facts.tighten_from_unsigned();
+    facts
+}
+
+fn merge_and_facts(lhs: Option<IntFacts>, rhs: Option<IntFacts>) -> IntFacts {
+    let lhs = lhs.unwrap_or_else(IntFacts::unknown);
+    let rhs = rhs.unwrap_or_else(IntFacts::unknown);
+
+    if let (Some(lhs), Some(rhs)) = (&lhs.exact_const, &rhs.exact_const) {
+        return IntFacts::from_exact_const(&(lhs & rhs));
+    }
+
+    let mut facts = IntFacts {
+        exact_const: None,
+        known_zero: lhs.known_zero | rhs.known_zero,
+        known_one: lhs.known_one & rhs.known_one,
+        unsigned_width_upper_bound: min_bound(
+            lhs.unsigned_width_upper_bound,
+            rhs.unsigned_width_upper_bound,
+        ),
+        signed_width_upper_bound: None,
+    };
+    facts.tighten_from_unsigned();
+    facts
+}
+
+fn merge_xor_facts(lhs: Option<IntFacts>, rhs: Option<IntFacts>) -> IntFacts {
+    let lhs = lhs.unwrap_or_else(IntFacts::unknown);
+    let rhs = rhs.unwrap_or_else(IntFacts::unknown);
+
+    if let (Some(lhs), Some(rhs)) = (&lhs.exact_const, &rhs.exact_const) {
+        return IntFacts::from_exact_const(&(lhs ^ rhs));
+    }
+
+    let mut facts = IntFacts {
+        exact_const: None,
+        known_zero: (lhs.known_zero & rhs.known_zero) | (lhs.known_one & rhs.known_one),
+        known_one: (lhs.known_zero & rhs.known_one) | (lhs.known_one & rhs.known_zero),
+        unsigned_width_upper_bound: max_bound(
+            lhs.unsigned_width_upper_bound,
+            rhs.unsigned_width_upper_bound,
+        ),
+        signed_width_upper_bound: None,
+    };
+    facts.tighten_from_unsigned();
+    facts
 }
 
 fn apply_value_root_rewrite(
@@ -211,6 +533,7 @@ fn apply_value_root_rewrite(
             let new_idx = func.insert_inst_before(root_idx, new_inst);
             ValueRef::inst_result(new_idx)
         }
+        ValueRewrite::Expr(expr) => build_replacement_expr(func, root_idx, matched_insts, &expr),
     };
     func.replace_all_uses(root_value, replacement);
     func.remove_inst(root_idx);
@@ -232,6 +555,50 @@ fn build_const_rewrite_instruction(
         origin: merged_origin(func, root_idx, matched_insts),
         result_annotation: root_inst.result_annotation,
         secondary_result_annotation: None,
+    }
+}
+
+fn build_replacement_expr(
+    func: &mut Function,
+    root_idx: u32,
+    matched_insts: &BTreeSet<u32>,
+    expr: &ReplacementExpr,
+) -> ValueRef {
+    match expr {
+        ReplacementExpr::Value(value) => *value,
+        ReplacementExpr::ConstBool(value) => {
+            let new_inst = build_const_rewrite_instruction(
+                func,
+                root_idx,
+                matched_insts,
+                Op::BConst(*value),
+                Type::Bool,
+            );
+            let new_idx = func.insert_inst_before(root_idx, new_inst);
+            ValueRef::inst_result(new_idx)
+        }
+        ReplacementExpr::BoolNot(value) => {
+            let operand = build_replacement_expr(func, root_idx, matched_insts, value);
+            let true_value = build_replacement_expr(
+                func,
+                root_idx,
+                matched_insts,
+                &ReplacementExpr::ConstBool(true),
+            );
+            let new_inst = Instruction {
+                op: Op::BXor(
+                    BoolOperand::from_value(BoolValue::new(operand, func)),
+                    BoolOperand::from_value(BoolValue::new(true_value, func)),
+                ),
+                ty: Type::Bool,
+                secondary_ty: None,
+                origin: merged_origin(func, root_idx, matched_insts),
+                result_annotation: None,
+                secondary_result_annotation: None,
+            };
+            let new_idx = func.insert_inst_before(root_idx, new_inst);
+            ValueRef::inst_result(new_idx)
+        }
     }
 }
 
@@ -356,6 +723,7 @@ fn definition_annotation(func: &Function, value: ValueRef) -> Option<Annotation>
     }
 }
 
+#[allow(dead_code)]
 fn apply_terminator_root_rewrite(
     func: &mut Function,
     root_idx: u32,
@@ -371,6 +739,7 @@ fn apply_terminator_root_rewrite(
     cleanup_dead_instructions(func, matched_insts);
 }
 
+#[allow(dead_code)]
 fn build_terminator_op(func: &Function, root_op: &Op, replacement: ReplacementTerminator) -> Op {
     let matched_successors = extract_matched_successors(root_op);
 
@@ -401,6 +770,7 @@ fn build_terminator_op(func: &Function, root_op: &Op, replacement: ReplacementTe
     }
 }
 
+#[allow(dead_code)]
 fn extract_matched_successors(root_op: &Op) -> Vec<MatchedSuccessor> {
     match root_op {
         Op::BrIf(_, then_block, then_args, else_block, else_args) => vec![

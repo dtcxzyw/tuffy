@@ -94,12 +94,46 @@ private def intPredicateToJson : IntPredicate → String
   | .isOne => quote "is_one"
   | .isOdd => quote "is_odd"
 
+private def intAnnotationToJson : Annotation → String
+  | .signed bits =>
+    jsonObj [
+      ("kind", quote "signed"),
+      ("bits", toString bits)
+    ]
+  | .unsigned bits =>
+    jsonObj [
+      ("kind", quote "unsigned"),
+      ("bits", toString bits)
+    ]
+  | .dontCare bits =>
+    jsonObj [
+      ("kind", quote "dont_care"),
+      ("bits", toString bits)
+    ]
+  | .align bytes =>
+    jsonObj [
+      ("kind", quote "align"),
+      ("bytes", toString bytes)
+    ]
+
 private def sideConditionToJson : SideCondition → String
   | .intPredicate binding predicate =>
     jsonObj [
       ("kind", quote "int_predicate"),
       ("binding", quote binding),
       ("predicate", intPredicateToJson predicate)
+    ]
+  | .bestIntAnnotation binding annotation =>
+    jsonObj [
+      ("kind", quote "best_int_annotation"),
+      ("binding", quote binding),
+      ("annotation", intAnnotationToJson annotation)
+    ]
+  | .knownOne binding bit =>
+    jsonObj [
+      ("kind", quote "known_one"),
+      ("binding", quote binding),
+      ("bit", toString bit)
     ]
   | .allOf conditions =>
     jsonObj [
@@ -158,6 +192,16 @@ private def replacementToJson : Replacement → String
       ("kind", quote "binding"),
       ("name", quote name)
     ]
+  | .boolConst value =>
+    jsonObj [
+      ("kind", quote "bool_const"),
+      ("value", toString value)
+    ]
+  | .boolNot value =>
+    jsonObj [
+      ("kind", quote "bool_not"),
+      ("value", replacementToJson value)
+    ]
 
 private def matchRootToJson : MatchRoot → String
   | MatchRoot.value root =>
@@ -215,7 +259,7 @@ private def peepholeRuleToJson (rule : PeepholeRule) : String :=
 
 private def exportPeepholeSpec : String :=
   jsonObj [
-    ("format_version", "3"),
+    ("format_version", "4"),
     ("kind", quote "peephole"),
     ("rules", jsonArr (allPeepholeRules.map peepholeRuleToJson))
   ]

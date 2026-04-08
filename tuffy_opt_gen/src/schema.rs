@@ -66,12 +66,27 @@ pub enum RootReplacement {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Replacement {
     Binding { name: String },
+    BoolConst { value: bool },
+    BoolNot { value: Box<Replacement> },
 }
 
 impl Replacement {
-    pub fn binding_name(&self) -> &str {
+    fn collect_bindings<'a>(&'a self, out: &mut Vec<&'a str>) {
         match self {
-            Replacement::Binding { name } => name,
+            Replacement::Binding { name } => {
+                if !out.contains(&name.as_str()) {
+                    out.push(name);
+                }
+            }
+            Replacement::BoolConst { .. } => {}
+            Replacement::BoolNot { value } => value.collect_bindings(out),
+        }
+    }
+
+    pub fn binding_name(&self) -> Option<&str> {
+        match self {
+            Replacement::Binding { name } => Some(name),
+            Replacement::BoolConst { .. } | Replacement::BoolNot { .. } => None,
         }
     }
 }
@@ -123,9 +138,59 @@ impl Pattern {
             }
         }
     }
+
+    fn inferred_value_type(&self) -> Option<ValueType> {
+        match self {
+            Pattern::Capture { ty, .. } => *ty,
+            Pattern::Bind { pattern, .. } => pattern.inferred_value_type(),
+            Pattern::IntConst { .. } | Pattern::IntConstBinding { .. } => Some(ValueType::Int),
+            Pattern::Inst { op, args, .. } => match op.as_str() {
+                "and" | "xor" => Some(ValueType::Int),
+                "icmp" => Some(ValueType::Bool),
+                "select" => {
+                    if args.len() != 3 {
+                        return None;
+                    }
+                    let true_ty = args[1].inferred_value_type()?;
+                    let false_ty = args[2].inferred_value_type()?;
+                    if true_ty == false_ty {
+                        Some(true_ty)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            },
+        }
+    }
+
+    fn collect_binding_kinds(&self, out: &mut BTreeMap<String, BindingKind>) {
+        match self {
+            Pattern::Capture { name, ty } => {
+                register_binding_kind(out, name, BindingKind::from_value_type(*ty));
+            }
+            Pattern::Bind { name, pattern } => {
+                register_binding_kind(
+                    out,
+                    name,
+                    BindingKind::from_value_type(pattern.inferred_value_type()),
+                );
+                pattern.collect_binding_kinds(out);
+            }
+            Pattern::IntConstBinding { name } => {
+                register_binding_kind(out, name, BindingKind::IntConst);
+            }
+            Pattern::IntConst { .. } => {}
+            Pattern::Inst { args, .. } => {
+                for arg in args {
+                    arg.collect_binding_kinds(out);
+                }
+            }
+        }
+    }
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ValueType {
     Int,
@@ -144,6 +209,14 @@ pub enum SideCondition {
     IntPredicate {
         binding: String,
         predicate: IntPredicate,
+    },
+    BestIntAnnotation {
+        binding: String,
+        annotation: IntAnnotationSpec,
+    },
+    KnownOne {
+        binding: String,
+        bit: u32,
     },
     AllOf {
         conditions: Vec<SideCondition>,
@@ -167,14 +240,42 @@ pub enum IntPredicate {
     Odd,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum IntAnnotationSpec {
+    Signed { bits: u32 },
+    Unsigned { bits: u32 },
+    DontCare { bits: u32 },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BindingKind {
-    Value,
+    UnknownValue,
+    IntValue,
+    BoolValue,
     IntConst,
 }
 
+impl BindingKind {
+    fn from_value_type(ty: Option<ValueType>) -> Self {
+        match ty {
+            Some(ValueType::Int) => Self::IntValue,
+            Some(ValueType::Bool) => Self::BoolValue,
+            None => Self::UnknownValue,
+        }
+    }
+
+    fn value_type(self) -> Option<ValueType> {
+        match self {
+            BindingKind::UnknownValue => None,
+            BindingKind::IntValue | BindingKind::IntConst => Some(ValueType::Int),
+            BindingKind::BoolValue => Some(ValueType::Bool),
+        }
+    }
+}
+
 pub fn validate_spec(spec: &PeepholeSpec) -> Result<(), GenerateError> {
-    if spec.format_version != 3 {
+    if spec.format_version != 4 {
         return Err(GenerateError::UnsupportedFormatVersion(spec.format_version));
     }
     if spec.kind != "peephole" {
@@ -194,13 +295,14 @@ pub fn validate_spec(spec: &PeepholeSpec) -> Result<(), GenerateError> {
             (MatchRoot::Value { root }, RootReplacement::Value { value: replacement }) => {
                 root.collect_bindings(&mut bindings);
                 root.collect_binding_kinds(&mut binding_kinds);
-                if !bindings.contains(&replacement.binding_name()) {
-                    return Err(GenerateError::MissingReplacementBinding {
-                        rule: rule.name.clone(),
-                        binding: replacement.binding_name().to_string(),
-                    });
-                }
                 validate_pattern(root)?;
+                validate_value_replacement(
+                    root,
+                    replacement,
+                    &bindings,
+                    &binding_kinds,
+                    &rule.name,
+                )?;
             }
             (
                 MatchRoot::Terminator {
@@ -220,12 +322,7 @@ pub fn validate_spec(spec: &PeepholeSpec) -> Result<(), GenerateError> {
                     validate_pattern(operand)?;
                 }
                 for replacement in replacement_operands {
-                    if !bindings.contains(&replacement.binding_name()) {
-                        return Err(GenerateError::MissingReplacementBinding {
-                            rule: rule.name.clone(),
-                            binding: replacement.binding_name().to_string(),
-                        });
-                    }
+                    validate_terminator_replacement_operand(replacement, &bindings, &rule.name)?;
                 }
                 if op != replacement_op {
                     return Err(GenerateError::UnsupportedRootRewrite {
@@ -295,37 +392,108 @@ fn validate_pattern(pattern: &Pattern) -> Result<(), GenerateError> {
     }
 }
 
-impl Pattern {
-    fn collect_binding_kinds(&self, out: &mut BTreeMap<String, BindingKind>) {
-        match self {
-            Pattern::Capture { name, .. } | Pattern::Bind { name, .. } => {
-                register_binding_kind(out, name, BindingKind::Value);
-                if let Pattern::Bind { pattern, .. } = self {
-                    pattern.collect_binding_kinds(out);
-                }
+fn register_binding_kind(out: &mut BTreeMap<String, BindingKind>, name: &str, kind: BindingKind) {
+    match out.get_mut(name) {
+        Some(existing) => match (*existing, kind) {
+            (BindingKind::UnknownValue, new_kind) if new_kind != BindingKind::UnknownValue => {
+                *existing = new_kind;
             }
-            Pattern::IntConstBinding { name } => {
-                register_binding_kind(out, name, BindingKind::IntConst);
+            (_, BindingKind::IntConst) => {
+                *existing = BindingKind::IntConst;
             }
-            Pattern::IntConst { .. } => {}
-            Pattern::Inst { args, .. } => {
-                for arg in args {
-                    arg.collect_binding_kinds(out);
-                }
-            }
+            _ => {}
+        },
+        None => {
+            out.insert(name.to_string(), kind);
         }
     }
 }
 
-fn register_binding_kind(out: &mut BTreeMap<String, BindingKind>, name: &str, kind: BindingKind) {
-    match out.get_mut(name) {
-        Some(existing) => {
-            if kind == BindingKind::IntConst {
-                *existing = BindingKind::IntConst;
-            }
+fn validate_value_replacement(
+    root: &Pattern,
+    replacement: &Replacement,
+    bindings: &[&str],
+    binding_kinds: &BTreeMap<String, BindingKind>,
+    rule: &str,
+) -> Result<(), GenerateError> {
+    validate_replacement_bindings(replacement, bindings, rule)?;
+    let root_ty = root.inferred_value_type();
+    let replacement_ty = replacement_value_type(replacement, binding_kinds, rule)?;
+    if let (Some(root_ty), Some(replacement_ty)) = (root_ty, replacement_ty)
+        && root_ty != replacement_ty
+    {
+        return Err(GenerateError::IllTypedReplacement {
+            rule: rule.to_string(),
+            message: format!(
+                "value-root replacement has type {:?}, but the matched root has type {:?}",
+                replacement_ty, root_ty
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn validate_terminator_replacement_operand(
+    replacement: &Replacement,
+    bindings: &[&str],
+    rule: &str,
+) -> Result<(), GenerateError> {
+    let Some(binding) = replacement.binding_name() else {
+        return Err(GenerateError::UnsupportedRootRewrite {
+            rule: rule.to_string(),
+            message: "terminator replacements only support direct binding operands".to_string(),
+        });
+    };
+    if !bindings.contains(&binding) {
+        return Err(GenerateError::MissingReplacementBinding {
+            rule: rule.to_string(),
+            binding: binding.to_string(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_replacement_bindings(
+    replacement: &Replacement,
+    bindings: &[&str],
+    rule: &str,
+) -> Result<(), GenerateError> {
+    let mut replacement_bindings = Vec::new();
+    replacement.collect_bindings(&mut replacement_bindings);
+    for binding in replacement_bindings {
+        if !bindings.contains(&binding) {
+            return Err(GenerateError::MissingReplacementBinding {
+                rule: rule.to_string(),
+                binding: binding.to_string(),
+            });
         }
-        None => {
-            out.insert(name.to_string(), kind);
+    }
+    Ok(())
+}
+
+fn replacement_value_type(
+    replacement: &Replacement,
+    binding_kinds: &BTreeMap<String, BindingKind>,
+    rule: &str,
+) -> Result<Option<ValueType>, GenerateError> {
+    match replacement {
+        Replacement::Binding { name } => {
+            Ok(binding_kinds.get(name).and_then(|kind| kind.value_type()))
+        }
+        Replacement::BoolConst { .. } => Ok(Some(ValueType::Bool)),
+        Replacement::BoolNot { value } => {
+            let value_ty = replacement_value_type(value, binding_kinds, rule)?;
+            match value_ty {
+                Some(ValueType::Bool) => Ok(Some(ValueType::Bool)),
+                Some(ValueType::Int) => Err(GenerateError::IllTypedReplacement {
+                    rule: rule.to_string(),
+                    message: "bool_not expects a Bool replacement operand".to_string(),
+                }),
+                None => Err(GenerateError::IllTypedReplacement {
+                    rule: rule.to_string(),
+                    message: "bool_not operand type could not be inferred".to_string(),
+                }),
+            }
         }
     }
 }
@@ -341,12 +509,53 @@ fn validate_side_condition(
             predicate: _,
         } => match binding_kinds.get(binding) {
             Some(BindingKind::IntConst) => Ok(()),
-            Some(BindingKind::Value) => Err(GenerateError::IllTypedSideCondition {
+            Some(BindingKind::IntValue)
+            | Some(BindingKind::BoolValue)
+            | Some(BindingKind::UnknownValue) => Err(GenerateError::IllTypedSideCondition {
                 rule: rule.to_string(),
                 message: format!(
                     "side condition binding `{binding}` must come from `int_const_binding`"
                 ),
             }),
+            None => Err(GenerateError::MissingSideConditionBinding {
+                rule: rule.to_string(),
+                binding: binding.clone(),
+            }),
+        },
+        SideCondition::BestIntAnnotation {
+            binding,
+            annotation,
+        } => {
+            if annotation.bits() == 0 {
+                return Err(GenerateError::IllTypedSideCondition {
+                    rule: rule.to_string(),
+                    message: format!(
+                        "side condition binding `{binding}` uses a zero-width integer annotation"
+                    ),
+                });
+            }
+            match binding_kinds.get(binding) {
+                Some(BindingKind::IntValue) | Some(BindingKind::IntConst) => Ok(()),
+                Some(BindingKind::BoolValue) | Some(BindingKind::UnknownValue) => {
+                    Err(GenerateError::IllTypedSideCondition {
+                        rule: rule.to_string(),
+                        message: format!("side condition binding `{binding}` must be an Int value"),
+                    })
+                }
+                None => Err(GenerateError::MissingSideConditionBinding {
+                    rule: rule.to_string(),
+                    binding: binding.clone(),
+                }),
+            }
+        }
+        SideCondition::KnownOne { binding, bit: _ } => match binding_kinds.get(binding) {
+            Some(BindingKind::IntValue) | Some(BindingKind::IntConst) => Ok(()),
+            Some(BindingKind::BoolValue) | Some(BindingKind::UnknownValue) => {
+                Err(GenerateError::IllTypedSideCondition {
+                    rule: rule.to_string(),
+                    message: format!("side condition binding `{binding}` must be an Int value"),
+                })
+            }
             None => Err(GenerateError::MissingSideConditionBinding {
                 rule: rule.to_string(),
                 binding: binding.clone(),
@@ -359,6 +568,16 @@ fn validate_side_condition(
             Ok(())
         }
         SideCondition::Not { condition } => validate_side_condition(condition, binding_kinds, rule),
+    }
+}
+
+impl IntAnnotationSpec {
+    fn bits(self) -> u32 {
+        match self {
+            IntAnnotationSpec::Signed { bits }
+            | IntAnnotationSpec::Unsigned { bits }
+            | IntAnnotationSpec::DontCare { bits } => bits,
+        }
     }
 }
 
