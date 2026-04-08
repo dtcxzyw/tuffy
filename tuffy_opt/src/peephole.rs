@@ -91,6 +91,20 @@ fn primary_inst_index(value: ValueRef) -> Option<u32> {
     }
 }
 
+fn bound_int_constant(func: &Function, value: ValueRef) -> Option<&BigInt> {
+    let idx = primary_inst_index(value)?;
+    let node = func.inst_pool.get(idx)?;
+    match &node.inst.op {
+        Op::Const(value) => Some(value),
+        _ => None,
+    }
+}
+
+fn bigint_is_odd(value: &BigInt) -> bool {
+    let modulus = BigInt::from(2u8);
+    (value % &modulus) != BigInt::from(0u8)
+}
+
 #[allow(dead_code)]
 fn parse_decimal_bigint(value: &str) -> BigInt {
     value

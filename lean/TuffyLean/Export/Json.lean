@@ -50,6 +50,34 @@ private def patternAttrToJson : PatternAttr → String
 private def transformKindToJson : TransformKind → String
   | .equivalence => quote "equivalence"
 
+private def intPredicateToJson : IntPredicate → String
+  | .isZero => quote "is_zero"
+  | .isOne => quote "is_one"
+  | .isOdd => quote "is_odd"
+
+private def sideConditionToJson : SideCondition → String
+  | .intPredicate binding predicate =>
+    jsonObj [
+      ("kind", quote "int_predicate"),
+      ("binding", quote binding),
+      ("predicate", intPredicateToJson predicate)
+    ]
+  | .allOf conditions =>
+    jsonObj [
+      ("kind", quote "all_of"),
+      ("conditions", jsonArr (conditions.map sideConditionToJson))
+    ]
+  | .anyOf conditions =>
+    jsonObj [
+      ("kind", quote "any_of"),
+      ("conditions", jsonArr (conditions.map sideConditionToJson))
+    ]
+  | .not condition =>
+    jsonObj [
+      ("kind", quote "not"),
+      ("condition", sideConditionToJson condition)
+    ]
+
 private def patternToJson : Pattern → String
   | .capture name ty =>
     let fields :=
@@ -131,13 +159,13 @@ private def peepholeRuleToJson (rule : PeepholeRule) : String :=
     ("name", quote rule.name),
     ("transform_kind", transformKindToJson rule.transformKind),
     ("proof_ref", quote rule.proofRef),
-    ("side_conditions", jsonArr (rule.sideConditions.map quote)),
+    ("side_conditions", jsonArr (rule.sideConditions.map sideConditionToJson)),
     ("rewrite", rewriteBodyToJson rule.body)
   ]
 
 private def exportPeepholeSpec : String :=
   jsonObj [
-    ("format_version", "1"),
+    ("format_version", "2"),
     ("kind", quote "peephole"),
     ("rules", jsonArr (allPeepholeRules.map peepholeRuleToJson))
   ]

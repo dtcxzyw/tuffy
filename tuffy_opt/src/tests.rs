@@ -53,7 +53,7 @@ func @branch_eq_one() {
     trap
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
-    assert_eq!(stats.per_rule["brif_icmp_eq_select_bool_to_int_one"], 1);
+    assert_eq!(stats.per_rule["brif_icmp_eq_select_bool_to_int_is_one"], 1);
 }
 
 #[test]
@@ -85,7 +85,7 @@ func @branch_eq_zero() {
     trap
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
-    assert_eq!(stats.per_rule["brif_icmp_eq_select_bool_to_int_zero"], 1);
+    assert_eq!(stats.per_rule["brif_icmp_eq_select_bool_to_int_is_zero"], 1);
 }
 
 #[test]
@@ -119,8 +119,57 @@ func @branch_and_mask() {
     trap
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
-    assert_eq!(stats.per_rule["and_select_bool_to_int_mask_255"], 1);
-    assert_eq!(stats.per_rule["brif_icmp_eq_select_bool_to_int_zero"], 1);
+    assert_eq!(stats.per_rule["and_select_bool_to_int_odd_mask"], 1);
+    assert_eq!(stats.per_rule["brif_icmp_eq_select_bool_to_int_is_zero"], 1);
+}
+
+#[test]
+fn generalizes_mask_cleanup_to_non_255_odd_masks() {
+    let input = r#"
+func @branch_and_mask_three() {
+  bb0:
+    v0: bool = bconst true
+    v1: int:s32 = iconst 1
+    v2: int:s32 = iconst 0
+    v3: int:s32 = select v0, v1, v2
+    v4: int:s32 = iconst 3
+    v5: int:s32 = and v3, v4
+    v6: int:s32 = add v5, v1
+    unreachable
+}
+"#;
+    let (output, stats) = optimize(input);
+    let expected = r#"func @branch_and_mask_three() {
+  bb0:
+    v0: bool = bconst true
+    v1: int:s32 = iconst 1
+    v2: int:s32 = iconst 0
+    v3: int:s32 = select v0, v1, v2
+    v4: int:s32 = add v3, v1
+    unreachable
+}"#;
+    assert_eq!(normalize_ir(&output), normalize_ir(expected));
+    assert_eq!(stats.per_rule["and_select_bool_to_int_odd_mask"], 1);
+}
+
+#[test]
+fn does_not_rewrite_even_masks() {
+    let input = r#"
+func @branch_and_mask_two() {
+  bb0:
+    v0: bool = bconst true
+    v1: int:s32 = iconst 1
+    v2: int:s32 = iconst 0
+    v3: int:s32 = select v0, v1, v2
+    v4: int:s32 = iconst 2
+    v5: int:s32 = and v3, v4
+    v6: int:s32 = add v5, v1
+    unreachable
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert_eq!(normalize_ir(&output), normalize_ir(input));
+    assert_eq!(stats.rewrites, 0);
 }
 
 #[test]
@@ -155,7 +204,7 @@ func @branch_xor_invert() {
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
     assert_eq!(
-        stats.per_rule["brif_icmp_eq_xor_select_bool_to_int_one_one"],
+        stats.per_rule["brif_icmp_eq_xor_select_bool_to_int_is_one_is_one"],
         1
     );
 }
@@ -186,5 +235,5 @@ func @mask_value() {
     unreachable
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
-    assert_eq!(stats.per_rule["and_select_bool_to_int_mask_255"], 1);
+    assert_eq!(stats.per_rule["and_select_bool_to_int_odd_mask"], 1);
 }

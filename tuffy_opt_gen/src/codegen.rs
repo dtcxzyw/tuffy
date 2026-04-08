@@ -4,8 +4,8 @@ use num_bigint::BigInt;
 
 use crate::GenerateError;
 use crate::schema::{
-    MatchRoot, Pattern, PatternAttr, PeepholeRule, PeepholeSpec, Replacement, RootReplacement,
-    ValueType,
+    IntPredicate, MatchRoot, Pattern, PatternAttr, PeepholeRule, PeepholeSpec, Replacement,
+    RootReplacement, SideCondition, ValueType,
 };
 
 pub fn generate(spec: &PeepholeSpec) -> Result<String, GenerateError> {
@@ -103,6 +103,7 @@ fn generate_rule_fn(out: &mut String, rule: &PeepholeRule) -> Result<(), Generat
             .unwrap();
             let mut pattern_gen = PatternGen::new(2);
             pattern_gen.emit_pattern(out, root, "root_value")?;
+            emit_side_condition_checks(out, &rule.side_conditions)?;
             writeln!(
                 out,
                 "        let replacement = bind_{}?;",
@@ -134,6 +135,7 @@ fn generate_rule_fn(out: &mut String, rule: &PeepholeRule) -> Result<(), Generat
                 });
             }
             emit_terminator_root_match(out, terminator_kind, operands)?;
+            emit_side_condition_checks(out, &rule.side_conditions)?;
             emit_terminator_replacement(out, replacement_kind, replacement_operands, successors)?;
         }
         _ => {
@@ -239,6 +241,59 @@ fn emit_terminator_replacement(
 fn replacement_expr(replacement: &Replacement) -> String {
     match replacement {
         Replacement::Binding { name } => format!("bind_{name}?"),
+    }
+}
+
+fn emit_side_condition_checks(
+    out: &mut String,
+    side_conditions: &[SideCondition],
+) -> Result<(), GenerateError> {
+    for condition in side_conditions {
+        let expr = side_condition_expr(condition)?;
+        writeln!(out, "        if !({expr}) {{ return None; }}").unwrap();
+    }
+    Ok(())
+}
+
+fn side_condition_expr(condition: &SideCondition) -> Result<String, GenerateError> {
+    match condition {
+        SideCondition::IntPredicate { binding, predicate } => {
+            let expr = match predicate {
+                IntPredicate::Zero => format!(
+                    "matches!(bound_int_constant(func, bind_{binding}?), Some(value) if value == &{})",
+                    bigint_expr("0")?
+                ),
+                IntPredicate::One => format!(
+                    "matches!(bound_int_constant(func, bind_{binding}?), Some(value) if value == &{})",
+                    bigint_expr("1")?
+                ),
+                IntPredicate::Odd => {
+                    format!(
+                        "matches!(bound_int_constant(func, bind_{binding}?), Some(value) if bigint_is_odd(value))"
+                    )
+                }
+            };
+            Ok(expr)
+        }
+        SideCondition::AllOf { conditions } => combine_side_conditions(conditions, "&&"),
+        SideCondition::AnyOf { conditions } => combine_side_conditions(conditions, "||"),
+        SideCondition::Not { condition } => Ok(format!("!({})", side_condition_expr(condition)?)),
+    }
+}
+
+fn combine_side_conditions(
+    conditions: &[SideCondition],
+    op: &str,
+) -> Result<String, GenerateError> {
+    let exprs = conditions
+        .iter()
+        .map(side_condition_expr)
+        .collect::<Result<Vec<_>, _>>()?;
+    let fallback = if op == "&&" { "true" } else { "false" };
+    if exprs.is_empty() {
+        Ok(fallback.to_string())
+    } else {
+        Ok(format!("({})", exprs.join(&format!(" {op} "))))
     }
 }
 

@@ -14,19 +14,11 @@ pub enum GenerateError {
     UnsupportedFormatVersion(u32),
     UnsupportedKind(String),
     UnsupportedTransformKind(String),
-    UnsupportedSideConditions {
-        rule: String,
-        conditions: Vec<String>,
-    },
-    UnsupportedRootRewrite {
-        rule: String,
-        message: String,
-    },
+    UnsupportedRootRewrite { rule: String, message: String },
     UnsupportedPattern(String),
-    MissingReplacementBinding {
-        rule: String,
-        binding: String,
-    },
+    MissingReplacementBinding { rule: String, binding: String },
+    MissingSideConditionBinding { rule: String, binding: String },
+    IllTypedSideCondition { rule: String, message: String },
     InvalidIntConstant(String),
 }
 
@@ -43,13 +35,6 @@ impl fmt::Display for GenerateError {
             GenerateError::UnsupportedTransformKind(kind) => {
                 write!(f, "unsupported transform kind: {kind}")
             }
-            GenerateError::UnsupportedSideConditions { rule, conditions } => {
-                write!(
-                    f,
-                    "rule `{rule}` uses unsupported side conditions: {}",
-                    conditions.join(", ")
-                )
-            }
             GenerateError::UnsupportedRootRewrite { rule, message } => {
                 write!(f, "rule `{rule}` uses unsupported root rewrite: {message}")
             }
@@ -60,6 +45,18 @@ impl fmt::Display for GenerateError {
                 write!(
                     f,
                     "rule `{rule}` references missing replacement binding `{binding}`"
+                )
+            }
+            GenerateError::MissingSideConditionBinding { rule, binding } => {
+                write!(
+                    f,
+                    "rule `{rule}` references missing side-condition binding `{binding}`"
+                )
+            }
+            GenerateError::IllTypedSideCondition { rule, message } => {
+                write!(
+                    f,
+                    "rule `{rule}` uses an ill-typed side condition: {message}"
                 )
             }
             GenerateError::InvalidIntConstant(value) => {
@@ -88,14 +85,20 @@ mod tests {
     use super::{GenerateError, generate, load_spec_from_json_str};
 
     const SAMPLE_JSON: &str = r#"{
-  "format_version": 1,
+  "format_version": 2,
   "kind": "peephole",
   "rules": [
     {
-      "name": "brif_icmp_eq_select_bool_to_int_one",
+      "name": "brif_icmp_eq_select_bool_to_int_is_one",
       "transform_kind": "equivalence",
-      "proof_ref": "TuffyLean.Rewrites.icmp_eq_select_bool_to_int_one",
-      "side_conditions": [],
+      "proof_ref": "TuffyLean.Rewrites.icmp_eq_select_bool_to_int_is_one",
+      "side_conditions": [
+        {
+          "kind": "int_predicate",
+          "binding": "cmp_const",
+          "predicate": "is_one"
+        }
+      ],
       "rewrite": {
         "match_root": {
           "kind": "terminator",
@@ -116,7 +119,7 @@ mod tests {
                     { "kind": "int_const", "value": "0" }
                   ]
                 },
-                { "kind": "int_const", "value": "1" }
+                { "kind": "int_const_binding", "name": "cmp_const" }
               ]
             }
           ],
@@ -139,22 +142,32 @@ mod tests {
         let rust = generate(&spec).expect("sample JSON should generate Rust");
 
         assert!(rust.contains("pub(super) const GENERATED_RULE_COUNT: usize = 1;"));
-        assert!(rust.contains("fn try_apply_brif_icmp_eq_select_bool_to_int_one"));
+        assert!(rust.contains("fn try_apply_brif_icmp_eq_select_bool_to_int_is_one"));
         assert!(rust.contains("Op::Select(cond, t, e)"));
         assert!(rust.contains("apply_terminator_root_rewrite"));
         assert!(rust.contains("TerminatorOpcode::BrIf"));
+        assert!(rust.contains("bound_int_constant(func, bind_cmp_const?)"));
     }
 
     #[test]
-    fn rejects_unsupported_side_conditions() {
-        let json = SAMPLE_JSON.replace(
-            "\"side_conditions\": []",
-            "\"side_conditions\": [\"single_use\"]",
-        );
-        let err = load_spec_from_json_str(&json).expect_err("side conditions should be rejected");
+    fn rejects_missing_side_condition_binding() {
+        let json = SAMPLE_JSON.replace("\"binding\": \"cmp_const\"", "\"binding\": \"missing\"");
+        let err =
+            load_spec_from_json_str(&json).expect_err("missing side-condition binding should fail");
         assert!(matches!(
             err,
-            GenerateError::UnsupportedSideConditions { .. }
+            GenerateError::MissingSideConditionBinding { .. }
         ));
+    }
+
+    #[test]
+    fn rejects_ill_typed_side_condition_binding() {
+        let json = SAMPLE_JSON.replace(
+            "{ \"kind\": \"int_const_binding\", \"name\": \"cmp_const\" }",
+            "{ \"kind\": \"capture\", \"name\": \"cmp_const\", \"ty\": \"int\" }",
+        );
+        let err = load_spec_from_json_str(&json)
+            .expect_err("non-const side-condition binding should fail");
+        assert!(matches!(err, GenerateError::IllTypedSideCondition { .. }));
     }
 }
