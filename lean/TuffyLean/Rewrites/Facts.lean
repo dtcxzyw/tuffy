@@ -81,8 +81,425 @@ structure FactDefaults where
   intAnnotationBackward : IntAnnotationBackwardKind := .none
   deriving Repr
 
+/-- Lean-side abstraction corresponding to the optimizer's integer fact summary. -/
+structure IntFacts where
+  isBottom : Bool := false
+  knownZero : Nat := 0
+  knownOne : Nat := 0
+  unsignedWidthUpperBound : Option Nat := none
+  signedWidthUpperBound : Option Nat := none
+  deriving DecidableEq, Repr
+
+/-- Mask inclusion: every known bit in `need` also appears in `available`. -/
+def maskContains (need available : Nat) : Prop :=
+  ∀ bit : Nat, need.testBit bit = true → available.testBit bit = true
+
+/-- More precise optional upper bounds are smaller (or present when the other side is not). -/
+def optionBoundLe : Option Nat → Option Nat → Prop
+  | some lhs, some rhs => lhs ≤ rhs
+  | some _, none => True
+  | none, none => True
+  | none, some _ => False
+
+/-- Current domain well-formedness conditions expected by the proofs below. -/
+def IntFacts.WellFormed (facts : IntFacts) : Prop :=
+  Nat.land facts.knownZero facts.knownOne = 0 ∧
+    (∀ bits, facts.unsignedWidthUpperBound = some bits → 0 < bits) ∧
+    (∀ bits, facts.signedWidthUpperBound = some bits → 0 < bits) ∧
+    match facts.unsignedWidthUpperBound, facts.signedWidthUpperBound with
+    | some ub, some sb => sb ≤ ub.succ
+    | _, _ => True
+
+/-- Precision order on the `IntFacts` summary domain. Smaller means more precise. -/
+def IntFacts.PreciseThan (lhs rhs : IntFacts) : Prop :=
+  if lhs.isBottom then True
+  else if rhs.isBottom then False
+  else
+    maskContains rhs.knownZero lhs.knownZero ∧
+      maskContains rhs.knownOne lhs.knownOne ∧
+      optionBoundLe lhs.unsignedWidthUpperBound rhs.unsignedWidthUpperBound ∧
+      optionBoundLe lhs.signedWidthUpperBound rhs.signedWidthUpperBound
+
+/-- Concrete unsigned-width predicate tracked by `unsignedWidthUpperBound`. -/
+def unsignedRange (bits : Nat) (v : Int) : Prop :=
+  0 ≤ v ∧ v < (2 : Int) ^ bits
+
+/-- Concrete signed-width predicate tracked by `signedWidthUpperBound`. -/
+def signedRange (bits : Nat) (v : Int) : Prop :=
+  -(2 : Int) ^ (bits - 1) ≤ v ∧ v ≤ (2 : Int) ^ (bits - 1) - 1
+
+/-- Concrete values admitted by an `IntFacts` summary. -/
+def IntFacts.Realizes (facts : IntFacts) (v : Int) : Prop :=
+  facts.isBottom = false ∧
+    (∀ bit : Nat, facts.knownOne.testBit bit = true → Int.testBit v bit = true) ∧
+    (∀ bit : Nat, facts.knownZero.testBit bit = true → Int.testBit v bit = false) ∧
+    (∀ bits : Nat, facts.unsignedWidthUpperBound = some bits → unsignedRange bits v) ∧
+    (∀ bits : Nat, facts.signedWidthUpperBound = some bits → signedRange bits v)
+
+/-- Rank order matching the runtime's `annotation_rank`. -/
+def annotationRank : Annotation → Option (Nat × Nat)
+  | .unsigned bits => some (bits, 0)
+  | .signed bits => some (bits, 1)
+  | .dontCare bits => some (bits, 2)
+  | .known _ => none
+  | .align _ => none
+
+/-- Lexicographic rank comparison used in minimality theorems. -/
+def annotationRankLe (lhs rhs : Annotation) : Prop :=
+  match annotationRank lhs, annotationRank rhs with
+  | some (lw, lk), some (rw, rk) => lw < rw ∨ (lw = rw ∧ lk ≤ rk)
+  | _, _ => False
+
+/-- An annotation candidate justified by the width-summary part of `IntFacts`. -/
+def IntFacts.SupportsSummaryAnnotation (facts : IntFacts) : Annotation → Prop
+  | .unsigned bits =>
+      facts.isBottom = false ∧
+        ∃ ub, facts.unsignedWidthUpperBound = some ub ∧ ub ≤ bits
+  | .signed bits =>
+      facts.isBottom = false ∧
+        ∃ ub, facts.signedWidthUpperBound = some ub ∧ ub ≤ bits
+  | _ => False
+
+/-- Lean specification of the runtime's `best_annotation()` selection rule. -/
+def IntFacts.bestAnnotation (facts : IntFacts) : Option Annotation :=
+  if facts.isBottom then
+    none
+  else
+    let bestUnsigned := facts.unsignedWidthUpperBound.map Annotation.unsigned
+    match facts.signedWidthUpperBound with
+    | none => bestUnsigned
+    | some bits =>
+        let signedCandidate := Annotation.signed bits
+        match bestUnsigned with
+        | none => some signedCandidate
+        | some (.unsigned ub) =>
+            if bits < ub then some signedCandidate else some (.unsigned ub)
+        | some current => some current
+
+/-- Exact per-bit domain used to prove `KnownBits` transfer optimality. -/
+inductive BitFact where
+  | zero
+  | one
+  | unknown
+  deriving DecidableEq, Repr
+
+namespace BitFact
+
+def HoldsB : BitFact → Bool → Bool
+  | .zero, false => true
+  | .zero, true => false
+  | .one, true => true
+  | .one, false => false
+  | .unknown, _ => true
+
+def Holds (fact : BitFact) (b : Bool) : Prop :=
+  fact.HoldsB b = true
+
+def Le (lhs rhs : BitFact) : Prop :=
+  ∀ b : Bool, Holds lhs b → Holds rhs b
+
+def forwardSelect (tv fv : BitFact) : BitFact :=
+  if tv = fv then tv else .unknown
+
+def forwardBitAnd : BitFact → BitFact → BitFact
+  | .zero, _ => .zero
+  | _, .zero => .zero
+  | .one, .one => .one
+  | _, _ => .unknown
+
+def forwardBitOr : BitFact → BitFact → BitFact
+  | .one, _ => .one
+  | _, .one => .one
+  | .zero, .zero => .zero
+  | _, _ => .unknown
+
+def forwardBitXor : BitFact → BitFact → BitFact
+  | .zero, .zero => .zero
+  | .one, .one => .zero
+  | .zero, .one => .one
+  | .one, .zero => .one
+  | _, _ => .unknown
+
+def backwardBitAndL : BitFact → BitFact → BitFact
+  | _, .one => .one
+  | .one, .zero => .zero
+  | _, _ => .unknown
+
+def backwardBitOrL : BitFact → BitFact → BitFact
+  | _, .zero => .zero
+  | .zero, .one => .one
+  | _, _ => .unknown
+
+def backwardBitXorL : BitFact → BitFact → BitFact
+  | .zero, .zero => .zero
+  | .one, .zero => .one
+  | .zero, .one => .one
+  | .one, .one => .zero
+  | _, _ => .unknown
+
+def ForwardSound (eval : Bool → Bool → Bool) (lhs rhs out : BitFact) : Prop :=
+  ∀ a b : Bool, Holds lhs a → Holds rhs b → Holds out (eval a b)
+
+def SelectForwardSound (tv fv out : BitFact) : Prop :=
+  ∀ cond : Bool, ∀ t f : Bool, Holds tv t → Holds fv f → Holds out (if cond then t else f)
+
+def BackwardSoundL (eval : Bool → Bool → Bool) (rhs result out : BitFact) : Prop :=
+  ∀ a b : Bool, Holds rhs b → Holds result (eval a b) → Holds out a
+
+instance instDecidableBitFactHolds (fact : BitFact) (b : Bool) : Decidable (fact.Holds b) := by
+  unfold BitFact.Holds
+  infer_instance
+
+instance instDecidableBitFactLe (lhs rhs : BitFact) : Decidable (lhs.Le rhs) := by
+  unfold BitFact.Le
+  infer_instance
+
+instance instDecidableBitFactForwardSound
+    (eval : Bool → Bool → Bool) (lhs rhs out : BitFact) :
+    Decidable (ForwardSound eval lhs rhs out) := by
+  unfold ForwardSound
+  infer_instance
+
+instance instDecidableBitFactSelectForwardSound (tv fv out : BitFact) :
+    Decidable (SelectForwardSound tv fv out) := by
+  unfold SelectForwardSound
+  infer_instance
+
+instance instDecidableBitFactBackwardSoundL
+    (eval : Bool → Bool → Bool) (rhs result out : BitFact) :
+    Decidable (BackwardSoundL eval rhs result out) := by
+  unfold BackwardSoundL
+  infer_instance
+
+theorem forwardSelect_optimal (tv fv out : BitFact) :
+    SelectForwardSound tv fv out → Le (forwardSelect tv fv) out := by
+  cases tv <;> cases fv <;> cases out <;> decide
+
+theorem forwardBitAnd_optimal (lhs rhs out : BitFact) :
+    ForwardSound Bool.and lhs rhs out → Le (forwardBitAnd lhs rhs) out := by
+  cases lhs <;> cases rhs <;> cases out <;> decide
+
+theorem forwardBitOr_optimal (lhs rhs out : BitFact) :
+    ForwardSound Bool.or lhs rhs out → Le (forwardBitOr lhs rhs) out := by
+  cases lhs <;> cases rhs <;> cases out <;> decide
+
+theorem forwardBitXor_optimal (lhs rhs out : BitFact) :
+    ForwardSound xor lhs rhs out → Le (forwardBitXor lhs rhs) out := by
+  cases lhs <;> cases rhs <;> cases out <;> decide
+
+theorem backwardBitAndL_optimal (rhs result out : BitFact) :
+    (∃ a b : Bool, Holds rhs b ∧ Holds result (Bool.and a b)) →
+      BackwardSoundL Bool.and rhs result out →
+        Le (backwardBitAndL rhs result) out := by
+  cases rhs <;> cases result <;> cases out <;> decide
+
+theorem backwardBitOrL_optimal (rhs result out : BitFact) :
+    (∃ a b : Bool, Holds rhs b ∧ Holds result (Bool.or a b)) →
+      BackwardSoundL Bool.or rhs result out →
+        Le (backwardBitOrL rhs result) out := by
+  cases rhs <;> cases result <;> cases out <;> decide
+
+theorem backwardBitXorL_optimal (rhs result out : BitFact) :
+    (∃ a b : Bool, Holds rhs b ∧ Holds result (xor a b)) →
+      BackwardSoundL xor rhs result out →
+        Le (backwardBitXorL rhs result) out := by
+  cases rhs <;> cases result <;> cases out <;> decide
+
+end BitFact
+
 private def selectInt (cond : Bool) (tv fv : Int) : Int :=
   if cond then tv else fv
+
+private theorem powTwoMono {m n : Nat} (h : m ≤ n) :
+    ((2 : Int) ^ m) ≤ (2 : Int) ^ n := by
+  have hNat : (2 : Nat) ^ m ≤ (2 : Nat) ^ n := Nat.pow_le_pow_right (by decide) h
+  exact_mod_cast hNat
+
+private theorem unsignedRangeMono {m n : Nat} (h : m ≤ n) {v : Int} :
+    unsignedRange m v → unsignedRange n v := by
+  intro hv
+  constructor
+  · exact hv.1
+  · exact lt_of_lt_of_le hv.2 (powTwoMono h)
+
+private theorem signedRangeMono {m n : Nat} (hmn : m ≤ n) (hm : 0 < m) (hn : 0 < n) {v : Int} :
+    signedRange m v → signedRange n v := by
+  intro hv
+  have hpred : m - 1 ≤ n - 1 := by omega
+  have hpow : ((2 : Int) ^ (m - 1)) ≤ (2 : Int) ^ (n - 1) := powTwoMono hpred
+  constructor
+  · exact le_trans (by simpa [Int.neg_le_neg_iff] using hpow) hv.1
+  · exact le_trans hv.2 (sub_le_sub_right hpow 1)
+
+private theorem rankUnsignedUnsigned {lhs rhs : Nat} (h : lhs ≤ rhs) :
+    annotationRankLe (.unsigned lhs) (.unsigned rhs) := by
+  unfold annotationRankLe annotationRank
+  rcases lt_or_eq_of_le h with hlt | heq
+  · exact Or.inl hlt
+  · exact Or.inr ⟨heq, by decide⟩
+
+private theorem rankUnsignedSigned {lhs rhs : Nat} (h : lhs ≤ rhs) :
+    annotationRankLe (.unsigned lhs) (.signed rhs) := by
+  unfold annotationRankLe annotationRank
+  rcases lt_or_eq_of_le h with hlt | heq
+  · exact Or.inl hlt
+  · exact Or.inr ⟨heq, by decide⟩
+
+private theorem rankSignedSigned {lhs rhs : Nat} (h : lhs ≤ rhs) :
+    annotationRankLe (.signed lhs) (.signed rhs) := by
+  unfold annotationRankLe annotationRank
+  rcases lt_or_eq_of_le h with hlt | heq
+  · exact Or.inl hlt
+  · exact Or.inr ⟨heq, by decide⟩
+
+private theorem rankSignedUnsigned {lhs rhs : Nat} (h : lhs < rhs) :
+    annotationRankLe (.signed lhs) (.unsigned rhs) := by
+  unfold annotationRankLe annotationRank
+  exact Or.inl h
+
+theorem supportsSummaryAnnotation_sound
+    (facts : IntFacts) (ann : Annotation)
+    (hwell : facts.WellFormed)
+    (hs : facts.SupportsSummaryAnnotation ann) :
+    ∀ v : Int, facts.Realizes v → applyAnnotation v ann = .int v := by
+  intro v hv
+  rcases hv with ⟨_, _, _, hUnsigned, hSigned⟩
+  rcases hwell with ⟨_, hUnsignedWF, hSignedWF, _⟩
+  cases ann with
+  | signed bits =>
+      rcases hs with ⟨_, ub, hub, hubLe⟩
+      have hvRange := hSigned ub hub
+      have hubPos : 0 < ub := hSignedWF _ hub
+      have hbitsPos : 0 < bits := lt_of_lt_of_le hubPos hubLe
+      have hwiden := signedRangeMono hubLe hubPos hbitsPos hvRange
+      simpa [applyAnnotation, checkSignedRange, signedRange] using hwiden
+  | unsigned bits =>
+      rcases hs with ⟨_, ub, hub, hubLe⟩
+      have hwiden := unsignedRangeMono hubLe (hUnsigned ub hub)
+      simpa [applyAnnotation, checkUnsignedRange, unsignedRange] using hwiden
+  | dontCare _ => cases hs
+  | known _ => cases hs
+  | align _ => cases hs
+
+theorem bestAnnotation_supportsSummary
+    (facts : IntFacts) (ann : Annotation)
+    (hbest : facts.bestAnnotation = some ann) :
+    facts.SupportsSummaryAnnotation ann := by
+  unfold IntFacts.bestAnnotation at hbest
+  cases hbot : facts.isBottom <;> simp [hbot] at hbest
+  case false =>
+    cases hu : facts.unsignedWidthUpperBound with
+    | none =>
+        cases hs : facts.signedWidthUpperBound with
+        | none =>
+            simp [hu, hs] at hbest
+        | some sb =>
+            simp [hu, hs] at hbest
+            cases hbest
+            exact ⟨hbot, sb, hs, le_rfl⟩
+    | some ub =>
+        cases hs : facts.signedWidthUpperBound with
+        | none =>
+            simp [hu, hs] at hbest
+            cases hbest
+            exact ⟨hbot, ub, hu, le_rfl⟩
+        | some sb =>
+            by_cases hchoose : sb < ub
+            · simp [hu, hs, hchoose] at hbest
+              cases hbest
+              exact ⟨hbot, sb, hs, le_rfl⟩
+            · simp [hu, hs, hchoose] at hbest
+              cases hbest
+              exact ⟨hbot, ub, hu, le_rfl⟩
+
+theorem bestAnnotation_sound
+    (facts : IntFacts) (ann : Annotation)
+    (hwell : facts.WellFormed)
+    (hbest : facts.bestAnnotation = some ann) :
+    ∀ v : Int, facts.Realizes v → applyAnnotation v ann = .int v := by
+  exact supportsSummaryAnnotation_sound facts ann hwell
+    (bestAnnotation_supportsSummary facts ann hbest)
+
+theorem bestAnnotation_minimal
+    (facts : IntFacts) (best candidate : Annotation)
+    (hbest : facts.bestAnnotation = some best)
+    (hsupport : facts.SupportsSummaryAnnotation candidate) :
+    annotationRankLe best candidate := by
+  cases candidate with
+  | unsigned bits =>
+      rcases hsupport with ⟨hbot, ubc, hubc, hubcLe⟩
+      unfold IntFacts.bestAnnotation at hbest
+      simp [hbot] at hbest
+      cases hu : facts.unsignedWidthUpperBound with
+      | none =>
+          simp [IntFacts.SupportsSummaryAnnotation, hu] at hubc
+      | some ub =>
+          cases hs : facts.signedWidthUpperBound with
+          | none =>
+              simp [hu, hs] at hbest
+              cases hbest
+              have hubEq : ubc = ub := by
+                simp [hu] at hubc
+                simpa using hubc.symm
+              subst hubEq
+              exact rankUnsignedUnsigned hubcLe
+          | some sb =>
+              by_cases hchoose : sb < ub
+              · simp [hu, hs, hchoose] at hbest
+                cases hbest
+                have hubEq : ubc = ub := by
+                  simp [hu] at hubc
+                  simpa using hubc.symm
+                subst hubEq
+                exact rankSignedUnsigned (lt_of_lt_of_le hchoose hubcLe)
+              · simp [hu, hs, hchoose] at hbest
+                cases hbest
+                have hubEq : ubc = ub := by
+                  simp [hu] at hubc
+                  simpa using hubc.symm
+                subst hubEq
+                exact rankUnsignedUnsigned hubcLe
+  | signed bits =>
+      rcases hsupport with ⟨hbot, ubc, hubc, hubcLe⟩
+      unfold IntFacts.bestAnnotation at hbest
+      simp [hbot] at hbest
+      cases hu : facts.unsignedWidthUpperBound with
+      | none =>
+          cases hs : facts.signedWidthUpperBound with
+          | none =>
+              simp [IntFacts.SupportsSummaryAnnotation, hs] at hubc
+          | some sb =>
+              simp [hu, hs] at hbest
+              cases hbest
+              have hubEq : ubc = sb := by
+                simp [hs] at hubc
+                simpa using hubc.symm
+              subst hubEq
+              exact rankSignedSigned hubcLe
+      | some ub =>
+          cases hs : facts.signedWidthUpperBound with
+          | none =>
+              simp [IntFacts.SupportsSummaryAnnotation, hs] at hubc
+          | some sb =>
+              by_cases hchoose : sb < ub
+              · simp [hu, hs, hchoose] at hbest
+                cases hbest
+                have hubEq : ubc = sb := by
+                  simp [hs] at hubc
+                  simpa using hubc.symm
+                subst hubEq
+                exact rankSignedSigned hubcLe
+              · simp [hu, hs, hchoose] at hbest
+                cases hbest
+                have hubEq : ubc = sb := by
+                  simp [hs] at hubc
+                  simpa using hubc.symm
+                subst hubEq
+                have hubLeBits : ub ≤ bits := le_trans (Nat.le_of_not_lt hchoose) hubcLe
+                exact rankUnsignedSigned hubLeBits
+  | dontCare _ => cases hsupport
+  | known _ => cases hsupport
+  | align _ => cases hsupport
 
 theorem knownBitsForward_unknown_sound (v : Int) :
     applyAnnotation v (.known {}) = .int v := by
@@ -335,28 +752,28 @@ def resultFactRules : List ResultFactRule :=
       result := .primary
       knownBitsForward := .select
       intAnnotationForward := .select
-      proofRef := "TuffyLean.Rewrites.Facts.knownBitsForward_select_sound"
+      proofRef := "TuffyLean.Rewrites.Facts.BitFact.forwardSelect_optimal"
     },
     {
       op := "and"
       result := .primary
       knownBitsForward := .bitAnd
       intAnnotationForward := .bitAnd
-      proofRef := "TuffyLean.Rewrites.Facts.knownBitsForward_bitAnd_sound"
+      proofRef := "TuffyLean.Rewrites.Facts.BitFact.forwardBitAnd_optimal"
     },
     {
       op := "or"
       result := .primary
       knownBitsForward := .bitOr
       intAnnotationForward := .bitOr
-      proofRef := "TuffyLean.Rewrites.Facts.knownBitsForward_bitOr_sound"
+      proofRef := "TuffyLean.Rewrites.Facts.BitFact.forwardBitOr_optimal"
     },
     {
       op := "xor"
       result := .primary
       knownBitsForward := .bitXor
       intAnnotationForward := .bitXor
-      proofRef := "TuffyLean.Rewrites.Facts.knownBitsForward_bitXor_sound"
+      proofRef := "TuffyLean.Rewrites.Facts.BitFact.forwardBitXor_optimal"
     },
     {
       op := "shl"
@@ -402,17 +819,17 @@ def instFactRules : List InstFactRule :=
     {
       op := "and"
       knownBitsBackward := .bitAnd
-      proofRef := "TuffyLean.Rewrites.Facts.knownBitsBackward_bitAnd_sound"
+      proofRef := "TuffyLean.Rewrites.Facts.BitFact.backwardBitAndL_optimal"
     },
     {
       op := "or"
       knownBitsBackward := .bitOr
-      proofRef := "TuffyLean.Rewrites.Facts.knownBitsBackward_bitOr_sound"
+      proofRef := "TuffyLean.Rewrites.Facts.BitFact.backwardBitOrL_optimal"
     },
     {
       op := "xor"
       knownBitsBackward := .bitXor
-      proofRef := "TuffyLean.Rewrites.Facts.knownBitsBackward_bitXor_sound"
+      proofRef := "TuffyLean.Rewrites.Facts.BitFact.backwardBitXorL_optimal"
     },
     {
       op := "shl"
