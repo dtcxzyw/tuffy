@@ -18,7 +18,8 @@ TuffyLean/
 │       ├── Arith/       # Arithmetic optimization prototypes
 │       │   └── Basic.lean
 │       └── Mem/         # Memory optimization prototypes
-│           └── Basic.lean
+│           ├── Basic.lean
+│           └── Mem2Reg.lean
 │
 └── Export/              # Serialization and interop
     └── Json.lean        # Target-agnostic JSON export entrypoint

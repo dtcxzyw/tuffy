@@ -17,7 +17,7 @@ IR's memory model supports the most fundamental memory optimization. -/
 
 theorem store_load_forward (mem : Memory) (addr : Int) (bs : List AbstractByte) :
     evalLoad (evalStore mem addr bs) addr bs.length = .bytes bs := by
-  simp only [evalLoad, evalStore]
+  simp only [evalLoad, evalStore, readBytes]
   congr 1
   have key : ∀ (i : Fin bs.length),
       (if 0 ≤ addr + ↑↑i - addr ∧ addr + ↑↑i - addr < ↑bs.length
@@ -74,7 +74,7 @@ theorem load_after_noalias_store (mem : Memory) (storeAddr loadAddr : Int)
     (h_noalias : ∀ i : Fin size, ∀ j : Fin bs.length,
       loadAddr + ↑i.val ≠ storeAddr + ↑j.val) :
     evalLoad (evalStore mem storeAddr bs) loadAddr size = evalLoad mem loadAddr size := by
-  simp only [evalLoad, evalStore]
+  simp only [evalLoad, evalStore, readBytes]
   congr 1
   have key : ∀ (i : Fin size),
       (if 0 ≤ loadAddr + ↑↑i - storeAddr ∧ loadAddr + ↑↑i - storeAddr < ↑bs.length

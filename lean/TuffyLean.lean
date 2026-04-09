@@ -6,4 +6,5 @@ import TuffyLean.Rewrites.Facts
 import TuffyLean.Export.Json
 import TuffyLean.Prototyping.Opt.Arith.Basic
 import TuffyLean.Prototyping.Opt.Mem.Basic
+import TuffyLean.Prototyping.Opt.Mem.Mem2Reg
 import TuffyLean.Prototyping.Opt.Fp.Basic

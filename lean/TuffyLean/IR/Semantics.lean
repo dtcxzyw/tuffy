@@ -441,15 +441,136 @@ def applyAnnotation (v : Int) (ann : Annotation) : Value :=
   | .align _ => .int v
 
 -- Memory load/store semantics
--- Load/store operations support int, float, vec, and byte types.
--- Array and struct types are not supported.
+-- Raw byte load/store remain the primitive memory operations.
+-- Typed helpers below add aggregate-aware decoding/encoding without changing
+-- the existing byte-oriented API used by current proofs.
+
+/-- Read `size` bytes from memory at `addr`. -/
+def readBytes (mem : Memory) (addr : Int) (size : Nat) : List AbstractByte :=
+  List.ofFn (fun (i : Fin size) => mem.bytes (addr + i.val))
+
+/-- Take exactly `size` bytes from `bs`, padding with `uninit` when needed. -/
+def takeBytesPadded (bs : List AbstractByte) (size : Nat) : List AbstractByte :=
+  bs.take size ++ List.replicate (size - (bs.take size).length) .uninit
+
+/-- Concatenate a list of byte chunks. -/
+def concatBytes (chunks : List (List AbstractByte)) : List AbstractByte :=
+  chunks.foldr List.append []
+
+/-- Little-endian nat decoding used by the executable typed memory helpers. -/
+def decodeNatLEAux : List AbstractByte → Nat → Option Nat
+  | [], _ => some 0
+  | b :: rest, shift => do
+      let tail <- decodeNatLEAux rest (shift + 8)
+      match b with
+      | .bits v => some (tail + v.toNat * 2 ^ shift)
+      | .uninit => some tail
+      | .poison => some tail
+      | .ptrFragment _ _ => none
+
+def decodeNatLE (bs : List AbstractByte) : Option Nat :=
+  decodeNatLEAux bs 0
+
+/-- Little-endian nat encoding truncated to `size` bytes. -/
+def encodeNatLE (n : Nat) (size : Nat) : List AbstractByte :=
+  List.ofFn (fun (i : Fin size) => .bits (UInt8.ofNat ((n / 2 ^ (8 * i.val)) % 256)))
+
+mutual
+
+  /-- Encode a value according to a typed memory layout. -/
+  def encodeValue : IRType → Value → List AbstractByte
+    | .int, .int v =>
+        let size := IRType.byteSize .int
+        let modulus := (2 : Int) ^ (8 * size)
+        let normalized := ((v % modulus) + modulus) % modulus
+        encodeNatLE normalized.toNat size
+    | .bool, .bool b => [.bits (if b then 1 else 0)]
+    | .unit, _ => []
+    | .bytes size, .bytes bs => takeBytesPadded bs size
+    | .ptr, .ptr p =>
+        List.ofFn (fun (i : Fin (IRType.byteSize .ptr)) => .ptrFragment p.allocId i.val)
+    | .float ft, .bytes bs => takeBytesPadded bs (IRType.byteSize (.float ft))
+    | .vec vt, .bytes bs => takeBytesPadded bs (IRType.byteSize (.vec vt))
+    | .mem, .mem => []
+    | .struct tys, .aggregate fields =>
+        encodeFieldValues tys fields
+    | .array ty count, .aggregate fields =>
+        if _h : fields.length = count then
+          encodeArrayValues ty fields
+        else
+          List.replicate (IRType.byteSize (.array ty count)) .poison
+    | ty, .poison => List.replicate (IRType.byteSize ty) .poison
+    | ty, _ => List.replicate (IRType.byteSize ty) .poison
+
+  /-- Encode a list of fields against a list of field types. -/
+  def encodeFieldValues : List IRType → List Value → List AbstractByte
+    | [], _ => []
+    | _, [] => []
+    | ty :: tys, value :: values => encodeValue ty value ++ encodeFieldValues tys values
+
+  /-- Encode an array payload field-by-field. -/
+  def encodeArrayValues (ty : IRType) : List Value → List AbstractByte
+    | [] => []
+    | value :: values => encodeValue ty value ++ encodeArrayValues ty values
+
+end
+
+/-- Check that the remaining pointer-fragment bytes continue the same pointer. -/
+def ptrFragmentsMatch (alloc : AllocId) : Nat → List AbstractByte → Bool
+  | _, [] => true
+  | idx, b :: rest =>
+      decide (b = .ptrFragment alloc idx) && ptrFragmentsMatch alloc (idx + 1) rest
+
+/-- Decode bytes according to a typed memory layout. -/
+def decodeValue : IRType → List AbstractByte → Value
+  | .int, bs =>
+      match decodeNatLE bs with
+      | some n => .int n
+      | none => .poison
+  | .bool, bs =>
+      match bs.head? with
+      | some (.bits 0) => .bool false
+      | some (.bits 1) => .bool true
+      | _ => .poison
+  | .unit, _ => .bytes []
+  | .bytes _, bs => .bytes bs
+  | .ptr, bs =>
+      match bs with
+      | [] => .poison
+      | first :: rest =>
+          match first with
+          | .ptrFragment alloc 0 =>
+              if ptrFragmentsMatch alloc 1 rest then
+                .ptr { allocId := alloc, offset := 0 }
+              else .poison
+          | _ => .poison
+  | .float _, bs => .bytes bs
+  | .vec _, bs => .bytes bs
+  | .mem, _ => .mem
+  | .struct tys, bs =>
+      let rec go (tys : List IRType) (offset : Nat) : List Value
+        := match tys with
+          | [] => []
+          | ty :: rest =>
+              let size := IRType.byteSize ty
+              decodeValue ty (takeBytesPadded (bs.drop offset) size) :: go rest (offset + size)
+      .aggregate (go tys 0)
+  | .array ty count, bs =>
+      let elemSize := IRType.byteSize ty
+      .aggregate <|
+        List.ofFn (fun (i : Fin count) =>
+          decodeValue ty (takeBytesPadded (bs.drop (i.val * elemSize)) elemSize))
+
+/-- Typed load derived from the raw byte model. -/
+def evalLoadTyped (mem : Memory) (addr : Int) (ty : IRType) : Value :=
+  decodeValue ty (readBytes mem addr (IRType.byteSize ty))
 
 /-- Load a value from memory starting at address `addr`.
     The loaded value type is determined by the instruction's type annotation.
     For byte(N) types, returns a `bytes` value containing N abstract bytes.
     For int/float/vec types, the bytes are interpreted according to the type. -/
 def evalLoad (mem : Memory) (addr : Int) (size : Nat) : Value :=
-  .bytes (List.ofFn (fun (i : Fin size) => mem.bytes (addr + i.val)))
+  .bytes (readBytes mem addr size)
 
 /-- Store a value to memory starting at address `addr`.
     The value must be of type int, float, vec, or byte(N).
@@ -460,6 +581,10 @@ def evalStore (mem : Memory) (addr : Int) (bs : List AbstractByte) : Memory :=
       if 0 ≤ offset ∧ offset < bs.length then
         List.getD bs offset.toNat .uninit
       else mem.bytes a }
+
+/-- Typed store derived from the raw byte model. -/
+def evalStoreTyped (mem : Memory) (addr : Int) (ty : IRType) (v : Value) : Memory :=
+  evalStore mem addr (encodeValue ty v)
 
 -- Atomic operation semantics (sequential model)
 

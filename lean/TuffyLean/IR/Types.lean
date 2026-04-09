@@ -42,6 +42,41 @@ def VectorType.baseWidth : VectorType → Nat
 def VectorType.laneCount (vt : VectorType) (elemBits : Nat) : Nat :=
   vt.baseWidth / elemBits
 
+/-- First-class IR types used by typed memory helpers and aggregate values. -/
+inductive IRType where
+  | int
+  | bool
+  | unit
+  | bytes (size : Nat)
+  | ptr
+  | float (ft : FloatType)
+  | vec (vt : VectorType)
+  | mem
+  | struct (fields : List IRType)
+  | array (elem : IRType) (count : Nat)
+  deriving Repr
+
+namespace IRType
+
+/-- Byte width used by the executable memory model. Mirrors the Rust interpreter. -/
+def byteSize : IRType → Nat
+  | .int => 8
+  | .bool => 1
+  | .unit => 0
+  | .bytes n => n
+  | .ptr => 8
+  | .float .bf16 => 2
+  | .float .f16 => 2
+  | .float .f32 => 4
+  | .float .f64 => 8
+  | .float .f128 => 16
+  | .vec vt => vt.baseWidth / 8
+  | .mem => 0
+  | .struct fields => fields.foldl (fun acc ty => acc + byteSize ty) 0
+  | .array elem count => byteSize elem * count
+
+end IRType
+
 /-- IEEE 754 floating-point value classes, mirroring LLVM's FPClassTest.
     Used by `nofpclass` annotations to exclude specific FP classes. -/
 inductive FpClass where
@@ -168,7 +203,7 @@ inductive AbstractByte where
   | ptrFragment (ptr : AllocId) (index : Nat)
   | uninit
   | poison
-  deriving Repr
+  deriving DecidableEq, Repr
 
 /-- Tuffy IR value -/
 inductive Value where
@@ -176,6 +211,7 @@ inductive Value where
   | bool (val : Bool)
   | bytes (bs : List AbstractByte)
   | ptr (p : Pointer)
+  | aggregate (fields : List Value)
   | poison
   | mem
   deriving Repr
