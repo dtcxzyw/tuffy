@@ -237,15 +237,14 @@ impl<'a> FuncVerifier<'a> {
         self.expect_type(op, &Type::Mem, ctx, loc);
     }
 
-    fn check_loadable_type(&mut self, ty: &Type, ctx: &str, loc: &Location) {
+    fn check_loadable_type(&mut self, ty: &Type, _ctx: &str, _loc: &Location) {
         match ty {
-            Type::Int | Type::Float(_) | Type::Vec(_) | Type::Byte(_) => {}
-            Type::Struct(_) | Type::Array(_, _) => {
-                self.result.error(
-                    loc.clone(),
-                    format!("{ctx}: array and struct types not supported, got {ty:?}"),
-                );
-            }
+            Type::Int
+            | Type::Float(_)
+            | Type::Vec(_)
+            | Type::Byte(_)
+            | Type::Struct(_)
+            | Type::Array(_, _) => {}
             _ => {}
         }
     }

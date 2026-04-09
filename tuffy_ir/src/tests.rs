@@ -2032,6 +2032,26 @@ fn test_insertvalue_array() {
 }
 
 #[test]
+fn verify_accepts_aggregate_load_store() {
+    let input = r#"
+func @aggregate_mem(struct{int, bool}) -> struct{int, bool} {
+  bb0(v0: mem):
+    v1: ptr = stack_slot 9
+    v2: struct{int, bool} = param 0
+    v3: mem = store.9 v2, v1, v0
+    v4: struct{int, bool} = load.9 v1, v3
+    ret v4, v3
+}
+"#;
+    let module = parse_module(input).unwrap_or_else(|e| panic!("parse error: {e}"));
+    let result = verify_module(&module);
+    assert!(
+        result.is_ok(),
+        "aggregate memory program should verify: {result}"
+    );
+}
+
+#[test]
 fn test_dontcare_annotation_display() {
     let mut st = SymbolTable::new();
     let name = st.intern("test_dc");
