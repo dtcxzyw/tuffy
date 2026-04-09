@@ -6,6 +6,10 @@ This crate hosts IR-level optimization passes operating on `tuffy_ir::Module` / 
 
 ## Status
 
+- Conservative stack-slot `sroa/mem2reg` runs before peephole cleanup.
+- Promotion is block-arg based (matching Tuffy IR CFG joins) rather than PHI-node based.
+- Promotion currently handles local `stack_slot` objects reached through constant-offset `ptradd`.
+- Promotion is intentionally conservative around escaping pointers, atomics, bulk memory ops, and unwind-cleanup calls.
 - Lean-owned peephole framework is implemented.
 - Default peephole rules are exported from `lean/TuffyLean/Rewrites/Basic.lean`.
 - Constant folding is modeled as peephole rules and exported through the same Lean JSON pipeline.

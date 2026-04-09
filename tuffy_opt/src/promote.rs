@@ -1,0 +1,1073 @@
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+
+use tuffy_ir::builder::Builder;
+use tuffy_ir::function::Function;
+use tuffy_ir::instruction::{Op, Operand};
+use tuffy_ir::pool::UseNode;
+use tuffy_ir::types::{Annotation, Type};
+use tuffy_ir::value::{BlockRef, RegionRef, ValueRef};
+
+use crate::peephole::PeepholeStats;
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct SliceKey {
+    offset: i64,
+    size: u32,
+}
+
+#[derive(Clone, Debug)]
+enum AccessKind {
+    Load,
+    Store,
+}
+
+#[derive(Clone, Debug)]
+struct AccessInfo {
+    inst_idx: u32,
+    block: BlockRef,
+    key: SliceKey,
+    ty: Type,
+    annotation: Option<Annotation>,
+    kind: AccessKind,
+}
+
+#[derive(Clone, Debug)]
+struct SlicePlan {
+    key: SliceKey,
+    ty: Type,
+    annotation: Option<Annotation>,
+    accesses: Vec<AccessInfo>,
+    phi_blocks: HashSet<BlockRef>,
+}
+
+#[derive(Clone, Debug)]
+struct SlotPlan {
+    slot: ValueRef,
+    slices: Vec<SlicePlan>,
+}
+
+#[derive(Clone, Debug)]
+struct FlattenedSlice {
+    slot: ValueRef,
+    key: SliceKey,
+    ty: Type,
+    annotation: Option<Annotation>,
+    phi_blocks: HashSet<BlockRef>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct PromotionPlan {
+    slots: Vec<SlotPlan>,
+    slices: Vec<FlattenedSlice>,
+    load_to_slice: HashMap<u32, usize>,
+    store_to_slice: HashMap<u32, usize>,
+    promoted_insts: HashSet<u32>,
+    promoted_slots: HashSet<u32>,
+}
+
+#[derive(Clone, Debug)]
+struct CfgInfo {
+    preds: Vec<Vec<BlockRef>>,
+    succs: Vec<Vec<BlockRef>>,
+    reachable: Vec<bool>,
+    dom_children: Vec<Vec<BlockRef>>,
+    dominance_frontier: Vec<HashSet<BlockRef>>,
+    loop_header: Vec<Option<BlockRef>>,
+}
+
+impl CfgInfo {
+    fn compute(func: &Function) -> Self {
+        let block_count = func.blocks.len();
+        let block_refs = collect_block_refs(func);
+        let mut succs = vec![Vec::new(); block_count];
+        let mut loop_header = vec![None; block_count];
+
+        for block_idx in 0..block_count {
+            let block = block_refs[block_idx];
+            let Some(last_idx) = func.block(block).last_inst else {
+                continue;
+            };
+            let inst = func.inst(last_idx);
+            let mut add_succ = |target: BlockRef| {
+                if !succs[block_idx].contains(&target) {
+                    succs[block_idx].push(target);
+                }
+            };
+            match &inst.op {
+                Op::Br(target, _) => add_succ(*target),
+                Op::BrIf(_, then_block, _, else_block, _) => {
+                    add_succ(*then_block);
+                    add_succ(*else_block);
+                }
+                Op::Continue(_) => {
+                    if let Some(header) = loop_header_for_block(func, block) {
+                        add_succ(header);
+                        loop_header[block_idx] = Some(header);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let mut preds = vec![Vec::new(); block_count];
+        for (from_idx, targets) in succs.iter().enumerate() {
+            for target in targets {
+                preds[target.index() as usize].push(block_refs[from_idx]);
+            }
+        }
+
+        let entry = func.entry_block();
+        let mut reachable = vec![false; block_count];
+        let mut postorder = Vec::new();
+        let mut stack = vec![(entry, 0usize)];
+        reachable[entry.index() as usize] = true;
+        while let Some((block, next_idx)) = stack.pop() {
+            let succ_list = &succs[block.index() as usize];
+            if next_idx < succ_list.len() {
+                stack.push((block, next_idx + 1));
+                let succ = succ_list[next_idx];
+                if !reachable[succ.index() as usize] {
+                    reachable[succ.index() as usize] = true;
+                    stack.push((succ, 0));
+                }
+            } else {
+                postorder.push(block);
+            }
+        }
+        postorder.reverse();
+        let rpo = postorder;
+
+        let mut rpo_pos = vec![usize::MAX; block_count];
+        for (idx, block) in rpo.iter().enumerate() {
+            rpo_pos[block.index() as usize] = idx;
+        }
+
+        let mut idom = vec![None; block_count];
+        idom[entry.index() as usize] = Some(entry);
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for block in rpo.iter().copied().skip(1) {
+                let pred_list = preds[block.index() as usize]
+                    .iter()
+                    .copied()
+                    .filter(|pred| {
+                        reachable[pred.index() as usize] && idom[pred.index() as usize].is_some()
+                    })
+                    .collect::<Vec<_>>();
+                let Some((first_pred, rest)) = pred_list.split_first() else {
+                    continue;
+                };
+                let mut new_idom = *first_pred;
+                for pred in rest {
+                    new_idom = intersect_idom(&idom, &rpo_pos, *pred, new_idom);
+                }
+                if idom[block.index() as usize] != Some(new_idom) {
+                    idom[block.index() as usize] = Some(new_idom);
+                    changed = true;
+                }
+            }
+        }
+
+        let mut dom_children = vec![Vec::new(); block_count];
+        for block in rpo.iter().copied().skip(1) {
+            if let Some(parent) = idom[block.index() as usize] {
+                dom_children[parent.index() as usize].push(block);
+            }
+        }
+
+        let mut dominance_frontier = vec![HashSet::new(); block_count];
+        for block in rpo.iter().copied() {
+            let pred_list = preds[block.index() as usize]
+                .iter()
+                .copied()
+                .filter(|pred| reachable[pred.index() as usize])
+                .collect::<Vec<_>>();
+            if pred_list.len() < 2 {
+                continue;
+            }
+            let Some(block_idom) = idom[block.index() as usize] else {
+                continue;
+            };
+            for pred in pred_list {
+                let mut runner = pred;
+                while runner != block_idom {
+                    dominance_frontier[runner.index() as usize].insert(block);
+                    let Some(next) = idom[runner.index() as usize] else {
+                        break;
+                    };
+                    runner = next;
+                }
+            }
+        }
+
+        Self {
+            preds,
+            succs,
+            reachable,
+            dom_children,
+            dominance_frontier,
+            loop_header,
+        }
+    }
+}
+
+fn collect_block_refs(func: &Function) -> Vec<BlockRef> {
+    let mut refs = vec![None; func.blocks.len()];
+    for region in &func.regions {
+        for child in &region.children {
+            if let tuffy_ir::function::CfgNode::Block(block) = child {
+                refs[block.index() as usize] = Some(*block);
+            }
+        }
+    }
+    refs.into_iter()
+        .map(|block| block.expect("every block should appear in a region"))
+        .collect()
+}
+
+fn has_unwind_cleanup_edges(func: &Function) -> bool {
+    func.inst_pool
+        .iter_insts()
+        .any(|(_, inst)| matches!(inst.op, Op::Call(_, _, _, Some(_))))
+}
+
+fn intersect_idom(
+    idom: &[Option<BlockRef>],
+    rpo_pos: &[usize],
+    mut lhs: BlockRef,
+    mut rhs: BlockRef,
+) -> BlockRef {
+    while lhs != rhs {
+        while rpo_pos[lhs.index() as usize] > rpo_pos[rhs.index() as usize] {
+            lhs = idom[lhs.index() as usize].expect("reachable block should have idom");
+        }
+        while rpo_pos[rhs.index() as usize] > rpo_pos[lhs.index() as usize] {
+            rhs = idom[rhs.index() as usize].expect("reachable block should have idom");
+        }
+    }
+    lhs
+}
+
+fn loop_header_for_block(func: &Function, block: BlockRef) -> Option<BlockRef> {
+    let mut region = func.block(block).parent_region;
+    loop {
+        let current = func.region(region);
+        if current.kind == tuffy_ir::function::RegionKind::Loop {
+            return Some(current.entry_block);
+        }
+        region = current.parent?;
+    }
+}
+
+fn value_annotation(func: &Function, value: ValueRef) -> Option<Annotation> {
+    if value.is_block_arg() {
+        return func
+            .block_args
+            .get(value.index() as usize)
+            .and_then(|arg| arg.annotation.clone());
+    }
+    if value.is_secondary_result() {
+        return func
+            .inst_pool
+            .get(value.inst_index())
+            .and_then(|node| node.inst.secondary_result_annotation.clone());
+    }
+    func.inst_pool
+        .get(value.index())
+        .and_then(|node| node.inst.result_annotation.clone())
+}
+
+fn value_type(func: &Function, value: ValueRef) -> Option<Type> {
+    func.value_type(value).cloned()
+}
+
+fn primary_value_ref(inst_idx: u32) -> ValueRef {
+    ValueRef::inst_result(inst_idx)
+}
+
+fn const_i64(func: &Function, value: ValueRef) -> Option<i64> {
+    if value.is_block_arg() || value.is_secondary_result() {
+        return None;
+    }
+    let node = func.inst_pool.get(value.index())?;
+    let Op::Const(int) = &node.inst.op else {
+        return None;
+    };
+    int.to_string().parse().ok()
+}
+
+fn address_root_slot(func: &Function, value: ValueRef) -> Option<ValueRef> {
+    if value.is_block_arg() || value.is_secondary_result() {
+        return None;
+    }
+    let node = func.inst_pool.get(value.index())?;
+    match &node.inst.op {
+        Op::StackSlot(_, _) => Some(value),
+        Op::PtrAdd(base, offset) => {
+            let _ = const_i64(func, offset.clone().raw().value)?;
+            address_root_slot(func, base.clone().raw().value)
+        }
+        _ => None,
+    }
+}
+
+fn mark_required_address_chain(func: &Function, value: ValueRef, required: &mut HashSet<u32>) {
+    let Some(root) = address_root_slot(func, value) else {
+        return;
+    };
+    if root == value {
+        required.insert(root.index());
+        return;
+    }
+    if required.insert(value.index()) {
+        let node = func
+            .inst_pool
+            .get(value.index())
+            .expect("address value should exist");
+        if let Op::PtrAdd(base, _) = &node.inst.op {
+            mark_required_address_chain(func, base.clone().raw().value, required);
+        }
+    }
+}
+
+fn collect_slot_plan(func: &Function, cfg: &CfgInfo, slot: ValueRef) -> Option<SlotPlan> {
+    let mut work = VecDeque::from([(slot, 0i64)]);
+    let mut visited = HashMap::<u32, i64>::from([(slot.raw(), 0)]);
+    let mut accesses = Vec::new();
+
+    while let Some((pointer, offset)) = work.pop_front() {
+        let uses = func.uses_of(pointer).cloned().collect::<Vec<_>>();
+        for use_node in uses {
+            if !classify_pointer_use(
+                func,
+                pointer,
+                offset,
+                &use_node,
+                &mut accesses,
+                &mut work,
+                &mut visited,
+            ) {
+                return None;
+            }
+        }
+    }
+
+    if accesses.is_empty() {
+        return None;
+    }
+
+    let mut by_slice = BTreeMap::<SliceKey, Vec<AccessInfo>>::new();
+    for access in accesses {
+        by_slice.entry(access.key.clone()).or_default().push(access);
+    }
+
+    let mut previous_end = None;
+    let mut slices = Vec::new();
+    for (key, group) in by_slice {
+        if let Some(end) = previous_end
+            && key.offset < end
+        {
+            return None;
+        }
+        previous_end = Some(key.offset + i64::from(key.size));
+
+        let mut iter = group.iter();
+        let first = iter.next().expect("slice group should be non-empty");
+        let canonical_ty = first.ty.clone();
+        let canonical_ann = first.annotation.clone();
+        let has_store = group
+            .iter()
+            .any(|access| matches!(access.kind, AccessKind::Store));
+        if !has_store {
+            return None;
+        }
+        if group
+            .iter()
+            .any(|access| access.ty != canonical_ty || access.annotation != canonical_ann)
+        {
+            return None;
+        }
+
+        let def_blocks = group
+            .iter()
+            .filter_map(|access| match access.kind {
+                AccessKind::Store => Some(access.block),
+                AccessKind::Load => None,
+            })
+            .collect::<HashSet<_>>();
+
+        let phi_blocks = compute_phi_blocks(cfg, &def_blocks);
+        let slice = SlicePlan {
+            key,
+            ty: canonical_ty,
+            annotation: canonical_ann,
+            accesses: group,
+            phi_blocks,
+        };
+        if !validate_slice(func, cfg, &slice) {
+            return None;
+        }
+        slices.push(slice);
+    }
+
+    Some(SlotPlan { slot, slices })
+}
+
+fn classify_pointer_use(
+    func: &Function,
+    pointer: ValueRef,
+    base_offset: i64,
+    use_node: &UseNode,
+    accesses: &mut Vec<AccessInfo>,
+    work: &mut VecDeque<(ValueRef, i64)>,
+    visited: &mut HashMap<u32, i64>,
+) -> bool {
+    let user = func.inst(use_node.user);
+    match &user.op {
+        Op::PtrAdd(base, delta)
+            if use_node.operand_index == 0 && base.clone().raw().value == pointer =>
+        {
+            let Some(delta) = const_i64(func, delta.clone().raw().value) else {
+                return false;
+            };
+            let child = primary_value_ref(use_node.user);
+            let total_offset = base_offset + delta;
+            if let Some(existing) = visited.get(&child.raw()) {
+                return *existing == total_offset;
+            }
+            visited.insert(child.raw(), total_offset);
+            work.push_back((child, total_offset));
+            true
+        }
+        Op::Load(_, size, _) if use_node.operand_index == 0 => {
+            accesses.push(AccessInfo {
+                inst_idx: use_node.user,
+                block: func.inst_node(use_node.user).parent_block,
+                key: SliceKey {
+                    offset: base_offset,
+                    size: *size,
+                },
+                ty: user.ty.clone(),
+                annotation: user.result_annotation.clone(),
+                kind: AccessKind::Load,
+            });
+            true
+        }
+        Op::Store(value, _, size, _) if use_node.operand_index == 1 => {
+            if value.annotation.is_some() {
+                return false;
+            }
+            let Some(ty) = value_type(func, value.value) else {
+                return false;
+            };
+            accesses.push(AccessInfo {
+                inst_idx: use_node.user,
+                block: func.inst_node(use_node.user).parent_block,
+                key: SliceKey {
+                    offset: base_offset,
+                    size: *size,
+                },
+                ty,
+                annotation: value_annotation(func, value.value),
+                kind: AccessKind::Store,
+            });
+            true
+        }
+        Op::LoadAtomic(_, _, _)
+        | Op::StoreAtomic(_, _, _, _)
+        | Op::AtomicRmw(_, _, _, _, _)
+        | Op::AtomicCmpXchg(_, _, _, _, _, _)
+        | Op::MemCopy(_, _, _, _)
+        | Op::MemMove(_, _, _, _)
+        | Op::MemSet(_, _, _, _)
+        | Op::Call(_, _, _, _)
+        | Op::CallRet2(_)
+        | Op::Fence(_, _) => false,
+        _ => false,
+    }
+}
+
+fn compute_phi_blocks(cfg: &CfgInfo, def_blocks: &HashSet<BlockRef>) -> HashSet<BlockRef> {
+    let mut phis = HashSet::new();
+    let mut work = def_blocks.iter().copied().collect::<VecDeque<_>>();
+    while let Some(block) = work.pop_front() {
+        for frontier in &cfg.dominance_frontier[block.index() as usize] {
+            if phis.insert(*frontier) && !def_blocks.contains(frontier) {
+                work.push_back(*frontier);
+            }
+        }
+    }
+    phis
+}
+
+fn validate_slice(func: &Function, cfg: &CfgInfo, slice: &SlicePlan) -> bool {
+    if slice
+        .accesses
+        .iter()
+        .any(|access| !cfg.reachable[access.block.index() as usize])
+    {
+        return false;
+    }
+    if slice.phi_blocks.iter().any(|block| {
+        cfg.preds[block.index() as usize]
+            .iter()
+            .any(|pred| !cfg.reachable[pred.index() as usize])
+    }) {
+        return false;
+    }
+
+    fn visit(
+        func: &Function,
+        cfg: &CfgInfo,
+        slice: &SlicePlan,
+        block: BlockRef,
+        mut current_defined: bool,
+    ) -> bool {
+        if slice.phi_blocks.contains(&block) {
+            current_defined = true;
+        }
+
+        for (value, inst) in func.block_insts_with_values(block) {
+            let inst_idx = value.index();
+            if slice.accesses.iter().any(|access| {
+                access.inst_idx == inst_idx && matches!(access.kind, AccessKind::Load)
+            }) {
+                if !current_defined {
+                    return false;
+                }
+                continue;
+            }
+            if slice.accesses.iter().any(|access| {
+                access.inst_idx == inst_idx && matches!(access.kind, AccessKind::Store)
+            }) {
+                current_defined = true;
+                continue;
+            }
+            if matches!(inst.op, Op::Trap | Op::Unreachable) {
+                break;
+            }
+        }
+
+        for succ in &cfg.succs[block.index() as usize] {
+            if slice.phi_blocks.contains(succ) && !current_defined {
+                return false;
+            }
+        }
+
+        for child in &cfg.dom_children[block.index() as usize] {
+            if !visit(func, cfg, slice, *child, current_defined) {
+                return false;
+            }
+        }
+        true
+    }
+
+    visit(func, cfg, slice, func.entry_block(), false)
+}
+
+fn collect_promotion_plan(func: &Function, cfg: &CfgInfo) -> PromotionPlan {
+    let mut plans = Vec::new();
+    for (inst_idx, inst) in func.inst_pool.iter_insts() {
+        if !matches!(inst.op, Op::StackSlot(_, _)) {
+            continue;
+        }
+        let slot = primary_value_ref(inst_idx);
+        if let Some(plan) = collect_slot_plan(func, cfg, slot) {
+            plans.push(plan);
+        }
+    }
+
+    let mut flattened = Vec::new();
+    for slot_plan in &plans {
+        for slice in &slot_plan.slices {
+            flattened.push(FlattenedSlice {
+                slot: slot_plan.slot,
+                key: slice.key.clone(),
+                ty: slice.ty.clone(),
+                annotation: slice.annotation.clone(),
+                phi_blocks: slice.phi_blocks.clone(),
+            });
+        }
+    }
+    flattened.sort_by(|lhs, rhs| {
+        lhs.slot
+            .index()
+            .cmp(&rhs.slot.index())
+            .then(lhs.key.offset.cmp(&rhs.key.offset))
+            .then(lhs.key.size.cmp(&rhs.key.size))
+    });
+
+    let mut slice_index = HashMap::<(u32, SliceKey), usize>::new();
+    for (idx, slice) in flattened.iter().enumerate() {
+        slice_index.insert((slice.slot.raw(), slice.key.clone()), idx);
+    }
+
+    let mut plan = PromotionPlan {
+        slots: plans,
+        slices: flattened,
+        ..PromotionPlan::default()
+    };
+    for slot in &plan.slots {
+        plan.promoted_slots.insert(slot.slot.index());
+        for slice in &slot.slices {
+            let slice_id = *slice_index
+                .get(&(slot.slot.raw(), slice.key.clone()))
+                .expect("flattened slice should exist");
+            for access in &slice.accesses {
+                plan.promoted_insts.insert(access.inst_idx);
+                match access.kind {
+                    AccessKind::Load => {
+                        plan.load_to_slice.insert(access.inst_idx, slice_id);
+                    }
+                    AccessKind::Store => {
+                        plan.store_to_slice.insert(access.inst_idx, slice_id);
+                    }
+                }
+            }
+        }
+    }
+    plan
+}
+
+fn clone_regions(
+    old_func: &Function,
+    builder: &mut Builder<'_>,
+    old_region: RegionRef,
+    region_map: &mut [Option<RegionRef>],
+    block_map: &mut [Option<BlockRef>],
+) {
+    let region = old_func.region(old_region);
+    let new_region = builder.create_region(region.kind);
+    region_map[old_region.index() as usize] = Some(new_region);
+    builder.enter_region(new_region);
+    for child in &region.children {
+        match child {
+            tuffy_ir::function::CfgNode::Block(block) => {
+                let new_block = builder.create_block();
+                block_map[block.index() as usize] = Some(new_block);
+            }
+            tuffy_ir::function::CfgNode::Region(region) => {
+                clone_regions(old_func, builder, *region, region_map, block_map);
+            }
+        }
+    }
+    builder.exit_region();
+}
+
+fn build_transformed_function(
+    func: &Function,
+    cfg: &CfgInfo,
+    plan: &PromotionPlan,
+) -> Option<Function> {
+    if plan.slices.is_empty() {
+        return None;
+    }
+
+    let block_refs = collect_block_refs(func);
+    let mut phi_slices_by_block = vec![Vec::<usize>::new(); func.blocks.len()];
+    for (slice_id, slice) in plan.slices.iter().enumerate() {
+        for block in &slice.phi_blocks {
+            phi_slices_by_block[block.index() as usize].push(slice_id);
+        }
+    }
+    for slices in &mut phi_slices_by_block {
+        slices.sort_unstable();
+    }
+
+    let mut new_func = Function::new(
+        func.name,
+        func.params.clone(),
+        func.param_annotations.clone(),
+        func.param_names.clone(),
+        func.ret_ty.clone(),
+        func.ret_annotation.clone(),
+    );
+    new_func.byval_sizes = func.byval_sizes.clone();
+
+    let mut block_map = vec![None; func.blocks.len()];
+    let mut region_map = vec![None; func.regions.len()];
+    let mut existing_block_arg_map = HashMap::<u32, ValueRef>::new();
+    let mut phi_arg_map = vec![HashMap::<usize, ValueRef>::new(); func.blocks.len()];
+
+    {
+        let mut builder = Builder::new(&mut new_func);
+        clone_regions(
+            func,
+            &mut builder,
+            func.root_region,
+            &mut region_map,
+            &mut block_map,
+        );
+
+        for old_block_idx in 0..func.blocks.len() {
+            let old_block = block_refs[old_block_idx];
+            let new_block = block_map[old_block_idx].expect("block should be cloned");
+            let old_args = func.block_arg_values(old_block);
+            for old_arg in old_args {
+                let block_arg = &func.block_args[old_arg.index() as usize];
+                let new_arg = builder.add_block_arg(
+                    new_block,
+                    block_arg.ty.clone(),
+                    block_arg.annotation.clone(),
+                );
+                existing_block_arg_map.insert(old_arg.raw(), new_arg);
+            }
+            for &slice_id in &phi_slices_by_block[old_block_idx] {
+                let slice = &plan.slices[slice_id];
+                let new_arg =
+                    builder.add_block_arg(new_block, slice.ty.clone(), slice.annotation.clone());
+                phi_arg_map[old_block_idx].insert(slice_id, new_arg);
+            }
+        }
+    }
+
+    let mut required_addr_insts = HashSet::new();
+    for (inst_idx, inst) in func.inst_pool.iter_insts() {
+        if plan.promoted_insts.contains(&inst_idx) {
+            continue;
+        }
+        if matches!(inst.op, Op::StackSlot(_, _) | Op::PtrAdd(_, _)) {
+            continue;
+        }
+        for value in inst.op.value_refs() {
+            mark_required_address_chain(func, value, &mut required_addr_insts);
+        }
+    }
+
+    let new_blocks = block_map
+        .iter()
+        .map(|block| block.expect("block should be cloned"))
+        .collect::<Vec<_>>();
+
+    let mut value_map = existing_block_arg_map;
+    let mut emitted = HashSet::<u32>::new();
+    let mut current_slice_values = vec![None::<ValueRef>; plan.slices.len()];
+
+    fn remap_value(value_map: &HashMap<u32, ValueRef>, value: ValueRef) -> ValueRef {
+        value_map
+            .get(&value.raw())
+            .copied()
+            .unwrap_or_else(|| panic!("missing remap for value raw={}", value.raw()))
+    }
+
+    fn remap_operand(value_map: &HashMap<u32, ValueRef>, operand: &Operand) -> Operand {
+        Operand {
+            value: remap_value(value_map, operand.value),
+            annotation: operand.annotation.clone(),
+        }
+    }
+
+    fn append_phi_args(
+        args: &mut Vec<Operand>,
+        current_slice_values: &[Option<ValueRef>],
+        phi_slices_by_block: &[Vec<usize>],
+        target: BlockRef,
+    ) -> Option<()> {
+        for &slice_id in &phi_slices_by_block[target.index() as usize] {
+            let value = current_slice_values[slice_id]?;
+            args.push(Operand::new(value));
+        }
+        Some(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn transform_and_append_instruction(
+        func: &Function,
+        cfg: &CfgInfo,
+        plan: &PromotionPlan,
+        promoted_slot_roots: &HashSet<u32>,
+        phi_slices_by_block: &[Vec<usize>],
+        required_addr_insts: &HashSet<u32>,
+        block_map: &[BlockRef],
+        value_map: &mut HashMap<u32, ValueRef>,
+        current_slice_values: &mut [Option<ValueRef>],
+        new_func: &mut Function,
+        inst_idx: u32,
+    ) -> Option<()> {
+        if plan.promoted_insts.contains(&inst_idx) {
+            let inst = func.inst(inst_idx);
+            if let Some(&slice_id) = plan.load_to_slice.get(&inst_idx) {
+                let replacement = current_slice_values[slice_id]?;
+                value_map.insert(primary_value_ref(inst_idx).raw(), replacement);
+                return Some(());
+            }
+            if let Some(&slice_id) = plan.store_to_slice.get(&inst_idx) {
+                let Op::Store(value, _, _, mem) = &inst.op else {
+                    return None;
+                };
+                let replacement_mem = remap_value(value_map, mem.clone().raw().value);
+                value_map.insert(primary_value_ref(inst_idx).raw(), replacement_mem);
+                let stored_value = remap_value(value_map, value.value);
+                current_slice_values[slice_id] = Some(stored_value);
+                return Some(());
+            }
+        }
+
+        if matches!(
+            func.inst(inst_idx).op,
+            Op::StackSlot(_, _) | Op::PtrAdd(_, _)
+        ) {
+            let root = address_root_slot(func, primary_value_ref(inst_idx));
+            if let Some(root) = root
+                && promoted_slot_roots.contains(&root.index())
+                && !required_addr_insts.contains(&inst_idx)
+            {
+                return Some(());
+            }
+        }
+
+        let old_inst = func.inst(inst_idx);
+        let mut new_inst = old_inst.clone();
+        match &old_inst.op {
+            Op::Br(target, args) => {
+                let mut new_args = args
+                    .iter()
+                    .map(|arg| remap_operand(value_map, arg))
+                    .collect::<Vec<_>>();
+                append_phi_args(
+                    &mut new_args,
+                    current_slice_values,
+                    phi_slices_by_block,
+                    *target,
+                )?;
+                new_inst.op = Op::Br(block_map[target.index() as usize], new_args);
+            }
+            Op::BrIf(cond, then_block, then_args, else_block, else_args) => {
+                let new_cond = remap_value(value_map, cond.clone().raw().value);
+                let mut new_then_args = then_args
+                    .iter()
+                    .map(|arg| remap_operand(value_map, arg))
+                    .collect::<Vec<_>>();
+                let mut new_else_args = else_args
+                    .iter()
+                    .map(|arg| remap_operand(value_map, arg))
+                    .collect::<Vec<_>>();
+                append_phi_args(
+                    &mut new_then_args,
+                    current_slice_values,
+                    phi_slices_by_block,
+                    *then_block,
+                )?;
+                append_phi_args(
+                    &mut new_else_args,
+                    current_slice_values,
+                    phi_slices_by_block,
+                    *else_block,
+                )?;
+                new_inst.op = Op::BrIf(
+                    tuffy_ir::typed::BoolOperand::from(new_cond),
+                    block_map[then_block.index() as usize],
+                    new_then_args,
+                    block_map[else_block.index() as usize],
+                    new_else_args,
+                );
+            }
+            Op::Continue(args) => {
+                let mut new_args = args
+                    .iter()
+                    .map(|arg| remap_operand(value_map, arg))
+                    .collect::<Vec<_>>();
+                let header =
+                    cfg.loop_header[func.inst_node(inst_idx).parent_block.index() as usize]?;
+                append_phi_args(
+                    &mut new_args,
+                    current_slice_values,
+                    phi_slices_by_block,
+                    header,
+                )?;
+                new_inst.op = Op::Continue(new_args);
+            }
+            _ => {
+                new_inst.op.for_each_value_ref_mut(&mut |value| {
+                    *value = remap_value(value_map, *value);
+                });
+                if let Op::Br(target, args) = &mut new_inst.op {
+                    *target = block_map[target.index() as usize];
+                    for arg in args {
+                        arg.value = remap_value(value_map, arg.value);
+                    }
+                }
+            }
+        }
+
+        let block = func.inst_node(inst_idx).parent_block;
+        let new_idx = new_func.append_inst(block_map[block.index() as usize], new_inst);
+        value_map.insert(
+            primary_value_ref(inst_idx).raw(),
+            primary_value_ref(new_idx),
+        );
+        if func.inst(inst_idx).secondary_ty.is_some() {
+            value_map.insert(
+                ValueRef::inst_secondary_result(inst_idx).raw(),
+                ValueRef::inst_secondary_result(new_idx),
+            );
+        }
+        Some(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_reachable_subtree(
+        func: &Function,
+        cfg: &CfgInfo,
+        plan: &PromotionPlan,
+        promoted_slot_roots: &HashSet<u32>,
+        phi_slices_by_block: &[Vec<usize>],
+        required_addr_insts: &HashSet<u32>,
+        block_map: &[BlockRef],
+        phi_arg_map: &[HashMap<usize, ValueRef>],
+        value_map: &mut HashMap<u32, ValueRef>,
+        current_slice_values: &mut [Option<ValueRef>],
+        emitted: &mut HashSet<u32>,
+        new_func: &mut Function,
+        block: BlockRef,
+    ) -> Option<()> {
+        let mut undo = Vec::<(usize, Option<ValueRef>)>::new();
+        for (&slice_id, &phi_value) in &phi_arg_map[block.index() as usize] {
+            undo.push((slice_id, current_slice_values[slice_id]));
+            current_slice_values[slice_id] = Some(phi_value);
+        }
+
+        for (value, _) in func.block_insts_with_values(block) {
+            let inst_idx = value.index();
+            emitted.insert(inst_idx);
+            if let Some(&slice_id) = plan.store_to_slice.get(&inst_idx) {
+                let inst = func.inst(inst_idx);
+                if let Op::Store(value, _, _, mem) = &inst.op {
+                    let replacement_mem = remap_value(value_map, mem.clone().raw().value);
+                    value_map.insert(primary_value_ref(inst_idx).raw(), replacement_mem);
+                    let stored_value = remap_value(value_map, value.value);
+                    undo.push((slice_id, current_slice_values[slice_id]));
+                    current_slice_values[slice_id] = Some(stored_value);
+                    continue;
+                }
+            }
+            if let Some(&slice_id) = plan.load_to_slice.get(&inst_idx) {
+                let replacement = current_slice_values[slice_id]?;
+                value_map.insert(primary_value_ref(inst_idx).raw(), replacement);
+                continue;
+            }
+            transform_and_append_instruction(
+                func,
+                cfg,
+                plan,
+                promoted_slot_roots,
+                phi_slices_by_block,
+                required_addr_insts,
+                block_map,
+                value_map,
+                current_slice_values,
+                new_func,
+                inst_idx,
+            )?;
+        }
+
+        for child in &cfg.dom_children[block.index() as usize] {
+            emit_reachable_subtree(
+                func,
+                cfg,
+                plan,
+                promoted_slot_roots,
+                phi_slices_by_block,
+                required_addr_insts,
+                block_map,
+                phi_arg_map,
+                value_map,
+                current_slice_values,
+                emitted,
+                new_func,
+                *child,
+            )?;
+        }
+
+        while let Some((slice_id, old_value)) = undo.pop() {
+            current_slice_values[slice_id] = old_value;
+        }
+        Some(())
+    }
+
+    emit_reachable_subtree(
+        func,
+        cfg,
+        plan,
+        &plan.promoted_slots,
+        &phi_slices_by_block,
+        &required_addr_insts,
+        &new_blocks,
+        &phi_arg_map,
+        &mut value_map,
+        &mut current_slice_values,
+        &mut emitted,
+        &mut new_func,
+        func.entry_block(),
+    )?;
+
+    for (inst_idx, _inst) in func.inst_pool.iter_insts() {
+        let block = func.inst_node(inst_idx).parent_block;
+        if cfg.reachable[block.index() as usize] {
+            continue;
+        }
+        if emitted.contains(&inst_idx) {
+            continue;
+        }
+        transform_and_append_instruction(
+            func,
+            cfg,
+            plan,
+            &plan.promoted_slots,
+            &phi_slices_by_block,
+            &required_addr_insts,
+            &new_blocks,
+            &mut value_map,
+            &mut current_slice_values,
+            &mut new_func,
+            inst_idx,
+        )?;
+    }
+
+    Some(new_func)
+}
+
+pub(crate) fn promote_function(func: &mut Function) -> PeepholeStats {
+    if has_unwind_cleanup_edges(func) {
+        return PeepholeStats::default();
+    }
+    let cfg = CfgInfo::compute(func);
+    let plan = collect_promotion_plan(func, &cfg);
+    if plan.slices.is_empty() {
+        return PeepholeStats::default();
+    }
+
+    let mut phi_slices_by_block = vec![Vec::<usize>::new(); func.blocks.len()];
+    for (slice_id, slice) in plan.slices.iter().enumerate() {
+        for block in &slice.phi_blocks {
+            phi_slices_by_block[block.index() as usize].push(slice_id);
+        }
+    }
+    if phi_slices_by_block
+        .iter()
+        .enumerate()
+        .any(|(block_idx, slices)| {
+            !slices.is_empty()
+                && cfg.preds[block_idx]
+                    .iter()
+                    .any(|pred| !cfg.reachable[pred.index() as usize])
+        })
+    {
+        return PeepholeStats::default();
+    }
+
+    let Some(mut new_func) = build_transformed_function(func, &cfg, &plan) else {
+        return PeepholeStats::default();
+    };
+    let stats = PeepholeStats {
+        promoted_slots: plan.slots.len(),
+        promoted_slices: plan.slices.len(),
+        promoted_loads: plan.load_to_slice.len(),
+        eliminated_stores: plan.store_to_slice.len(),
+        ..PeepholeStats::default()
+    };
+    new_func.rebuild_use_lists();
+    *func = new_func;
+    stats
+}
