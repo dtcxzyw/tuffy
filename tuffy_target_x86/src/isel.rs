@@ -928,7 +928,8 @@ fn collect_call_ret2_users(func: &Function) -> HashSet<u32> {
 
 fn has_exact_double_gpr_int_result(func: &Function, inst_idx: u32) -> bool {
     let inst = func.inst(inst_idx);
-    is_exact_double_gpr_int_annotation(inst.secondary_result_annotation.as_ref())
+    inst.secondary_ty.is_some()
+        && is_exact_double_gpr_int_annotation(inst.secondary_result_annotation.as_ref())
 }
 
 fn classify_call_abi(

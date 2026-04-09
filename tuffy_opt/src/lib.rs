@@ -1,9 +1,12 @@
 //! tuffy_opt: Optimization pipeline and pass infrastructure.
 
 mod bulk_memory;
+mod cfg;
+mod cfg_cleanup;
 mod inline;
 mod peephole;
 mod promote;
+mod range;
 
 use tuffy_ir::function::Function;
 use tuffy_ir::module::Module;
@@ -36,6 +39,8 @@ fn run_local_cleanup(func: &mut Function) -> PeepholeStats {
     for _ in 0..MAX_LOCAL_CLEANUP_ROUNDS {
         let mut round = promote::promote_function(func);
         round.merge(peephole::optimize_function(func));
+        round.merge(range::optimize_function(func));
+        round.merge(cfg_cleanup::optimize_function(func));
         let changed = round.rewrites > 0
             || round.promoted_slots > 0
             || round.promoted_slices > 0

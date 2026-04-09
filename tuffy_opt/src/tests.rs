@@ -46,8 +46,7 @@ func @branch_eq_one() {
     let (output, stats) = optimize(input);
     let expected = r#"func @branch_eq_one() {
   bb0:
-    v0: bool = bconst true
-    brif v0, bb1, bb2
+    br bb1
   bb1:
     trap
   bb2:
@@ -78,8 +77,7 @@ func @branch_eq_zero() {
     let (output, stats) = optimize(input);
     let expected = r#"func @branch_eq_zero() {
   bb0:
-    v0: bool = bconst false
-    brif v0, bb2, bb1
+    br bb1
   bb1:
     trap
   bb2:
@@ -112,8 +110,7 @@ func @branch_and_mask() {
     let (output, stats) = optimize(input);
     let expected = r#"func @branch_and_mask() {
   bb0:
-    v0: bool = bconst true
-    brif v0, bb2, bb1
+    br bb2
   bb1:
     trap
   bb2:
@@ -233,8 +230,7 @@ func @branch_xor_invert() {
     let (output, stats) = optimize(input);
     let expected = r#"func @branch_xor_invert() {
   bb0:
-    v0: bool = bconst true
-    brif v0, bb2, bb1
+    br bb2
   bb1:
     trap
   bb2:
@@ -325,7 +321,7 @@ func @mem2reg_branch(bool, int:s32, int:s32) -> int:s32 {
     v1: bool = param 0
     v2: int:s32 = param 1
     v3: int:s32 = param 2
-    brif v1, bb1, bb2
+    brif v1, bb3(v0, v2), bb3(v0, v3)
   bb1:
     br bb3(v0, v2)
   bb2:
@@ -496,6 +492,104 @@ func @call_unrelated(int:s32) -> int:s32 {
         "unrelated call should remain:\n{output}"
     );
     assert_eq!(stats.promoted_slots, 1);
+}
+
+#[test]
+fn range_folds_branch_in_refined_successor() {
+    let input = r#"
+func @range_refine(int:u64) {
+  bb0(v0: mem):
+    v1: int:u64 = param 0
+    v2: int:u64 = iconst 10
+    v3: bool = icmp.lt v1, v2
+    brif v3, bb1(v0), bb2(v0)
+  bb1(v4: mem):
+    v5: int:u64 = iconst 12
+    v6: bool = icmp.lt v1, v5
+    brif v6, bb3(v4), bb4(v4)
+  bb2(v7: mem):
+    ret v7
+  bb3(v8: mem):
+    ret v8
+  bb4(v9: mem):
+    trap
+}
+"#;
+    let (output, stats) = optimize(input);
+    let expected = r#"func @range_refine(int:u64) {
+  bb0(v0: mem):
+    v1: int:u64 = param 0
+    v2: int:u64 = iconst 10
+    v3: bool = icmp.lt v1, v2
+    brif v3, bb1(v0), bb2(v0)
+  bb1(v5: mem):
+    v6: int:u64 = iconst 12
+    br bb3(v5)
+  bb2(v8: mem):
+    ret v8
+  bb3(v10: mem):
+    ret v10
+  bb4(v12: mem):
+    trap
+}"#;
+    assert_eq!(normalize_ir(&output), normalize_ir(expected));
+    assert!(stats.rewrites > 0);
+}
+
+#[test]
+fn cfg_threads_forwarding_block() {
+    let input = r#"
+func @thread_forward() {
+  bb0(v0: mem):
+    v1: bool = bconst true
+    brif v1, bb1(v0), bb2(v0)
+  bb1(v3: mem):
+    br bb3(v3)
+  bb2(v4: mem):
+    ret v4
+  bb3(v5: mem):
+    ret v5
+}
+"#;
+    let (output, stats) = optimize(input);
+    let expected = r#"func @thread_forward() {
+  bb0(v0: mem):
+    br bb1(v0)
+  bb1(v2: mem):
+    br bb3(v2)
+  bb2(v4: mem):
+    ret v4
+  bb3(v6: mem):
+    ret v6
+}"#;
+    assert_eq!(normalize_ir(&output), normalize_ir(expected));
+    assert!(stats.rewrites > 0);
+}
+
+#[test]
+fn cfg_removes_unreachable_after_constant_branch() {
+    let input = r#"
+func @remove_unreachable() {
+  bb0(v0: mem):
+    v1: bool = bconst true
+    brif v1, bb1(v0), bb2(v0)
+  bb1(v3: mem):
+    ret v3
+  bb2(v4: mem):
+    trap
+}
+"#;
+    let (output, stats) = optimize(input);
+    let expected = r#"func @remove_unreachable() {
+  bb0(v0: mem):
+    br bb1(v0)
+  bb1(v2: mem):
+    ret v2
+  bb2(v4: mem):
+    trap
+}"#;
+    assert_eq!(normalize_ir(&output), normalize_ir(expected));
+    assert!(stats.rewrites > 0);
 }
 
 #[test]
