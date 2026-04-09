@@ -34,8 +34,14 @@ run_test() {
 
     echo -n "  $name ... "
 
+    local compile_flags=""
+    if grep -q "^// compile-flags:" "$src"; then
+        compile_flags=$(grep "^// compile-flags:" "$src" | head -1 | sed 's|^// compile-flags:||')
+    fi
+
     # Compile
     if ! rustc -Z codegen-backend="$BACKEND" \
+        $compile_flags \
         -o "$OUT_DIR/$name" "$src" 2>"$OUT_DIR/$name.compile.log"; then
         echo "FAIL (compile)"
         echo "    $(cat "$OUT_DIR/$name.compile.log")"
@@ -80,6 +86,8 @@ run_test "fat_ptr_field_assign" "$FIXTURE_DIR/fat_ptr_field_assign.rs" "b"
 run_test "stack_thin_to_slice_unsize" "$FIXTURE_DIR/stack_thin_to_slice_unsize.rs" "ok"
 run_test "const_slice_of_str_refs" "$FIXTURE_DIR/const_slice_of_str_refs.rs" "ok"
 run_test "trait_object_branch_vtable" "$FIXTURE_DIR/trait_object_branch_vtable.rs" "ok"
+run_test "aggregate_eq_cfg" "$FIXTURE_DIR/aggregate_eq_cfg.rs" "ok"
+run_test "array_iter_enumerate" "$FIXTURE_DIR/array_iter_enumerate.rs" "ok"
 
 echo ""
 echo "=== Results: $pass passed, $fail failed ==="

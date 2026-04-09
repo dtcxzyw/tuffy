@@ -96,6 +96,16 @@ impl IselCtx {
         }
         None
     }
+
+    fn block_arg_reg(&mut self, val: ValueRef) -> VReg {
+        debug_assert!(val.is_block_arg());
+        if let Some(vreg) = self.regs.get(val) {
+            return vreg;
+        }
+        let vreg = self.alloc.alloc();
+        self.regs.assign(val, vreg);
+        vreg
+    }
 }
 
 /// Convert a byte count to an x86 operand size.
@@ -106,6 +116,43 @@ fn bytes_to_opsize(bytes: u32) -> OpSize {
         4 => OpSize::S32,
         _ => OpSize::S64,
     }
+}
+
+fn emit_block_arg_copies(
+    ctx: &mut IselCtx,
+    target: tuffy_ir::value::BlockRef,
+    args: &[Operand],
+    func: &Function,
+) -> Option<()> {
+    let ba_vrefs = func.block_arg_values(target);
+    let mut pending = Vec::new();
+
+    for (arg, ba_vref) in args.iter().zip(ba_vrefs.iter()) {
+        // Mem block args are SSA threading only and do not occupy machine regs.
+        if func.value_type(*ba_vref) == Some(&Type::Mem) {
+            continue;
+        }
+        let src = ctx.ensure_in_reg(arg.value)?;
+        let dst = ctx.block_arg_reg(*ba_vref);
+        let tmp = ctx.alloc.alloc();
+        ctx.out.push(MInst::MovRR {
+            size: OpSize::S64,
+            dst: tmp,
+            src,
+        });
+        pending.push((tmp, dst));
+    }
+
+    // Finish the edge as a parallel copy into the block-argument vregs.
+    for (tmp, dst) in pending {
+        ctx.out.push(MInst::MovRR {
+            size: OpSize::S64,
+            dst,
+            src: tmp,
+        });
+    }
+
+    Some(())
 }
 
 /// Emit a store of exactly `bytes` bytes from `src` to `base + offset`.
@@ -1281,12 +1328,14 @@ fn select_inst(
             ctx.out.push(MInst::MovRR {
                 dst,
                 src: lhs,
-                size: OpSize::S8,
+                // Bool values are materialized as canonical 0/1 integers.
+                // Keep them full-width so later `test reg, reg` sees clean bits.
+                size: OpSize::S64,
             });
             ctx.out.push(MInst::AndRR {
                 dst,
                 src: rhs,
-                size: OpSize::S8,
+                size: OpSize::S64,
             });
             ctx.regs.assign(vref, dst);
         }
@@ -1298,12 +1347,12 @@ fn select_inst(
             ctx.out.push(MInst::MovRR {
                 dst,
                 src: lhs,
-                size: OpSize::S8,
+                size: OpSize::S64,
             });
             ctx.out.push(MInst::OrRR {
                 dst,
                 src: rhs,
-                size: OpSize::S8,
+                size: OpSize::S64,
             });
             ctx.regs.assign(vref, dst);
         }
@@ -1315,12 +1364,12 @@ fn select_inst(
             ctx.out.push(MInst::MovRR {
                 dst,
                 src: lhs,
-                size: OpSize::S8,
+                size: OpSize::S64,
             });
             ctx.out.push(MInst::XorRR {
                 dst,
                 src: rhs,
-                size: OpSize::S8,
+                size: OpSize::S64,
             });
             ctx.regs.assign(vref, dst);
         }
@@ -1342,21 +1391,7 @@ fn select_inst(
         }
 
         Op::Br(target, args) => {
-            let ba_vrefs = func.block_arg_values(*target);
-            for (arg, ba_vref) in args.iter().zip(ba_vrefs.iter()) {
-                // Skip mem-typed block arguments — they have no runtime register.
-                if func.value_type(*ba_vref) == Some(&Type::Mem) {
-                    continue;
-                }
-                let src = ctx.ensure_in_reg(arg.value)?;
-                let dst = ctx.alloc.alloc();
-                ctx.out.push(MInst::MovRR {
-                    size: OpSize::S64,
-                    dst,
-                    src,
-                });
-                ctx.regs.assign(*ba_vref, dst);
-            }
+            emit_block_arg_copies(ctx, *target, args, func)?;
             ctx.out.push(MInst::Jmp {
                 target: target.index(),
             });
@@ -3495,6 +3530,11 @@ fn select_brif(
     func: &Function,
 ) -> Option<()> {
     let has_args = !then_args.is_empty() || !else_args.is_empty();
+    let cond_test_size = if func.value_type(cond.value) == Some(&Type::Bool) {
+        OpSize::S8
+    } else {
+        OpSize::S64
+    };
 
     if has_args {
         let intermediate = ctx.next_label;
@@ -3508,7 +3548,7 @@ fn select_brif(
         } else {
             let cond_vreg = ctx.regs.get(cond.value)?;
             ctx.out.push(MInst::TestRR {
-                size: OpSize::S64,
+                size: cond_test_size,
                 src1: cond_vreg,
                 src2: cond_vreg,
             });
@@ -3519,40 +3559,14 @@ fn select_brif(
         }
 
         // Else path.
-        let else_ba_vrefs = func.block_arg_values(*else_block);
-        for (arg, ba_vref) in else_args.iter().zip(else_ba_vrefs.iter()) {
-            if func.value_type(*ba_vref) == Some(&Type::Mem) {
-                continue;
-            }
-            let src = ctx.ensure_in_reg(arg.value)?;
-            let dst = ctx.alloc.alloc();
-            ctx.out.push(MInst::MovRR {
-                size: OpSize::S64,
-                dst,
-                src,
-            });
-            ctx.regs.assign(*ba_vref, dst);
-        }
+        emit_block_arg_copies(ctx, *else_block, else_args, func)?;
         ctx.out.push(MInst::Jmp {
             target: else_block.index(),
         });
 
         // Then path.
         ctx.out.push(MInst::Label { id: intermediate });
-        let then_ba_vrefs = func.block_arg_values(*then_block);
-        for (arg, ba_vref) in then_args.iter().zip(then_ba_vrefs.iter()) {
-            if func.value_type(*ba_vref) == Some(&Type::Mem) {
-                continue;
-            }
-            let src = ctx.ensure_in_reg(arg.value)?;
-            let dst = ctx.alloc.alloc();
-            ctx.out.push(MInst::MovRR {
-                size: OpSize::S64,
-                dst,
-                src,
-            });
-            ctx.regs.assign(*ba_vref, dst);
-        }
+        emit_block_arg_copies(ctx, *then_block, then_args, func)?;
         ctx.out.push(MInst::Jmp {
             target: then_block.index(),
         });
@@ -3565,7 +3579,7 @@ fn select_brif(
         } else {
             let cond_vreg = ctx.regs.get(cond.value)?;
             ctx.out.push(MInst::TestRR {
-                size: OpSize::S64,
+                size: cond_test_size,
                 src1: cond_vreg,
                 src2: cond_vreg,
             });
