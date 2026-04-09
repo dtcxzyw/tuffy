@@ -52,13 +52,18 @@ The core translation layer, organized into submodules by concern:
 
 ### Optimization Hook
 
-After MIR-to-IR translation succeeds, the backend now runs `tuffy_opt` on each translated
-function before handing it to `tuffy_codegen`, but only when rustc codegen optimization is enabled
-(`-C opt-level` other than `0`). This keeps debug-style builds close to raw translation while
-allowing optimized builds to benefit from the Lean-owned peephole pipeline.
+After MIR-to-IR translation succeeds, the backend batches all translated functions for one emitted
+object into a shared tuffy IR module and runs `tuffy_opt::optimize_module` on that batch before
+handing functions to `tuffy_codegen`, but only when rustc codegen optimization is enabled
+(`-C opt-level` other than `0`). Regular CGU objects and the later `inline_shims` object are
+optimized as separate module batches. This keeps debug-style builds close to raw translation while
+allowing optimized builds to benefit from module-level inlining plus the existing cleanup pipeline.
 
 `dump-ir` continues to print the post-translation, pre-optimization IR so the existing codegen
-tests remain focused on MIR lowering rather than backend-local optimization effects.
+tests remain focused on MIR lowering rather than backend-local optimization effects. When
+`dump-module=` is enabled, the written module dump now appends a post-optimization module snapshot
+for each batched object. The `dump-ir` stream remains the stable pre-optimization artifact used by
+existing codegen checks.
 
 ## Boundary Rule
 

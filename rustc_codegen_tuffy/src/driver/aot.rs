@@ -10,6 +10,10 @@ use rustc_middle::dep_graph::{WorkProduct, WorkProductId};
 use rustc_middle::mir::mono::MonoItem;
 use rustc_middle::ty::{self, Instance, TyCtxt, TypeVisitableExt};
 use tuffy_codegen::CodegenSession;
+use tuffy_ir::instruction::Op;
+use tuffy_ir::module::{
+    Module as IrModule, StaticData as IrStaticData, StaticRelocation, SymbolId,
+};
 use tuffy_opt::PeepholeStats;
 use tuffy_target::reloc::{RelocKind, Relocation};
 use tuffy_target::types::{CompiledFunction, StaticData};
@@ -47,6 +51,34 @@ struct TranslationCaches {
 struct ObjectArtifacts {
     functions: Vec<CompiledFunction>,
     static_data: Vec<StaticData>,
+}
+
+struct PendingFunction {
+    weak: bool,
+}
+
+struct IrModuleBatch {
+    module: IrModule,
+    function_meta: Vec<PendingFunction>,
+    target_static_data: Vec<StaticData>,
+    weak_undefined_symbols: HashSet<String>,
+}
+
+impl IrModuleBatch {
+    fn new(name: impl Into<String>) -> Self {
+        Self {
+            module: IrModule::new(name),
+            function_meta: Vec::new(),
+            target_static_data: Vec::new(),
+            weak_undefined_symbols: HashSet::new(),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.module.functions.is_empty()
+            && self.target_static_data.is_empty()
+            && self.weak_undefined_symbols.is_empty()
+    }
 }
 
 pub(crate) fn codegen_crate<'tcx>(tcx: TyCtxt<'tcx>, _crate_info: &CrateInfo) -> Box<dyn Any> {
@@ -90,6 +122,7 @@ impl<'tcx> AotCodegen<'tcx> {
             let mono_items = cgu.items_in_deterministic_order(self.tcx);
 
             let mut artifacts = ObjectArtifacts::default();
+            let mut ir_batch = IrModuleBatch::new(cgu_name.clone());
             let mut caches = TranslationCaches::default();
 
             for (mono_item, item_data) in &mono_items {
@@ -97,7 +130,7 @@ impl<'tcx> AotCodegen<'tcx> {
                     MonoItem::Fn(instance) => self.codegen_fn_item(
                         *instance,
                         is_weak_linkage(item_data.linkage),
-                        &mut artifacts,
+                        &mut ir_batch,
                         &mut caches,
                     ),
                     MonoItem::Static(def_id) => {
@@ -107,6 +140,7 @@ impl<'tcx> AotCodegen<'tcx> {
                 }
             }
 
+            self.finish_ir_batch(&mut ir_batch, &mut artifacts);
             if !artifacts.functions.is_empty() || !artifacts.static_data.is_empty() {
                 self.modules.push(self.emit_module(
                     &cgu_name,
@@ -142,7 +176,7 @@ impl<'tcx> AotCodegen<'tcx> {
         &mut self,
         instance: Instance<'tcx>,
         weak: bool,
-        artifacts: &mut ObjectArtifacts,
+        batch: &mut IrModuleBatch,
         caches: &mut TranslationCaches,
     ) {
         if Some(instance.def_id()) == self.tcx.lang_items().start_fn() {
@@ -154,7 +188,7 @@ impl<'tcx> AotCodegen<'tcx> {
 
         self.compiled_symbols
             .insert(self.tcx.symbol_name(instance).name.to_string());
-        self.compile_instance(instance, weak, true, artifacts, caches);
+        self.translate_instance_into_batch(instance, weak, true, batch, caches);
     }
 
     fn codegen_static_item(
@@ -234,12 +268,12 @@ impl<'tcx> AotCodegen<'tcx> {
         });
     }
 
-    fn compile_instance(
+    fn translate_instance_into_batch(
         &mut self,
         instance: Instance<'tcx>,
         weak: bool,
         dump_mir: bool,
-        artifacts: &mut ObjectArtifacts,
+        batch: &mut IrModuleBatch,
         caches: &mut TranslationCaches,
     ) {
         if !self.should_codegen_instance(instance) {
@@ -263,7 +297,7 @@ impl<'tcx> AotCodegen<'tcx> {
             &mut caches.content_cache,
         );
 
-        let Some(mut result) = result else {
+        let Some(result) = result else {
             self.fatal_instance(
                 instance,
                 "MIR-to-IR translation unexpectedly skipped a codegenable instance",
@@ -276,22 +310,12 @@ impl<'tcx> AotCodegen<'tcx> {
         if let Err(err) = verify_translation_result(&result) {
             self.fatal_instance(instance, &err);
         }
-        if let Err(err) = optimize_translation_result(&mut result, self.config.run_tuffy_opt) {
-            self.fatal_instance(instance, &err);
-        }
-        append_translation_static_data(&mut artifacts.static_data, &result);
-
-        let compiled = self
-            .session
-            .compile_function(&result.func, &mut result.symbols)
-            .unwrap_or_else(|err| self.fatal_instance(instance, &err));
-        artifacts
-            .functions
-            .push(CompiledFunction { weak, ..compiled });
+        merge_translation_result(batch, result, weak);
     }
 
     fn codegen_inline_instances(&mut self) {
         let mut artifacts = ObjectArtifacts::default();
+        let mut ir_batch = IrModuleBatch::new("inline_shims");
         let mut caches = TranslationCaches::default();
 
         loop {
@@ -311,10 +335,17 @@ impl<'tcx> AotCodegen<'tcx> {
                 if !self.should_codegen_instance(instance) {
                     continue;
                 }
-                self.compile_instance(instance, true, false, &mut artifacts, &mut caches);
+                self.translate_instance_into_batch(
+                    instance,
+                    true,
+                    false,
+                    &mut ir_batch,
+                    &mut caches,
+                );
             }
         }
 
+        self.finish_ir_batch(&mut ir_batch, &mut artifacts);
         if !artifacts.functions.is_empty() {
             self.modules.push(self.emit_module(
                 "inline_shims",
@@ -433,6 +464,12 @@ impl<'tcx> AotCodegen<'tcx> {
         }
     }
 
+    fn append_optimized_module_dump(&mut self, batch: &IrModuleBatch) {
+        if let Some(buf) = &mut self.module_ir_text {
+            buf.push_str(&format_post_opt_module_dump(&batch.module));
+        }
+    }
+
     fn append_static_dump(&mut self, name: &str, data: &[u8], relocs: &[Relocation]) {
         let Some(buf) = &mut self.module_ir_text else {
             return;
@@ -492,6 +529,45 @@ impl<'tcx> AotCodegen<'tcx> {
             "rustc_codegen_tuffy failed for {symbol}: {message}"
         ));
     }
+
+    fn fatal_symbol(&self, symbol: &str, message: &str) -> ! {
+        self.tcx.dcx().fatal(format!(
+            "rustc_codegen_tuffy failed for {symbol}: {message}"
+        ));
+    }
+
+    fn finish_ir_batch(&mut self, batch: &mut IrModuleBatch, artifacts: &mut ObjectArtifacts) {
+        if batch.is_empty() {
+            return;
+        }
+
+        if let Err(err) = optimize_ir_batch(batch, self.config.run_tuffy_opt) {
+            self.fatal_symbol(&batch.module.name, &err);
+        }
+        if self.config.run_tuffy_opt {
+            self.append_optimized_module_dump(batch);
+        }
+        if let Err(err) = verify_ir_batch(batch, "IR verification failed") {
+            self.fatal_symbol(&batch.module.name, &err);
+        }
+
+        append_ir_batch_static_data(&mut artifacts.static_data, batch);
+
+        let functions = &batch.module.functions;
+        let symbols = &mut batch.module.symbols;
+        for (idx, meta) in batch.function_meta.iter().enumerate() {
+            let func = &functions[idx];
+            let func_name = symbols.resolve(func.name).to_string();
+            let compiled = self
+                .session
+                .compile_function(func, symbols)
+                .unwrap_or_else(|err| self.fatal_symbol(&func_name, &err));
+            artifacts.functions.push(CompiledFunction {
+                weak: meta.weak,
+                ..compiled
+            });
+        }
+    }
 }
 
 fn verify_translation_result(result: &mir_to_ir::TranslationResult<'_>) -> Result<(), String> {
@@ -505,32 +581,119 @@ fn verify_translation_result(result: &mir_to_ir::TranslationResult<'_>) -> Resul
     Ok(())
 }
 
-fn optimize_translation_result(
-    result: &mut mir_to_ir::TranslationResult<'_>,
+fn optimize_ir_batch(
+    batch: &mut IrModuleBatch,
     enabled: bool,
 ) -> Result<Option<PeepholeStats>, String> {
     if !enabled {
         return Ok(None);
     }
 
-    let stats = tuffy_opt::optimize_function(&mut result.func);
-    let verification = tuffy_ir::verifier::verify_function(&result.func, &result.symbols);
-    if !verification.is_ok() {
-        let func_name = result.symbols.resolve(result.func.name);
-        return Err(format!(
-            "optimized IR verification failed for {func_name}: {verification}"
-        ));
-    }
+    let stats = tuffy_opt::optimize_module(&mut batch.module);
+    verify_ir_batch(batch, "optimized IR verification failed")?;
     Ok(Some(stats))
 }
 
-fn append_translation_static_data(
-    all_static_data: &mut Vec<StaticData>,
-    result: &mir_to_ir::TranslationResult<'_>,
+fn verify_ir_batch(batch: &IrModuleBatch, context: &str) -> Result<(), String> {
+    let verification = tuffy_ir::verifier::verify_module(&batch.module);
+    if !verification.is_ok() {
+        return Err(format!(
+            "{context} for module {}: {verification}",
+            batch.module.name
+        ));
+    }
+    Ok(())
+}
+
+fn merge_translation_result(
+    batch: &mut IrModuleBatch,
+    mut result: mir_to_ir::TranslationResult<'_>,
+    weak: bool,
 ) {
-    for sym in &result.weak_undefined_symbols {
+    let symbol_remap = build_symbol_remap(&result.symbols, &mut batch.module);
+    remap_function_symbols(&mut result.func, &symbol_remap);
+    batch.module.functions.push(result.func);
+
+    for (name, data, relocs, _align) in &result.static_data {
+        let remapped_relocs = relocs
+            .iter()
+            .map(|(offset, symbol)| StaticRelocation {
+                offset: *offset,
+                symbol: batch.module.intern(symbol),
+            })
+            .collect();
+        batch.module.static_data.push(IrStaticData {
+            name: remap_symbol_id(*name, &symbol_remap),
+            data: data.clone(),
+            relocations: remapped_relocs,
+        });
+    }
+
+    for (name, data, relocs, align) in result.static_data {
+        let remapped_name = remap_symbol_id(name, &symbol_remap);
+        batch.target_static_data.push(StaticData {
+            name: batch.module.resolve(remapped_name).to_string(),
+            data,
+            relocations: relocs
+                .into_iter()
+                .map(|(offset, symbol)| Relocation {
+                    offset,
+                    symbol,
+                    kind: RelocKind::Abs64,
+                })
+                .collect(),
+            writable: false,
+            used: false,
+            weak_undefined: false,
+            align,
+            thread_local: false,
+        });
+    }
+
+    batch
+        .weak_undefined_symbols
+        .extend(result.weak_undefined_symbols.drain());
+    batch.function_meta.push(PendingFunction { weak });
+}
+
+fn build_symbol_remap(
+    source: &tuffy_ir::module::SymbolTable,
+    module: &mut IrModule,
+) -> Vec<SymbolId> {
+    (0..source.len())
+        .map(|idx| module.intern(source.resolve(SymbolId(idx as u32))))
+        .collect()
+}
+
+fn remap_symbol_id(symbol: SymbolId, remap: &[SymbolId]) -> SymbolId {
+    remap[symbol.0 as usize]
+}
+
+fn remap_function_symbols(func: &mut tuffy_ir::function::Function, remap: &[SymbolId]) {
+    func.name = remap_symbol_id(func.name, remap);
+    for symbol in func.param_names.iter_mut().flatten() {
+        *symbol = remap_symbol_id(*symbol, remap);
+    }
+    for node in func.inst_pool.iter_mut() {
+        match &mut node.inst.op {
+            Op::SymbolAddr(symbol) | Op::TlsSymbolAddr(symbol) => {
+                *symbol = remap_symbol_id(*symbol, remap);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn append_ir_batch_static_data(all_static_data: &mut Vec<StaticData>, batch: &IrModuleBatch) {
+    let mut weak_undefined_symbols = batch
+        .weak_undefined_symbols
+        .iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    weak_undefined_symbols.sort();
+    for sym in weak_undefined_symbols {
         all_static_data.push(StaticData {
-            name: sym.clone(),
+            name: sym,
             data: vec![],
             relocations: vec![],
             writable: false,
@@ -541,25 +704,30 @@ fn append_translation_static_data(
         });
     }
 
-    for (sym_id, data, relocs, align) in &result.static_data {
+    for sd in &batch.target_static_data {
         all_static_data.push(StaticData {
-            name: result.symbols.resolve(*sym_id).to_string(),
-            data: data.clone(),
-            relocations: relocs
+            name: sd.name.clone(),
+            data: sd.data.clone(),
+            relocations: sd
+                .relocations
                 .iter()
-                .map(|(offset, symbol)| Relocation {
-                    offset: *offset,
-                    symbol: symbol.clone(),
-                    kind: RelocKind::Abs64,
+                .map(|reloc| Relocation {
+                    offset: reloc.offset,
+                    symbol: reloc.symbol.clone(),
+                    kind: reloc.kind,
                 })
                 .collect(),
-            writable: false,
-            used: false,
-            weak_undefined: false,
-            align: *align,
-            thread_local: false,
+            writable: sd.writable,
+            used: sd.used,
+            weak_undefined: sd.weak_undefined,
+            align: sd.align,
+            thread_local: sd.thread_local,
         });
     }
+}
+
+fn format_post_opt_module_dump(module: &IrModule) -> String {
+    format!("; post-opt module {}\n{}\n\n", module.name, module)
 }
 
 fn is_weak_linkage(linkage: Linkage) -> bool {
@@ -575,8 +743,12 @@ fn is_weak_linkage(linkage: Linkage) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::optimize_translation_result;
+    use super::{
+        IrModuleBatch, format_post_opt_module_dump, merge_translation_result, optimize_ir_batch,
+        verify_ir_batch,
+    };
     use crate::mir_to_ir::TranslationResult;
+    use tuffy_ir::instruction::Op;
     use tuffy_ir::parser::parse_module;
 
     fn parse_result(input: &str) -> TranslationResult<'static> {
@@ -594,47 +766,146 @@ mod tests {
         }
     }
 
-    #[test]
-    fn optimize_translation_result_runs_tuffy_opt_when_enabled() {
-        let mut result = parse_result(
-            r#"
-func @mask_i1(int:i1) {
-  bb0:
-    v0: int:i1 = param 0
-    v1: int:u8 = iconst 255
-    v2: int:i1 = and v0, v1
-    v3: int:i1 = add v2, v0
-    unreachable
-}
-"#,
-        );
-
-        let stats = optimize_translation_result(&mut result, true)
-            .expect("optimization should verify")
-            .expect("optimization should run");
-        assert!(stats.rewrites > 0, "expected at least one peephole rewrite");
-        let printed = format!("{}", result.func.display(&result.symbols));
-        assert!(printed.contains("add v0, v0"));
+    fn merge_results(results: Vec<TranslationResult<'static>>) -> IrModuleBatch {
+        let mut batch = IrModuleBatch::new("test");
+        for result in results {
+            merge_translation_result(&mut batch, result, false);
+        }
+        batch
     }
 
     #[test]
-    fn optimize_translation_result_skips_when_disabled() {
-        let mut result = parse_result(
+    fn optimize_ir_batch_runs_module_tuffy_opt_when_enabled() {
+        let callee = parse_result(
             r#"
-func @mask_i1(int:i1) {
-  bb0:
-    v0: int:i1 = param 0
-    v1: int:u8 = iconst 255
-    v2: int:i1 = and v0, v1
-    v3: int:i1 = add v2, v0
-    unreachable
+func @id(int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    ret v1, v0
+}
+"#,
+        );
+        let caller = parse_result(
+            r#"
+func @caller(int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    v2: ptr = symbol_addr @id
+    v3: mem, v4: int:s32 = call v2(v1), v0 -> int:s32
+    ret v4, v3
 }
 "#,
         );
 
-        let stats = optimize_translation_result(&mut result, false).expect("skip should succeed");
+        let mut batch = merge_results(vec![callee, caller]);
+        let stats = optimize_ir_batch(&mut batch, true)
+            .expect("optimization should verify")
+            .expect("optimization should run");
+        assert_eq!(stats.inlined_calls, 1);
+        let printed = format!("{}", batch.module);
+        assert!(
+            !printed.contains(" = call "),
+            "expected inlining:\n{printed}"
+        );
+    }
+
+    #[test]
+    fn optimize_ir_batch_skips_when_disabled() {
+        let callee = parse_result(
+            r#"
+func @id(int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    ret v1, v0
+}
+"#,
+        );
+        let caller = parse_result(
+            r#"
+func @caller(int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    v2: ptr = symbol_addr @id
+    v3: mem, v4: int:s32 = call v2(v1), v0 -> int:s32
+    ret v4, v3
+}
+"#,
+        );
+
+        let mut batch = merge_results(vec![callee, caller]);
+        let stats = optimize_ir_batch(&mut batch, false).expect("skip should succeed");
         assert!(stats.is_none(), "optimization should be skipped");
-        let printed = format!("{}", result.func.display(&result.symbols));
-        assert!(printed.contains("and v0, v1"));
+        let printed = format!("{}", batch.module);
+        assert!(
+            printed.contains(" = call "),
+            "call should remain:\n{printed}"
+        );
+    }
+
+    #[test]
+    fn merge_translation_result_remaps_symbols_and_static_data() {
+        let mut result = parse_result(
+            r#"
+func @caller() {
+  bb0(v0: mem):
+    v1: ptr = symbol_addr @callee
+    ret v0
+}
+"#,
+        );
+        let blob = result.symbols.intern("blob");
+        result
+            .static_data
+            .push((blob, vec![1, 2, 3, 4], vec![(0, "callee".to_string())], 8));
+        result
+            .weak_undefined_symbols
+            .insert("extern_weak_sym".to_string());
+
+        let mut batch = IrModuleBatch::new("merged");
+        merge_translation_result(&mut batch, result, true);
+
+        assert!(verify_ir_batch(&batch, "merged batch should verify").is_ok());
+        assert_eq!(
+            batch.module.resolve(batch.module.functions[0].name),
+            "caller"
+        );
+        let call_target = batch.module.functions[0]
+            .inst_pool
+            .iter_insts()
+            .find_map(|(_, inst)| match &inst.op {
+                Op::SymbolAddr(symbol) => Some(*symbol),
+                _ => None,
+            })
+            .expect("caller should contain a symbol_addr");
+        assert_eq!(batch.module.resolve(call_target), "callee");
+        assert_eq!(
+            batch.module.resolve(batch.module.static_data[0].name),
+            "blob"
+        );
+        assert_eq!(
+            batch
+                .module
+                .resolve(batch.module.static_data[0].relocations[0].symbol),
+            "callee"
+        );
+        assert_eq!(batch.target_static_data[0].name, "blob");
+        assert_eq!(batch.target_static_data[0].align, 8);
+        assert!(batch.weak_undefined_symbols.contains("extern_weak_sym"));
+        assert!(batch.function_meta[0].weak);
+    }
+
+    #[test]
+    fn format_post_opt_module_dump_includes_module_display() {
+        let batch = merge_results(vec![parse_result(
+            r#"
+func @only() {
+  bb0(v0: mem):
+    ret v0
+}
+"#,
+        )]);
+        let dump = format_post_opt_module_dump(&batch.module);
+        assert!(dump.contains("; post-opt module test"));
+        assert!(dump.contains("func @only()"));
     }
 }
