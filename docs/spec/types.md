@@ -31,9 +31,8 @@ To convert `bool` to `int`, use `select cond, 1, 0`. To convert `int` to `bool`,
 
 Raw memory data of N bytes. Distinct from integers. The byte type preserves pointer
 fragments and supports per-byte poison tracking. Loads and stores operate on byte types.
-
-*Note: `byte` is defined in the type system but not yet used by any implemented
-instructions. Memory operations currently use `int` directly.*
+It is also the leaf representation used when aggregates need explicit padding or raw
+byte-oriented subfields.
 
 ## `ptr(AS)`
 

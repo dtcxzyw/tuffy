@@ -712,8 +712,9 @@ vN = load vPtr, vMem -> <type>
 Load a value of the specified type from the address pointed to by `vPtr`. Takes a `mem` token as input
 (MemoryUse). Returns a data value only — does not produce a new `mem` token.
 
-The loaded type must be one of: `int`, `float` (any variant), `vec` (any variant), or `byte(N)`.
-Array and struct types are not supported — use `byte(N)` and convert explicitly instead.
+The loaded type may be any non-`mem` data type, including `struct{...}` and `[T; N]`.
+Aggregate loads use the explicit field/element layout described by the type and do not
+introduce implicit padding beyond what is already represented in the aggregate.
 
 **Semantics**: `evalLoad(mem, addr, ty) = value of type ty loaded from mem[addr..]`
 
@@ -726,8 +727,8 @@ vN = store vVal, vPtr, vMem
 Store a value to the address pointed to by `vPtr`. Takes a `mem` token as input
 (MemoryDef) and produces a new `mem` token as its result.
 
-The stored value type must be one of: `int`, `float` (any variant), `vec` (any variant), or `byte(N)`.
-Array and struct types are not supported — convert to `byte(N)` explicitly before storing.
+The stored value may be any non-`mem` data type, including aggregates. Aggregate stores
+write the explicit byte layout induced by the value's type.
 
 **Semantics**: `evalStore(mem, addr, val) = mem with val written at addr`
 
