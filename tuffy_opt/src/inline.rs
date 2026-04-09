@@ -13,6 +13,7 @@ const MAX_INLINE_ITERATIONS: usize = 128;
 const INLINE_SCORE_THRESHOLD: u32 = 24;
 const INLINE_SINGLE_CALLER_THRESHOLD: u32 = 48;
 const INLINE_SINGLE_CALLER_LEAF_THRESHOLD: u32 = 64;
+const INLINE_SINGLE_CALLER_SIMPLE_CFG_THRESHOLD: u32 = 128;
 
 pub(crate) struct InlineResult {
     pub(crate) stats: PeepholeStats,
@@ -41,6 +42,7 @@ struct ModuleAnalysis {
     scc_sizes: Vec<usize>,
     inline_scores: Vec<Option<u32>>,
     call_site_counts: Vec<usize>,
+    local_callee_counts: Vec<usize>,
 }
 
 pub(crate) fn inline_module(module: &mut Module) -> InlineResult {
@@ -87,6 +89,7 @@ impl ModuleAnalysis {
             .collect::<Vec<_>>();
         let (scc_ids, scc_sizes) = compute_sccs(&adjacency);
         let inline_scores = module.functions.iter().map(inline_score).collect();
+        let local_callee_counts = adjacency.iter().map(Vec::len).collect();
         let mut call_site_counts = vec![0; module.functions.len()];
         for func in &module.functions {
             for (_, inst) in func.inst_pool.iter_insts() {
@@ -108,6 +111,7 @@ impl ModuleAnalysis {
             scc_sizes,
             inline_scores,
             call_site_counts,
+            local_callee_counts,
         }
     }
 
@@ -145,6 +149,12 @@ fn find_inline_site(module: &Module, analysis: &ModuleAnalysis) -> Option<Inline
                 let call_site_count = analysis.call_site_counts[callee_idx];
                 let inline_budget = if call_site_count == 1 && callee_is_leaf(callee_func) {
                     INLINE_SINGLE_CALLER_LEAF_THRESHOLD
+                } else if call_site_count == 1
+                    && analysis.local_callee_counts[callee_idx] <= 1
+                    && callee_func.regions.len() == 1
+                    && callee_is_scalar_simple_cfg(callee_func)
+                {
+                    INLINE_SINGLE_CALLER_SIMPLE_CFG_THRESHOLD
                 } else if call_site_count == 1 {
                     INLINE_SINGLE_CALLER_THRESHOLD
                 } else {
@@ -181,6 +191,30 @@ fn callee_is_leaf(func: &Function) -> bool {
         .inst_pool
         .iter_insts()
         .any(|(_, inst)| matches!(inst.op, Op::Call(..)))
+}
+
+fn callee_is_scalar_simple_cfg(func: &Function) -> bool {
+    !func.inst_pool.iter_insts().any(|(_, inst)| {
+        matches!(
+            inst.op,
+            Op::Load(..)
+                | Op::Store(..)
+                | Op::StackSlot(..)
+                | Op::MemCopy(..)
+                | Op::MemMove(..)
+                | Op::MemSet(..)
+                | Op::LoadAtomic(..)
+                | Op::StoreAtomic(..)
+                | Op::AtomicRmw(..)
+                | Op::AtomicCmpXchg(..)
+                | Op::Fence(..)
+                | Op::PtrAdd(..)
+                | Op::PtrDiff(..)
+                | Op::PtrToInt(..)
+                | Op::PtrToAddr(..)
+                | Op::IntToPtr(..)
+        )
+    })
 }
 
 fn supported_entry_block(func: &Function) -> bool {

@@ -81,18 +81,23 @@ fn thread_forwarders(func: &mut Function) -> bool {
                     *else_block,
                     else_args.clone(),
                 );
-                if new_then != *then_block
+                if (new_then == new_else && operands_eq(&new_then_args, &new_else_args))
+                    || new_then != *then_block
                     || new_else != *else_block
                     || !operands_eq(&new_then_args, then_args)
                     || !operands_eq(&new_else_args, else_args)
                 {
-                    Some(Op::BrIf(
-                        cond.clone(),
-                        new_then,
-                        new_then_args,
-                        new_else,
-                        new_else_args,
-                    ))
+                    if new_then == new_else && operands_eq(&new_then_args, &new_else_args) {
+                        Some(Op::Br(new_then, new_then_args))
+                    } else {
+                        Some(Op::BrIf(
+                            cond.clone(),
+                            new_then,
+                            new_then_args,
+                            new_else,
+                            new_else_args,
+                        ))
+                    }
                 } else {
                     None
                 }
@@ -132,9 +137,6 @@ fn compute_forwarders(func: &Function, cfg: &CfgInfo) -> HashMap<BlockRef, Forwa
             continue;
         }
         let bb = func.block(block);
-        if bb.arg_count != 0 {
-            continue;
-        }
         if bb.inst_count != 1 {
             continue;
         }
@@ -146,6 +148,9 @@ fn compute_forwarders(func: &Function, cfg: &CfgInfo) -> HashMap<BlockRef, Forwa
             continue;
         };
         if func.block(*target).parent_region != bb.parent_region {
+            continue;
+        }
+        if args.len() != bb.arg_count as usize {
             continue;
         }
         forwarders.insert(

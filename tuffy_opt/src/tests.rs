@@ -321,7 +321,7 @@ func @mem2reg_branch(bool, int:s32, int:s32) -> int:s32 {
     v1: bool = param 0
     v2: int:s32 = param 1
     v3: int:s32 = param 2
-    brif v1, bb3(v0, v2), bb3(v0, v3)
+    brif v1, bb1, bb2
   bb1:
     br bb3(v0, v2)
   bb2:
@@ -554,13 +554,71 @@ func @thread_forward() {
     let (output, stats) = optimize(input);
     let expected = r#"func @thread_forward() {
   bb0(v0: mem):
-    br bb1(v0)
+    br bb3(v0)
   bb1(v2: mem):
     br bb3(v2)
   bb2(v4: mem):
     ret v4
   bb3(v6: mem):
     ret v6
+}"#;
+    assert_eq!(normalize_ir(&output), normalize_ir(expected));
+    assert!(stats.rewrites > 0);
+}
+
+#[test]
+fn cfg_threads_forwarding_block_args() {
+    let input = r#"
+func @thread_forward_args(int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    br bb1(v0, v1)
+  bb1(v2: mem, v3: int:s32):
+    br bb2(v2, v3)
+  bb2(v4: mem, v5: int:s32):
+    ret v5, v4
+}
+"#;
+    let (output, stats) = optimize(input);
+    let expected = r#"func @thread_forward_args(int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    br bb2(v0, v1)
+  bb1(v3: mem, v4: int:s32):
+    br bb2(v3, v4)
+  bb2(v6: mem, v7: int:s32):
+    ret v7, v6
+}"#;
+    assert_eq!(normalize_ir(&output), normalize_ir(expected));
+    assert!(stats.rewrites > 0);
+}
+
+#[test]
+fn cfg_collapses_same_target_brif_after_threading() {
+    let input = r#"
+func @collapse_same_target(bool) {
+  bb0(v0: mem):
+    v1: bool = param 0
+    brif v1, bb1(v0), bb2(v0)
+  bb1(v3: mem):
+    br bb3(v3)
+  bb2(v4: mem):
+    br bb3(v4)
+  bb3(v5: mem):
+    ret v5
+}
+"#;
+    let (output, stats) = optimize(input);
+    let expected = r#"func @collapse_same_target(bool) {
+  bb0(v0: mem):
+    v1: bool = param 0
+    br bb3(v0)
+  bb1(v3: mem):
+    br bb3(v3)
+  bb2(v5: mem):
+    br bb3(v5)
+  bb3(v7: mem):
+    ret v7
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
     assert!(stats.rewrites > 0);
@@ -697,6 +755,164 @@ func @caller(int:s32) -> int:s32 {
     assert!(
         !output.contains(" = call "),
         "single-caller medium leaf should inline:\n{output}"
+    );
+    assert_eq!(stats.inlined_calls, 1);
+}
+
+#[test]
+fn inlines_single_caller_large_leaf() {
+    let input = r#"
+func @large_leaf(int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    v2: int:s32 = iconst 1
+    v3: int:s32 = add v1, v2
+    v4: int:s32 = iconst 2
+    v5: int:s32 = add v3, v4
+    v6: int:s32 = iconst 3
+    v7: int:s32 = add v5, v6
+    v8: int:s32 = iconst 4
+    v9: int:s32 = add v7, v8
+    v10: int:s32 = iconst 5
+    v11: int:s32 = add v9, v10
+    v12: int:s32 = iconst 6
+    v13: int:s32 = add v11, v12
+    v14: int:s32 = iconst 7
+    v15: int:s32 = add v13, v14
+    v16: int:s32 = iconst 8
+    v17: int:s32 = add v15, v16
+    v18: int:s32 = iconst 9
+    v19: int:s32 = add v17, v18
+    v20: int:s32 = iconst 10
+    v21: int:s32 = add v19, v20
+    v22: int:s32 = iconst 11
+    v23: int:s32 = add v21, v22
+    v24: int:s32 = iconst 12
+    v25: int:s32 = add v23, v24
+    v26: int:s32 = iconst 13
+    v27: int:s32 = add v25, v26
+    v28: int:s32 = iconst 14
+    v29: int:s32 = add v27, v28
+    v30: int:s32 = iconst 15
+    v31: int:s32 = add v29, v30
+    v32: int:s32 = iconst 16
+    v33: int:s32 = add v31, v32
+    v34: int:s32 = iconst 17
+    v35: int:s32 = add v33, v34
+    v36: int:s32 = iconst 18
+    v37: int:s32 = add v35, v36
+    v38: int:s32 = iconst 19
+    v39: int:s32 = add v37, v38
+    v40: int:s32 = iconst 20
+    v41: int:s32 = add v39, v40
+    v42: int:s32 = iconst 21
+    v43: int:s32 = add v41, v42
+    v44: int:s32 = iconst 22
+    v45: int:s32 = add v43, v44
+    v46: int:s32 = iconst 23
+    v47: int:s32 = add v45, v46
+    v48: int:s32 = iconst 24
+    v49: int:s32 = add v47, v48
+    v50: int:s32 = iconst 25
+    v51: int:s32 = add v49, v50
+    ret v51, v0
+}
+
+func @caller(int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    v2: ptr = symbol_addr @large_leaf
+    v3: mem, v4: int:s32 = call v2(v1), v0 -> int:s32
+    ret v4, v3
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        !output.contains(" = call "),
+        "single-caller large leaf should inline:\n{output}"
+    );
+    assert_eq!(stats.inlined_calls, 1);
+}
+
+#[test]
+fn inlines_single_caller_large_simple_cfg() {
+    let input = r#"
+func @large_cfg_helper(int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    v2: int:s32 = iconst 1
+    v3: int:s32 = add v1, v2
+    v4: int:s32 = iconst 2
+    v5: int:s32 = add v3, v4
+    v6: int:s32 = iconst 3
+    v7: int:s32 = add v5, v6
+    v8: int:s32 = iconst 4
+    v9: int:s32 = add v7, v8
+    v10: int:s32 = iconst 5
+    v11: int:s32 = add v9, v10
+    v12: int:s32 = iconst 6
+    v13: int:s32 = add v11, v12
+    v14: int:s32 = iconst 7
+    v15: int:s32 = add v13, v14
+    v16: int:s32 = iconst 8
+    v17: int:s32 = add v15, v16
+    v18: int:s32 = iconst 9
+    v19: int:s32 = add v17, v18
+    v20: int:s32 = iconst 10
+    v21: int:s32 = add v19, v20
+    v22: int:s32 = iconst 11
+    v23: int:s32 = add v21, v22
+    v24: int:s32 = iconst 12
+    v25: int:s32 = add v23, v24
+    v26: int:s32 = iconst 13
+    v27: int:s32 = add v25, v26
+    v28: int:s32 = iconst 14
+    v29: int:s32 = add v27, v28
+    v30: int:s32 = iconst 15
+    v31: int:s32 = add v29, v30
+    v32: int:s32 = iconst 16
+    v33: int:s32 = add v31, v32
+    v34: int:s32 = iconst 17
+    v35: int:s32 = add v33, v34
+    v36: int:s32 = iconst 18
+    v37: int:s32 = add v35, v36
+    v38: int:s32 = iconst 19
+    v39: int:s32 = add v37, v38
+    v40: int:s32 = iconst 20
+    v41: int:s32 = add v39, v40
+    v42: int:s32 = iconst 21
+    v43: int:s32 = add v41, v42
+    v44: int:s32 = iconst 22
+    v45: int:s32 = add v43, v44
+    v46: int:s32 = iconst 23
+    v47: int:s32 = add v45, v46
+    v48: int:s32 = iconst 24
+    v49: int:s32 = add v47, v48
+    v50: int:s32 = iconst 25
+    v51: int:s32 = add v49, v50
+    v52: int:s32 = iconst 0
+    v53: bool = icmp.lt v51, v52
+    brif v53, bb1(v0, v51), bb2(v0, v51)
+  bb1(v54: mem, v55: int:s32):
+    ret v55, v54
+  bb2(v56: mem, v57: int:s32):
+    v58: int:s32 = iconst 99
+    v59: int:s32 = add v57, v58
+    ret v59, v56
+}
+
+func @caller(int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    v2: ptr = symbol_addr @large_cfg_helper
+    v3: mem, v4: int:s32 = call v2(v1), v0 -> int:s32
+    ret v4, v3
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        !output.contains(" = call "),
+        "single-caller simple CFG helper should inline:\n{output}"
     );
     assert_eq!(stats.inlined_calls, 1);
 }
