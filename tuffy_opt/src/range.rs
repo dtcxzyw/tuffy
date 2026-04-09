@@ -10,6 +10,7 @@ use crate::cfg::{CfgInfo, collect_block_refs};
 use crate::peephole::PeepholeStats;
 
 const MAX_SIMPLIFY_ITERATIONS: usize = 16;
+const MAX_BLOCK_ENV_UPDATES: usize = 256;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct IntRange {
@@ -28,14 +29,6 @@ struct RangeAnalysis {
 }
 
 pub(crate) fn optimize_function(func: &mut Function) -> PeepholeStats {
-    if func
-        .inst_pool
-        .iter_insts()
-        .any(|(_, inst)| matches!(inst.op, Op::Continue(_) | Op::RegionYield(_)))
-    {
-        return PeepholeStats::default();
-    }
-
     let mut stats = PeepholeStats::default();
 
     for _ in 0..MAX_SIMPLIFY_ITERATIONS {
@@ -107,6 +100,7 @@ impl RangeAnalysis {
     fn compute(func: &Function) -> Self {
         let cfg = CfgInfo::compute(func);
         let mut entry = vec![None; func.blocks.len()];
+        let mut update_counts = vec![0usize; func.blocks.len()];
         let mut worklist = VecDeque::new();
         let entry_block = func.entry_block();
         entry[entry_block.index() as usize] = Some(FactMap::new());
@@ -133,7 +127,8 @@ impl RangeAnalysis {
             };
             let term = func.inst(last_idx);
             for (target, succ_env) in successor_envs(func, &cfg, block, &current_env, term) {
-                let changed = match &mut entry[target.index() as usize] {
+                let target_idx = target.index() as usize;
+                let changed = match &mut entry[target_idx] {
                     slot @ None => {
                         *slot = Some(succ_env);
                         true
@@ -141,6 +136,10 @@ impl RangeAnalysis {
                     Some(existing) => merge_env(existing, &succ_env),
                 };
                 if changed {
+                    update_counts[target_idx] = update_counts[target_idx].saturating_add(1);
+                    if update_counts[target_idx] > MAX_BLOCK_ENV_UPDATES {
+                        entry[target_idx] = Some(annotation_only_env(func, target));
+                    }
                     worklist.push_back(target);
                 }
             }
@@ -388,7 +387,22 @@ fn decode_condition(
     }
     let inst = func.inst(value.index());
     match &inst.op {
-        Op::ICmp(op, lhs, rhs) => Some((*op, lhs.clone(), rhs.clone(), false)),
+        Op::ICmp(op, lhs, rhs) => {
+            let lhs_value = lhs.clone().raw().value;
+            let rhs_value = rhs.clone().raw().value;
+            if let Some(constant) = bound_int_constant(func, rhs_value)
+                && let Some(decoded) = decode_intified_bool_compare(func, *op, lhs_value, constant)
+            {
+                Some(decoded)
+            } else if let Some(constant) = bound_int_constant(func, lhs_value)
+                && let Some(decoded) =
+                    decode_intified_bool_compare(func, flip_cmp(*op), rhs_value, constant)
+            {
+                Some(decoded)
+            } else {
+                Some((*op, lhs.clone(), rhs.clone(), false))
+            }
+        }
         Op::BXor(lhs, rhs) => {
             let lhs_value = lhs.clone().raw().value;
             let rhs_value = rhs.clone().raw().value;
@@ -402,6 +416,80 @@ fn decode_condition(
                 None
             }
         }
+        _ => None,
+    }
+}
+
+fn decode_intified_bool_compare(
+    func: &Function,
+    pred: ICmpOp,
+    intified_value: ValueRef,
+    compare_const: &BigInt,
+) -> Option<(
+    ICmpOp,
+    tuffy_ir::typed::IntOperand,
+    tuffy_ir::typed::IntOperand,
+    bool,
+)> {
+    let compare_zero = *compare_const == BigInt::from(0u8);
+    let compare_one = *compare_const == BigInt::from(1u8);
+    if !compare_zero && !compare_one {
+        return None;
+    }
+    let (source_value, mut invert) = decode_intified_bool(func, intified_value)?;
+    invert ^= match pred {
+        ICmpOp::Eq if compare_zero => true,
+        ICmpOp::Eq if compare_one => false,
+        ICmpOp::Ne if compare_zero => false,
+        ICmpOp::Ne if compare_one => true,
+        _ => return None,
+    };
+    let (cmp_op, lhs, rhs, source_invert) = decode_condition(func, source_value)?;
+    Some((cmp_op, lhs, rhs, invert ^ source_invert))
+}
+
+fn decode_intified_bool(func: &Function, value: ValueRef) -> Option<(ValueRef, bool)> {
+    if value.is_block_arg() || value.is_secondary_result() {
+        return None;
+    }
+    let node = func.inst_pool.get(value.index())?;
+    match &node.inst.op {
+        Op::Select(cond, true_value, false_value) => {
+            let true_const = bound_int_constant(func, true_value.value)?;
+            let false_const = bound_int_constant(func, false_value.value)?;
+            if *true_const == BigInt::from(1u8) && *false_const == BigInt::from(0u8) {
+                Some((cond.clone().raw().value, false))
+            } else if *true_const == BigInt::from(0u8) && *false_const == BigInt::from(1u8) {
+                Some((cond.clone().raw().value, true))
+            } else {
+                None
+            }
+        }
+        Op::And(lhs, rhs) => {
+            let lhs_value = lhs.clone().raw().value;
+            let rhs_value = rhs.clone().raw().value;
+            if bound_int_constant(func, lhs_value).is_some_and(is_non_negative_odd_int) {
+                decode_intified_bool(func, rhs_value)
+            } else if bound_int_constant(func, rhs_value).is_some_and(is_non_negative_odd_int) {
+                decode_intified_bool(func, lhs_value)
+            } else {
+                None
+            }
+        }
+        Op::Xor(lhs, rhs) => {
+            let lhs_value = lhs.clone().raw().value;
+            let rhs_value = rhs.clone().raw().value;
+            if bound_int_constant(func, lhs_value) == Some(&BigInt::from(1u8)) {
+                let (cond, invert) = decode_intified_bool(func, rhs_value)?;
+                Some((cond, !invert))
+            } else if bound_int_constant(func, rhs_value) == Some(&BigInt::from(1u8)) {
+                let (cond, invert) = decode_intified_bool(func, lhs_value)?;
+                Some((cond, !invert))
+            } else {
+                None
+            }
+        }
+        _ if matches!(func.value_type(value), Some(Type::Bool)) => Some((value, false)),
         _ => None,
     }
 }
@@ -626,6 +714,10 @@ fn bound_bool_constant(func: &Function, value: ValueRef) -> Option<bool> {
     Some(*value)
 }
 
+fn is_non_negative_odd_int(value: &BigInt) -> bool {
+    value.sign() != num_bigint::Sign::Minus && (value & BigInt::from(1u8)) == BigInt::from(1u8)
+}
+
 fn rewrite_icmp_to_const(func: &mut Function, root_idx: u32, value: bool) {
     let origin = func.inst(root_idx).origin.clone();
     let new_idx = func.insert_inst_before(
@@ -682,6 +774,12 @@ fn cleanup_dead_value(func: &mut Function, value: ValueRef) {
     for dep in deps {
         cleanup_dead_value(func, dep);
     }
+}
+
+fn annotation_only_env(func: &Function, block: BlockRef) -> FactMap {
+    let mut env = FactMap::new();
+    seed_block_args(func, block, &mut env);
+    env
 }
 
 fn is_cleanup_pure_op(op: &Op) -> bool {

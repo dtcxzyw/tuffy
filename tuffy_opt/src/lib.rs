@@ -7,6 +7,7 @@ mod inline;
 mod peephole;
 mod promote;
 mod range;
+mod scalar_swap;
 
 use tuffy_ir::function::Function;
 use tuffy_ir::module::Module;
@@ -76,6 +77,10 @@ fn run_module_cleanup(module: &mut Module, changed_functions: Option<&[bool]>) -
         let bulk = bulk_memory::optimize_module(module, changed_functions);
         changed |= bulk.rewrites > 0;
         total.merge(bulk);
+
+        let swaps = scalar_swap::optimize_module(module, changed_functions);
+        changed |= swaps.rewrites > 0;
+        total.merge(swaps);
 
         if !changed {
             break;

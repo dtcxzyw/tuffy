@@ -14,6 +14,7 @@ const INLINE_SCORE_THRESHOLD: u32 = 24;
 const INLINE_SINGLE_CALLER_THRESHOLD: u32 = 48;
 const INLINE_SINGLE_CALLER_LEAF_THRESHOLD: u32 = 64;
 const INLINE_SINGLE_CALLER_SIMPLE_CFG_THRESHOLD: u32 = 128;
+const INLINE_MEMORY_WRAPPER_THRESHOLD: u32 = 96;
 
 pub(crate) struct InlineResult {
     pub(crate) stats: PeepholeStats,
@@ -155,6 +156,12 @@ fn find_inline_site(module: &Module, analysis: &ModuleAnalysis) -> Option<Inline
                     && callee_is_scalar_simple_cfg(callee_func)
                 {
                     INLINE_SINGLE_CALLER_SIMPLE_CFG_THRESHOLD
+                } else if call_site_count <= 2
+                    && analysis.local_callee_counts[callee_idx] <= 1
+                    && callee_func.regions.len() == 1
+                    && callee_is_memory_wrapper(callee_func)
+                {
+                    INLINE_MEMORY_WRAPPER_THRESHOLD
                 } else if call_site_count == 1 {
                     INLINE_SINGLE_CALLER_THRESHOLD
                 } else {
@@ -213,6 +220,30 @@ fn callee_is_scalar_simple_cfg(func: &Function) -> bool {
                 | Op::PtrToInt(..)
                 | Op::PtrToAddr(..)
                 | Op::IntToPtr(..)
+        )
+    })
+}
+
+fn callee_is_memory_wrapper(func: &Function) -> bool {
+    !func.inst_pool.iter_insts().any(|(_, inst)| {
+        matches!(
+            inst.op,
+            Op::StackSlot(..)
+                | Op::MemCopy(..)
+                | Op::MemMove(..)
+                | Op::MemSet(..)
+                | Op::LoadAtomic(..)
+                | Op::StoreAtomic(..)
+                | Op::AtomicRmw(..)
+                | Op::AtomicCmpXchg(..)
+                | Op::Fence(..)
+                | Op::PtrAdd(..)
+                | Op::PtrDiff(..)
+                | Op::PtrToInt(..)
+                | Op::PtrToAddr(..)
+                | Op::IntToPtr(..)
+                | Op::Continue(..)
+                | Op::RegionYield(..)
         )
     })
 }

@@ -537,6 +537,50 @@ func @range_refine(int:u64) {
 }
 
 #[test]
+fn range_folds_branch_inside_loop_region() {
+    let input = r#"
+func @range_loop_region() {
+  bb0(v0: mem):
+    v1: int:u64 = iconst 0
+    br bb1(v0, v1)
+
+  region loop {
+    bb1(v2: mem, v3: int:u64):
+      v4: int:u64 = iconst 10
+      v5: bool = icmp.lt v3, v4
+      brif v5, bb2(v2, v3), bb4(v2)
+
+    bb2(v6: mem, v7: int:u64):
+      v8: int:u64 = iconst 12
+      v9: bool = icmp.lt v7, v8
+      brif v9, bb3(v6, v7), bb5(v6)
+
+    bb3(v10: mem, v11: int:u64):
+      v12: int:u64 = iconst 1
+      v13: int:u64 = add v11, v12
+      continue v10, v13
+  }
+
+  bb4(v14: mem):
+    ret v14
+
+  bb5(v15: mem):
+    trap
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        output.contains("continue"),
+        "loop structure should remain:\n{output}"
+    );
+    assert!(
+        output.contains("br bb3"),
+        "refined loop branch should fold to direct branch:\n{output}"
+    );
+    assert!(stats.rewrites > 0);
+}
+
+#[test]
 fn cfg_threads_forwarding_block() {
     let input = r#"
 func @thread_forward() {
@@ -918,6 +962,64 @@ func @caller(int:s32) -> int:s32 {
 }
 
 #[test]
+fn inlines_two_callsite_memory_wrapper() {
+    let input = r#"
+func @memory_helper(ptr, ptr, int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: ptr = param 0
+    v2: ptr = param 1
+    v3: int:s32 = param 2
+    v4: int:s32 = load.4 v1, v0
+    v5: int:s32 = add v4, v3
+    v6: mem = store.4 v5, v2, v0
+    v7: int:s32 = load.4 v2, v6
+    v8: int:s32 = add v7, v3
+    v9: int:s32 = add v8, v3
+    v10: int:s32 = add v9, v3
+    v11: int:s32 = add v10, v3
+    v12: int:s32 = add v11, v3
+    v13: int:s32 = add v12, v3
+    v14: int:s32 = add v13, v3
+    v15: int:s32 = add v14, v3
+    v16: int:s32 = add v15, v3
+    v17: bool = icmp.gt v16, v3
+    brif v17, bb1(v6, v16), bb2(v6, v16)
+  bb1(v18: mem, v19: int:s32):
+    ret v19, v18
+  bb2(v20: mem, v21: int:s32):
+    v22: int:s32 = sub v21, v3
+    ret v22, v20
+}
+
+func @caller_a(ptr, ptr, int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: ptr = param 0
+    v2: ptr = param 1
+    v3: int:s32 = param 2
+    v4: ptr = symbol_addr @memory_helper
+    v5: mem, v6: int:s32 = call v4(v1, v2, v3), v0 -> int:s32
+    ret v6, v5
+}
+
+func @caller_b(ptr, ptr, int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: ptr = param 0
+    v2: ptr = param 1
+    v3: int:s32 = param 2
+    v4: ptr = symbol_addr @memory_helper
+    v5: mem, v6: int:s32 = call v4(v2, v1, v3), v0 -> int:s32
+    ret v6, v5
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        !output.contains(" = call "),
+        "two-callsite memory wrapper should inline:\n{output}"
+    );
+    assert_eq!(stats.inlined_calls, 2);
+}
+
+#[test]
 fn does_not_inline_recursive_cycle() {
     let input = r#"
 func @a(int:s32) -> int:s32 {
@@ -1206,6 +1308,116 @@ func @zero_init() {
         "store chain should be gone:\n{output}"
     );
     assert_eq!(stats.per_rule["form_bulk_memset_zero"], 1);
+}
+
+#[test]
+fn forms_bulk_memset_from_repeated_zero_static_symbol_block() {
+    let input = r#"
+data @zeros16 = "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+
+func @zero_repeat_init() {
+  bb0(v0: mem):
+    v1: ptr = stack_slot 32
+    v2: ptr = symbol_addr @zeros16
+    v3: int:i64 = load.8 v2, v0
+    v4: mem = store.8 v3, v1, v0
+    v5: int:i64 = iconst 8
+    v6: ptr = ptradd v2, v5
+    v7: int:i64 = load.8 v6, v4
+    v8: ptr = ptradd v1, v5
+    v9: mem = store.8 v7, v8, v4
+    v10: int:i64 = iconst 16
+    v11: ptr = ptradd v1, v10
+    v12: int:i64 = load.8 v2, v9
+    v13: mem = store.8 v12, v11, v9
+    v14: int:i64 = iconst 24
+    v15: ptr = ptradd v1, v14
+    v16: int:i64 = load.8 v6, v13
+    v17: mem = store.8 v16, v15, v13
+    v18: ptr = symbol_addr @extern_sink
+    v19: mem = call v18(v1), v17
+    ret v19
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(output.contains("memset"), "expected memset:\n{output}");
+    assert!(
+        !output.contains("store.8"),
+        "store chain should be gone:\n{output}"
+    );
+    assert_eq!(stats.per_rule["form_bulk_memset_zero"], 1);
+}
+
+#[test]
+fn forms_scalar_swap_from_memcpy_memmove_chain() {
+    let input = r#"
+func @swap4(ptr, ptr) {
+  bb0(v0: mem):
+    v1: ptr = param 0
+    v2: ptr = param 1
+    v3: ptr = stack_slot 4 align 4
+    v4: int:i32 = iconst 0
+    v5: mem = store.4 v4, v3, v0
+    v6: ptr = symbol_addr @memcpy
+    v7: int:i64 = iconst 1
+    v8: int:i64 = iconst 4
+    v9: int:u64 = mul v7, v8
+    v10: mem, v11: int:u64 = call v6(v3, v1, v9), v5 -> int:u64
+    v12: mem = memmove v1:align4, v2:align4, v9, v10
+    v13: ptr = symbol_addr @memcpy
+    v14: mem, v15: int:u64 = call v13(v2, v3, v9), v12 -> int:u64
+    ret v14
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        !output.contains("memmove"),
+        "swap chain should remove memmove:\n{output}"
+    );
+    assert!(
+        !output.contains("symbol_addr @memcpy"),
+        "swap chain should remove memcpy calls:\n{output}"
+    );
+    assert!(
+        output.contains("load.4") && output.contains("store.4"),
+        "swap chain should become scalar load/store ops:\n{output}"
+    );
+    assert_eq!(stats.per_rule["form_scalar_swap"], 1);
+}
+
+#[test]
+fn forms_scalar_swap_eight_byte_chain() {
+    let input = r#"
+func @swap8(ptr, ptr) {
+  bb0(v0: mem):
+    v1: ptr = param 0
+    v2: ptr = param 1
+    v3: ptr = stack_slot 8 align 8
+    v4: int:i64 = iconst 0
+    v5: mem = store.8 v4, v3, v0
+    v6: ptr = symbol_addr @memcpy
+    v7: int:u64 = iconst 8
+    v8: mem, v9: int:u64 = call v6(v3, v1, v7), v5 -> int:u64
+    v10: mem = memmove v1:align8, v2:align8, v7, v8
+    v11: ptr = symbol_addr @memcpy
+    v12: mem, v13: int:u64 = call v11(v2, v3, v7), v10 -> int:u64
+    ret v12
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        !output.contains("memmove"),
+        "swap chain should remove memmove:\n{output}"
+    );
+    assert!(
+        !output.contains("symbol_addr @memcpy"),
+        "swap chain should remove memcpy calls:\n{output}"
+    );
+    assert!(
+        output.contains("load.8") && output.contains("store.8"),
+        "swap chain should become scalar load/store ops:\n{output}"
+    );
+    assert_eq!(stats.per_rule["form_scalar_swap"], 1);
 }
 
 #[test]

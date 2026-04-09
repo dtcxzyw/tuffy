@@ -25,9 +25,11 @@ This crate hosts IR-level optimization passes operating on `tuffy_ir::Module` / 
 
 `optimize_module` currently runs:
 
-1. function-local promotion + peepholes for every function
-2. direct same-module inlining across the module
-3. promotion + peepholes again for callers changed by inlining
+1. function-local cleanup for every function:
+   promotion, peepholes, range simplification, CFG cleanup
+2. module-level bulk memory and scalar-swap idiom formation
+3. direct same-module inlining across the module
+4. function-local cleanup again for callers changed by inlining
 
 ## Dependencies
 

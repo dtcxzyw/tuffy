@@ -120,7 +120,7 @@ fn find_candidate(
             .collect::<Vec<_>>();
 
         for &inst_idx in &insts {
-            let Some(pattern) = parse_store_pattern(func, inst_idx) else {
+            let Some(pattern) = parse_store_pattern_with_static(func, inst_idx, static_data) else {
                 continue;
             };
             let Some(mut candidate) = start_candidate(func, pattern) else {
@@ -141,7 +141,8 @@ fn find_candidate(
                 .expect("candidate store should be in block");
             while let Some(&next_idx) = insts.get(cursor + 1) {
                 cursor += 1;
-                let Some(pattern) = parse_store_pattern(func, next_idx) else {
+                let Some(pattern) = parse_store_pattern_with_static(func, next_idx, static_data)
+                else {
                     continue;
                 };
                 if pattern.mem_in != previous_value(previous) {
@@ -286,7 +287,11 @@ fn load_index_for_store(func: &Function, store_idx: u32) -> Option<u32> {
     matches!(node.inst.op, Op::Load(_, _, _)).then_some(value.value.index())
 }
 
-fn parse_store_pattern(func: &Function, store_idx: u32) -> Option<StorePattern> {
+fn parse_store_pattern_with_static(
+    func: &Function,
+    store_idx: u32,
+    static_data: &HashMap<SymbolId, StaticInfo>,
+) -> Option<StorePattern> {
     let inst = func.inst_pool.get(store_idx)?;
     let Op::Store(value, ptr, size, mem) = &inst.inst.op else {
         return None;
@@ -298,7 +303,7 @@ fn parse_store_pattern(func: &Function, store_idx: u32) -> Option<StorePattern> 
     let mut matched = BTreeSet::new();
     matched.insert(store_idx);
     let dst = ptr_expr(func, ptr.clone().raw().value, &mut matched)?;
-    let src = parse_store_source(func, value, *size, &mut matched)?;
+    let src = parse_store_source(func, value, *size, &mut matched, static_data)?;
 
     Some(StorePattern {
         store_idx,
@@ -330,6 +335,7 @@ fn parse_store_source(
     value: &Operand,
     store_size: u32,
     matched: &mut BTreeSet<u32>,
+    static_data: &HashMap<SymbolId, StaticInfo>,
 ) -> Option<SourcePattern> {
     if let Some(constant) = const_bigint(func, value.value) {
         if *constant == BigInt::from(0u8) {
@@ -354,6 +360,12 @@ fn parse_store_source(
     }
     matched.insert(load_idx);
     let src = ptr_expr(func, ptr.clone().raw().value, matched)?;
+    if let RootKind::Symbol(sym) = root_kind(func, src.root)
+        && let Ok(start) = usize::try_from(src.offset)
+        && static_range_is_zero(static_data.get(&sym), start, store_size as usize)
+    {
+        return Some(SourcePattern::FillZero);
+    }
     Some(SourcePattern::CopyFrom(src))
 }
 
