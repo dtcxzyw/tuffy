@@ -27,6 +27,8 @@ pub struct PeepholeStats {
     pub promoted_slices: usize,
     pub promoted_loads: usize,
     pub eliminated_stores: usize,
+    pub inline_iterations: usize,
+    pub inlined_calls: usize,
 }
 
 impl PeepholeStats {
@@ -42,6 +44,8 @@ impl PeepholeStats {
         self.promoted_slices += other.promoted_slices;
         self.promoted_loads += other.promoted_loads;
         self.eliminated_stores += other.eliminated_stores;
+        self.inline_iterations += other.inline_iterations;
+        self.inlined_calls += other.inlined_calls;
         for (name, count) in other.per_rule {
             *self.per_rule.entry(name).or_default() += count;
         }

@@ -404,19 +404,14 @@ func @mem2reg_loop(int:s32) -> int:s32 {
 }
 
 #[test]
-fn does_not_promote_slot_passed_to_call() {
+fn does_not_promote_slot_passed_to_external_call() {
     let input = r#"
-func @sink(ptr) {
-  bb0(v0: mem):
-    ret v0
-}
-
 func @call_escape(int:s32) -> int:s32 {
   bb0(v0: mem):
     v1: ptr = stack_slot 4
     v2: int:s32 = param 0
     v3: mem = store.4 v2, v1, v0
-    v4: ptr = symbol_addr @sink
+    v4: ptr = symbol_addr @extern_sink
     v5: mem = call v4(v1), v3
     v6: int:s32 = load.4 v1, v5
     ret v6, v5
@@ -439,19 +434,14 @@ func @call_escape(int:s32) -> int:s32 {
 }
 
 #[test]
-fn still_promotes_local_slot_around_unrelated_call() {
+fn still_promotes_local_slot_around_external_unrelated_call() {
     let input = r#"
-func @sink(int:s32) {
-  bb0(v0: mem):
-    ret v0
-}
-
 func @call_unrelated(int:s32) -> int:s32 {
   bb0(v0: mem):
     v1: ptr = stack_slot 4
     v2: int:s32 = param 0
     v3: mem = store.4 v2, v1, v0
-    v4: ptr = symbol_addr @sink
+    v4: ptr = symbol_addr @extern_sink
     v5: mem = call v4(v2), v3
     v6: int:s32 = load.4 v1, v5
     ret v6, v5
@@ -475,6 +465,168 @@ func @call_unrelated(int:s32) -> int:s32 {
         "unrelated call should remain:\n{output}"
     );
     assert_eq!(stats.promoted_slots, 1);
+}
+
+#[test]
+fn inlines_direct_same_module_call() {
+    let input = r#"
+func @id(int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    ret v1, v0
+}
+
+func @caller(int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    v2: ptr = symbol_addr @id
+    v3: mem, v4: int:s32 = call v2(v1), v0 -> int:s32
+    ret v4, v3
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        !output.contains(" = call "),
+        "direct same-module calls should inline:\n{output}"
+    );
+    assert_eq!(stats.inlined_calls, 1);
+}
+
+#[test]
+fn inlines_transitive_same_module_chain() {
+    let input = r#"
+func @leaf(int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    v2: int:s32 = iconst 1
+    v3: int:s32 = add v1, v2
+    ret v3, v0
+}
+
+func @mid(int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    v2: ptr = symbol_addr @leaf
+    v3: mem, v4: int:s32 = call v2(v1), v0 -> int:s32
+    ret v4, v3
+}
+
+func @top(int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    v2: ptr = symbol_addr @mid
+    v3: mem, v4: int:s32 = call v2(v1), v0 -> int:s32
+    ret v4, v3
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        !output.contains(" = call "),
+        "small acyclic call chains should inline transitively:\n{output}"
+    );
+    assert_eq!(stats.inlined_calls, 2);
+}
+
+#[test]
+fn does_not_inline_recursive_cycle() {
+    let input = r#"
+func @a(int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    v2: ptr = symbol_addr @b
+    v3: mem, v4: int:s32 = call v2(v1), v0 -> int:s32
+    ret v4, v3
+}
+
+func @b(int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    v2: ptr = symbol_addr @a
+    v3: mem, v4: int:s32 = call v2(v1), v0 -> int:s32
+    ret v4, v3
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        output.contains(" = call "),
+        "recursive SCCs must not inline:\n{output}"
+    );
+    assert_eq!(stats.inlined_calls, 0);
+}
+
+#[test]
+fn inlines_call_ret2_uses() {
+    let input = r#"
+func @pair(int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    v2: int:s32 = iconst 7
+    ret v1, v2, v0
+}
+
+func @caller(int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    v2: ptr = symbol_addr @pair
+    v3: mem, v4: int:s32 = call v2(v1), v0 -> int:s32
+    v5: int:s32 = call_ret2 v3
+    v6: int:s32 = add v4, v5
+    ret v6, v3
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        !output.contains(" = call "),
+        "inlined call sites should not leave call instructions behind:\n{output}"
+    );
+    assert!(
+        !output.contains("call_ret2"),
+        "call_ret2 users should rewrite to the inlined secondary return value:\n{output}"
+    );
+    assert_eq!(stats.inlined_calls, 1);
+}
+
+#[test]
+fn inlines_region_aware_callee() {
+    let input = r#"
+func @loop_region(int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    br bb1(v1)
+
+  region loop {
+    bb1(v2: int:s32):
+      v3: int:s32 = iconst 0
+      v4: bool = icmp.eq v2, v3
+      brif v4, bb2, bb3
+    bb2:
+      continue v1
+    bb3:
+      region_yield v2
+  }
+
+  bb4:
+    ret v1, v0
+}
+
+func @caller(int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    v2: ptr = symbol_addr @loop_region
+    v3: mem, v4: int:s32 = call v2(v1), v0 -> int:s32
+    ret v4, v3
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        !output.contains(" = call "),
+        "region-aware callees should inline:\n{output}"
+    );
+    assert!(
+        output.contains("region loop"),
+        "the cloned callee region structure should remain in the caller:\n{output}"
+    );
+    assert_eq!(stats.inlined_calls, 1);
 }
 
 #[test]

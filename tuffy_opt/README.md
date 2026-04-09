@@ -7,6 +7,9 @@ This crate hosts IR-level optimization passes operating on `tuffy_ir::Module` / 
 ## Status
 
 - Conservative stack-slot `sroa/mem2reg` runs before peephole cleanup.
+- Module optimization now includes a direct same-module inliner for eligible
+  `symbol_addr` call sites, followed by a second cleanup round on changed
+  callers.
 - Promotion is block-arg based (matching Tuffy IR CFG joins) rather than PHI-node based.
 - Promotion currently handles local `stack_slot` objects reached through constant-offset `ptradd`.
 - Promotion is intentionally conservative around escaping pointers, atomics, bulk memory ops, and unwind-cleanup calls.
@@ -19,6 +22,12 @@ This crate hosts IR-level optimization passes operating on `tuffy_ir::Module` / 
 - Peephole side conditions can query optimizer-local integer facts such as synthesized best-width annotations and known low bits.
 - Value-root replacements are not limited to existing bindings; the current generated runtime can also materialize simple boolean expressions such as logical negation.
 - Rewrites are modeled around generic value roots and terminator roots; the current terminator subset only includes `brif`, but it is no longer represented as a dedicated rewrite kind.
+
+`optimize_module` currently runs:
+
+1. function-local promotion + peepholes for every function
+2. direct same-module inlining across the module
+3. promotion + peepholes again for callers changed by inlining
 
 ## Dependencies
 
