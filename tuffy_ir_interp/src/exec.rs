@@ -402,6 +402,7 @@ pub fn execute_instruction(
     secondary_result_annotation: &Option<Annotation>,
     resolve_value: &dyn Fn(ValueRef) -> Value,
     resolve_operand_value: &dyn Fn(&Operand) -> Value,
+    value_type: &dyn Fn(ValueRef) -> Option<Type>,
     memory: &mut Memory,
     alloc_stack_slot: &mut dyn FnMut(usize) -> AllocId,
     resolve_symbol: &dyn Fn(tuffy_ir::module::SymbolId) -> Value,
@@ -1088,22 +1089,19 @@ pub fn execute_instruction(
         Op::Load(ptr_op, byte_count, _mem) => {
             let vp = res_op(resolve_value, &ptr_op.clone().raw());
             match vp.as_ptr() {
-                Some(ptr) => {
-                    let n = *byte_count as usize;
-                    match memory.read(ptr, n) {
-                        Ok(bytes) => {
-                            let val = bytes_to_value(&bytes, ty, n);
-                            Ok(ExecResult::Value(apply_result_annotation(
-                                val,
-                                result_annotation,
-                            )))
-                        }
-                        Err(e) => Err(UbViolation {
-                            kind: UbKind::MemoryViolation,
-                            message: e.to_string(),
-                        }),
+                Some(ptr) => match memory.read(ptr, *byte_count as usize) {
+                    Ok(bytes) => {
+                        let val = bytes_to_value_typed(&bytes, ty);
+                        Ok(ExecResult::Value(apply_result_annotation(
+                            val,
+                            result_annotation,
+                        )))
                     }
-                }
+                    Err(e) => Err(UbViolation {
+                        kind: UbKind::MemoryViolation,
+                        message: e.to_string(),
+                    }),
+                },
                 None if vp.is_poison() => Ok(ExecResult::Value(Value::Poison)),
                 _ => Err(UbViolation {
                     kind: UbKind::InvalidOperand,
@@ -1117,7 +1115,8 @@ pub fn execute_instruction(
             match vp.as_ptr() {
                 Some(ptr) => {
                     let n = *byte_count as usize;
-                    let bytes = value_to_bytes(&vv, n);
+                    let store_ty = value_type(val_op.value).unwrap_or(Type::Byte(*byte_count));
+                    let bytes = value_to_bytes_typed(&vv, &store_ty, n);
                     match memory.write(ptr, &bytes) {
                         Ok(()) => Ok(ExecResult::Value(Value::Mem)),
                         Err(e) => Err(UbViolation {
@@ -1209,7 +1208,7 @@ pub fn execute_instruction(
                     let n = type_byte_size(ty);
                     match memory.read(ptr, n) {
                         Ok(bytes) => {
-                            let val = bytes_to_value(&bytes, ty, n);
+                            let val = bytes_to_value_typed(&bytes, ty);
                             let annotated =
                                 apply_result_annotation(val, secondary_result_annotation);
                             Ok(ExecResult::MultiValue(Value::Mem, annotated))
@@ -2017,6 +2016,14 @@ pub fn type_byte_size(ty: &Type) -> usize {
 
 /// Convert memory bytes to a Value based on the target type.
 fn bytes_to_value(bytes: &[AbstractByte], ty: &Type, n: usize) -> Value {
+    bytes_to_value_typed_with_width(bytes, ty, n)
+}
+
+fn bytes_to_value_typed(bytes: &[AbstractByte], ty: &Type) -> Value {
+    bytes_to_value_typed_with_width(bytes, ty, bytes.len())
+}
+
+fn bytes_to_value_typed_with_width(bytes: &[AbstractByte], ty: &Type, n: usize) -> Value {
     // Treat Uninit as 0 — codegen may emit wide loads that span padding bytes.
     // Real hardware reads arbitrary junk; we pick 0 for determinism.
     // Check for pointer fragments
@@ -2066,6 +2073,27 @@ fn bytes_to_value(bytes: &[AbstractByte], ty: &Type, n: usize) -> Value {
             }
             Value::Float(FloatConst::from_bits(*ft, bits))
         }
+        Type::Struct(fields) => {
+            let mut values = Vec::with_capacity(fields.len());
+            let mut offset = 0usize;
+            for field_ty in fields {
+                let size = type_byte_size(field_ty);
+                let field_bytes = slice_with_padding(bytes, offset, size);
+                values.push(bytes_to_value_typed(&field_bytes, field_ty));
+                offset += size;
+            }
+            Value::Aggregate(values)
+        }
+        Type::Array(elem_ty, count) => {
+            let elem_size = type_byte_size(elem_ty);
+            let mut values = Vec::with_capacity(*count as usize);
+            for idx in 0..(*count as usize) {
+                let start = idx * elem_size;
+                let elem_bytes = slice_with_padding(bytes, start, elem_size);
+                values.push(bytes_to_value_typed(&elem_bytes, elem_ty));
+            }
+            Value::Aggregate(values)
+        }
         _ => {
             // For other types, return as Bytes
             Value::Bytes(bytes.to_vec())
@@ -2075,6 +2103,44 @@ fn bytes_to_value(bytes: &[AbstractByte], ty: &Type, n: usize) -> Value {
 
 /// Convert a Value to memory bytes.
 fn value_to_bytes(val: &Value, n: usize) -> Vec<AbstractByte> {
+    value_to_bytes_typed(val, &Type::Byte(n as u32), n)
+}
+
+fn value_to_bytes_typed(val: &Value, ty: &Type, n: usize) -> Vec<AbstractByte> {
+    let mut bytes = match ty {
+        Type::Struct(fields) => match val {
+            Value::Aggregate(values) if values.len() == fields.len() => {
+                let mut out = Vec::new();
+                for (field_val, field_ty) in values.iter().zip(fields) {
+                    out.extend(value_to_bytes_typed(
+                        field_val,
+                        field_ty,
+                        type_byte_size(field_ty),
+                    ));
+                }
+                out
+            }
+            _ => vec![AbstractByte::Poison; type_byte_size(ty)],
+        },
+        Type::Array(elem_ty, count) => match val {
+            Value::Aggregate(values) if values.len() == *count as usize => {
+                let mut out = Vec::new();
+                let elem_size = type_byte_size(elem_ty);
+                for value in values {
+                    out.extend(value_to_bytes_typed(value, elem_ty, elem_size));
+                }
+                out
+            }
+            _ => vec![AbstractByte::Poison; type_byte_size(ty)],
+        },
+        _ => value_to_bytes_scalar(val, n),
+    };
+    bytes.resize(n, AbstractByte::Uninit);
+    bytes.truncate(n);
+    bytes
+}
+
+fn value_to_bytes_scalar(val: &Value, n: usize) -> Vec<AbstractByte> {
     match val {
         Value::Int(i) => int_to_le_bytes(i, n),
         Value::Bool(b) => {
@@ -2094,6 +2160,16 @@ fn value_to_bytes(val: &Value, n: usize) -> Vec<AbstractByte> {
         Value::Aggregate(_) => vec![AbstractByte::Uninit; n],
         Value::Mem => vec![],
     }
+}
+
+fn slice_with_padding(bytes: &[AbstractByte], start: usize, size: usize) -> Vec<AbstractByte> {
+    let mut out = if start >= bytes.len() {
+        Vec::new()
+    } else {
+        bytes[start..bytes.len().min(start + size)].to_vec()
+    };
+    out.resize(size, AbstractByte::Uninit);
+    out
 }
 
 /// Extract a value from a nested aggregate using an index path.
@@ -2131,5 +2207,48 @@ fn insert_value(agg: Value, val: &Value, indices: &[u32]) -> Value {
             }
         }
         _ => Value::Poison,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use num_bigint::BigInt;
+
+    #[test]
+    fn aggregate_bytes_roundtrip() {
+        let ty = Type::Struct(vec![
+            Type::Int,
+            Type::Array(Box::new(Type::Bool), 2),
+            Type::Byte(3),
+        ]);
+        let value = Value::Aggregate(vec![
+            Value::Int(BigInt::from(42)),
+            Value::Aggregate(vec![Value::Bool(true), Value::Bool(false)]),
+            Value::Bytes(vec![
+                AbstractByte::Bits(0xAA),
+                AbstractByte::Bits(0xBB),
+                AbstractByte::Bits(0xCC),
+            ]),
+        ]);
+
+        let bytes = value_to_bytes_typed(&value, &ty, type_byte_size(&ty));
+        let decoded = bytes_to_value_typed(&bytes, &ty);
+
+        let Value::Aggregate(fields) = decoded else {
+            panic!("expected aggregate roundtrip");
+        };
+        assert_eq!(fields.len(), 3);
+        assert_eq!(fields[0].as_int(), Some(&BigInt::from(42)));
+        assert_eq!(fields[1].to_string(), "(true, false)");
+        match &fields[2] {
+            Value::Bytes(bs) => {
+                assert_eq!(bs.len(), 3);
+                assert!(matches!(bs[0], AbstractByte::Bits(0xAA)));
+                assert!(matches!(bs[1], AbstractByte::Bits(0xBB)));
+                assert!(matches!(bs[2], AbstractByte::Bits(0xCC)));
+            }
+            other => panic!("expected bytes leaf, got {other:?}"),
+        }
     }
 }

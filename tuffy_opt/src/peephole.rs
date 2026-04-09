@@ -23,6 +23,10 @@ pub struct PeepholeStats {
     pub iterations: usize,
     pub rewrites: usize,
     pub per_rule: BTreeMap<String, usize>,
+    pub promoted_slots: usize,
+    pub promoted_slices: usize,
+    pub promoted_loads: usize,
+    pub eliminated_stores: usize,
 }
 
 impl PeepholeStats {
@@ -31,9 +35,13 @@ impl PeepholeStats {
         *self.per_rule.entry(rule_name.to_string()).or_default() += 1;
     }
 
-    fn merge(&mut self, other: PeepholeStats) {
+    pub(crate) fn merge(&mut self, other: PeepholeStats) {
         self.iterations += other.iterations;
         self.rewrites += other.rewrites;
+        self.promoted_slots += other.promoted_slots;
+        self.promoted_slices += other.promoted_slices;
+        self.promoted_loads += other.promoted_loads;
+        self.eliminated_stores += other.eliminated_stores;
         for (name, count) in other.per_rule {
             *self.per_rule.entry(name).or_default() += count;
         }
@@ -44,6 +52,7 @@ pub fn generated_rule_count() -> usize {
     GENERATED_RULE_COUNT
 }
 
+#[allow(dead_code)]
 pub fn optimize_module(module: &mut Module) -> PeepholeStats {
     let mut total = PeepholeStats::default();
     for func in &mut module.functions {
@@ -1335,6 +1344,7 @@ fn try_fold_constant_root(
     };
     let resolve_symbol = |_symbol| Value::Poison;
     let def_annotation = |value: ValueRef| definition_annotation(func, value);
+    let def_type = |value: ValueRef| definition_type(func, value);
     let mut memory = Memory::new();
     let mut alloc_stack_slot = |_bytes: usize| AllocId(0);
 
@@ -1346,6 +1356,7 @@ fn try_fold_constant_root(
         &node.inst.secondary_result_annotation,
         &resolve_value,
         &resolve_operand_value,
+        &def_type,
         &mut memory,
         &mut alloc_stack_slot,
         &resolve_symbol,
@@ -1439,6 +1450,10 @@ fn definition_annotation(func: &Function, value: ValueRef) -> Option<Annotation>
             .get(value.index())
             .and_then(|node| node.inst.result_annotation.clone())
     }
+}
+
+fn definition_type(func: &Function, value: ValueRef) -> Option<Type> {
+    func.value_type(value).cloned()
 }
 
 #[allow(dead_code)]

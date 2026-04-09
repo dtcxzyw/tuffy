@@ -820,6 +820,7 @@ impl<'a> Interpreter<'a> {
             let def_annotation = |v: ValueRef| -> Option<Annotation> {
                 env_snapshot.get(&v.raw()).and_then(|(_, ann)| ann.clone())
             };
+            let value_type = |v: ValueRef| frame.func.value_type(v).cloned();
 
             let result = execute_instruction(
                 &inst_op,
@@ -829,6 +830,7 @@ impl<'a> Interpreter<'a> {
                 &inst_secondary_result_ann,
                 &resolve_value,
                 &resolve_operand_value,
+                &value_type,
                 &mut self.memory,
                 &mut noop_alloc,
                 &resolve_symbol,
