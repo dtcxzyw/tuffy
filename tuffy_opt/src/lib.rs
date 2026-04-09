@@ -1,5 +1,6 @@
 //! tuffy_opt: Optimization pipeline and pass infrastructure.
 
+mod bulk_memory;
 mod inline;
 mod peephole;
 mod promote;
@@ -14,28 +15,68 @@ pub fn optimize_function(func: &mut Function) -> PeepholeStats {
 }
 
 pub fn optimize_module(module: &mut Module) -> PeepholeStats {
-    let mut total = PeepholeStats::default();
-    for func in &mut module.functions {
-        total.merge(run_local_cleanup(func));
-    }
+    let mut total = run_module_cleanup(module, None);
 
     let inline_result = inline::inline_module(module);
     total.merge(inline_result.stats);
 
     if total.inlined_calls > 0 {
-        for (idx, func) in module.functions.iter_mut().enumerate() {
-            if inline_result.changed_functions[idx] {
-                total.merge(run_local_cleanup(func));
-            }
-        }
+        total.merge(run_module_cleanup(
+            module,
+            Some(&inline_result.changed_functions),
+        ));
     }
     total
 }
 
 fn run_local_cleanup(func: &mut Function) -> PeepholeStats {
-    let mut stats = promote::promote_function(func);
-    stats.merge(peephole::optimize_function(func));
-    stats
+    const MAX_LOCAL_CLEANUP_ROUNDS: usize = 8;
+
+    let mut total = PeepholeStats::default();
+    for _ in 0..MAX_LOCAL_CLEANUP_ROUNDS {
+        let mut round = promote::promote_function(func);
+        round.merge(peephole::optimize_function(func));
+        let changed = round.rewrites > 0
+            || round.promoted_slots > 0
+            || round.promoted_slices > 0
+            || round.promoted_loads > 0
+            || round.eliminated_stores > 0;
+        total.merge(round);
+        if !changed {
+            break;
+        }
+    }
+    total
+}
+
+fn run_module_cleanup(module: &mut Module, changed_functions: Option<&[bool]>) -> PeepholeStats {
+    const MAX_MODULE_CLEANUP_ROUNDS: usize = 6;
+
+    let mut total = PeepholeStats::default();
+    for _ in 0..MAX_MODULE_CLEANUP_ROUNDS {
+        let mut changed = false;
+        for (idx, func) in module.functions.iter_mut().enumerate() {
+            if changed_functions.is_some_and(|flags| !flags[idx]) {
+                continue;
+            }
+            let round = run_local_cleanup(func);
+            changed |= round.rewrites > 0
+                || round.promoted_slots > 0
+                || round.promoted_slices > 0
+                || round.promoted_loads > 0
+                || round.eliminated_stores > 0;
+            total.merge(round);
+        }
+
+        let bulk = bulk_memory::optimize_module(module, changed_functions);
+        changed |= bulk.rewrites > 0;
+        total.merge(bulk);
+
+        if !changed {
+            break;
+        }
+    }
+    total
 }
 
 #[cfg(test)]

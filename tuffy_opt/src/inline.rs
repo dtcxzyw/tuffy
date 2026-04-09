@@ -10,7 +10,9 @@ use tuffy_ir::value::{BlockRef, RegionRef, ValueRef};
 use crate::peephole::PeepholeStats;
 
 const MAX_INLINE_ITERATIONS: usize = 128;
-const INLINE_SCORE_THRESHOLD: u32 = 16;
+const INLINE_SCORE_THRESHOLD: u32 = 24;
+const INLINE_SINGLE_CALLER_THRESHOLD: u32 = 48;
+const INLINE_SINGLE_CALLER_LEAF_THRESHOLD: u32 = 64;
 
 pub(crate) struct InlineResult {
     pub(crate) stats: PeepholeStats,
@@ -38,6 +40,7 @@ struct ModuleAnalysis {
     scc_ids: Vec<usize>,
     scc_sizes: Vec<usize>,
     inline_scores: Vec<Option<u32>>,
+    call_site_counts: Vec<usize>,
 }
 
 pub(crate) fn inline_module(module: &mut Module) -> InlineResult {
@@ -84,11 +87,27 @@ impl ModuleAnalysis {
             .collect::<Vec<_>>();
         let (scc_ids, scc_sizes) = compute_sccs(&adjacency);
         let inline_scores = module.functions.iter().map(inline_score).collect();
+        let mut call_site_counts = vec![0; module.functions.len()];
+        for func in &module.functions {
+            for (_, inst) in func.inst_pool.iter_insts() {
+                let Op::Call(callee, _, _, None) = &inst.op else {
+                    continue;
+                };
+                let Some(sym) = direct_call_symbol(func, callee.clone().raw().value) else {
+                    continue;
+                };
+                let Some(&callee_idx) = func_by_symbol.get(&sym) else {
+                    continue;
+                };
+                call_site_counts[callee_idx] += 1;
+            }
+        }
         Self {
             func_by_symbol,
             scc_ids,
             scc_sizes,
             inline_scores,
+            call_site_counts,
         }
     }
 
@@ -122,10 +141,18 @@ fn find_inline_site(module: &Module, analysis: &ModuleAnalysis) -> Option<Inline
                 let Some(score) = analysis.inline_scores[callee_idx] else {
                     continue;
                 };
-                if score > INLINE_SCORE_THRESHOLD {
+                let callee_func = &module.functions[callee_idx];
+                let call_site_count = analysis.call_site_counts[callee_idx];
+                let inline_budget = if call_site_count == 1 && callee_is_leaf(callee_func) {
+                    INLINE_SINGLE_CALLER_LEAF_THRESHOLD
+                } else if call_site_count == 1 {
+                    INLINE_SINGLE_CALLER_THRESHOLD
+                } else {
+                    INLINE_SCORE_THRESHOLD
+                };
+                if score > inline_budget {
                     continue;
                 }
-                let callee_func = &module.functions[callee_idx];
                 if !supported_entry_block(callee_func) {
                     continue;
                 }
@@ -147,6 +174,13 @@ fn find_inline_site(module: &Module, analysis: &ModuleAnalysis) -> Option<Inline
         }
     }
     None
+}
+
+fn callee_is_leaf(func: &Function) -> bool {
+    !func
+        .inst_pool
+        .iter_insts()
+        .any(|(_, inst)| matches!(inst.op, Op::Call(..)))
 }
 
 fn supported_entry_block(func: &Function) -> bool {

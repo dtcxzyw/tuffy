@@ -32,7 +32,7 @@ pub struct PeepholeStats {
 }
 
 impl PeepholeStats {
-    fn record(&mut self, rule_name: &str) {
+    pub(crate) fn record(&mut self, rule_name: &str) {
         self.rewrites += 1;
         *self.per_rule.entry(rule_name.to_string()).or_default() += 1;
     }
@@ -80,6 +80,10 @@ pub fn optimize_function(func: &mut Function) -> PeepholeStats {
             if func.inst_pool.get(idx).is_none() {
                 continue;
             }
+            if try_apply_manual_rule(func, idx, &mut stats) {
+                changed = true;
+                break 'candidate;
+            }
             if try_apply_generated_rule(func, idx, &mut stats, &mut fact_cache) {
                 changed = true;
                 break 'candidate;
@@ -93,6 +97,245 @@ pub fn optimize_function(func: &mut Function) -> PeepholeStats {
 
     stats.iterations = iterations;
     stats
+}
+
+fn try_apply_manual_rule(func: &mut Function, root_idx: u32, stats: &mut PeepholeStats) -> bool {
+    try_simplify_brif_condition(func, root_idx, stats)
+}
+
+fn try_simplify_brif_condition(
+    func: &mut Function,
+    root_idx: u32,
+    stats: &mut PeepholeStats,
+) -> bool {
+    let Some(root) = func.inst_pool.get(root_idx) else {
+        return false;
+    };
+    let Op::BrIf(cond, _, _, _, _) = &root.inst.op else {
+        return false;
+    };
+
+    let mut matched = BTreeSet::new();
+    let Some((cond_value, invert, rule_name)) =
+        canonical_brif_condition(func, cond.clone().raw().value, &mut matched)
+    else {
+        return false;
+    };
+
+    let replacement = ReplacementTerminator {
+        opcode: TerminatorOpcode::BrIf,
+        operands: vec![cond_value],
+        successors: if invert { vec![1, 0] } else { vec![0, 1] },
+    };
+    apply_terminator_root_rewrite(func, root_idx, replacement, &matched);
+    stats.record(rule_name);
+    true
+}
+
+fn canonical_brif_condition(
+    func: &Function,
+    value: ValueRef,
+    matched: &mut BTreeSet<u32>,
+) -> Option<(ValueRef, bool, &'static str)> {
+    if let Some((cond, invert)) = decode_bool_not(func, value, matched) {
+        return Some((cond, invert, "canonicalize_brif_bool_not"));
+    }
+    decode_intified_bool_compare(func, value, matched)
+        .map(|(cond, invert)| (cond, invert, "canonicalize_brif_intified_bool_compare"))
+}
+
+fn decode_bool_not(
+    func: &Function,
+    value: ValueRef,
+    matched: &mut BTreeSet<u32>,
+) -> Option<(ValueRef, bool)> {
+    if value.is_block_arg() || value.is_secondary_result() {
+        return None;
+    }
+    let node = func.inst_pool.get(value.index())?;
+    let Op::BXor(lhs, rhs) = &node.inst.op else {
+        return None;
+    };
+
+    let lhs_value = lhs.clone().raw().value;
+    let rhs_value = rhs.clone().raw().value;
+    if bound_bool_constant(func, lhs_value) == Some(true)
+        && matches!(func.value_type(rhs_value), Some(Type::Bool))
+    {
+        matched.insert(value.index());
+        if !lhs_value.is_block_arg() && !lhs_value.is_secondary_result() {
+            matched.insert(lhs_value.index());
+        }
+        return Some((rhs_value, true));
+    }
+    if bound_bool_constant(func, rhs_value) == Some(true)
+        && matches!(func.value_type(lhs_value), Some(Type::Bool))
+    {
+        matched.insert(value.index());
+        if !rhs_value.is_block_arg() && !rhs_value.is_secondary_result() {
+            matched.insert(rhs_value.index());
+        }
+        return Some((lhs_value, true));
+    }
+    if bound_bool_constant(func, lhs_value) == Some(false)
+        && matches!(func.value_type(rhs_value), Some(Type::Bool))
+    {
+        matched.insert(value.index());
+        if !lhs_value.is_block_arg() && !lhs_value.is_secondary_result() {
+            matched.insert(lhs_value.index());
+        }
+        return Some((rhs_value, false));
+    }
+    if bound_bool_constant(func, rhs_value) == Some(false)
+        && matches!(func.value_type(lhs_value), Some(Type::Bool))
+    {
+        matched.insert(value.index());
+        if !rhs_value.is_block_arg() && !rhs_value.is_secondary_result() {
+            matched.insert(rhs_value.index());
+        }
+        return Some((lhs_value, false));
+    }
+    None
+}
+
+fn decode_intified_bool_compare(
+    func: &Function,
+    value: ValueRef,
+    matched: &mut BTreeSet<u32>,
+) -> Option<(ValueRef, bool)> {
+    if value.is_block_arg() || value.is_secondary_result() {
+        return None;
+    }
+    let node = func.inst_pool.get(value.index())?;
+    let Op::ICmp(pred, lhs, rhs) = &node.inst.op else {
+        return None;
+    };
+
+    let (bool_source, compare_const, source_is_lhs) =
+        if let Some(constant) = bound_int_constant(func, rhs.clone().raw().value) {
+            let rhs_value = rhs.clone().raw().value;
+            if !rhs_value.is_block_arg() && !rhs_value.is_secondary_result() {
+                matched.insert(rhs_value.index());
+            }
+            let source = decode_intified_bool(func, lhs.clone().raw().value, matched)?;
+            (source, constant, true)
+        } else if let Some(constant) = bound_int_constant(func, lhs.clone().raw().value) {
+            let lhs_value = lhs.clone().raw().value;
+            if !lhs_value.is_block_arg() && !lhs_value.is_secondary_result() {
+                matched.insert(lhs_value.index());
+            }
+            let source = decode_intified_bool(func, rhs.clone().raw().value, matched)?;
+            (source, constant, false)
+        } else {
+            return None;
+        };
+
+    let compare_zero = *compare_const == BigInt::from(0u8);
+    let compare_one = *compare_const == BigInt::from(1u8);
+    if !compare_zero && !compare_one {
+        return None;
+    }
+
+    let (cond, mut invert) = bool_source;
+    invert ^= match pred {
+        ICmpOp::Eq if compare_zero => true,
+        ICmpOp::Eq if compare_one => false,
+        ICmpOp::Ne if compare_zero => false,
+        ICmpOp::Ne if compare_one => true,
+        _ => return None,
+    };
+
+    // Keep commuted constant compares eligible but do not accept non-Eq/Ne roots.
+    let _ = source_is_lhs;
+    matched.insert(value.index());
+    Some((cond, invert))
+}
+
+fn decode_intified_bool(
+    func: &Function,
+    value: ValueRef,
+    matched: &mut BTreeSet<u32>,
+) -> Option<(ValueRef, bool)> {
+    if value.is_block_arg() || value.is_secondary_result() {
+        return None;
+    }
+    let node = func.inst_pool.get(value.index())?;
+    match &node.inst.op {
+        Op::Select(cond, true_value, false_value) => {
+            let true_const = bound_int_constant(func, true_value.value)?;
+            let false_const = bound_int_constant(func, false_value.value)?;
+            if *true_const == BigInt::from(1u8) && *false_const == BigInt::from(0u8) {
+                matched.insert(value.index());
+                if !true_value.value.is_block_arg() && !true_value.value.is_secondary_result() {
+                    matched.insert(true_value.value.index());
+                }
+                if !false_value.value.is_block_arg() && !false_value.value.is_secondary_result() {
+                    matched.insert(false_value.value.index());
+                }
+                Some((cond.clone().raw().value, false))
+            } else if *true_const == BigInt::from(0u8) && *false_const == BigInt::from(1u8) {
+                matched.insert(value.index());
+                if !true_value.value.is_block_arg() && !true_value.value.is_secondary_result() {
+                    matched.insert(true_value.value.index());
+                }
+                if !false_value.value.is_block_arg() && !false_value.value.is_secondary_result() {
+                    matched.insert(false_value.value.index());
+                }
+                Some((cond.clone().raw().value, true))
+            } else {
+                None
+            }
+        }
+        Op::And(lhs, rhs) => {
+            let lhs_value = lhs.clone().raw().value;
+            let rhs_value = rhs.clone().raw().value;
+            let lhs_const = bound_int_constant(func, lhs_value);
+            let rhs_const = bound_int_constant(func, rhs_value);
+            if lhs_const.is_some_and(is_non_negative_odd_int) {
+                if !lhs_value.is_block_arg() && !lhs_value.is_secondary_result() {
+                    matched.insert(lhs_value.index());
+                }
+                let (cond, invert) = decode_intified_bool(func, rhs_value, matched)?;
+                matched.insert(value.index());
+                Some((cond, invert))
+            } else if rhs_const.is_some_and(is_non_negative_odd_int) {
+                if !rhs_value.is_block_arg() && !rhs_value.is_secondary_result() {
+                    matched.insert(rhs_value.index());
+                }
+                let (cond, invert) = decode_intified_bool(func, lhs_value, matched)?;
+                matched.insert(value.index());
+                Some((cond, invert))
+            } else {
+                None
+            }
+        }
+        Op::Xor(lhs, rhs) => {
+            let lhs_value = lhs.clone().raw().value;
+            let rhs_value = rhs.clone().raw().value;
+            if bound_int_constant(func, lhs_value) == Some(&BigInt::from(1u8)) {
+                if !lhs_value.is_block_arg() && !lhs_value.is_secondary_result() {
+                    matched.insert(lhs_value.index());
+                }
+                let (cond, invert) = decode_intified_bool(func, rhs_value, matched)?;
+                matched.insert(value.index());
+                Some((cond, !invert))
+            } else if bound_int_constant(func, rhs_value) == Some(&BigInt::from(1u8)) {
+                if !rhs_value.is_block_arg() && !rhs_value.is_secondary_result() {
+                    matched.insert(rhs_value.index());
+                }
+                let (cond, invert) = decode_intified_bool(func, lhs_value, matched)?;
+                matched.insert(value.index());
+                Some((cond, !invert))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn is_non_negative_odd_int(value: &BigInt) -> bool {
+    value.sign() != Sign::Minus && bigint_is_odd(value)
 }
 
 fn bind_value_slot(slot: &mut Option<ValueRef>, value: ValueRef) -> bool {
