@@ -462,6 +462,16 @@ fn emit_partial_load(ctx: &mut IselCtx, base: VReg, base_offset: i32, dst: VReg,
     }
 }
 
+fn direct_call_symbol(func: &Function, value: ValueRef) -> Option<tuffy_ir::module::SymbolId> {
+    if value.is_block_arg() || value.is_secondary_result() {
+        return None;
+    }
+    match &func.inst(value.index()).op {
+        Op::SymbolAddr(sym) => Some(*sym),
+        _ => None,
+    }
+}
+
 /// Extract IntAnnotation from a ValueRef's result_annotation.
 fn get_int_annotation(func: &Function, val: ValueRef) -> Option<IntAnnotation> {
     if val.is_block_arg() {
@@ -967,31 +977,32 @@ pub fn isel(func: &Function, symbols: &SymbolTable) -> Result<IselResult<VInst>,
         rdx_captured: HashMap::new(),
     };
 
-    let root = &func.regions[func.root_region.index() as usize];
-    for child in &root.children {
-        if let CfgNode::Block(block_ref) = child {
-            ctx.out.push(MInst::Label {
-                id: block_ref.index(),
-            });
-            for (vref, inst) in func.block_insts_with_values(*block_ref) {
-                if select_inst(
-                    &mut ctx,
-                    vref,
-                    &inst.op,
-                    &inst.ty,
-                    func,
-                    symbols,
-                    &call_has_ret2,
-                )
-                .is_none()
-                {
-                    return Err(format!(
-                        "instruction selection failed for {} at value {}: {:?}",
-                        symbols.resolve(func.name),
-                        vref.index(),
-                        inst.op,
-                    ));
-                }
+    let reachable = compute_reachable_blocks(func);
+    for block_ref in collect_block_order(func, func.root_region) {
+        if !reachable[block_ref.index() as usize] {
+            continue;
+        }
+        ctx.out.push(MInst::Label {
+            id: block_ref.index(),
+        });
+        for (vref, inst) in func.block_insts_with_values(block_ref) {
+            if select_inst(
+                &mut ctx,
+                vref,
+                &inst.op,
+                &inst.ty,
+                func,
+                symbols,
+                &call_has_ret2,
+            )
+            .is_none()
+            {
+                return Err(format!(
+                    "instruction selection failed for {} at value {}: {:?}",
+                    symbols.resolve(func.name),
+                    vref.index(),
+                    inst.op,
+                ));
             }
         }
     }
@@ -1007,6 +1018,53 @@ pub fn isel(func: &Function, symbols: &SymbolTable) -> Result<IselResult<VInst>,
         isel_frame_size: ctx.stack.frame_size,
         has_calls,
     })
+}
+
+fn collect_block_order(
+    func: &Function,
+    region: tuffy_ir::value::RegionRef,
+) -> Vec<tuffy_ir::value::BlockRef> {
+    let mut out = Vec::new();
+    collect_block_order_into(func, region, &mut out);
+    out
+}
+
+fn collect_block_order_into(
+    func: &Function,
+    region: tuffy_ir::value::RegionRef,
+    out: &mut Vec<tuffy_ir::value::BlockRef>,
+) {
+    for child in &func.region(region).children {
+        match child {
+            CfgNode::Block(block) => out.push(*block),
+            CfgNode::Region(region) => collect_block_order_into(func, *region, out),
+        }
+    }
+}
+
+fn compute_reachable_blocks(func: &Function) -> Vec<bool> {
+    let mut reachable = vec![false; func.blocks.len()];
+    let mut stack = vec![func.entry_block()];
+    while let Some(block) = stack.pop() {
+        let idx = block.index() as usize;
+        if reachable[idx] {
+            continue;
+        }
+        reachable[idx] = true;
+        let Some(last_idx) = func.block(block).last_inst else {
+            continue;
+        };
+        match &func.inst(last_idx).op {
+            Op::Br(target, _) => stack.push(*target),
+            Op::BrIf(_, then_block, _, else_block, _) => {
+                stack.push(*then_block);
+                stack.push(*else_block);
+            }
+            Op::Continue(_) => {}
+            _ => {}
+        }
+    }
+    reachable
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1611,6 +1669,7 @@ fn select_inst(
                 &dst.clone().raw(),
                 &src.clone().raw(),
                 &count.clone().raw(),
+                func,
             )?;
         }
 
@@ -1620,6 +1679,7 @@ fn select_inst(
                 &dst.clone().raw(),
                 &src.clone().raw(),
                 &count.clone().raw(),
+                func,
             )?;
         }
 
@@ -3531,33 +3591,13 @@ fn select_brif(
     func: &Function,
 ) -> Option<()> {
     let has_args = !then_args.is_empty() || !else_args.is_empty();
-    let cond_test_size = if func.value_type(cond.value) == Some(&Type::Bool) {
-        OpSize::S8
-    } else {
-        OpSize::S64
-    };
+    let branch_test = decode_branch_test(ctx, func, cond.value);
 
     if has_args {
         let intermediate = ctx.next_label;
         ctx.next_label += 1;
 
-        if let Some(cc) = ctx.cmps.get(cond.value) {
-            ctx.out.push(MInst::Jcc {
-                cc,
-                target: intermediate,
-            });
-        } else {
-            let cond_vreg = ctx.regs.get(cond.value)?;
-            ctx.out.push(MInst::TestRR {
-                size: cond_test_size,
-                src1: cond_vreg,
-                src2: cond_vreg,
-            });
-            ctx.out.push(MInst::Jcc {
-                cc: CondCode::Ne,
-                target: intermediate,
-            });
-        }
+        emit_branch_jump(ctx, branch_test, cond.value, intermediate, func)?;
 
         // Else path.
         emit_block_arg_copies(ctx, *else_block, else_args, func)?;
@@ -3572,23 +3612,7 @@ fn select_brif(
             target: then_block.index(),
         });
     } else {
-        if let Some(cc) = ctx.cmps.get(cond.value) {
-            ctx.out.push(MInst::Jcc {
-                cc,
-                target: then_block.index(),
-            });
-        } else {
-            let cond_vreg = ctx.regs.get(cond.value)?;
-            ctx.out.push(MInst::TestRR {
-                size: cond_test_size,
-                src1: cond_vreg,
-                src2: cond_vreg,
-            });
-            ctx.out.push(MInst::Jcc {
-                cc: CondCode::Ne,
-                target: then_block.index(),
-            });
-        }
+        emit_branch_jump(ctx, branch_test, cond.value, then_block.index(), func)?;
         ctx.out.push(MInst::Jmp {
             target: else_block.index(),
         });
@@ -3606,6 +3630,28 @@ fn select_call(
     symbols: &SymbolTable,
     call_has_ret2: &HashSet<u32>,
 ) -> Option<()> {
+    let cleanup_label = match &func.inst(vref.index()).op {
+        Op::Call(_, _, _, cleanup) => *cleanup,
+        _ => None,
+    };
+    if cleanup_label.is_none()
+        && let Some(sym_id) = direct_call_symbol(func, callee.value)
+    {
+        let name = symbols.resolve(sym_id);
+        if (name == "memcpy" || name == "memmove")
+            && args.len() == 3
+            && let Some(bytes) = const_byte_count(func, &args[2])
+            && lower_small_memtransfer(ctx, &args[0], &args[1], bytes).is_some()
+        {
+            if func.inst(vref.index()).secondary_ty.is_some() {
+                let dst = ctx.ensure_in_reg(args[0].value)?;
+                let secondary = ValueRef::inst_secondary_result(vref.index());
+                ctx.regs.assign(secondary, dst);
+            }
+            return Some(());
+        }
+    }
+
     // Phase 1: materialize all args into unconstrained vregs.
     // This must happen before any fixed-register moves, otherwise
     // ensure_in_reg may emit LEA/MOV instructions whose destinations
@@ -3845,10 +3891,6 @@ fn select_call(
     };
 
     let callee_idx = callee.value.index();
-    let cleanup_label = match &func.inst(vref.index()).op {
-        Op::Call(_, _, _, cleanup) => *cleanup,
-        _ => None,
-    };
     if let Op::SymbolAddr(sym_id) = &func.inst(callee_idx).op {
         let name = symbols.resolve(*sym_id).to_string();
         ctx.out.push(MInst::CallSym {
@@ -4254,11 +4296,33 @@ fn icmp_to_cc(op: ICmpOp, ann: Option<IntAnnotation>) -> CondCode {
     }
 }
 
-fn select_memcopy(ctx: &mut IselCtx, dst: &Operand, src: &Operand, count: &Operand) -> Option<()> {
+fn select_memcopy(
+    ctx: &mut IselCtx,
+    dst: &Operand,
+    src: &Operand,
+    count: &Operand,
+    func: &Function,
+) -> Option<()> {
+    if let Some(bytes) = const_byte_count(func, count)
+        && lower_small_memtransfer(ctx, dst, src, bytes).is_some()
+    {
+        return Some(());
+    }
     emit_libc_call(ctx, "memcpy", &[dst, src, count])
 }
 
-fn select_memmove(ctx: &mut IselCtx, dst: &Operand, src: &Operand, count: &Operand) -> Option<()> {
+fn select_memmove(
+    ctx: &mut IselCtx,
+    dst: &Operand,
+    src: &Operand,
+    count: &Operand,
+    func: &Function,
+) -> Option<()> {
+    if let Some(bytes) = const_byte_count(func, count)
+        && lower_small_memtransfer(ctx, dst, src, bytes).is_some()
+    {
+        return Some(());
+    }
     emit_libc_call(ctx, "memmove", &[dst, src, count])
 }
 
@@ -4284,4 +4348,318 @@ fn emit_libc_call(ctx: &mut IselCtx, name: &str, args: &[&Operand]) -> Option<()
         cleanup_label: None,
     });
     Some(())
+}
+
+#[derive(Clone, Copy)]
+enum BranchTest {
+    Always(bool),
+    Flags(CondCode),
+    Value { reg: VReg, size: OpSize },
+}
+
+fn emit_branch_jump(
+    ctx: &mut IselCtx,
+    branch_test: Option<BranchTest>,
+    cond_value: ValueRef,
+    target: u32,
+    func: &Function,
+) -> Option<()> {
+    match branch_test.or_else(|| fallback_branch_test(ctx, cond_value, func))? {
+        BranchTest::Always(true) => {
+            ctx.out.push(MInst::Jmp { target });
+        }
+        BranchTest::Always(false) => {}
+        BranchTest::Flags(cc) => {
+            ctx.out.push(MInst::Jcc { cc, target });
+        }
+        BranchTest::Value { reg, size } => {
+            ctx.out.push(MInst::TestRR {
+                size,
+                src1: reg,
+                src2: reg,
+            });
+            ctx.out.push(MInst::Jcc {
+                cc: CondCode::Ne,
+                target,
+            });
+        }
+    }
+    Some(())
+}
+
+fn fallback_branch_test(
+    ctx: &mut IselCtx,
+    cond_value: ValueRef,
+    func: &Function,
+) -> Option<BranchTest> {
+    if let Some(cc) = ctx.cmps.get(cond_value) {
+        return Some(BranchTest::Flags(cc));
+    }
+    let size = if func.value_type(cond_value) == Some(&Type::Bool) {
+        OpSize::S8
+    } else {
+        OpSize::S64
+    };
+    Some(BranchTest::Value {
+        reg: ctx.ensure_in_reg(cond_value)?,
+        size,
+    })
+}
+
+fn decode_branch_test(ctx: &mut IselCtx, func: &Function, value: ValueRef) -> Option<BranchTest> {
+    if value.is_block_arg() || value.is_secondary_result() {
+        return None;
+    }
+    let node = func.inst_pool.get(value.index())?;
+    match &node.inst.op {
+        Op::BConst(value) => Some(BranchTest::Always(*value)),
+        Op::BXor(lhs, rhs) => {
+            let lhs_bool = bool_const(func, lhs.clone().raw().value);
+            let rhs_bool = bool_const(func, rhs.clone().raw().value);
+            if lhs_bool == Some(true) {
+                Some(invert_branch_test(decode_branch_test(
+                    ctx,
+                    func,
+                    rhs.clone().raw().value,
+                )?))
+            } else if rhs_bool == Some(true) {
+                Some(invert_branch_test(decode_branch_test(
+                    ctx,
+                    func,
+                    lhs.clone().raw().value,
+                )?))
+            } else if lhs_bool == Some(false) {
+                decode_branch_test(ctx, func, rhs.clone().raw().value)
+            } else if rhs_bool == Some(false) {
+                decode_branch_test(ctx, func, lhs.clone().raw().value)
+            } else {
+                None
+            }
+        }
+        Op::Select(cond, true_value, false_value) => {
+            let true_const = int_const(func, true_value.value)?;
+            let false_const = int_const(func, false_value.value)?;
+            if true_const == 1 && false_const == 0 {
+                decode_branch_test(ctx, func, cond.clone().raw().value)
+            } else if true_const == 0 && false_const == 1 {
+                Some(invert_branch_test(decode_branch_test(
+                    ctx,
+                    func,
+                    cond.clone().raw().value,
+                )?))
+            } else {
+                None
+            }
+        }
+        Op::And(lhs, rhs) => {
+            let lhs_value = lhs.clone().raw().value;
+            let rhs_value = rhs.clone().raw().value;
+            if int_const(func, lhs_value).is_some_and(is_non_negative_odd) {
+                decode_branch_test(ctx, func, rhs_value)
+            } else if int_const(func, rhs_value).is_some_and(is_non_negative_odd) {
+                decode_branch_test(ctx, func, lhs_value)
+            } else {
+                None
+            }
+        }
+        Op::Xor(lhs, rhs) => {
+            let lhs_value = lhs.clone().raw().value;
+            let rhs_value = rhs.clone().raw().value;
+            if int_const(func, lhs_value) == Some(1) {
+                Some(invert_branch_test(decode_branch_test(
+                    ctx, func, rhs_value,
+                )?))
+            } else if int_const(func, rhs_value) == Some(1) {
+                Some(invert_branch_test(decode_branch_test(
+                    ctx, func, lhs_value,
+                )?))
+            } else {
+                None
+            }
+        }
+        Op::ICmp(pred, lhs, rhs) => {
+            let lhs_value = lhs.clone().raw().value;
+            let rhs_value = rhs.clone().raw().value;
+            if let Some(constant) = int_const(func, rhs_value)
+                && let Some(branch_test) = decode_intified_bool_compare(
+                    ctx,
+                    func,
+                    *pred,
+                    lhs.clone().raw().value,
+                    constant,
+                )
+            {
+                return Some(branch_test);
+            }
+            if let Some(constant) = int_const(func, lhs_value)
+                && let Some(branch_test) = decode_intified_bool_compare(
+                    ctx,
+                    func,
+                    flip_cmp_inputs(*pred),
+                    rhs.clone().raw().value,
+                    constant,
+                )
+            {
+                return Some(branch_test);
+            }
+            let cc = emit_icmp_compare(ctx, func, *pred, &lhs.clone().raw(), &rhs.clone().raw())?;
+            Some(BranchTest::Flags(cc))
+        }
+        _ => None,
+    }
+}
+
+fn decode_intified_bool_compare(
+    ctx: &mut IselCtx,
+    func: &Function,
+    pred: ICmpOp,
+    intified_value: ValueRef,
+    compare_const: i64,
+) -> Option<BranchTest> {
+    if compare_const != 0 && compare_const != 1 {
+        return None;
+    }
+    let branch_test = decode_branch_test(ctx, func, intified_value)?;
+    match (pred, compare_const) {
+        (ICmpOp::Eq, 0) | (ICmpOp::Ne, 1) => Some(invert_branch_test(branch_test)),
+        (ICmpOp::Eq, 1) | (ICmpOp::Ne, 0) => Some(branch_test),
+        _ => None,
+    }
+}
+
+fn invert_branch_test(branch_test: BranchTest) -> BranchTest {
+    match branch_test {
+        BranchTest::Always(value) => BranchTest::Always(!value),
+        BranchTest::Flags(cc) => BranchTest::Flags(invert_cc(cc)),
+        BranchTest::Value { reg, size } => BranchTest::Value { reg, size },
+    }
+}
+
+fn invert_cc(cc: CondCode) -> CondCode {
+    match cc {
+        CondCode::E => CondCode::Ne,
+        CondCode::Ne => CondCode::E,
+        CondCode::L => CondCode::Ge,
+        CondCode::Le => CondCode::G,
+        CondCode::G => CondCode::Le,
+        CondCode::Ge => CondCode::L,
+        CondCode::B => CondCode::Ae,
+        CondCode::Be => CondCode::A,
+        CondCode::A => CondCode::Be,
+        CondCode::Ae => CondCode::B,
+        CondCode::O => CondCode::No,
+        CondCode::No => CondCode::O,
+    }
+}
+
+fn flip_cmp_inputs(pred: ICmpOp) -> ICmpOp {
+    match pred {
+        ICmpOp::Eq => ICmpOp::Eq,
+        ICmpOp::Ne => ICmpOp::Ne,
+        ICmpOp::Lt => ICmpOp::Gt,
+        ICmpOp::Le => ICmpOp::Ge,
+        ICmpOp::Gt => ICmpOp::Lt,
+        ICmpOp::Ge => ICmpOp::Le,
+    }
+}
+
+fn emit_icmp_compare(
+    ctx: &mut IselCtx,
+    func: &Function,
+    pred: ICmpOp,
+    lhs: &Operand,
+    rhs: &Operand,
+) -> Option<CondCode> {
+    let lhs_reg = ctx.ensure_in_reg(lhs.value)?;
+    let rhs_reg = ctx.ensure_in_reg(rhs.value)?;
+    let cmp_size = operand_int_annotation(func, lhs)
+        .or_else(|| operand_int_annotation(func, rhs))
+        .map(|ann| match ann.bit_width {
+            8 => OpSize::S8,
+            16 => OpSize::S16,
+            32 => OpSize::S32,
+            _ => OpSize::S64,
+        })
+        .unwrap_or(OpSize::S64);
+    ctx.out.push(MInst::CmpRR {
+        size: cmp_size,
+        src1: lhs_reg,
+        src2: rhs_reg,
+    });
+    Some(icmp_to_cc(
+        pred,
+        operand_int_annotation(func, lhs).or_else(|| operand_int_annotation(func, rhs)),
+    ))
+}
+
+fn operand_int_annotation(func: &Function, operand: &Operand) -> Option<IntAnnotation> {
+    operand
+        .annotation
+        .as_ref()
+        .and_then(|annotation| match annotation {
+            Annotation::Int(ann) => Some(*ann),
+            _ => None,
+        })
+        .or_else(|| get_int_annotation(func, operand.value))
+}
+
+fn const_byte_count(func: &Function, operand: &Operand) -> Option<u32> {
+    int_const(func, operand.value).and_then(|constant| u32::try_from(constant).ok())
+}
+
+fn lower_small_memtransfer(
+    ctx: &mut IselCtx,
+    dst: &Operand,
+    src: &Operand,
+    bytes: u32,
+) -> Option<()> {
+    if bytes == 0 {
+        return Some(());
+    }
+    if bytes > 16 {
+        return None;
+    }
+
+    let dst_reg = ctx.ensure_in_reg(dst.value)?;
+    let src_reg = ctx.ensure_in_reg(src.value)?;
+    if bytes <= 8 {
+        let tmp = ctx.alloc.alloc();
+        emit_partial_load(ctx, src_reg, 0, tmp, bytes);
+        emit_partial_store(ctx, dst_reg, 0, tmp, bytes);
+        return Some(());
+    }
+
+    let lo = ctx.alloc.alloc();
+    let hi = ctx.alloc.alloc();
+    emit_partial_load(ctx, src_reg, 0, lo, 8);
+    emit_partial_load(ctx, src_reg, 8, hi, bytes - 8);
+    emit_partial_store(ctx, dst_reg, 0, lo, 8);
+    emit_partial_store(ctx, dst_reg, 8, hi, bytes - 8);
+    Some(())
+}
+
+fn int_const(func: &Function, value: ValueRef) -> Option<i64> {
+    if value.is_block_arg() || value.is_secondary_result() {
+        return None;
+    }
+    let node = func.inst_pool.get(value.index())?;
+    let Op::Const(constant) = &node.inst.op else {
+        return None;
+    };
+    constant.to_i64()
+}
+
+fn bool_const(func: &Function, value: ValueRef) -> Option<bool> {
+    if value.is_block_arg() || value.is_secondary_result() {
+        return None;
+    }
+    let node = func.inst_pool.get(value.index())?;
+    match &node.inst.op {
+        Op::BConst(value) => Some(*value),
+        _ => None,
+    }
+}
+
+fn is_non_negative_odd(value: i64) -> bool {
+    value >= 0 && value & 1 == 1
 }

@@ -1,5 +1,6 @@
 //! Tests for x86-64 target definitions, instruction selection, encoding, and ELF emission.
 
+use crate::inst::MInst;
 use crate::reg::Gpr;
 use tuffy_ir::types::Annotation;
 
@@ -22,6 +23,7 @@ use tuffy_ir::builder::Builder;
 use tuffy_ir::function::{Function, RegionKind};
 use tuffy_ir::instruction::{ICmpOp, Op, Operand, Origin};
 use tuffy_ir::module::SymbolTable;
+use tuffy_ir::parser::parse_module;
 use tuffy_ir::types::{FloatType, IntAnnotation, IntSignedness, Type};
 use tuffy_ir::value::ValueRef;
 use tuffy_target::legality::{LegalityInfo, LegalizeAction};
@@ -141,6 +143,144 @@ fn backend_compile_function_propagates_isel_error() {
     };
     assert!(err.contains("instruction selection failed"));
     assert!(err.contains("Continue"));
+}
+
+#[test]
+fn isel_small_constant_memcopy_avoids_libcall() {
+    let module = parse_module(
+        r#"
+func @small_memcopy(ptr, ptr) {
+  bb0(v0: mem):
+    v1: ptr = param 0
+    v2: ptr = param 1
+    v3: int:u64 = iconst 4
+    v4: mem = memcopy v1:align4, v2:align4, v3, v0
+    ret v4
+}
+"#,
+    )
+    .expect("module should parse");
+    let func = &module.functions[0];
+    let result = isel::isel(func, &module.symbols).expect("isel should succeed for small memcopy");
+
+    assert!(
+        !result
+            .insts
+            .iter()
+            .any(|inst| matches!(inst, MInst::CallSym { name, .. } if name == "memcpy")),
+        "small constant memcopy should not call memcpy: {:?}",
+        result.insts
+    );
+}
+
+#[test]
+fn isel_small_constant_memmove_avoids_libcall() {
+    let module = parse_module(
+        r#"
+func @small_memmove(ptr, ptr) {
+  bb0(v0: mem):
+    v1: ptr = param 0
+    v2: ptr = param 1
+    v3: int:u64 = iconst 4
+    v4: mem = memmove v1:align4, v2:align4, v3, v0
+    ret v4
+}
+"#,
+    )
+    .expect("module should parse");
+    let func = &module.functions[0];
+    let result = isel::isel(func, &module.symbols).expect("isel should succeed for small memmove");
+
+    assert!(
+        !result
+            .insts
+            .iter()
+            .any(|inst| matches!(inst, MInst::CallSym { name, .. } if name == "memmove")),
+        "small constant memmove should not call memmove: {:?}",
+        result.insts
+    );
+}
+
+#[test]
+fn isel_small_direct_memcpy_call_avoids_libcall() {
+    let module = parse_module(
+        r#"
+func @small_direct_memcpy(ptr, ptr) -> int:u64 {
+  bb0(v0: mem):
+    v1: ptr = param 0
+    v2: ptr = param 1
+    v3: ptr = symbol_addr @memcpy
+    v4: int:u64 = iconst 4
+    v5: mem, v6: int:u64 = call v3(v1, v2, v4), v0 -> int:u64
+    ret v6, v5
+}
+"#,
+    )
+    .expect("module should parse");
+    let func = &module.functions[0];
+    let result =
+        isel::isel(func, &module.symbols).expect("isel should succeed for direct memcpy call");
+
+    assert!(
+        !result
+            .insts
+            .iter()
+            .any(|inst| matches!(inst, MInst::CallSym { name, .. } if name == "memcpy")),
+        "small direct memcpy call should not call memcpy: {:?}",
+        result.insts
+    );
+}
+
+#[test]
+fn isel_branch_only_intified_bool_tree_stays_in_flags() {
+    let module = parse_module(
+        r#"
+func @branch_ladder(int:s32, int:s32) {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    v2: int:s32 = param 1
+    v3: bool = icmp.lt v1, v2
+    v4: int:s32 = iconst 1
+    v5: int:s32 = iconst 0
+    v6: int:s32 = select v3, v4, v5
+    v7: int:s32 = iconst 0
+    v8: bool = icmp.eq v6, v7
+    brif v8, bb1(v0), bb2(v0)
+  bb1(v10: mem):
+    ret v10
+  bb2(v11: mem):
+    ret v11
+}
+"#,
+    )
+    .expect("module should parse");
+    let func = &module.functions[0];
+    let result = isel::isel(func, &module.symbols).expect("isel should succeed for branch ladder");
+
+    assert!(
+        result
+            .insts
+            .iter()
+            .any(|inst| matches!(inst, MInst::CmpRR { .. })),
+        "branch ladder should emit a compare: {:?}",
+        result.insts
+    );
+    assert!(
+        result
+            .insts
+            .iter()
+            .any(|inst| matches!(inst, MInst::Jcc { .. })),
+        "branch ladder should emit a conditional jump: {:?}",
+        result.insts
+    );
+    assert!(
+        result
+            .insts
+            .windows(2)
+            .any(|window| { matches!(window, [MInst::CmpRR { .. }, MInst::Jcc { .. }]) }),
+        "branch ladder should finish with a recovered compare+jump pair: {:?}",
+        result.insts
+    );
 }
 
 fn build_add_func() -> (Function, SymbolTable) {
