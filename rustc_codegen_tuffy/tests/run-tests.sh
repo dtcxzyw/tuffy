@@ -88,6 +88,7 @@ run_test "const_slice_of_str_refs" "$FIXTURE_DIR/const_slice_of_str_refs.rs" "ok
 run_test "trait_object_branch_vtable" "$FIXTURE_DIR/trait_object_branch_vtable.rs" "ok"
 run_test "aggregate_eq_cfg" "$FIXTURE_DIR/aggregate_eq_cfg.rs" "ok"
 run_test "array_iter_enumerate" "$FIXTURE_DIR/array_iter_enumerate.rs" "ok"
+run_test "catch_unwind_call_cleanup" "$FIXTURE_DIR/catch_unwind_call_cleanup.rs" "ok"
 
 echo ""
 echo "=== Results: $pass passed, $fail failed ==="

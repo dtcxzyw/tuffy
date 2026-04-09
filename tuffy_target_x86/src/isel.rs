@@ -977,14 +977,17 @@ pub fn isel(func: &Function, symbols: &SymbolTable) -> Result<IselResult<VInst>,
         rdx_captured: HashMap::new(),
     };
 
-    let reachable = compute_reachable_blocks(func);
     for block_ref in collect_block_order(func, func.root_region) {
-        if !reachable[block_ref.index() as usize] {
-            continue;
-        }
+        // Emit all blocks, including unwind-entry cleanup blocks that are
+        // intentionally unreachable from normal control flow.
         ctx.out.push(MInst::Label {
             id: block_ref.index(),
         });
+        for block_arg in func.block_arg_values(block_ref) {
+            if func.value_type(block_arg) != Some(&Type::Mem) {
+                let _ = ctx.block_arg_reg(block_arg);
+            }
+        }
         for (vref, inst) in func.block_insts_with_values(block_ref) {
             if select_inst(
                 &mut ctx,
@@ -1040,31 +1043,6 @@ fn collect_block_order_into(
             CfgNode::Region(region) => collect_block_order_into(func, *region, out),
         }
     }
-}
-
-fn compute_reachable_blocks(func: &Function) -> Vec<bool> {
-    let mut reachable = vec![false; func.blocks.len()];
-    let mut stack = vec![func.entry_block()];
-    while let Some(block) = stack.pop() {
-        let idx = block.index() as usize;
-        if reachable[idx] {
-            continue;
-        }
-        reachable[idx] = true;
-        let Some(last_idx) = func.block(block).last_inst else {
-            continue;
-        };
-        match &func.inst(last_idx).op {
-            Op::Br(target, _) => stack.push(*target),
-            Op::BrIf(_, then_block, _, else_block, _) => {
-                stack.push(*then_block);
-                stack.push(*else_block);
-            }
-            Op::Continue(_) => {}
-            _ => {}
-        }
-    }
-    reachable
 }
 
 #[allow(clippy::too_many_arguments)]

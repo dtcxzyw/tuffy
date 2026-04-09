@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use rustc_codegen_ssa::TargetConfig;
 use rustc_session::Session;
-use rustc_session::config::{InstrumentCoverage, Lto, OptLevel};
+use rustc_session::config::{InstrumentCoverage, Lto};
 use rustc_span::Symbol;
 
 #[derive(Clone, Debug)]
@@ -22,7 +22,7 @@ impl BackendOptions {
             .iter()
             .find_map(|arg| arg.strip_prefix("dump-module="))
             .map(PathBuf::from);
-        let run_tuffy_opt = sess.opts.optimize != OptLevel::No;
+        let run_tuffy_opt = false;
 
         Self {
             dump_ir,

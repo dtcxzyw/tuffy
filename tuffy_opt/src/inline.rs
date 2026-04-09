@@ -177,7 +177,7 @@ fn find_inline_site(module: &Module, analysis: &ModuleAnalysis) -> Option<Inline
                     continue;
                 }
                 let ret2 = collect_ret2_spec(caller, value.index())?;
-                if !call_signature_matches(inst, callee_func, ret2.as_ref()) {
+                if !call_signature_matches(caller, inst, callee_func, ret2.as_ref()) {
                     continue;
                 }
                 return Some(InlineSite {
@@ -255,10 +255,23 @@ fn supported_entry_block(func: &Function) -> bool {
 }
 
 fn call_signature_matches(
+    caller: &Function,
     call_inst: &Instruction,
     callee: &Function,
     ret2: Option<&Ret2Spec>,
 ) -> bool {
+    let Op::Call(_, args, _, _) = &call_inst.op else {
+        return false;
+    };
+    if args.len() != callee.params.len() {
+        return false;
+    }
+    for (arg, expected_ty) in args.iter().zip(callee.params.iter()) {
+        if caller.value_type(arg.value) != Some(expected_ty) {
+            return false;
+        }
+    }
+
     if call_inst.secondary_ty != callee.ret_ty {
         return false;
     }

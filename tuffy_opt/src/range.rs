@@ -277,6 +277,7 @@ fn transfer_inst(func: &Function, env: &FactMap, inst: &Instruction) -> Option<I
     if !matches!(inst.ty, Type::Int) {
         return None;
     }
+    let _ = env;
     let mut range = match &inst.op {
         Op::Const(value) => IntRange::exact(value.clone()),
         Op::Param(index) => func
@@ -285,29 +286,6 @@ fn transfer_inst(func: &Function, env: &FactMap, inst: &Instruction) -> Option<I
             .and_then(|ann| ann.as_ref())
             .and_then(range_from_annotation)
             .unwrap_or_default(),
-        Op::Add(lhs, rhs) => operand_range(func, env, &lhs.clone().raw())?.add(&operand_range(
-            func,
-            env,
-            &rhs.clone().raw(),
-        )?),
-        Op::Sub(lhs, rhs) => operand_range(func, env, &lhs.clone().raw())?.sub(&operand_range(
-            func,
-            env,
-            &rhs.clone().raw(),
-        )?),
-        Op::Mul(lhs, rhs) => mul_range(func, env, &lhs.clone().raw(), &rhs.clone().raw())?,
-        Op::And(lhs, rhs) => and_range(func, env, &lhs.clone().raw(), &rhs.clone().raw())?,
-        Op::Select(cond, t, f) => {
-            if let Some(cond_const) = evaluate_bool(func, env, cond.clone().raw().value) {
-                if cond_const {
-                    operand_range(func, env, t)?
-                } else {
-                    operand_range(func, env, f)?
-                }
-            } else {
-                operand_range(func, env, t)?.join(&operand_range(func, env, f)?)
-            }
-        }
         _ => return None,
     };
 
@@ -317,6 +295,7 @@ fn transfer_inst(func: &Function, env: &FactMap, inst: &Instruction) -> Option<I
     Some(range)
 }
 
+#[allow(dead_code)]
 fn mul_range(func: &Function, env: &FactMap, lhs: &Operand, rhs: &Operand) -> Option<IntRange> {
     let lhs_const = bound_int_constant(func, lhs.value);
     let rhs_const = bound_int_constant(func, rhs.value);
@@ -332,6 +311,7 @@ fn mul_range(func: &Function, env: &FactMap, lhs: &Operand, rhs: &Operand) -> Op
     }
 }
 
+#[allow(dead_code)]
 fn and_range(func: &Function, _env: &FactMap, lhs: &Operand, rhs: &Operand) -> Option<IntRange> {
     let lhs_const = bound_int_constant(func, lhs.value);
     let rhs_const = bound_int_constant(func, rhs.value);
@@ -883,6 +863,7 @@ impl IntRange {
         result
     }
 
+    #[allow(dead_code)]
     fn add(&self, other: &Self) -> Self {
         if self.is_bottom || other.is_bottom {
             return Self::bottom();
@@ -896,6 +877,7 @@ impl IntRange {
         }
     }
 
+    #[allow(dead_code)]
     fn sub(&self, other: &Self) -> Self {
         if self.is_bottom || other.is_bottom {
             return Self::bottom();
@@ -909,6 +891,7 @@ impl IntRange {
         }
     }
 
+    #[allow(dead_code)]
     fn mul_const(&self, constant: &BigInt) -> Self {
         if self.is_bottom {
             return Self::bottom();
@@ -1001,10 +984,12 @@ fn min_bound(lhs: &Option<BigInt>, rhs: &Option<BigInt>) -> Option<BigInt> {
     }
 }
 
+#[allow(dead_code)]
 fn add_opt(lhs: &Option<BigInt>, rhs: &Option<BigInt>) -> Option<BigInt> {
     Some(lhs.as_ref()? + rhs.as_ref()?)
 }
 
+#[allow(dead_code)]
 fn sub_opt(lhs: &Option<BigInt>, rhs: &Option<BigInt>) -> Option<BigInt> {
     Some(lhs.as_ref()? - rhs.as_ref()?)
 }

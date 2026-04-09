@@ -1,7 +1,10 @@
-use tuffy_ir::instruction::Op;
+use tuffy_ir::instruction::{Instruction, Op, Operand, Origin};
 use tuffy_ir::parser::parse_module;
+use tuffy_ir::types::Type;
+use tuffy_ir::value::ValueRef;
 use tuffy_ir::verifier::verify_module;
 
+use crate::cfg::collect_block_refs;
 use crate::{generated_rule_count, optimize_module};
 
 fn optimize(input: &str) -> (String, crate::PeepholeStats) {
@@ -1079,6 +1082,37 @@ func @caller(int:s32) -> int:s32 {
 }
 
 #[test]
+fn skips_inlining_when_argument_types_do_not_match() {
+    let input = r#"
+func @as_ref(ptr, int:i64) -> ptr {
+  bb0(v0: mem):
+    v1: ptr = param 0
+    v2: int:i64 = param 1
+    ret v1, v2, v0
+}
+
+func @caller(ptr) -> int:i64 {
+  bb0(v0: mem):
+    v1: ptr = param 0
+    v2: int:i64 = load.8 v1, v0
+    v3: int:i64 = iconst 8
+    v4: ptr = ptradd v1, v3
+    v5: int:i64 = load.8 v4, v0
+    v6: ptr = symbol_addr @as_ref
+    v7: mem, v8: ptr = call v6(v2, v5), v0 -> ptr
+    v9: int:i64 = call_ret2 v7
+    ret v9, v7
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        output.contains(" = call "),
+        "mismatched local call signatures must not inline:\n{output}"
+    );
+    assert_eq!(stats.inlined_calls, 0);
+}
+
+#[test]
 fn inlines_region_aware_callee() {
     let input = r#"
 func @loop_region(int:s32) -> int:s32 {
@@ -1638,4 +1672,63 @@ func @skip_div_zero() {
     let (output, stats) = optimize(input);
     assert_eq!(normalize_ir(&output), normalize_ir(input));
     assert_eq!(stats.rewrites, 0);
+}
+
+#[test]
+fn promotion_preserves_unreachable_block_link_order() {
+    let input = r#"
+func @promotion_unreachable_order() {
+  bb0(v0: mem):
+    v1: ptr = stack_slot 4
+    v2: int:s32 = iconst 1
+    v3: mem = store.4 v2, v1, v0
+    v4: int:s32 = load.4 v1, v3
+    ret v3
+
+  bb1(v5: mem):
+    br bb2(v5)
+
+  bb2(v6: mem):
+    ret v6
+
+  bb3(v7: mem):
+    ret v7
+}
+"#;
+    let mut module = parse_module(input).unwrap_or_else(|e| panic!("parse error: {e}"));
+    let func = &mut module.functions[0];
+    let blocks = collect_block_refs(func);
+    let unreachable = blocks[1];
+    let then_block = blocks[2];
+    let else_block = blocks[3];
+    let mem_arg = func.block_arg_values(unreachable)[0];
+    let branch_idx = func.block(unreachable).last_inst.unwrap();
+    let cond_idx = func.insert_inst_before(
+        branch_idx,
+        Instruction {
+            op: Op::BConst(true),
+            ty: Type::Bool,
+            secondary_ty: None,
+            origin: Origin::synthetic(),
+            result_annotation: None,
+            secondary_result_annotation: None,
+        },
+    );
+    func.inst_pool
+        .get_mut(branch_idx)
+        .expect("branch exists")
+        .inst
+        .op = Op::BrIf(
+        ValueRef::inst_result(cond_idx).into(),
+        then_block,
+        vec![Operand::new(mem_arg)],
+        else_block,
+        vec![Operand::new(mem_arg)],
+    );
+    func.rebuild_use_lists();
+
+    let stats = optimize_module(&mut module);
+    let verify = verify_module(&module);
+    assert!(verify.is_ok(), "optimized module should verify: {verify}");
+    assert_eq!(stats.promoted_slots, 1);
 }

@@ -808,27 +808,29 @@ fn build_transformed_function(
         func.entry_block(),
     )?;
 
-    for (inst_idx, _inst) in func.inst_pool.iter_insts() {
-        let block = func.inst_node(inst_idx).parent_block;
+    for &block in &block_refs {
         if cfg.reachable[block.index() as usize] {
             continue;
         }
-        if emitted.contains(&inst_idx) {
-            continue;
+        for (value, _) in func.block_insts_with_values(block) {
+            let inst_idx = value.index();
+            if emitted.contains(&inst_idx) {
+                continue;
+            }
+            transform_and_append_instruction(
+                func,
+                cfg,
+                plan,
+                &plan.promoted_slots,
+                &phi_slices_by_block,
+                &required_addr_insts,
+                &new_blocks,
+                &mut value_map,
+                &mut current_slice_values,
+                &mut new_func,
+                inst_idx,
+            )?;
         }
-        transform_and_append_instruction(
-            func,
-            cfg,
-            plan,
-            &plan.promoted_slots,
-            &phi_slices_by_block,
-            &required_addr_insts,
-            &new_blocks,
-            &mut value_map,
-            &mut current_slice_values,
-            &mut new_func,
-            inst_idx,
-        )?;
     }
 
     Some(new_func)
