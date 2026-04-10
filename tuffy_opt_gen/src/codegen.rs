@@ -4,8 +4,8 @@ use num_bigint::BigInt;
 
 use crate::GenerateError;
 use crate::schema::{
-    IntAnnotationSpec, IntPredicate, MatchRoot, Pattern, PatternAttr, PeepholeRule, PeepholeSpec,
-    Replacement, RootReplacement, SideCondition, ValueType,
+    CanonicalBrIfMode, IntAnnotationSpec, IntPredicate, MatchRoot, Pattern, PatternAttr,
+    PeepholeRule, PeepholeSpec, Replacement, RootReplacement, SideCondition, ValueType,
 };
 
 pub fn generate(spec: &PeepholeSpec) -> Result<String, GenerateError> {
@@ -63,6 +63,7 @@ fn generate_rule_fn(out: &mut String, rule: &PeepholeRule) -> Result<(), Generat
                 operand.collect_bindings(&mut bindings);
             }
         }
+        MatchRoot::CanonicalBrIf { binding, .. } => bindings.push(binding.as_str()),
         MatchRoot::ConstFold { .. } => {}
     }
 
@@ -169,6 +170,59 @@ fn generate_rule_fn(out: &mut String, rule: &PeepholeRule) -> Result<(), Generat
             )
             .unwrap();
         }
+        (
+            MatchRoot::CanonicalBrIf { binding, mode },
+            RootReplacement::Terminator {
+                op,
+                operands,
+                successors,
+            },
+        ) => {
+            let replacement_kind = classify_terminator_kind(op, successors.len())?;
+            if replacement_kind != TerminatorKind::BrIf {
+                return Err(GenerateError::UnsupportedRootRewrite {
+                    rule: rule.name.clone(),
+                    message: "canonical brif roots only support brif replacements".to_string(),
+                });
+            }
+            for binding in &bindings {
+                writeln!(out, "    let mut bind_{binding}: Option<ValueRef> = None;").unwrap();
+            }
+            writeln!(
+                out,
+                "    let replacement = (|| -> Option<(ReplacementTerminator, BTreeSet<u32>)> {{"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "        let canonical_match = try_match_canonical_brif(func, root_idx, {})?;",
+                canonical_brif_mode_expr(*mode)
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "        if !bind_value_slot(&mut bind_{binding}, canonical_match.cond) {{ return None; }}"
+            )
+            .unwrap();
+            emit_side_condition_checks(out, &rule.side_conditions)?;
+            emit_canonical_brif_replacement(out, operands, successors)?;
+            writeln!(
+                out,
+                "        Some((replacement, canonical_match.matched_insts))"
+            )
+            .unwrap();
+            writeln!(out, "    }})();").unwrap();
+            writeln!(
+                out,
+                "    let Some((replacement, matched_insts)) = replacement else {{ return false; }};"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "    apply_terminator_root_rewrite(func, root_idx, replacement, &matched_insts);"
+            )
+            .unwrap();
+        }
         (MatchRoot::ConstFold { op, attrs }, RootReplacement::ConstFold) => {
             let kind = classify_const_fold(op, attrs)?;
             writeln!(
@@ -195,6 +249,13 @@ fn generate_rule_fn(out: &mut String, rule: &PeepholeRule) -> Result<(), Generat
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
     Ok(())
+}
+
+fn canonical_brif_mode_expr(mode: CanonicalBrIfMode) -> &'static str {
+    match mode {
+        CanonicalBrIfMode::BoolXorConst => "CanonicalBrIfMode::BoolXorConst",
+        CanonicalBrIfMode::IntifiedBoolCompare => "CanonicalBrIfMode::IntifiedBoolCompare",
+    }
 }
 
 fn emit_terminator_root_match(
@@ -225,6 +286,45 @@ fn emit_terminator_root_match(
             pattern_gen.emit_pattern(out, &operands[0], "root_op_arg_0")?;
         }
     }
+    Ok(())
+}
+
+fn emit_canonical_brif_replacement(
+    out: &mut String,
+    operands: &[Replacement],
+    successors: &[usize],
+) -> Result<(), GenerateError> {
+    if operands.len() != 1 {
+        return Err(GenerateError::UnsupportedPattern(
+            "canonical brif replacement currently expects exactly one operand".to_string(),
+        ));
+    }
+    if successors.len() != 2 {
+        return Err(GenerateError::UnsupportedPattern(
+            "canonical brif replacement currently expects exactly two successors".to_string(),
+        ));
+    }
+    let cond = replacement_expr(&operands[0]);
+    writeln!(out, "        let successors = if canonical_match.invert {{").unwrap();
+    writeln!(
+        out,
+        "            vec![{}, {}]",
+        successors[1], successors[0]
+    )
+    .unwrap();
+    writeln!(out, "        }} else {{").unwrap();
+    writeln!(
+        out,
+        "            vec![{}, {}]",
+        successors[0], successors[1]
+    )
+    .unwrap();
+    writeln!(out, "        }};").unwrap();
+    writeln!(out, "        let replacement = ReplacementTerminator {{").unwrap();
+    writeln!(out, "            opcode: TerminatorOpcode::BrIf,").unwrap();
+    writeln!(out, "            operands: vec![{cond}],").unwrap();
+    writeln!(out, "            successors,").unwrap();
+    writeln!(out, "        }};").unwrap();
     Ok(())
 }
 

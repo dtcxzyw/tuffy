@@ -80,10 +80,6 @@ pub fn optimize_function(func: &mut Function) -> PeepholeStats {
             if func.inst_pool.get(idx).is_none() {
                 continue;
             }
-            if try_apply_manual_rule(func, idx, &mut stats) {
-                changed = true;
-                break 'candidate;
-            }
             if try_apply_generated_rule(func, idx, &mut stats, &mut fact_cache) {
                 changed = true;
                 break 'candidate;
@@ -99,49 +95,45 @@ pub fn optimize_function(func: &mut Function) -> PeepholeStats {
     stats
 }
 
-fn try_apply_manual_rule(func: &mut Function, root_idx: u32, stats: &mut PeepholeStats) -> bool {
-    try_simplify_brif_condition(func, root_idx, stats)
+#[derive(Clone, Copy)]
+#[allow(dead_code)]
+enum CanonicalBrIfMode {
+    BoolXorConst,
+    IntifiedBoolCompare,
 }
 
-fn try_simplify_brif_condition(
-    func: &mut Function,
-    root_idx: u32,
-    stats: &mut PeepholeStats,
-) -> bool {
-    let Some(root) = func.inst_pool.get(root_idx) else {
-        return false;
-    };
-    let Op::BrIf(cond, _, _, _, _) = &root.inst.op else {
-        return false;
-    };
-
-    let mut matched = BTreeSet::new();
-    let Some((cond_value, invert, rule_name)) =
-        canonical_brif_condition(func, cond.clone().raw().value, &mut matched)
-    else {
-        return false;
-    };
-
-    let replacement = ReplacementTerminator {
-        opcode: TerminatorOpcode::BrIf,
-        operands: vec![cond_value],
-        successors: if invert { vec![1, 0] } else { vec![0, 1] },
-    };
-    apply_terminator_root_rewrite(func, root_idx, replacement, &matched);
-    stats.record(rule_name);
-    true
+#[allow(dead_code)]
+struct CanonicalBrIfMatch {
+    cond: ValueRef,
+    invert: bool,
+    matched_insts: BTreeSet<u32>,
 }
 
-fn canonical_brif_condition(
+#[allow(dead_code)]
+fn try_match_canonical_brif(
     func: &Function,
-    value: ValueRef,
-    matched: &mut BTreeSet<u32>,
-) -> Option<(ValueRef, bool, &'static str)> {
-    if let Some((cond, invert)) = decode_bool_not(func, value, matched) {
-        return Some((cond, invert, "canonicalize_brif_bool_not"));
-    }
-    decode_intified_bool_compare(func, value, matched)
-        .map(|(cond, invert)| (cond, invert, "canonicalize_brif_intified_bool_compare"))
+    root_idx: u32,
+    mode: CanonicalBrIfMode,
+) -> Option<CanonicalBrIfMatch> {
+    let root = func.inst_pool.get(root_idx)?;
+    let Op::BrIf(cond, _, _, _, _) = &root.inst.op else {
+        return None;
+    };
+
+    let mut matched_insts = BTreeSet::new();
+    let (cond, invert) = match mode {
+        CanonicalBrIfMode::BoolXorConst => {
+            decode_bool_not(func, cond.clone().raw().value, &mut matched_insts)?
+        }
+        CanonicalBrIfMode::IntifiedBoolCompare => {
+            decode_intified_bool_compare(func, cond.clone().raw().value, &mut matched_insts)?
+        }
+    };
+    Some(CanonicalBrIfMatch {
+        cond,
+        invert,
+        matched_insts,
+    })
 }
 
 fn decode_bool_not(

@@ -14,6 +14,18 @@ use tuffy_ir::module::Module;
 
 pub use peephole::{PeepholeStats, generated_rule_count};
 
+pub fn generated_cleanup_pass_count() -> usize {
+    GENERATED_LOCAL_CLEANUP_PASS_COUNT + GENERATED_MODULE_CLEANUP_PASS_COUNT
+}
+
+pub fn generated_verified_cleanup_pass_count() -> usize {
+    GENERATED_VERIFIED_CLEANUP_PASS_COUNT
+}
+
+pub fn generated_legacy_cleanup_pass_count() -> usize {
+    GENERATED_LEGACY_CLEANUP_PASS_COUNT
+}
+
 pub fn optimize_function(func: &mut Function) -> PeepholeStats {
     run_local_cleanup(func)
 }
@@ -38,10 +50,7 @@ fn run_local_cleanup(func: &mut Function) -> PeepholeStats {
 
     let mut total = PeepholeStats::default();
     for _ in 0..MAX_LOCAL_CLEANUP_ROUNDS {
-        let mut round = promote::promote_function(func);
-        round.merge(peephole::optimize_function(func));
-        round.merge(range::optimize_function(func));
-        round.merge(cfg_cleanup::optimize_function(func));
+        let round = run_generated_local_cleanup_passes(func);
         let changed = round.rewrites > 0
             || round.promoted_slots > 0
             || round.promoted_slices > 0
@@ -74,13 +83,9 @@ fn run_module_cleanup(module: &mut Module, changed_functions: Option<&[bool]>) -
             total.merge(round);
         }
 
-        let bulk = bulk_memory::optimize_module(module, changed_functions);
-        changed |= bulk.rewrites > 0;
-        total.merge(bulk);
-
-        let swaps = scalar_swap::optimize_module(module, changed_functions);
-        changed |= swaps.rewrites > 0;
-        total.merge(swaps);
+        let module_round = run_generated_module_cleanup_passes(module, changed_functions);
+        changed |= module_round.rewrites > 0;
+        total.merge(module_round);
 
         if !changed {
             break;
@@ -91,3 +96,5 @@ fn run_module_cleanup(module: &mut Module, changed_functions: Option<&[bool]>) -
 
 #[cfg(test)]
 mod tests;
+
+include!(concat!(env!("OUT_DIR"), "/cleanup_pass_manifest_gen.rs"));

@@ -4,6 +4,7 @@
 
 import TuffyLean.Rewrites.Basic
 import TuffyLean.Rewrites.Facts
+import TuffyLean.Rewrites.PassManifest
 import TuffyLean.Target.X86.Export
 
 namespace TuffyLean.Export
@@ -33,6 +34,10 @@ private def patternOpcodeToJson : PatternOpcode → String
 
 private def terminatorOpcodeToJson : TerminatorOpcode → String
   | .brif => quote "brif"
+
+private def canonicalBrIfKindToJson : CanonicalBrIfKind → String
+  | .boolXorConst => quote "bool_xor_const"
+  | .intifiedBoolCompare => quote "intified_bool_compare"
 
 private def constFoldOpcodeToJsonParts : ConstFoldOpcode → String × List String
   | ConstFoldOpcode.add => (quote "add", [])
@@ -227,6 +232,12 @@ private def matchRootToJson : MatchRoot → String
       ("operands", jsonArr (operands.map patternToJson)),
       ("successor_count", toString successorCount)
     ]
+  | MatchRoot.canonicalBrIf binding kind =>
+    jsonObj [
+      ("kind", quote "canonical_brif"),
+      ("binding", quote binding),
+      ("mode", canonicalBrIfKindToJson kind)
+    ]
   | MatchRoot.constFold opcode =>
     let (op, attrs) := constFoldOpcodeToJsonParts opcode
     jsonObj [
@@ -351,10 +362,39 @@ private def exportPeepholeFactSpec : String :=
     ("inst_rules", jsonArr (instFactRules.map instFactRuleToJson))
   ]
 
+private def cleanupPassVerificationToJson : CleanupPassVerification → String
+  | .verified => quote "verified"
+  | .legacy => quote "legacy"
+
+private def cleanupPassFamilyToJson (family : CleanupPassFamily) : String :=
+  let leanSourceField :=
+    match family.leanSource with
+    | some source => [("lean_source", quote source)]
+    | none => []
+  jsonObj <|
+    [
+      ("name", quote family.name),
+      ("runner", quote family.runner),
+      ("verification", cleanupPassVerificationToJson family.verification)
+    ] ++ leanSourceField
+
+private def exportCleanupPassManifest : String :=
+  let localFamilies :=
+    allCleanupPassFamilies.filter (fun family => decide (family.stage = .local))
+  let moduleFamilies :=
+    allCleanupPassFamilies.filter (fun family => decide (family.stage = .module))
+  jsonObj [
+    ("format_version", "1"),
+    ("kind", quote "opt_pass_manifest"),
+    ("local_families", jsonArr (localFamilies.map cleanupPassFamilyToJson)),
+    ("module_families", jsonArr (moduleFamilies.map cleanupPassFamilyToJson))
+  ]
+
 private inductive ExportRequest where
   | target (name : String)
   | peephole
   | peepholeFacts
+  | optPassManifest
 
 private def usage : String :=
   String.intercalate "\n"
@@ -366,7 +406,9 @@ private def usage : String :=
       "  lean --run TuffyLean/Export/Json.lean peephole",
       "  lean --run TuffyLean/Export/Json.lean --kind peephole",
       "  lean --run TuffyLean/Export/Json.lean peephole_facts",
-      "  lean --run TuffyLean/Export/Json.lean --kind peephole_facts"
+      "  lean --run TuffyLean/Export/Json.lean --kind peephole_facts",
+      "  lean --run TuffyLean/Export/Json.lean opt_pass_manifest",
+      "  lean --run TuffyLean/Export/Json.lean --kind opt_pass_manifest"
     ]
 
 private def parseRequest (args : List String) : Except String ExportRequest :=
@@ -376,6 +418,8 @@ private def parseRequest (args : List String) : Except String ExportRequest :=
   | ["--kind", "peephole"] => .ok .peephole
   | ["peephole_facts"] => .ok .peepholeFacts
   | ["--kind", "peephole_facts"] => .ok .peepholeFacts
+  | ["opt_pass_manifest"] => .ok .optPassManifest
+  | ["--kind", "opt_pass_manifest"] => .ok .optPassManifest
   | [target] => .ok (.target target)
   | ["--target", target] => .ok (.target target)
   | _ => .error usage
@@ -383,6 +427,7 @@ private def parseRequest (args : List String) : Except String ExportRequest :=
 private def exportForRequest? : ExportRequest → Option String
   | .peephole => some exportPeepholeSpec
   | .peepholeFacts => some exportPeepholeFactSpec
+  | .optPassManifest => some exportCleanupPassManifest
   | .target "x86" => some TuffyLean.Target.X86.Export.exportIselSpec
   | .target _ => none
 
@@ -398,6 +443,7 @@ def main (args : List String) : IO Unit := do
     match request with
     | .peephole => throw <| IO.userError "unknown peephole export request"
     | .peepholeFacts => throw <| IO.userError "unknown peephole fact export request"
+    | .optPassManifest => throw <| IO.userError "unknown optimizer pass manifest request"
     | .target target => throw <| IO.userError s!"unknown target: {target}"
 
 end TuffyLean.Export

@@ -16,6 +16,8 @@ fn main() {
     let rust_path = out_dir.join("peephole_gen.rs");
     let facts_json_path = out_dir.join("peephole_facts.json");
     let facts_rust_path = out_dir.join("peephole_facts_gen.rs");
+    let manifest_json_path = out_dir.join("cleanup_pass_manifest.json");
+    let manifest_rust_path = out_dir.join("cleanup_pass_manifest_gen.rs");
 
     let build_status = Command::new("lake")
         .args(["build", "TuffyLean.Export.Json"])
@@ -81,4 +83,34 @@ fn main() {
         .expect("peephole fact Rust generation should succeed");
     fs::write(&facts_rust_path, facts_rust_src)
         .expect("failed to write generated peephole fact Rust");
+
+    let manifest_output = Command::new("lake")
+        .args([
+            "env",
+            "lean",
+            "--run",
+            "TuffyLean/Export/Json.lean",
+            "--kind",
+            "opt_pass_manifest",
+        ])
+        .current_dir(&lean_dir)
+        .output()
+        .expect("failed to invoke Lean cleanup pass manifest exporter");
+
+    if !manifest_output.status.success() {
+        let stderr = String::from_utf8_lossy(&manifest_output.stderr);
+        panic!("Lean cleanup pass manifest exporter failed:\n{stderr}");
+    }
+
+    fs::write(&manifest_json_path, &manifest_output.stdout)
+        .expect("failed to write cleanup pass manifest JSON");
+
+    let manifest_json_str = String::from_utf8(manifest_output.stdout)
+        .expect("cleanup pass manifest JSON must be utf-8");
+    let manifest_spec = tuffy_opt_gen::load_pass_manifest_spec_from_json_str(&manifest_json_str)
+        .expect("generated cleanup pass manifest JSON should satisfy the generator schema");
+    let manifest_rust_src = tuffy_opt_gen::generate_pass_manifest(&manifest_spec)
+        .expect("cleanup pass manifest Rust generation should succeed");
+    fs::write(&manifest_rust_path, manifest_rust_src)
+        .expect("failed to write generated cleanup pass manifest Rust");
 }

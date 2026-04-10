@@ -3,6 +3,7 @@ import TuffyLean.IR.Semantics
 import TuffyLean.IR.FloatAxioms
 import TuffyLean.Rewrites.Basic
 import TuffyLean.Rewrites.Facts
+import TuffyLean.Rewrites.PassManifest
 import TuffyLean.Export.Json
 import TuffyLean.Prototyping.Opt.Arith.Basic
 import TuffyLean.Prototyping.Opt.Mem.Basic

@@ -48,6 +48,16 @@ lake env lean --run TuffyLean/Export/Json.lean --kind peephole
 
 - The exported JSON is the interface consumed by `tuffy_opt`; do not hand-maintain Rust copies of production rules.
 
+## Optimizer Manifest Export
+
+- `TuffyLean/Export/Json.lean` also exports the non-inline `tuffy_opt` cleanup manifest:
+
+```bash
+lake env lean --run TuffyLean/Export/Json.lean --kind opt_pass_manifest
+```
+
+- This manifest is the Lean-owned source for cleanup pass ordering and family metadata consumed by `tuffy_opt`.
+
 ## Key Distinction: Rewrites vs Prototyping
 
 - **`Rewrites/`** — Production rewrite rules with formal correctness proofs. These feed into the actual compiler optimization pipeline.

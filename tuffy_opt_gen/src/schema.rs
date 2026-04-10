@@ -41,11 +41,23 @@ pub enum MatchRoot {
         operands: Vec<Pattern>,
         successor_count: usize,
     },
+    #[serde(rename = "canonical_brif")]
+    CanonicalBrIf {
+        binding: String,
+        mode: CanonicalBrIfMode,
+    },
     ConstFold {
         op: String,
         #[serde(default)]
         attrs: Vec<PatternAttr>,
     },
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CanonicalBrIfMode {
+    BoolXorConst,
+    IntifiedBoolCompare,
 }
 
 #[derive(Debug, Deserialize)]
@@ -343,6 +355,45 @@ pub fn validate_spec(spec: &PeepholeSpec) -> Result<(), GenerateError> {
                     }
                 }
             }
+            (
+                MatchRoot::CanonicalBrIf { binding, .. },
+                RootReplacement::Terminator {
+                    op,
+                    operands,
+                    successors,
+                },
+            ) => {
+                bindings.push(binding.as_str());
+                register_binding_kind(&mut binding_kinds, binding, BindingKind::BoolValue);
+                if op != "brif" {
+                    return Err(GenerateError::UnsupportedRootRewrite {
+                        rule: rule.name.clone(),
+                        message: format!(
+                            "canonical brif root cannot be replaced with terminator op `{op}`"
+                        ),
+                    });
+                }
+                if operands.len() != 1 {
+                    return Err(GenerateError::UnsupportedRootRewrite {
+                        rule: rule.name.clone(),
+                        message: "canonical brif replacement expects exactly one operand"
+                            .to_string(),
+                    });
+                }
+                validate_terminator_replacement_operand(&operands[0], &bindings, &rule.name)?;
+                if successors.len() != 2
+                    || !successors
+                        .iter()
+                        .all(|successor| *successor == 0 || *successor == 1)
+                {
+                    return Err(GenerateError::UnsupportedRootRewrite {
+                        rule: rule.name.clone(),
+                        message:
+                            "canonical brif replacement expects two successor indices in {0, 1}"
+                                .to_string(),
+                    });
+                }
+            }
             (MatchRoot::ConstFold { op, attrs }, RootReplacement::ConstFold) => {
                 if !rule.side_conditions.is_empty() {
                     return Err(GenerateError::UnsupportedRootRewrite {
@@ -356,6 +407,8 @@ pub fn validate_spec(spec: &PeepholeSpec) -> Result<(), GenerateError> {
             | (MatchRoot::Value { .. }, RootReplacement::ConstFold)
             | (MatchRoot::Terminator { .. }, RootReplacement::Value { .. })
             | (MatchRoot::Terminator { .. }, RootReplacement::ConstFold)
+            | (MatchRoot::CanonicalBrIf { .. }, RootReplacement::Value { .. })
+            | (MatchRoot::CanonicalBrIf { .. }, RootReplacement::ConstFold)
             | (MatchRoot::ConstFold { .. }, RootReplacement::Value { .. })
             | (MatchRoot::ConstFold { .. }, RootReplacement::Terminator { .. }) => {
                 return Err(GenerateError::UnsupportedRootRewrite {

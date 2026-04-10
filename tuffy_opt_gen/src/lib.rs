@@ -3,6 +3,8 @@
 mod codegen;
 mod facts_codegen;
 mod facts_schema;
+mod pass_manifest_codegen;
+mod pass_manifest_schema;
 mod schema;
 
 use std::fmt;
@@ -10,6 +12,8 @@ use std::fmt;
 pub use codegen::generate;
 pub use facts_codegen::generate as generate_facts;
 pub use facts_schema::FactSpec;
+pub use pass_manifest_codegen::generate as generate_pass_manifest;
+pub use pass_manifest_schema::OptPassManifestSpec;
 pub use schema::PeepholeSpec;
 
 #[derive(Debug)]
@@ -19,10 +23,13 @@ pub enum GenerateError {
     UnsupportedFactsFormatVersion(u32),
     UnsupportedKind(String),
     UnsupportedFactsKind(String),
+    UnsupportedPassManifestFormatVersion(u32),
+    UnsupportedPassManifestKind(String),
     UnsupportedTransformKind(String),
     UnsupportedRootRewrite { rule: String, message: String },
     UnsupportedPattern(String),
     UnsupportedFactsRule(String),
+    UnsupportedPassFamilyRunner(String),
     IllTypedReplacement { rule: String, message: String },
     MissingReplacementBinding { rule: String, binding: String },
     MissingSideConditionBinding { rule: String, binding: String },
@@ -46,6 +53,15 @@ impl fmt::Display for GenerateError {
             GenerateError::UnsupportedFactsKind(kind) => {
                 write!(f, "unsupported peephole facts kind: {kind}")
             }
+            GenerateError::UnsupportedPassManifestFormatVersion(version) => {
+                write!(
+                    f,
+                    "unsupported optimizer pass manifest format version: {version}"
+                )
+            }
+            GenerateError::UnsupportedPassManifestKind(kind) => {
+                write!(f, "unsupported optimizer pass manifest kind: {kind}")
+            }
             GenerateError::UnsupportedTransformKind(kind) => {
                 write!(f, "unsupported transform kind: {kind}")
             }
@@ -57,6 +73,9 @@ impl fmt::Display for GenerateError {
             }
             GenerateError::UnsupportedFactsRule(msg) => {
                 write!(f, "unsupported peephole fact rule: {msg}")
+            }
+            GenerateError::UnsupportedPassFamilyRunner(runner) => {
+                write!(f, "unsupported optimizer pass family runner: {runner}")
             }
             GenerateError::IllTypedReplacement { rule, message } => {
                 write!(f, "rule `{rule}` uses an ill-typed replacement: {message}")
@@ -106,10 +125,19 @@ pub fn load_facts_spec_from_json_str(json: &str) -> Result<FactSpec, GenerateErr
     Ok(spec)
 }
 
+pub fn load_pass_manifest_spec_from_json_str(
+    json: &str,
+) -> Result<OptPassManifestSpec, GenerateError> {
+    let spec: OptPassManifestSpec = serde_json::from_str(json)?;
+    pass_manifest_schema::validate_spec(&spec)?;
+    Ok(spec)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        GenerateError, generate, generate_facts, load_facts_spec_from_json_str,
+        GenerateError, generate, generate_facts, generate_pass_manifest,
+        load_facts_spec_from_json_str, load_pass_manifest_spec_from_json_str,
         load_spec_from_json_str,
     };
 
@@ -255,6 +283,52 @@ mod tests {
   ]
 }"#;
 
+    const CANONICAL_BRIF_JSON: &str = r#"{
+  "format_version": 4,
+  "kind": "peephole",
+  "rules": [
+    {
+      "name": "canonicalize_brif_intified_bool_compare",
+      "transform_kind": "equivalence",
+      "proof_ref": "TuffyLean.Rewrites.canonicalize_brif_intified_bool_compare_sound",
+      "side_conditions": [],
+      "rewrite": {
+        "match_root": {
+          "kind": "canonical_brif",
+          "binding": "cond",
+          "mode": "intified_bool_compare"
+        },
+        "replacement": {
+          "kind": "terminator",
+          "op": "brif",
+          "operands": [{ "kind": "binding", "name": "cond" }],
+          "successors": [0, 1]
+        }
+      }
+    }
+  ]
+}"#;
+
+    const PASS_MANIFEST_JSON: &str = r#"{
+  "format_version": 1,
+  "kind": "opt_pass_manifest",
+  "local_families": [
+    {
+      "name": "peephole",
+      "runner": "peephole",
+      "verification": "verified",
+      "lean_source": "TuffyLean.Rewrites.Basic"
+    }
+  ],
+  "module_families": [
+    {
+      "name": "bulk_memory",
+      "runner": "bulk_memory",
+      "verification": "legacy"
+    }
+  ]
+}"#;
+
     #[test]
     fn parses_and_generates_dispatch_code() {
         let spec = load_spec_from_json_str(SAMPLE_JSON).expect("sample JSON should parse");
@@ -276,6 +350,17 @@ mod tests {
         assert!(rust.contains("fn try_apply_const_fold_add"));
         assert!(rust.contains("try_fold_constant_root(func, root_idx, ConstFoldKind::Add)"));
         assert!(rust.contains("fold_match.replacement"));
+    }
+
+    #[test]
+    fn parses_and_generates_canonical_brif_code() {
+        let spec =
+            load_spec_from_json_str(CANONICAL_BRIF_JSON).expect("canonical brif JSON should parse");
+        let rust = generate(&spec).expect("canonical brif JSON should generate Rust");
+
+        assert!(rust.contains("try_match_canonical_brif"));
+        assert!(rust.contains("CanonicalBrIfMode::IntifiedBoolCompare"));
+        assert!(rust.contains("canonical_match.invert"));
     }
 
     #[test]
@@ -331,5 +416,18 @@ mod tests {
         assert!(rust.contains("forward_bitand"));
         assert!(rust.contains("generated_backward_int_facts"));
         assert!(rust.contains("backward_bitand"));
+    }
+
+    #[test]
+    fn parses_and_generates_cleanup_pass_manifest() {
+        let spec = load_pass_manifest_spec_from_json_str(PASS_MANIFEST_JSON)
+            .expect("cleanup pass manifest parses");
+        let rust = generate_pass_manifest(&spec).expect("cleanup pass manifest generates Rust");
+
+        assert!(rust.contains("GENERATED_LOCAL_CLEANUP_PASS_COUNT: usize = 1;"));
+        assert!(rust.contains("GENERATED_MODULE_CLEANUP_PASS_COUNT: usize = 1;"));
+        assert!(rust.contains("run_generated_local_cleanup_passes"));
+        assert!(rust.contains("crate::peephole::optimize_function(func)"));
+        assert!(rust.contains("crate::bulk_memory::optimize_module(module, changed_functions)"));
     }
 }

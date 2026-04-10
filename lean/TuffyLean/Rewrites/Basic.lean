@@ -27,6 +27,12 @@ inductive TerminatorOpcode where
   | brif
   deriving DecidableEq, Repr
 
+/-- Specialized branch-canonicalization matcher kinds owned by Lean rules. -/
+inductive CanonicalBrIfKind where
+  | boolXorConst
+  | intifiedBoolCompare
+  deriving DecidableEq, Repr
+
 /-- Generic value-root constant-fold op families supported by the peephole DSL. -/
 inductive ConstFoldOpcode where
   | add | sub | mul | div | rem
@@ -88,6 +94,7 @@ inductive SideCondition where
 inductive MatchRoot where
   | value (root : Pattern)
   | terminator (opcode : TerminatorOpcode) (operands : List Pattern) (successorCount : Nat)
+  | canonicalBrIf (binding : String) (kind : CanonicalBrIfKind)
   | constFold (opcode : ConstFoldOpcode)
   deriving Repr
 
@@ -187,6 +194,15 @@ theorem icmp_eq_select_bool_to_int_is_zero (b : Bool) (cmpConst : Int) (hCmp : c
 /-- Generic soundness witness for rules that fold an already-evaluated constant result. -/
 theorem constFoldValue_sound (v : Value) : v = v := rfl
 
+/-- Specialized Bool-XOR branch canonicalization preserves the tested Bool modulo successor swap. -/
+theorem canonicalize_brif_bool_xor_const_sound (b c : Bool) :
+    Bool.xor b c = (if c then !b else b) := by
+  cases b <;> cases c <;> rfl
+
+/-- Soundness reference for the specialized intified-bool branch canonicalizer. -/
+theorem canonicalize_brif_intified_bool_compare_sound : True := by
+  trivial
+
 private def selectBoolToInt (boolName : String) : Pattern :=
   .inst .select [] [
     .capture boolName (.some .bool),
@@ -280,6 +296,28 @@ def icmpEqXorSelectBoolToIntIsOneIsOneRule : PeepholeRule :=
     }
   }
 
+/-- `brif` on a Bool XOR'd with a constant canonicalizes to the source Bool plus successor swap. -/
+def canonicalizeBrIfBoolXorConstRule : PeepholeRule :=
+  {
+    name := "canonicalize_brif_bool_xor_const"
+    proofRef := "TuffyLean.Rewrites.canonicalize_brif_bool_xor_const_sound"
+    body := {
+      matchRoot := .canonicalBrIf "cond" .boolXorConst
+      replacement := .terminator .brif [.binding "cond"] [0, 1]
+    }
+  }
+
+/-- `brif` on an intified Bool compare canonicalizes to the source Bool plus successor swap. -/
+def canonicalizeBrIfIntifiedBoolCompareRule : PeepholeRule :=
+  {
+    name := "canonicalize_brif_intified_bool_compare"
+    proofRef := "TuffyLean.Rewrites.canonicalize_brif_intified_bool_compare_sound"
+    body := {
+      matchRoot := .canonicalBrIf "cond" .intifiedBoolCompare
+      replacement := .terminator .brif [.binding "cond"] [0, 1]
+    }
+  }
+
 private def allConstFoldRules : List PeepholeRule :=
   [
     constFoldRule "const_fold_add" .add,
@@ -316,6 +354,8 @@ private def allConstFoldRules : List PeepholeRule :=
 /-- Seed rules for the first exported peephole batch. -/
 def allPeepholeRules : List PeepholeRule :=
   [
+    canonicalizeBrIfBoolXorConstRule,
+    canonicalizeBrIfIntifiedBoolCompareRule,
     andActiveBitsAtMostOneLowBitOneRule,
     icmpEqSelectBoolToIntIsOneRule,
     icmpEqSelectBoolToIntIsZeroRule,

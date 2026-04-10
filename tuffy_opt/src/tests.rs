@@ -5,7 +5,10 @@ use tuffy_ir::value::ValueRef;
 use tuffy_ir::verifier::verify_module;
 
 use crate::cfg::collect_block_refs;
-use crate::{generated_rule_count, optimize_module};
+use crate::{
+    generated_cleanup_pass_count, generated_legacy_cleanup_pass_count, generated_rule_count,
+    generated_verified_cleanup_pass_count, optimize_module,
+};
 
 fn optimize(input: &str) -> (String, crate::PeepholeStats) {
     let mut module = parse_module(input).unwrap_or_else(|e| panic!("parse error: {e}"));
@@ -25,7 +28,14 @@ fn normalize_ir(ir: &str) -> String {
 
 #[test]
 fn loads_default_rule_set() {
-    assert_eq!(generated_rule_count(), 33);
+    assert_eq!(generated_rule_count(), 35);
+}
+
+#[test]
+fn loads_generated_cleanup_manifest() {
+    assert_eq!(generated_cleanup_pass_count(), 6);
+    assert_eq!(generated_verified_cleanup_pass_count(), 1);
+    assert_eq!(generated_legacy_cleanup_pass_count(), 5);
 }
 
 #[test]
