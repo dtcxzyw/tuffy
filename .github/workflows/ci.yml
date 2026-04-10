@@ -92,6 +92,9 @@ jobs:
       - name: Build Lean export modules
         run: cd lean && lake build TuffyLean.Export.Json
 
+      - name: Test codegen backend unit tests
+        run: cd rustc_codegen_tuffy && cargo test --lib
+
       - name: Build codegen backend (release)
         run: cd rustc_codegen_tuffy && cargo build --release
 

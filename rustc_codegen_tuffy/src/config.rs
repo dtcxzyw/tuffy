@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use rustc_codegen_ssa::TargetConfig;
 use rustc_session::Session;
-use rustc_session::config::{DebugInfo, InstrumentCoverage, Lto};
+use rustc_session::config::{DebugInfo, InstrumentCoverage, Lto, OptLevel};
 use rustc_span::Symbol;
 use tuffy_ir::debug::FunctionDebugInfo;
 
@@ -24,7 +24,7 @@ impl BackendOptions {
             .iter()
             .find_map(|arg| arg.strip_prefix("dump-module="))
             .map(PathBuf::from);
-        let run_tuffy_opt = false;
+        let run_tuffy_opt = should_run_tuffy_opt(sess.opts.optimize);
         let debuginfo = sess.opts.cg.debuginfo;
 
         Self {
@@ -59,6 +59,10 @@ impl BackendOptions {
         }
         stripped
     }
+}
+
+fn should_run_tuffy_opt(opt_level: OptLevel) -> bool {
+    !matches!(opt_level, OptLevel::No)
 }
 
 pub(crate) fn init(sess: &Session) {
@@ -96,5 +100,21 @@ pub(crate) fn target_config(sess: &Session) -> TargetConfig {
         has_reliable_f16_math: false,
         has_reliable_f128: false,
         has_reliable_f128_math: false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_run_tuffy_opt;
+    use rustc_session::config::OptLevel;
+
+    #[test]
+    fn enables_tuffy_opt_for_non_o0_levels() {
+        assert!(!should_run_tuffy_opt(OptLevel::No));
+        assert!(should_run_tuffy_opt(OptLevel::Less));
+        assert!(should_run_tuffy_opt(OptLevel::More));
+        assert!(should_run_tuffy_opt(OptLevel::Aggressive));
+        assert!(should_run_tuffy_opt(OptLevel::Size));
+        assert!(should_run_tuffy_opt(OptLevel::SizeMin));
     }
 }
