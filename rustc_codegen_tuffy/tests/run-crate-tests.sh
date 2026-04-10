@@ -18,6 +18,7 @@ mkdir -p "$TEMP_DIR"
 
 overall_pass=0
 overall_fail=0
+RUST_NIGHTLY="${TUFFY_CRATE_TEST_TOOLCHAIN:-nightly-2026-03-28}"
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
@@ -25,7 +26,7 @@ if [ -n "${BACKEND:-}" ]; then
     echo "=== Using pre-built backend ==="
 else
     echo "=== Build ==="
-    cargo build --manifest-path "$CRATE_ROOT/Cargo.toml" --release
+    cargo +"$RUST_NIGHTLY" build --manifest-path "$CRATE_ROOT/Cargo.toml" --release
     BACKEND="$CRATE_ROOT/target/release/librustc_codegen_tuffy.so"
 fi
 
@@ -62,7 +63,7 @@ cat > "$BITFLAGS_DIR/.cargo/config.toml" <<CFGEOF
 rustflags = ["-Z", "codegen-backend=$BACKEND"]
 CFGEOF
 
-if cargo +nightly-2026-03-28 test --manifest-path "$BITFLAGS_DIR/Cargo.toml"; then
+if cargo +"$RUST_NIGHTLY" test --manifest-path "$BITFLAGS_DIR/Cargo.toml"; then
     overall_pass=$((overall_pass + 1))
 else
     overall_fail=$((overall_fail + 1))
@@ -73,12 +74,21 @@ echo ""
 # syn is a widely-used parser crate. Because many proc-macros depend on syn
 # from crates.io, TUFFY_SRC_DIR restricts the tuffy backend to the workspace
 # copy of syn (prevents applying tuffy to the registry copy used by proc-macros).
+# The checkout is pinned and patched because nightly-2026-03-28 changed
+# rustc_ast::UseTree in a way that breaks syn's floating test-suite snapshots.
 
 SYN_DIR="$REPO_ROOT/scratch/syn"
+SYN_REV="ae257c4e05a338f73655aa1fa3d144e047daccf1"
+SYN_PATCH="$SCRIPT_DIR/patches/syn-nightly-2026-03-28.patch"
 if [ ! -d "$SYN_DIR" ]; then
     echo "=== Cloning syn ==="
     git clone --filter=blob:none https://github.com/dtolnay/syn.git "$SYN_DIR"
 fi
+if ! git -C "$SYN_DIR" cat-file -e "$SYN_REV^{commit}" 2>/dev/null; then
+    git -C "$SYN_DIR" fetch --filter=blob:none origin "$SYN_REV"
+fi
+git -C "$SYN_DIR" checkout --force "$SYN_REV"
+git -C "$SYN_DIR" apply "$SYN_PATCH"
 echo "=== Syn cargo test ==="
 
 WRAPPER_EXEC="$TEMP_DIR/rustc-wrapper-tuffy"
@@ -91,7 +101,7 @@ if RUSTC_WRAPPER="$WRAPPER_EXEC" \
    TUFFY_BACKEND="$BACKEND" \
    TUFFY_CRATE="syn" \
    TUFFY_SRC_DIR="$SYN_DIR" \
-   cargo test --manifest-path "$SYN_DIR/Cargo.toml" --all-features; then
+   cargo +"$RUST_NIGHTLY" test --manifest-path "$SYN_DIR/Cargo.toml" --all-features; then
     overall_pass=$((overall_pass + 1))
 else
     overall_fail=$((overall_fail + 1))
@@ -121,19 +131,19 @@ echo "=== Hashbrown release-focused tests ==="
 if CARGO_TARGET_DIR="$HASHBROWN_TARGET_DIR" \
    RUSTFLAGS="-Zcodegen-backend=$BACKEND" \
    RUSTDOCFLAGS="-Zcodegen-backend=$BACKEND" \
-   cargo +nightly-2026-03-28 build --manifest-path "$HASHBROWN_DIR/Cargo.toml" --target x86_64-unknown-linux-gnu --no-default-features \
+   cargo +"$RUST_NIGHTLY" build --manifest-path "$HASHBROWN_DIR/Cargo.toml" --target x86_64-unknown-linux-gnu --no-default-features \
    && CARGO_TARGET_DIR="$HASHBROWN_TARGET_DIR" \
       RUSTFLAGS="-Zcodegen-backend=$BACKEND" \
       RUSTDOCFLAGS="-Zcodegen-backend=$BACKEND" \
-      cargo +nightly-2026-03-28 build --manifest-path "$HASHBROWN_DIR/Cargo.toml" --target x86_64-unknown-linux-gnu --release --no-default-features \
+      cargo +"$RUST_NIGHTLY" build --manifest-path "$HASHBROWN_DIR/Cargo.toml" --target x86_64-unknown-linux-gnu --release --no-default-features \
    && CARGO_TARGET_DIR="$HASHBROWN_TARGET_DIR" \
       RUSTFLAGS="-Zcodegen-backend=$BACKEND" \
       RUSTDOCFLAGS="-Zcodegen-backend=$BACKEND" \
-      cargo +nightly-2026-03-28 test --manifest-path "$HASHBROWN_DIR/Cargo.toml" --target x86_64-unknown-linux-gnu --release --no-fail-fast \
+      cargo +"$RUST_NIGHTLY" test --manifest-path "$HASHBROWN_DIR/Cargo.toml" --target x86_64-unknown-linux-gnu --release --no-fail-fast \
    && CARGO_TARGET_DIR="$HASHBROWN_TARGET_DIR" \
       RUSTFLAGS="-Zcodegen-backend=$BACKEND" \
       RUSTDOCFLAGS="-Zcodegen-backend=$BACKEND" \
-      cargo +nightly-2026-03-28 test --manifest-path "$HASHBROWN_DIR/Cargo.toml" --target x86_64-unknown-linux-gnu --release --features rustc-internal-api,serde,rayon,nightly --no-fail-fast; then
+      cargo +"$RUST_NIGHTLY" test --manifest-path "$HASHBROWN_DIR/Cargo.toml" --target x86_64-unknown-linux-gnu --release --features rustc-internal-api,serde,rayon,nightly --no-fail-fast; then
     overall_pass=$((overall_pass + 1))
 else
     overall_fail=$((overall_fail + 1))

@@ -1,0 +1,15 @@
+diff --git a/tests/common/eq.rs b/tests/common/eq.rs
+index afdba57..4b2d15b 100644
+--- a/tests/common/eq.rs
++++ b/tests/common/eq.rs
+@@ -346,8 +346,8 @@ macro_rules! spanless_eq_struct {
+     } => {
+         impl $(<$param: SpanlessEq>)* SpanlessEq for $($name)::+ $(<$param>)* {
+             fn eq(&self, other: &Self) -> bool {
+-                let $($name)::+ { $($field: $this,)* $($ignore: _,)* } = self;
+-                let $($name)::+ { $($field: $other,)* $($ignore: _,)* } = other;
++                let $($name)::+ { $($field: $this,)* $($ignore: _,)* .. } = self;
++                let $($name)::+ { $($field: $other,)* $($ignore: _,)* .. } = other;
+                 true $(&& SpanlessEq::eq($this, $other))*
+             }
+         }
