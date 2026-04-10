@@ -11,6 +11,7 @@ pub(crate) struct BackendOptions {
     pub dump_ir: bool,
     pub dump_module_path: Option<PathBuf>,
     pub run_tuffy_opt: bool,
+    pub trace_timings: bool,
     pub debuginfo: DebugInfo,
 }
 
@@ -25,12 +26,14 @@ impl BackendOptions {
             .find_map(|arg| arg.strip_prefix("dump-module="))
             .map(PathBuf::from);
         let run_tuffy_opt = should_run_tuffy_opt(sess.opts.optimize);
+        let trace_timings = std::env::var_os("TUFFY_TRACE_TIMINGS").is_some();
         let debuginfo = sess.opts.cg.debuginfo;
 
         Self {
             dump_ir,
             dump_module_path,
             run_tuffy_opt,
+            trace_timings,
             debuginfo,
         }
     }

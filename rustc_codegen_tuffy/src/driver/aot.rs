@@ -2,6 +2,7 @@ use std::any::Any;
 use std::collections::HashSet;
 use std::fmt::Write;
 use std::fs;
+use std::time::Instant;
 
 use rustc_codegen_ssa::{CompiledModule, CompiledModules, CrateInfo, ModuleKind};
 use rustc_data_structures::fx::FxIndexMap;
@@ -541,14 +542,38 @@ impl<'tcx> AotCodegen<'tcx> {
             return;
         }
 
+        let module_name = batch.module.name.clone();
+        let function_count = batch.module.functions.len();
+        let total_inst_count = batch
+            .module
+            .functions
+            .iter()
+            .map(|func| func.inst_pool.iter_insts().count())
+            .sum::<usize>();
+
+        let optimize_start = Instant::now();
         if let Err(err) = optimize_ir_batch(batch, self.config.run_tuffy_opt) {
             self.fatal_symbol(&batch.module.name, &err);
         }
+        let optimize_elapsed = optimize_start.elapsed();
         if self.config.run_tuffy_opt {
             self.append_optimized_module_dump(batch);
         }
+        let verify_start = Instant::now();
         if let Err(err) = verify_ir_batch(batch, "IR verification failed") {
             self.fatal_symbol(&batch.module.name, &err);
+        }
+        let verify_elapsed = verify_start.elapsed();
+
+        if self.config.trace_timings {
+            eprintln!(
+                "[tuffy-timing] module={module_name} phase=optimize functions={function_count} insts={total_inst_count} elapsed_ms={}",
+                optimize_elapsed.as_millis()
+            );
+            eprintln!(
+                "[tuffy-timing] module={module_name} phase=verify elapsed_ms={}",
+                verify_elapsed.as_millis()
+            );
         }
 
         append_ir_batch_static_data(&mut artifacts.static_data, batch);
@@ -559,10 +584,18 @@ impl<'tcx> AotCodegen<'tcx> {
             let func = &functions[idx];
             let func_name = symbols.resolve(func.name).to_string();
             let codegen_func = self.config.strip_debug_for_codegen(func);
+            let compile_start = Instant::now();
             let compiled = self
                 .session
                 .compile_function(&codegen_func, symbols)
                 .unwrap_or_else(|err| self.fatal_symbol(&func_name, &err));
+            if self.config.trace_timings {
+                let inst_count = func.inst_pool.iter_insts().count();
+                eprintln!(
+                    "[tuffy-timing] module={module_name} function={func_name} phase=codegen insts={inst_count} elapsed_ms={}",
+                    compile_start.elapsed().as_millis()
+                );
+            }
             artifacts.functions.push(CompiledFunction {
                 weak: meta.weak,
                 ..compiled

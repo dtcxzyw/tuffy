@@ -49,7 +49,48 @@ struct AtUseAnalysis {
 }
 
 pub(crate) fn optimize_function(func: &mut Function) -> PeepholeStats {
+    if function_is_pointer_sensitive(func) {
+        return PeepholeStats::default();
+    }
     optimize_with_generated_transforms(func, GENERATED_AT_USE_TRANSFORMS)
+}
+
+fn function_is_pointer_sensitive(func: &Function) -> bool {
+    func.params.iter().any(|ty| matches!(ty, Type::Ptr(_)))
+        || func
+            .block_args
+            .iter()
+            .any(|arg| matches!(arg.ty, Type::Ptr(_)))
+        || func.inst_pool.iter_insts().any(|(_, inst)| {
+            matches!(inst.ty, Type::Ptr(_))
+                || inst
+                    .secondary_ty
+                    .as_ref()
+                    .is_some_and(|ty| matches!(ty, Type::Ptr(_)))
+                || matches!(
+                    inst.op,
+                    Op::Call(..)
+                        | Op::CallRet2(..)
+                        | Op::StackSlot(..)
+                        | Op::Load(..)
+                        | Op::Store(..)
+                        | Op::MemCopy(..)
+                        | Op::MemMove(..)
+                        | Op::MemSet(..)
+                        | Op::LoadAtomic(..)
+                        | Op::StoreAtomic(..)
+                        | Op::AtomicRmw(..)
+                        | Op::AtomicCmpXchg(..)
+                        | Op::Fence(..)
+                        | Op::SymbolAddr(..)
+                        | Op::PtrAdd(..)
+                        | Op::PtrDiff(..)
+                        | Op::PtrToInt(..)
+                        | Op::PtrToAddr(..)
+                        | Op::IntToPtr(..)
+                        | Op::LandingPad
+                )
+        })
 }
 
 fn optimize_with_generated_transforms(
@@ -121,6 +162,65 @@ fn optimize_with_generated_transforms(
     }
 
     stats
+}
+
+#[cfg(test)]
+#[allow(clippy::items_after_test_module)]
+mod tests {
+    use super::{function_is_pointer_sensitive, optimize_function};
+    use tuffy_ir::parser::parse_module;
+
+    fn parse_single_function(input: &str) -> tuffy_ir::function::Function {
+        let module = parse_module(input).unwrap_or_else(|err| panic!("parse error: {err}"));
+        module
+            .functions
+            .into_iter()
+            .next()
+            .expect("module should contain one function")
+    }
+
+    #[test]
+    fn detects_pointer_sensitive_functions() {
+        let func = parse_single_function(
+            r#"
+func @ptr_sensitive(ptr) {
+  bb0(v0: mem):
+    v1: ptr = param 0
+    v2: int = ptrtoaddr v1
+    v3: int = iconst 0
+    v4: bool = icmp.eq v2, v3
+    brif v4, bb1(v0), bb2(v0)
+  bb1(v5: mem):
+    ret v5
+  bb2(v6: mem):
+    ret v6
+}
+"#,
+        );
+        assert!(function_is_pointer_sensitive(&func));
+    }
+
+    #[test]
+    fn skips_pointer_sensitive_at_use_optimization() {
+        let mut func = parse_single_function(
+            r#"
+func @ptr_sensitive(ptr) {
+  bb0(v0: mem):
+    v1: ptr = param 0
+    v2: int = ptrtoaddr v1
+    v3: int = iconst 0
+    v4: bool = icmp.eq v2, v3
+    brif v4, bb1(v0), bb2(v0)
+  bb1(v5: mem):
+    ret v5
+  bb2(v6: mem):
+    ret v6
+}
+"#,
+        );
+        let stats = optimize_function(&mut func);
+        assert_eq!(stats.rewrites, 0);
+    }
 }
 
 impl AtUseAnalysis {

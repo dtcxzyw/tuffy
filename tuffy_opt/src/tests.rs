@@ -1,3 +1,5 @@
+use std::fmt::Write;
+
 use tuffy_ir::instruction::{Instruction, Op, Operand, Origin};
 use tuffy_ir::parser::parse_module;
 use tuffy_ir::types::Type;
@@ -36,6 +38,36 @@ fn loads_generated_cleanup_manifest() {
     assert_eq!(generated_cleanup_pass_count(), 5);
     assert_eq!(generated_verified_cleanup_pass_count(), 1);
     assert_eq!(generated_legacy_cleanup_pass_count(), 4);
+}
+
+#[test]
+fn skips_expensive_peephole_fixpoint_for_large_functions() {
+    let mut input = String::from(
+        r#"func @large_fixpoint_guard(int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    v2: int:s32 = iconst 0
+"#,
+    );
+    let mut prev = 1u32;
+    let zero = 2u32;
+    for next in 3..1105u32 {
+        writeln!(&mut input, "    v{next}: int:s32 = add v{prev}, v{zero}")
+            .expect("string write should succeed");
+        prev = next;
+    }
+    writeln!(&mut input, "    ret v{prev}, v0").expect("string write should succeed");
+    input.push_str("}\n");
+
+    let (output, stats) = optimize(&input);
+    assert_eq!(
+        stats.rewrites, 0,
+        "large functions should skip the expensive local fixpoint:\n{output}"
+    );
+    assert!(
+        output.contains(" = add "),
+        "large function should remain largely untranslated by peepholes:\n{output}"
+    );
 }
 
 #[test]
