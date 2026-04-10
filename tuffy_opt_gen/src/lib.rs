@@ -1,7 +1,6 @@
 //! Generate Rust peephole matcher code from Lean-exported JSON rules.
 
 mod at_use_codegen;
-mod at_use_schema;
 mod codegen;
 mod facts_codegen;
 mod facts_schema;
@@ -12,7 +11,6 @@ mod schema;
 use std::fmt;
 
 pub use at_use_codegen::generate as generate_at_use;
-pub use at_use_schema::AtUseSpec;
 pub use codegen::generate;
 pub use facts_codegen::generate as generate_facts;
 pub use facts_schema::FactSpec;
@@ -24,9 +22,7 @@ pub use schema::PeepholeSpec;
 pub enum GenerateError {
     Json(serde_json::Error),
     UnsupportedFormatVersion(u32),
-    UnsupportedAtUseFormatVersion(u32),
     UnsupportedFactsFormatVersion(u32),
-    UnsupportedAtUseKind(String),
     UnsupportedKind(String),
     UnsupportedFactsKind(String),
     UnsupportedPassManifestFormatVersion(u32),
@@ -50,14 +46,8 @@ impl fmt::Display for GenerateError {
             GenerateError::UnsupportedFormatVersion(version) => {
                 write!(f, "unsupported peephole format version: {version}")
             }
-            GenerateError::UnsupportedAtUseFormatVersion(version) => {
-                write!(f, "unsupported at-use format version: {version}")
-            }
             GenerateError::UnsupportedFactsFormatVersion(version) => {
                 write!(f, "unsupported peephole facts format version: {version}")
-            }
-            GenerateError::UnsupportedAtUseKind(kind) => {
-                write!(f, "unsupported at-use kind: {kind}")
             }
             GenerateError::UnsupportedKind(kind) => {
                 write!(f, "unsupported peephole kind: {kind}")
@@ -131,12 +121,6 @@ pub fn load_spec_from_json_str(json: &str) -> Result<PeepholeSpec, GenerateError
     Ok(spec)
 }
 
-pub fn load_at_use_spec_from_json_str(json: &str) -> Result<AtUseSpec, GenerateError> {
-    let spec: AtUseSpec = serde_json::from_str(json)?;
-    at_use_schema::validate_spec(&spec)?;
-    Ok(spec)
-}
-
 pub fn load_facts_spec_from_json_str(json: &str) -> Result<FactSpec, GenerateError> {
     let spec: FactSpec = serde_json::from_str(json)?;
     facts_schema::validate_spec(&spec)?;
@@ -155,8 +139,8 @@ pub fn load_pass_manifest_spec_from_json_str(
 mod tests {
     use super::{
         GenerateError, generate, generate_at_use, generate_facts, generate_pass_manifest,
-        load_at_use_spec_from_json_str, load_facts_spec_from_json_str,
-        load_pass_manifest_spec_from_json_str, load_spec_from_json_str,
+        load_facts_spec_from_json_str, load_pass_manifest_spec_from_json_str,
+        load_spec_from_json_str,
     };
 
     const SAMPLE_JSON: &str = r#"{
@@ -348,9 +332,10 @@ mod tests {
 }"#;
 
     const AT_USE_JSON: &str = r#"{
-  "format_version": 1,
-  "kind": "at_use",
-  "forward_rules": [
+  "format_version": 4,
+  "kind": "peephole",
+  "rules": [],
+  "at_use_forward_rules": [
     {
       "op": "and",
       "known_bits_forward": "bit_and",
@@ -358,7 +343,7 @@ mod tests {
       "proof_ref": "TuffyLean.Rewrites.Facts.resultFact_bitAnd_optimal"
     }
   ],
-  "transforms": [
+  "at_use_transforms": [
     {
       "name": "at_use_fold_icmp",
       "kind": "fold_icmp",
@@ -471,8 +456,8 @@ mod tests {
 
     #[test]
     fn parses_and_generates_at_use_code() {
-        let spec = load_at_use_spec_from_json_str(AT_USE_JSON).expect("at_use JSON parses");
-        let rust = generate_at_use(&spec).expect("at_use JSON generates Rust");
+        let spec = load_spec_from_json_str(AT_USE_JSON).expect("peephole JSON parses");
+        let rust = generate_at_use(&spec).expect("at-use code generates from peephole JSON");
 
         assert!(rust.contains("generated_forward_at_use_facts"));
         assert!(rust.contains("GENERATED_AT_USE_TRANSFORMS"));

@@ -1,6 +1,5 @@
 //! tuffy_opt: Optimization pipeline and pass infrastructure.
 
-mod at_use;
 mod bulk_memory;
 mod cfg;
 mod cfg_cleanup;

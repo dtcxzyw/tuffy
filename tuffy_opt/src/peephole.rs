@@ -18,6 +18,9 @@ use tuffy_ir_interp::value::{AllocId, Value};
 const MAX_ITERATIONS: usize = 32;
 const MAX_FACT_ITERATIONS: usize = 64;
 
+#[path = "at_use.rs"]
+mod cfg_sensitive;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PeepholeStats {
     pub iterations: usize,
@@ -66,6 +69,21 @@ pub fn optimize_module(module: &mut Module) -> PeepholeStats {
 }
 
 pub fn optimize_function(func: &mut Function) -> PeepholeStats {
+    let mut total = PeepholeStats::default();
+    for _ in 0..MAX_ITERATIONS {
+        let local = optimize_local_roots(func);
+        let cfg = cfg_sensitive::optimize_function(func);
+        let changed = local.rewrites > 0 || cfg.rewrites > 0;
+        total.merge(local);
+        total.merge(cfg);
+        if !changed {
+            break;
+        }
+    }
+    total
+}
+
+fn optimize_local_roots(func: &mut Function) -> PeepholeStats {
     let mut stats = PeepholeStats::default();
     let mut iterations = 0;
 

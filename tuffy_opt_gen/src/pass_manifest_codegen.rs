@@ -150,7 +150,6 @@ fn local_runner_expr(runner: &str) -> Result<&'static str, GenerateError> {
         "promote" => Ok("crate::promote::promote_function(func)"),
         "peephole" => Ok("crate::peephole::optimize_function(func)"),
         "range" => Ok("crate::range::optimize_function(func)"),
-        "at_use" => Ok("crate::at_use::optimize_function(func)"),
         "cfg_cleanup" => Ok("crate::cfg_cleanup::optimize_function(func)"),
         _ => Err(GenerateError::UnsupportedPassFamilyRunner(
             runner.to_string(),

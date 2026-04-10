@@ -14,7 +14,6 @@ fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("missing OUT_DIR"));
     let json_path = out_dir.join("peephole_rules.json");
     let rust_path = out_dir.join("peephole_gen.rs");
-    let at_use_json_path = out_dir.join("at_use.json");
     let at_use_rust_path = out_dir.join("at_use_gen.rs");
     let facts_json_path = out_dir.join("peephole_facts.json");
     let facts_rust_path = out_dir.join("peephole_facts_gen.rs");
@@ -57,32 +56,8 @@ fn main() {
     let rust_src = tuffy_opt_gen::generate(&spec).expect("peephole Rust generation should succeed");
     fs::write(&rust_path, rust_src).expect("failed to write generated peephole Rust");
 
-    let at_use_output = Command::new("lake")
-        .args([
-            "env",
-            "lean",
-            "--run",
-            "TuffyLean/Export/Json.lean",
-            "--kind",
-            "at_use",
-        ])
-        .current_dir(&lean_dir)
-        .output()
-        .expect("failed to invoke Lean at-use exporter");
-
-    if !at_use_output.status.success() {
-        let stderr = String::from_utf8_lossy(&at_use_output.stderr);
-        panic!("Lean at-use exporter failed:\n{stderr}");
-    }
-
-    fs::write(&at_use_json_path, &at_use_output.stdout).expect("failed to write at-use JSON");
-
-    let at_use_json_str =
-        String::from_utf8(at_use_output.stdout).expect("at-use JSON must be utf-8");
-    let at_use_spec = tuffy_opt_gen::load_at_use_spec_from_json_str(&at_use_json_str)
-        .expect("generated at-use JSON should satisfy the generator schema");
-    let at_use_rust_src = tuffy_opt_gen::generate_at_use(&at_use_spec)
-        .expect("at-use Rust generation should succeed");
+    let at_use_rust_src =
+        tuffy_opt_gen::generate_at_use(&spec).expect("at-use Rust generation should succeed");
     fs::write(&at_use_rust_path, at_use_rust_src).expect("failed to write generated at-use Rust");
 
     let facts_output = Command::new("lake")

@@ -280,13 +280,6 @@ private def peepholeRuleToJson (rule : PeepholeRule) : String :=
     ("rewrite", rewriteBodyToJson rule.body)
   ]
 
-private def exportPeepholeSpec : String :=
-  jsonObj [
-    ("format_version", "4"),
-    ("kind", quote "peephole"),
-    ("rules", jsonArr (allPeepholeRules.map peepholeRuleToJson))
-  ]
-
 private def factResultToJson : FactResult → String
   | .primary => quote "primary"
   | .secondary => quote "secondary"
@@ -358,12 +351,15 @@ private def atUseTransformToJson (transform : TuffyLean.Rewrites.AtUse.Transform
     ("proof_ref", quote transform.proofRef)
   ]
 
-private def exportAtUseSpec : String :=
+private def exportPeepholeSpec : String :=
   jsonObj [
-    ("format_version", "1"),
-    ("kind", quote "at_use"),
-    ("forward_rules", jsonArr (TuffyLean.Rewrites.AtUse.forwardRules.map atUseForwardRuleToJson)),
-    ("transforms", jsonArr (TuffyLean.Rewrites.AtUse.allTransforms.map atUseTransformToJson))
+    ("format_version", "4"),
+    ("kind", quote "peephole"),
+    ("rules", jsonArr (allPeepholeRules.map peepholeRuleToJson)),
+    ("at_use_forward_rules",
+      jsonArr (TuffyLean.Rewrites.AtUse.forwardRules.map atUseForwardRuleToJson)),
+    ("at_use_transforms",
+      jsonArr (TuffyLean.Rewrites.AtUse.allTransforms.map atUseTransformToJson))
   ]
 
 private def resultFactRuleToJson (rule : ResultFactRule) : String :=
@@ -431,7 +427,6 @@ private def exportCleanupPassManifest : String :=
 private inductive ExportRequest where
   | target (name : String)
   | peephole
-  | atUse
   | peepholeFacts
   | optPassManifest
 
@@ -444,8 +439,6 @@ private def usage : String :=
       "  lean --run TuffyLean/Export/Json.lean --target <target>",
       "  lean --run TuffyLean/Export/Json.lean peephole",
       "  lean --run TuffyLean/Export/Json.lean --kind peephole",
-      "  lean --run TuffyLean/Export/Json.lean at_use",
-      "  lean --run TuffyLean/Export/Json.lean --kind at_use",
       "  lean --run TuffyLean/Export/Json.lean peephole_facts",
       "  lean --run TuffyLean/Export/Json.lean --kind peephole_facts",
       "  lean --run TuffyLean/Export/Json.lean opt_pass_manifest",
@@ -457,8 +450,6 @@ private def parseRequest (args : List String) : Except String ExportRequest :=
   | [] => .ok (.target "x86")
   | ["peephole"] => .ok .peephole
   | ["--kind", "peephole"] => .ok .peephole
-  | ["at_use"] => .ok .atUse
-  | ["--kind", "at_use"] => .ok .atUse
   | ["peephole_facts"] => .ok .peepholeFacts
   | ["--kind", "peephole_facts"] => .ok .peepholeFacts
   | ["opt_pass_manifest"] => .ok .optPassManifest
@@ -469,7 +460,6 @@ private def parseRequest (args : List String) : Except String ExportRequest :=
 
 private def exportForRequest? : ExportRequest → Option String
   | .peephole => some exportPeepholeSpec
-  | .atUse => some exportAtUseSpec
   | .peepholeFacts => some exportPeepholeFactSpec
   | .optPassManifest => some exportCleanupPassManifest
   | .target "x86" => some TuffyLean.Target.X86.Export.exportIselSpec
@@ -486,7 +476,6 @@ def main (args : List String) : IO Unit := do
   | none =>
     match request with
     | .peephole => throw <| IO.userError "unknown peephole export request"
-    | .atUse => throw <| IO.userError "unknown at-use export request"
     | .peepholeFacts => throw <| IO.userError "unknown peephole fact export request"
     | .optPassManifest => throw <| IO.userError "unknown optimizer pass manifest request"
     | .target target => throw <| IO.userError s!"unknown target: {target}"

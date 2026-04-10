@@ -4,6 +4,8 @@ Code generator for `tuffy_opt` peephole rules.
 
 This crate reads the Lean-exported peephole JSON schema and emits Rust matcher/rewrite code for the optimizer, similar to how `tuffy_isel_gen` emits generated instruction-selection code.
 
+The same peephole JSON artifact now also carries the context-sensitive at-use metadata consumed by the unified peephole runtime in `tuffy_opt`.
+
 The generated matcher supports:
 - structural value / terminator roots
 - fact-based side conditions over integer bindings

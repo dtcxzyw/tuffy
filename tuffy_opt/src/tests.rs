@@ -33,8 +33,8 @@ fn loads_default_rule_set() {
 
 #[test]
 fn loads_generated_cleanup_manifest() {
-    assert_eq!(generated_cleanup_pass_count(), 6);
-    assert_eq!(generated_verified_cleanup_pass_count(), 2);
+    assert_eq!(generated_cleanup_pass_count(), 5);
+    assert_eq!(generated_verified_cleanup_pass_count(), 1);
     assert_eq!(generated_legacy_cleanup_pass_count(), 4);
 }
 

@@ -12,6 +12,10 @@ pub struct PeepholeSpec {
     pub format_version: u32,
     pub kind: String,
     pub rules: Vec<PeepholeRule>,
+    #[serde(default)]
+    pub at_use_forward_rules: Vec<AtUseForwardRule>,
+    #[serde(default)]
+    pub at_use_transforms: Vec<AtUseTransform>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -22,6 +26,52 @@ pub struct PeepholeRule {
     #[serde(default)]
     pub side_conditions: Vec<SideCondition>,
     pub rewrite: RewriteBody,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AtUseForwardRule {
+    pub op: String,
+    pub known_bits_forward: AtUseKnownBitsForwardKind,
+    pub summary_forward: AtUseSummaryForwardKind,
+    pub proof_ref: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AtUseTransform {
+    pub name: String,
+    pub kind: AtUseTransformKind,
+    pub proof_ref: String,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AtUseKnownBitsForwardKind {
+    Unknown,
+    Const,
+    Select,
+    BitAnd,
+    BitOr,
+    BitXor,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AtUseSummaryForwardKind {
+    Unknown,
+    Const,
+    Select,
+    BitAnd,
+    BitOr,
+    BitXor,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AtUseTransformKind {
+    FoldIcmp,
+    FoldBrIf,
+    StrengthenOperand,
+    StrengthenResult,
 }
 
 #[derive(Debug, Deserialize)]
