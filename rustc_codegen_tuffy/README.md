@@ -127,6 +127,13 @@ tests/run-tests.sh
 
 Compiles and runs `tests/fixtures/hello.rs`, verifying that `println!("Hello, world!")` produces correct output.
 
+## Debug Info
+
+`-C debuginfo` now emits embedded DWARF into the generated object files.
+Source locations are derived from MIR `SourceInfo`, attached to IR instruction
+origins, preserved through legalization, and lowered into x86 machine-code line
+records plus best-effort parameter/local variable locations.
+
 ### UI Tests
 
 Runs rustc UI tests from `rust-lang/rust` against the tuffy backend:

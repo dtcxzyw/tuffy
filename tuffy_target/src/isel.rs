@@ -6,6 +6,38 @@
 use tuffy_ir::value::ValueRef;
 use tuffy_regalloc::{PReg, VReg};
 
+type RegSlots = Vec<Option<VReg>>;
+type StackSlots = Vec<Option<(i32, u32)>>;
+
+/// Location hints for IR values after instruction selection.
+pub struct SelectedValueLocations {
+    primary_regs: Vec<Option<VReg>>,
+    secondary_regs: Vec<Option<VReg>>,
+    block_arg_regs: Vec<Option<VReg>>,
+    stack_slots: Vec<Option<(i32, u32)>>,
+    block_arg_stack_slots: Vec<Option<(i32, u32)>>,
+}
+
+impl SelectedValueLocations {
+    pub fn reg(&self, value: ValueRef) -> Option<VReg> {
+        if value.is_block_arg() {
+            *self.block_arg_regs.get(value.index() as usize)?
+        } else if value.is_secondary_result() {
+            *self.secondary_regs.get(value.index() as usize)?
+        } else {
+            *self.primary_regs.get(value.index() as usize)?
+        }
+    }
+
+    pub fn stack_slot(&self, value: ValueRef) -> Option<(i32, u32)> {
+        if value.is_block_arg() {
+            *self.block_arg_stack_slots.get(value.index() as usize)?
+        } else {
+            *self.stack_slots.get(value.index() as usize)?
+        }
+    }
+}
+
 /// Map from IR value to virtual register.
 pub struct VRegMap {
     /// Primary instruction result values.
@@ -47,6 +79,10 @@ impl VRegMap {
         } else {
             *self.map.get(val.index() as usize)?
         }
+    }
+
+    fn into_parts(self) -> (RegSlots, RegSlots, RegSlots) {
+        (self.map, self.secondary_map, self.block_arg_map)
     }
 }
 
@@ -140,6 +176,10 @@ impl StackMap {
             *self.slots.get(val.index() as usize)?
         }
     }
+
+    fn into_parts(self) -> (StackSlots, StackSlots) {
+        (self.slots, self.block_arg_slots)
+    }
 }
 
 /// Tracks comparison results so conditional branches can emit fused jumps.
@@ -224,6 +264,8 @@ impl Default for VRegAlloc {
 pub struct IselResult<I> {
     pub name: String,
     pub insts: Vec<I>,
+    pub inst_sources: Vec<Option<u32>>,
+    pub value_locations: SelectedValueLocations,
     /// Number of virtual registers allocated.
     pub vreg_count: u32,
     /// Fixed physical register constraint per VReg (indexed by VReg.0).
@@ -235,4 +277,18 @@ pub struct IselResult<I> {
     pub isel_frame_size: i32,
     /// Whether the function contains any call instructions.
     pub has_calls: bool,
+}
+
+impl SelectedValueLocations {
+    pub fn from_maps(regs: VRegMap, stack: StackMap) -> Self {
+        let (primary_regs, secondary_regs, block_arg_regs) = regs.into_parts();
+        let (stack_slots, block_arg_stack_slots) = stack.into_parts();
+        Self {
+            primary_regs,
+            secondary_regs,
+            block_arg_regs,
+            stack_slots,
+            block_arg_stack_slots,
+        }
+    }
 }

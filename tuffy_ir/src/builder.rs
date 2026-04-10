@@ -214,6 +214,25 @@ impl<'a> Builder<'a> {
         }
     }
 
+    /// Return the next instruction pool index that will be allocated.
+    pub fn next_inst_index(&self) -> u32 {
+        self.func.inst_pool.next_index()
+    }
+
+    /// Overwrite the origin for an existing instruction.
+    pub fn set_inst_origin(&mut self, index: u32, origin: Origin) {
+        self.func.inst_pool.inst_mut(index).origin = origin;
+    }
+
+    /// Overwrite origins for the allocated instruction range `[start, end)`.
+    pub fn set_inst_origins(&mut self, start: u32, end: u32, origin: Origin) {
+        for index in start..end {
+            if self.func.inst_pool.get(index).is_some() {
+                self.func.inst_pool.inst_mut(index).origin = origin.clone();
+            }
+        }
+    }
+
     pub fn add_block_arg(
         &mut self,
         block: BlockRef,

@@ -17,7 +17,9 @@ use tuffy_ir::module::SymbolTable;
 use tuffy_ir::types::{Annotation, FloatType, IntAnnotation, IntSignedness, Type};
 use tuffy_ir::value::ValueRef;
 use tuffy_regalloc::{PReg, VReg};
-use tuffy_target::isel::{CmpMap, IselResult, StackMap, VRegAlloc, VRegMap};
+use tuffy_target::isel::{
+    CmpMap, IselResult, SelectedValueLocations, StackMap, VRegAlloc, VRegMap,
+};
 
 /// Mutable instruction selection state, bundled to reduce parameter counts.
 struct IselCtx {
@@ -976,6 +978,7 @@ pub fn isel(func: &Function, symbols: &SymbolTable) -> Result<IselResult<VInst>,
         tls_sym_addrs: HashMap::new(),
         rdx_captured: HashMap::new(),
     };
+    let mut inst_sources = Vec::new();
 
     for block_ref in collect_block_order(func, func.root_region) {
         // Emit all blocks, including unwind-entry cleanup blocks that are
@@ -983,6 +986,7 @@ pub fn isel(func: &Function, symbols: &SymbolTable) -> Result<IselResult<VInst>,
         ctx.out.push(MInst::Label {
             id: block_ref.index(),
         });
+        inst_sources.push(None);
         for block_arg in func.block_arg_values(block_ref) {
             if func.value_type(block_arg) != Some(&Type::Mem) {
                 let _ = ctx.block_arg_reg(block_arg);
@@ -1007,18 +1011,24 @@ pub fn isel(func: &Function, symbols: &SymbolTable) -> Result<IselResult<VInst>,
                     inst.op,
                 ));
             }
+            let source = inst.origin.sources.first().copied();
+            inst_sources.resize(ctx.out.len(), source);
         }
     }
 
     let has_calls = ctx.out.iter().any(|i| matches!(i, MInst::CallSym { .. }));
+    let isel_frame_size = ctx.stack.frame_size;
+    let value_locations = SelectedValueLocations::from_maps(ctx.regs, ctx.stack);
 
     Ok(IselResult {
         name: symbols.resolve(func.name).to_string(),
         insts: ctx.out,
+        inst_sources,
+        value_locations,
         vreg_count: ctx.alloc.next,
         constraints: ctx.alloc.constraints,
         vreg_classes: ctx.alloc.vreg_classes,
-        isel_frame_size: ctx.stack.frame_size,
+        isel_frame_size,
         has_calls,
     })
 }

@@ -477,7 +477,8 @@ fn build_new_func(old: &Function, legality: &impl LegalityInfo) -> (Function, St
     };
 
     let wide = collect_wide_values(old, legality);
-    let out = Function::new(old.name, params, param_anns, param_names, ret_ty, ret_ann);
+    let mut out = Function::new(old.name, params, param_anns, param_names, ret_ty, ret_ann);
+    out.debug = old.debug.clone();
     let state = State {
         vmap: VMap::new(),
         bmap: HashMap::new(),
@@ -660,7 +661,15 @@ fn run_legalize(
         walk_region(old, &mut s, &mut b, old_root, symbols);
         b.exit_region();
     }
+    remap_debug_bindings(&mut out, &s.vmap);
     out
+}
+
+fn remap_debug_bindings(func: &mut Function, vmap: &VMap) {
+    for binding in &mut func.debug.bindings {
+        let tuffy_ir::debug::DebugValue::IrValue(value) = &mut binding.value;
+        *value = vmap.one(*value);
+    }
 }
 
 fn walk_region(
@@ -739,7 +748,12 @@ fn walk_block_insts(
     }
 
     for (old_vref, inst) in old.block_insts_with_values(old_blk) {
+        let start = b.next_inst_index();
         legalize_inst(old, s, b, old_vref, inst, symbols);
+        let end = b.next_inst_index();
+        if start < end && !inst.origin.sources.is_empty() {
+            b.set_inst_origins(start, end, inst.origin.clone());
+        }
         // Keep current_old_mem up to date so that double-width div/rem legalization can
         // inject calls into the correct position in the mem chain.
         if inst.ty == Type::Mem {

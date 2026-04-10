@@ -2,13 +2,18 @@
 
 use std::collections::HashSet;
 
+use tuffy_ir::debug::DebugValue;
 use tuffy_ir::function::Function;
 use tuffy_ir::module::SymbolTable;
+use tuffy_ir::value::ValueRef;
 use tuffy_regalloc::{OpKind, PReg, RegAllocInst};
 use tuffy_target::backend::Backend;
 use tuffy_target::regbank::{RegBank, preg_reg_num};
 use tuffy_target::reloc::{RelocKind, Relocation};
-use tuffy_target::types::{CompiledFunction, StaticData};
+use tuffy_target::types::{
+    CompiledDebugInfo, CompiledDebugVariable, CompiledFunction, DebugLineRecord, DebugLocation,
+    DebugVariableRange, StaticData,
+};
 
 use crate::emit::emit_elf_with_data;
 use crate::encode::encode_function;
@@ -91,6 +96,95 @@ fn preg_to_dwarf(p: PReg) -> u8 {
         n @ 8..=15 => n, // R8–R15
         _ => panic!("preg_to_dwarf: unexpected PReg({})", p.0),
     }
+}
+
+fn debug_location_for_value(
+    value: ValueRef,
+    isel_result: &IselResult<VInst>,
+    alloc_result: &AllocResult,
+) -> Option<DebugLocation> {
+    if let Some((offset, _align)) = isel_result.value_locations.stack_slot(value) {
+        return Some(DebugLocation::FrameOffset(offset));
+    }
+
+    let vreg = isel_result.value_locations.reg(value)?;
+    if let Some(&slot) = alloc_result.spill_map.get(&vreg.0) {
+        let offset = -(isel_result.isel_frame_size + (slot as i32 + 1) * 8);
+        return Some(DebugLocation::FrameOffset(offset));
+    }
+
+    let preg = *alloc_result.assignments.get(vreg.0 as usize)?;
+    Some(DebugLocation::Register(preg_to_dwarf(preg) as u16))
+}
+
+fn build_compiled_debug_info(
+    func: &Function,
+    isel_result: &IselResult<VInst>,
+    alloc_result: &AllocResult,
+    line_records: &[DebugLineRecord],
+    code_len: u32,
+) -> Option<CompiledDebugInfo> {
+    if !func.debug.has_debuginfo() || line_records.is_empty() {
+        return None;
+    }
+
+    let mut source_offsets = std::collections::HashMap::new();
+    for record in line_records {
+        source_offsets.entry(record.source).or_insert(record.offset);
+    }
+
+    let mut variables = Vec::new();
+    for variable in 0..func.debug.variables.len() as u32 {
+        let mut bindings: Vec<_> = func
+            .debug
+            .bindings
+            .iter()
+            .filter(|binding| binding.variable == variable)
+            .collect();
+        if bindings.is_empty() {
+            continue;
+        }
+        bindings.sort_by_key(|binding| source_offsets.get(&binding.source).copied().unwrap_or(0));
+
+        let mut ranges: Vec<DebugVariableRange> = Vec::new();
+        for (index, binding) in bindings.iter().enumerate() {
+            let DebugValue::IrValue(value) = binding.value;
+            let Some(location) = debug_location_for_value(value, isel_result, alloc_result) else {
+                continue;
+            };
+            let start = source_offsets.get(&binding.source).copied().unwrap_or(0);
+            let end = bindings
+                .iter()
+                .skip(index + 1)
+                .find_map(|next| source_offsets.get(&next.source).copied())
+                .unwrap_or(code_len);
+            if start >= end {
+                continue;
+            }
+            if let Some(last) = ranges.last_mut()
+                && last.end == start
+                && last.location == location
+            {
+                last.end = end;
+                continue;
+            }
+            ranges.push(DebugVariableRange {
+                start,
+                end,
+                location,
+            });
+        }
+
+        if !ranges.is_empty() {
+            variables.push(CompiledDebugVariable { variable, ranges });
+        }
+    }
+
+    Some(CompiledDebugInfo {
+        function: func.debug.clone(),
+        lines: line_records.to_vec(),
+        variables,
+    })
 }
 
 /// Rewrite a VReg instruction to a Gpr instruction using the assignment map.
@@ -479,14 +573,16 @@ fn rewrite_inst(inst: &VInst, assignments: &[PReg]) -> PInst {
 /// Spill slot N lives at `[RBP - isel_frame_size - (N+1)*8]`.
 fn rewrite_with_spills(
     insts: &[VInst],
+    inst_sources: &[Option<u32>],
     alloc_result: &AllocResult,
     isel_frame_size: i32,
-) -> Vec<PInst> {
+) -> (Vec<PInst>, Vec<Option<u32>>) {
     let mut out = Vec::with_capacity(insts.len() * 2);
+    let mut out_sources = Vec::with_capacity(insts.len() * 2);
     let mut ops_buf = Vec::new();
     let spill_gpr2 = Gpr::from_preg(SPILL_REG2);
 
-    for inst in insts {
+    for (inst, &source) in insts.iter().zip(inst_sources.iter()) {
         ops_buf.clear();
         inst.reg_operands(&mut ops_buf);
 
@@ -519,10 +615,12 @@ fn rewrite_with_spills(
                         base: Gpr::Rbp,
                         offset: sp.offset,
                     });
+                    out_sources.push(source);
                 }
             }
 
             out.push(rewrite_inst(inst, &alloc_result.assignments));
+            out_sources.push(source);
 
             for sp in &spilled {
                 if matches!(sp.kind, OpKind::Def | OpKind::UseDef) {
@@ -532,6 +630,7 @@ fn rewrite_with_spills(
                         offset: sp.offset,
                         src: Gpr::R11,
                     });
+                    out_sources.push(source);
                 }
             }
         } else {
@@ -581,6 +680,7 @@ fn rewrite_with_spills(
                         base: Gpr::Rbp,
                         offset: sp.offset,
                     });
+                    out_sources.push(source);
                 }
             }
 
@@ -591,8 +691,10 @@ fn rewrite_with_spills(
                     overrides[vi as usize] = SPILL_REG2;
                 }
                 out.push(rewrite_inst(inst, &overrides));
+                out_sources.push(source);
             } else {
                 out.push(rewrite_inst(inst, &alloc_result.assignments));
+                out_sources.push(source);
             }
 
             // Emit stores for Def/UseDef operands.
@@ -609,12 +711,13 @@ fn rewrite_with_spills(
                         offset: sp.offset,
                         src: src_gpr,
                     });
+                    out_sources.push(source);
                 }
             }
         }
     }
 
-    out
+    (out, out_sources)
 }
 
 /// Run regalloc + rewrite + prologue/epilogue on an IselResult.
@@ -630,18 +733,21 @@ pub fn lower_isel_result(isel_result: &IselResult<VInst>) -> Vec<PInst> {
         SPILL_REG,
         X86RegBank::aliases,
     );
-    let pinsts = rewrite_with_spills(
+    let (pinsts, pinst_sources) = rewrite_with_spills(
         &isel_result.insts,
+        &isel_result.inst_sources,
         &alloc_result,
         isel_result.isel_frame_size,
     );
     insert_prologue_epilogue(
         pinsts,
+        pinst_sources,
         isel_result.isel_frame_size,
         alloc_result.spill_slots,
         isel_result.has_calls,
         &alloc_result.used_callee_saved,
     )
+    .0
 }
 
 /// X86-64 code generation backend.
@@ -669,15 +775,17 @@ impl Backend for X86Backend {
         );
 
         // 3. Rewrite VReg → Gpr, inserting spill loads/stores
-        let pinsts = rewrite_with_spills(
+        let (pinsts, pinst_sources) = rewrite_with_spills(
             &isel_result.insts,
+            &isel_result.inst_sources,
             &alloc_result,
             isel_result.isel_frame_size,
         );
 
         // 4. Insert prologue/epilogue
-        let final_insts = insert_prologue_epilogue(
+        let (final_insts, final_sources) = insert_prologue_epilogue(
             pinsts,
+            pinst_sources,
             isel_result.isel_frame_size,
             alloc_result.spill_slots,
             isel_result.has_calls,
@@ -685,7 +793,7 @@ impl Backend for X86Backend {
         );
 
         // 5. Encode to machine code
-        let enc = encode_function(&final_insts);
+        let enc = encode_function(&final_insts, &final_sources);
         let total_frame = isel_result.isel_frame_size + (alloc_result.spill_slots as i32) * 8;
         let has_frame_pointer =
             total_frame > 0 || isel_result.has_calls || !alloc_result.used_callee_saved.is_empty();
@@ -702,11 +810,19 @@ impl Backend for X86Backend {
             .iter()
             .map(|p| preg_to_dwarf(*p))
             .collect();
+        let debug = build_compiled_debug_info(
+            func,
+            &isel_result,
+            &alloc_result,
+            &enc.line_records,
+            enc.code.len() as u32,
+        );
 
         Ok(CompiledFunction {
             name: isel_result.name,
             code: enc.code,
             relocations: enc.relocations,
+            debug,
             weak: false,
             local: false,
             has_frame_pointer,
@@ -737,6 +853,7 @@ impl Backend for X86Backend {
                 name: export_name.to_string(),
                 code,
                 relocations,
+                debug: None,
                 weak: false,
                 local: false,
                 has_frame_pointer: false,
@@ -749,6 +866,7 @@ impl Backend for X86Backend {
             name: shim_marker.to_string(),
             code: vec![0xc3],
             relocations: vec![],
+            debug: None,
             weak: false,
             local: false,
             has_frame_pointer: false,
@@ -799,6 +917,7 @@ impl Backend for X86Backend {
                 name: "main".to_string(),
                 code: main_code,
                 relocations: main_relocs,
+                debug: None,
                 weak: false,
                 local: false,
                 has_frame_pointer: true,
@@ -810,6 +929,7 @@ impl Backend for X86Backend {
                 name: start_sym.to_string(),
                 code: start_code,
                 relocations: vec![],
+                debug: None,
                 weak: false,
                 local: false,
                 has_frame_pointer: true,

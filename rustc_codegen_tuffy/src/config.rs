@@ -2,14 +2,16 @@ use std::path::PathBuf;
 
 use rustc_codegen_ssa::TargetConfig;
 use rustc_session::Session;
-use rustc_session::config::{InstrumentCoverage, Lto};
+use rustc_session::config::{DebugInfo, InstrumentCoverage, Lto};
 use rustc_span::Symbol;
+use tuffy_ir::debug::FunctionDebugInfo;
 
 #[derive(Clone, Debug)]
 pub(crate) struct BackendOptions {
     pub dump_ir: bool,
     pub dump_module_path: Option<PathBuf>,
     pub run_tuffy_opt: bool,
+    pub debuginfo: DebugInfo,
 }
 
 impl BackendOptions {
@@ -23,12 +25,39 @@ impl BackendOptions {
             .find_map(|arg| arg.strip_prefix("dump-module="))
             .map(PathBuf::from);
         let run_tuffy_opt = false;
+        let debuginfo = sess.opts.cg.debuginfo;
 
         Self {
             dump_ir,
             dump_module_path,
             run_tuffy_opt,
+            debuginfo,
         }
+    }
+
+    pub(crate) fn emit_debuginfo(&self) -> bool {
+        self.debuginfo != DebugInfo::None
+    }
+
+    pub(crate) fn retain_variable_debuginfo(&self) -> bool {
+        matches!(self.debuginfo, DebugInfo::Limited | DebugInfo::Full)
+    }
+
+    pub(crate) fn strip_debug_for_codegen(
+        &self,
+        func: &tuffy_ir::function::Function,
+    ) -> tuffy_ir::function::Function {
+        if self.emit_debuginfo() && self.retain_variable_debuginfo() {
+            return func.clone();
+        }
+        let mut stripped = func.clone();
+        if !self.emit_debuginfo() {
+            stripped.debug = FunctionDebugInfo::default();
+        } else {
+            stripped.debug.variables.clear();
+            stripped.debug.bindings.clear();
+        }
+        stripped
     }
 }
 

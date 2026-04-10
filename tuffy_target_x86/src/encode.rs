@@ -7,6 +7,7 @@ use iced_x86::{Code, Encoder, Instruction, MemoryOperand, Register};
 use crate::inst::{AtomicRmwOpKind, CondCode, FpBinOpKind, MInst, OpSize, PInst};
 use crate::reg::Gpr;
 use tuffy_target::reloc::{EncodeResult, RelocKind, Relocation};
+use tuffy_target::types::DebugLineRecord;
 
 /// A fixup for a jump instruction whose target offset is not yet known.
 struct JumpFixup {
@@ -517,8 +518,9 @@ impl EncodeContext {
 /// Uses a two-pass approach: first pass emits code with placeholder jump
 /// offsets, second pass patches the actual relative displacements.
 /// External call relocations are returned separately for the ELF emitter.
-pub fn encode_function(insts: &[PInst]) -> EncodeResult {
+pub fn encode_function(insts: &[PInst], inst_sources: &[Option<u32>]) -> EncodeResult {
     let mut ctx = EncodeContext::new();
+    let mut line_records = Vec::new();
 
     // Check if this function has any cleanup landing pads.  When it does,
     // every call instruction must have a call-site entry in the LSDA so
@@ -537,8 +539,20 @@ pub fn encode_function(insts: &[PInst]) -> EncodeResult {
         )
     });
 
-    for inst in insts {
+    for (inst, &source) in insts.iter().zip(inst_sources.iter()) {
+        let start = ctx.pos;
         encode_inst(inst, &mut ctx);
+        if let Some(source) = source
+            && ctx.pos > start
+            && line_records.last().is_none_or(|last: &DebugLineRecord| {
+                last.offset != start as u32 || last.source != source
+            })
+        {
+            line_records.push(DebugLineRecord {
+                offset: start as u32,
+                source,
+            });
+        }
     }
 
     let mut buf = ctx.encoder.take_buffer();
@@ -576,6 +590,7 @@ pub fn encode_function(insts: &[PInst]) -> EncodeResult {
         code: buf,
         relocations: ctx.relocations,
         call_site_table,
+        line_records,
     }
 }
 

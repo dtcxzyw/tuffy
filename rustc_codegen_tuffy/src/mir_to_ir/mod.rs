@@ -406,6 +406,18 @@ pub fn translate_function<'tcx>(
         caller_location_param: None,
         exc_ptr_slot: None,
         landing_pad_wrappers: Vec::new(),
+        debug_sources: std::collections::HashMap::new(),
+        function_debug: tuffy_ir::debug::FunctionDebugInfo {
+            declaration: Some({
+                let loc = tcx.sess.source_map().lookup_char_pos(mir.span.lo());
+                tuffy_ir::debug::SourceLocation {
+                    file: loc.file.name.prefer_remapped_unconditionally().to_string(),
+                    line: loc.line as u32,
+                    column: (loc.col.0 + 1) as u32,
+                }
+            }),
+            ..Default::default()
+        },
     };
 
     // Emit params into the entry block.
@@ -445,10 +457,14 @@ pub fn translate_function<'tcx>(
         }
 
         for stmt in &bb_data.statements {
+            let start = ctx.builder.next_inst_index();
             ctx.translate_statement(stmt);
+            ctx.stamp_new_insts_with_source(start, stmt.source_info);
         }
         if let Some(ref term) = bb_data.terminator {
+            let start = ctx.builder.next_inst_index();
             ctx.translate_terminator(term);
+            ctx.stamp_new_insts_with_source(start, term.source_info);
         }
 
         if !ctx.builder.current_block_is_terminated() {
@@ -481,6 +497,7 @@ pub fn translate_function<'tcx>(
         }
     }
 
+    ctx.collect_debug_variables();
     ctx.builder.exit_region();
 
     // Destructure ctx to release the borrow on `func` (held by builder).
@@ -489,8 +506,10 @@ pub fn translate_function<'tcx>(
         static_data,
         referenced_instances,
         weak_undefined_symbols,
+        function_debug,
         ..
     } = ctx;
+    func.debug = function_debug;
 
     Some(TranslationResult {
         func,

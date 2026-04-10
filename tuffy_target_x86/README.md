@@ -2,7 +2,7 @@
 
 x86-64 backend implementation for the Tuffy compiler.
 
-This is the primary (and currently only) target backend. It handles instruction selection, register allocation integration, machine code encoding, and ELF object file emission.
+This is the primary (and currently only) target backend. It handles instruction selection, register allocation integration, machine code encoding, ELF object file emission, and embedded DWARF debug info emission.
 
 ## Boundary Rule
 
@@ -50,9 +50,9 @@ Implements `RegAllocInst` for `MInst<VReg>`, bridging the target-agnostic alloca
 
 Encodes `MInst<Gpr>` (post-regalloc instructions) into x86-64 machine code bytes. Handles REX prefixes, ModR/M encoding, immediates, and relocation placeholders.
 
-### `emit.rs` — ELF Object Emission
+### `emit.rs` — ELF/DWARF Object Emission
 
-Emits compiled functions and static data as ELF object files using the `object` crate. Handles symbol table entries, section placement, and relocation records.
+Emits compiled functions and static data as ELF object files using the `object` crate, and writes embedded DWARF sections for any compiled debug artifacts.
 
 ### `frame.rs` — Stack Frame Layout
 

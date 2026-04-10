@@ -7,6 +7,7 @@
 //! Instructions are stored in a pool (`InstPool`) and threaded into per-BB
 //! doubly-linked lists, enabling O(1) insertion and removal anywhere.
 
+use crate::debug::FunctionDebugInfo;
 use crate::instruction::Instruction;
 use crate::module::SymbolId;
 use crate::pool::{InstNode, InstPool, UseNode, UsePool};
@@ -97,6 +98,8 @@ pub struct Function {
     /// the stack and the callee receives a pointer to that data.
     /// `None` means normal register-passed parameter.
     pub byval_sizes: Vec<Option<u32>>,
+    /// Sidecar debug metadata keyed by instruction origins.
+    pub debug: FunctionDebugInfo,
 }
 
 impl Function {
@@ -127,6 +130,7 @@ impl Function {
             block_args: Vec::new(),
             root_region: RegionRef(0),
             byval_sizes: vec![None; param_count],
+            debug: FunctionDebugInfo::default(),
         }
     }
 

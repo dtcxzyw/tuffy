@@ -1,12 +1,52 @@
 //! Common types shared between target backends and the codegen layer.
 
+use tuffy_ir::debug::FunctionDebugInfo;
+
 use crate::reloc::Relocation;
+
+/// A machine-code offset tagged with a source id from `FunctionDebugInfo`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DebugLineRecord {
+    pub offset: u32,
+    pub source: u32,
+}
+
+/// A location that a debugger can use to recover a variable value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DebugLocation {
+    Register(u16),
+    FrameOffset(i32),
+}
+
+/// One half-open machine-code range where a variable lives in one location.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DebugVariableRange {
+    pub start: u32,
+    pub end: u32,
+    pub location: DebugLocation,
+}
+
+/// Resolved machine locations for one source-level variable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledDebugVariable {
+    pub variable: u32,
+    pub ranges: Vec<DebugVariableRange>,
+}
+
+/// Debug info attached to a compiled function.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledDebugInfo {
+    pub function: FunctionDebugInfo,
+    pub lines: Vec<DebugLineRecord>,
+    pub variables: Vec<CompiledDebugVariable>,
+}
 
 /// A compiled function ready for object file emission.
 pub struct CompiledFunction {
     pub name: String,
     pub code: Vec<u8>,
     pub relocations: Vec<Relocation>,
+    pub debug: Option<CompiledDebugInfo>,
     /// If true, emit with weak binding (STB_WEAK) so the linker can
     /// deduplicate identical instantiations across codegen units.
     pub weak: bool,

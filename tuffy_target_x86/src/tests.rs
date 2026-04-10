@@ -81,7 +81,7 @@ fn encode_add_function() {
     let (func, symbols) = build_add_func();
     let result = isel::isel(&func, &symbols).expect("isel should succeed for add");
     let pinsts = lower_isel_result(&result);
-    let enc = encode::encode_function(&pinsts);
+    let enc = encode::encode_function(&pinsts, &vec![None; pinsts.len()]);
 
     // After regalloc the exact encoding may differ, but must contain ret (0xc3).
     assert!(!enc.code.is_empty());
@@ -94,7 +94,7 @@ fn encode_f64_const_return_function() {
     let (func, symbols) = build_f64_const_func();
     let result = isel::isel(&func, &symbols).expect("isel should succeed for f64 const");
     let pinsts = lower_isel_result(&result);
-    let enc = encode::encode_function(&pinsts);
+    let enc = encode::encode_function(&pinsts, &vec![None; pinsts.len()]);
 
     assert!(!enc.code.is_empty());
     assert!(enc.code.contains(&0xc3), "expected ret in encoded output");
@@ -105,7 +105,7 @@ fn encode_f16_const_return_function() {
     let (func, symbols) = build_f16_const_func();
     let result = isel::isel(&func, &symbols).expect("isel should succeed for f16 const");
     let pinsts = lower_isel_result(&result);
-    let enc = encode::encode_function(&pinsts);
+    let enc = encode::encode_function(&pinsts, &vec![None; pinsts.len()]);
 
     assert!(!enc.code.is_empty());
     assert!(enc.code.contains(&0xc3), "expected ret in encoded output");
@@ -116,7 +116,7 @@ fn emit_elf_valid() {
     let (func, symbols) = build_add_func();
     let result = isel::isel(&func, &symbols).expect("isel should succeed for add");
     let pinsts = lower_isel_result(&result);
-    let enc = encode::encode_function(&pinsts);
+    let enc = encode::encode_function(&pinsts, &vec![None; pinsts.len()]);
     let elf = crate::emit::emit_elf(&result.name, &enc.code, &enc.relocations);
 
     // Verify ELF magic number.
@@ -388,7 +388,7 @@ fn isel_branch_function() {
 
     // Verify we can encode it without panicking and get valid bytes.
     let pinsts = lower_isel_result(&result);
-    let enc = encode::encode_function(&pinsts);
+    let enc = encode::encode_function(&pinsts, &vec![None; pinsts.len()]);
     assert!(!enc.code.is_empty());
 }
 
@@ -397,7 +397,7 @@ fn encode_branch_labels_resolved() {
     let (func, symbols) = build_branch_func();
     let result = isel::isel(&func, &symbols).expect("isel should succeed for branch");
     let pinsts = lower_isel_result(&result);
-    let enc = encode::encode_function(&pinsts);
+    let enc = encode::encode_function(&pinsts, &vec![None; pinsts.len()]);
 
     // Verify it doesn't panic and produces non-trivial output.
     assert!(enc.code.len() > 10);

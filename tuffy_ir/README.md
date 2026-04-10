@@ -59,6 +59,8 @@ Instructions are defined in `instruction.rs` as the `Op` enum. Categories includ
 - **Other**: `Const` (arbitrary-precision), `BConst`, `Param`, `Call` (with optional cleanup label), `CallRet2`, `SymbolAddr`
 
 Every instruction carries an `Origin` for debug info / provenance tracking.
+Per-function source tables, variable bindings, and other debug side data live in
+`debug.rs` as a `FunctionDebugInfo` sidecar attached to `Function`.
 
 ## Module Structure
 
@@ -72,6 +74,7 @@ Every instruction carries an `Origin` for debug info / provenance tracking.
 | Module         | Purpose                                      |
 |----------------|----------------------------------------------|
 | `builder.rs`   | Builder API for constructing IR (origin-mandatory) |
+| `debug.rs`     | Function-level debug metadata side tables    |
 | `display.rs`   | Human-readable IR printer                    |
 | `verifier.rs`  | Structural integrity and type-safety checks  |
 | `types.rs`     | Type system and annotation definitions       |

@@ -34,7 +34,7 @@ Target-independent building blocks shared across all backends:
 
 ### `types.rs` — Shared Output Types
 
-- `CompiledFunction` — compiled machine code with relocations and binding attributes (weak, local).
+- `CompiledFunction` — compiled machine code with relocations, optional debug artifacts, and binding attributes (weak, local).
 - `StaticData` — static data blob with relocations and section placement (writable vs read-only).
 
 ### `reloc.rs` — Relocation Types

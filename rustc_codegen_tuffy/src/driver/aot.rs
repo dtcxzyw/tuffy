@@ -558,9 +558,10 @@ impl<'tcx> AotCodegen<'tcx> {
         for (idx, meta) in batch.function_meta.iter().enumerate() {
             let func = &functions[idx];
             let func_name = symbols.resolve(func.name).to_string();
+            let codegen_func = self.config.strip_debug_for_codegen(func);
             let compiled = self
                 .session
-                .compile_function(func, symbols)
+                .compile_function(&codegen_func, symbols)
                 .unwrap_or_else(|err| self.fatal_symbol(&func_name, &err));
             artifacts.functions.push(CompiledFunction {
                 weak: meta.weak,

@@ -14,7 +14,7 @@ Created from a target triple string (currently only `x86_64-*` is supported). Wr
 
 API surface:
 - `compile_function` — compile a single IR function to machine code.
-- `emit_object` — emit compiled functions and static data as an object file.
+- `emit_object` — emit compiled functions, static data, and any backend-produced debug info as an object file.
 - `generate_allocator_stubs` — generate allocator forwarding stubs.
 - `generate_entry_point` — generate C `main` and `lang_start`.
 

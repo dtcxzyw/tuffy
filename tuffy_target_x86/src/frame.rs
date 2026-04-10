@@ -35,16 +35,17 @@ fn preg_to_gpr(p: PReg) -> Gpr {
 /// `callee_saved`: callee-saved registers that must be preserved.
 pub fn insert_prologue_epilogue(
     body: Vec<PInst>,
+    body_sources: Vec<Option<u32>>,
     isel_frame_size: i32,
     spill_slots: u32,
     has_calls: bool,
     callee_saved: &[PReg],
-) -> Vec<PInst> {
+) -> (Vec<PInst>, Vec<Option<u32>>) {
     let total_frame = isel_frame_size + (spill_slots as i32) * 8;
     let needs_frame = total_frame > 0 || has_calls || !callee_saved.is_empty();
 
     if !needs_frame {
-        return body;
+        return (body, body_sources);
     }
 
     // The sub amount must be chosen so that after both the sub and the
@@ -63,31 +64,39 @@ pub fn insert_prologue_epilogue(
     let sub_amount = aligned_total - callee_save_bytes;
 
     let mut out = Vec::with_capacity(body.len() + 6 + callee_saved.len() * 2);
+    let mut out_sources = Vec::with_capacity(out.capacity());
 
     // Prologue: push rbp, set up frame, allocate stack, save callee-saved regs.
     out.push(MInst::Push { reg: Gpr::Rbp });
+    out_sources.push(None);
     out.push(MInst::MovRR {
         size: OpSize::S64,
         dst: Gpr::Rbp,
         src: Gpr::Rsp,
     });
+    out_sources.push(None);
     out.push(MInst::SubSPI { imm: sub_amount });
+    out_sources.push(None);
     for &p in callee_saved {
         out.push(MInst::Push {
             reg: preg_to_gpr(p),
         });
+        out_sources.push(None);
     }
 
-    for inst in body {
+    for (inst, source) in body.into_iter().zip(body_sources) {
         if matches!(inst, MInst::Ret) {
             // Epilogue: restore callee-saved regs, tear down frame.
             for &p in callee_saved.iter().rev() {
                 out.push(MInst::Pop {
                     reg: preg_to_gpr(p),
                 });
+                out_sources.push(None);
             }
             out.push(MInst::AddSPI { imm: sub_amount });
+            out_sources.push(None);
             out.push(MInst::Pop { reg: Gpr::Rbp });
+            out_sources.push(None);
         }
         // Landing pads are entered from the unwinder which sets RSP = CFA
         // (= RBP + 16).  Restore RSP to the correct in-body position so
@@ -98,12 +107,15 @@ pub fn insert_prologue_epilogue(
                 dst: Gpr::Rsp,
                 src: Gpr::Rbp,
             });
+            out_sources.push(None);
             if aligned_total > 0 {
                 out.push(MInst::SubSPI { imm: aligned_total });
+                out_sources.push(None);
             }
         }
         out.push(inst);
+        out_sources.push(source);
     }
 
-    out
+    (out, out_sources)
 }

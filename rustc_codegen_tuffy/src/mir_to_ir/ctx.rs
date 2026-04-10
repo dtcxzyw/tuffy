@@ -3,6 +3,10 @@ use std::collections::{HashMap, HashSet};
 use rustc_middle::mir::{self, BasicBlock};
 use rustc_middle::ty::{self, Instance, TyCtxt};
 use tuffy_ir::builder::Builder;
+use tuffy_ir::debug::{
+    DebugBinding, DebugSource, DebugValue, DebugVariable, DebugVariableKind, FunctionDebugInfo,
+    SourceLocation,
+};
 use tuffy_ir::instruction::{Operand, Origin};
 use tuffy_ir::module::{SymbolId, SymbolTable};
 use tuffy_ir::types::{Annotation, IntAnnotation, IntSignedness, Type};
@@ -205,9 +209,91 @@ pub(super) struct TranslationCtx<'a, 'tcx> {
     /// Landing-pad wrapper blocks to emit after the main translation loop.
     /// Each entry is `(wrapper_ir_block, cleanup_mir_bb)`.
     pub(super) landing_pad_wrappers: Vec<(tuffy_ir::value::BlockRef, BasicBlock)>,
+    /// Stable source ids used by IR origins.
+    pub(super) debug_sources: HashMap<(u32, u32, u32), u32>,
+    /// Per-function debug side metadata.
+    pub(super) function_debug: FunctionDebugInfo,
 }
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
+    fn source_location_from_span(&self, span: rustc_span::Span) -> SourceLocation {
+        let loc = self.tcx.sess.source_map().lookup_char_pos(span.lo());
+        SourceLocation {
+            file: loc.file.name.prefer_remapped_unconditionally().to_string(),
+            line: loc.line as u32,
+            column: (loc.col.0 + 1) as u32,
+        }
+    }
+
+    pub(super) fn record_source(&mut self, source_info: mir::SourceInfo) -> u32 {
+        let key = (
+            source_info.span.lo().0,
+            source_info.span.hi().0,
+            source_info.scope.as_u32(),
+        );
+        if let Some(&existing) = self.debug_sources.get(&key) {
+            return existing;
+        }
+        let source = DebugSource {
+            location: self.source_location_from_span(source_info.span),
+        };
+        let id = self.function_debug.sources.len() as u32;
+        self.function_debug.sources.push(source);
+        self.debug_sources.insert(key, id);
+        id
+    }
+
+    pub(super) fn stamp_new_insts_with_source(
+        &mut self,
+        start_index: u32,
+        source_info: mir::SourceInfo,
+    ) {
+        let end_index = self.builder.next_inst_index();
+        if start_index >= end_index {
+            return;
+        }
+        let source = self.record_source(source_info);
+        self.builder
+            .set_inst_origins(start_index, end_index, Origin::from_source(source));
+    }
+
+    pub(super) fn collect_debug_variables(&mut self) {
+        use rustc_middle::mir::VarDebugInfoContents;
+
+        for info in &self.mir.var_debug_info {
+            if info.composite.is_some() {
+                continue;
+            }
+
+            let variable = self.function_debug.variables.len() as u32;
+            self.function_debug.variables.push(DebugVariable {
+                name: info.name.as_str().to_string(),
+                kind: if info.argument_index.is_some() {
+                    DebugVariableKind::Parameter
+                } else {
+                    DebugVariableKind::Local
+                },
+                declaration: Some(self.source_location_from_span(info.source_info.span)),
+            });
+
+            let value = match &info.value {
+                VarDebugInfoContents::Place(place) if place.projection.is_empty() => {
+                    self.locals.get(place.local).map(DebugValue::IrValue)
+                }
+                _ => None,
+            };
+            let Some(value) = value else {
+                continue;
+            };
+            let source = self.record_source(info.source_info);
+            self.function_debug.bindings.push(DebugBinding {
+                source,
+                variable,
+                value,
+            });
+        }
+    }
+
     pub(super) fn target_part_bytes(&self) -> u64 {
         (self.target_max_int_width / 8) as u64
     }

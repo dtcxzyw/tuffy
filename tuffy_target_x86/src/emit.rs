@@ -1,7 +1,13 @@
 //! ELF object file emission using the `object` crate.
 
 use std::collections::HashMap;
+use std::path::Path;
 
+use gimli::write::{
+    Address, AttributeValue, Dwarf, EndianVec, Expression, LineProgram, LineString, RelocateWriter,
+    Relocation as DwarfRelocation, RelocationTarget as DwarfRelocationTarget, Sections,
+};
+use gimli::{Encoding, Format, LineEncoding, Register, SectionId as DwarfSectionId};
 use object::write::{
     Comdat, Object, Relocation as ObjRelocation, SectionId, Symbol, SymbolId, SymbolSection,
 };
@@ -11,7 +17,9 @@ use object::{
 };
 
 use tuffy_target::reloc::{RelocKind, Relocation};
-pub use tuffy_target::types::{CompiledFunction, StaticData};
+pub use tuffy_target::types::{
+    CompiledDebugInfo, CompiledFunction, DebugLocation, DebugVariableRange, StaticData,
+};
 
 /// Emit a single function as an ELF object file.
 pub fn emit_elf(name: &str, code: &[u8], relocations: &[Relocation]) -> Vec<u8> {
@@ -19,6 +27,7 @@ pub fn emit_elf(name: &str, code: &[u8], relocations: &[Relocation]) -> Vec<u8> 
         name: name.to_string(),
         code: code.to_vec(),
         relocations: relocations.to_vec(),
+        debug: None,
         weak: false,
         local: false,
         has_frame_pointer: false,
@@ -317,6 +326,8 @@ pub fn emit_elf_with_data(functions: &[CompiledFunction], statics: &[StaticData]
         }
     }
 
+    emit_dwarf(&mut obj, functions, &sym_map);
+
     // Generate .eh_frame unwind information so that libunwind can traverse
     // tuffy-compiled frames (required for panic unwinding / catch_unwind).
     emit_eh_frame(
@@ -330,6 +341,377 @@ pub fn emit_elf_with_data(functions: &[CompiledFunction], statics: &[StaticData]
     let mut buf = Vec::new();
     obj.emit(&mut buf).expect("failed to emit ELF object");
     buf
+}
+
+#[derive(Debug, Clone)]
+struct DwarfSectionWriter {
+    writer: EndianVec<gimli::LittleEndian>,
+    relocations: Vec<DwarfRelocation>,
+}
+
+impl DwarfSectionWriter {
+    fn slice(&self) -> &[u8] {
+        self.writer.slice()
+    }
+}
+
+impl Default for DwarfSectionWriter {
+    fn default() -> Self {
+        Self {
+            writer: EndianVec::new(gimli::LittleEndian),
+            relocations: Vec::new(),
+        }
+    }
+}
+
+impl RelocateWriter for DwarfSectionWriter {
+    type Writer = EndianVec<gimli::LittleEndian>;
+
+    fn writer(&self) -> &Self::Writer {
+        &self.writer
+    }
+
+    fn writer_mut(&mut self) -> &mut Self::Writer {
+        &mut self.writer
+    }
+
+    fn relocate(&mut self, relocation: DwarfRelocation) {
+        self.relocations.push(relocation);
+    }
+}
+
+fn split_source_path(path: &str) -> (String, String) {
+    let source_path = Path::new(path);
+    let file = source_path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string());
+    let dir = source_path
+        .parent()
+        .map(|parent| parent.to_string_lossy().into_owned())
+        .filter(|parent| !parent.is_empty())
+        .unwrap_or_else(|| ".".to_string());
+    (dir, file)
+}
+
+fn debug_expr(location: &DebugLocation) -> Expression {
+    let mut expr = Expression::new();
+    match location {
+        DebugLocation::Register(reg) => expr.op_reg(Register(*reg)),
+        DebugLocation::FrameOffset(offset) => expr.op_fbreg(i64::from(*offset)),
+    }
+    expr
+}
+
+fn frame_base_expr() -> Expression {
+    let mut expr = Expression::new();
+    expr.op(gimli::DW_OP_call_frame_cfa);
+    expr
+}
+
+fn ensure_file_id(
+    program: &mut LineProgram,
+    file_ids: &mut HashMap<String, gimli::write::FileId>,
+    working_dir: &str,
+    path: &str,
+) -> gimli::write::FileId {
+    if let Some(&file_id) = file_ids.get(path) {
+        return file_id;
+    }
+
+    let file_path = Path::new(path);
+    let file_name = file_path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string());
+    let directory = file_path
+        .parent()
+        .map(|parent| parent.to_string_lossy().into_owned())
+        .filter(|parent| !parent.is_empty())
+        .unwrap_or_else(|| working_dir.to_string());
+    let dir_id = if directory == working_dir {
+        program.default_directory()
+    } else {
+        program.add_directory(LineString::String(directory.as_bytes().to_vec()))
+    };
+    let file_id = program.add_file(
+        LineString::String(file_name.as_bytes().to_vec()),
+        dir_id,
+        None,
+    );
+    file_ids.insert(path.to_string(), file_id);
+    file_id
+}
+
+fn build_dwarf_unit(
+    encoding: Encoding,
+    line_encoding: LineEncoding,
+    func: &CompiledFunction,
+    debug: &CompiledDebugInfo,
+    symbol_index: usize,
+) -> Option<gimli::write::Unit> {
+    let declaration = debug.function.declaration.as_ref().or_else(|| {
+        debug
+            .function
+            .sources
+            .first()
+            .map(|source| &source.location)
+    })?;
+    let (working_dir, source_file) = split_source_path(&declaration.file);
+    let mut program = LineProgram::new(
+        encoding,
+        line_encoding,
+        LineString::String(working_dir.as_bytes().to_vec()),
+        None,
+        LineString::String(source_file.as_bytes().to_vec()),
+        None,
+    );
+    let mut file_ids = HashMap::new();
+    let decl_file_id = ensure_file_id(&mut program, &mut file_ids, &working_dir, &declaration.file);
+
+    program.begin_sequence(Some(Address::Symbol {
+        symbol: symbol_index,
+        addend: 0,
+    }));
+    let mut marked_prologue_end = false;
+    for line in &debug.lines {
+        let Some(source) = debug.function.sources.get(line.source as usize) else {
+            continue;
+        };
+        let file_id = ensure_file_id(
+            &mut program,
+            &mut file_ids,
+            &working_dir,
+            &source.location.file,
+        );
+        let row = program.row();
+        row.address_offset = u64::from(line.offset);
+        row.file = file_id;
+        row.line = u64::from(source.location.line);
+        row.column = u64::from(source.location.column);
+        if !marked_prologue_end {
+            row.prologue_end = true;
+            marked_prologue_end = true;
+        }
+        program.generate_row();
+    }
+    program.end_sequence(func.code.len() as u64);
+
+    let mut unit = gimli::write::Unit::new(encoding, program);
+    let root = unit.root();
+    {
+        let root_entry = unit.get_mut(root);
+        root_entry.set(
+            gimli::DW_AT_name,
+            AttributeValue::String(source_file.as_bytes().to_vec()),
+        );
+        root_entry.set(
+            gimli::DW_AT_comp_dir,
+            AttributeValue::String(working_dir.as_bytes().to_vec()),
+        );
+        root_entry.set(
+            gimli::DW_AT_producer,
+            AttributeValue::String(b"rustc_codegen_tuffy".to_vec()),
+        );
+        root_entry.set(
+            gimli::DW_AT_language,
+            AttributeValue::Language(gimli::DW_LANG_Rust),
+        );
+        root_entry.set(
+            gimli::DW_AT_low_pc,
+            AttributeValue::Address(Address::Symbol {
+                symbol: symbol_index,
+                addend: 0,
+            }),
+        );
+        root_entry.set(
+            gimli::DW_AT_high_pc,
+            AttributeValue::Udata(func.code.len() as u64),
+        );
+    }
+
+    let subprogram = unit.add(root, gimli::DW_TAG_subprogram);
+    {
+        let entry = unit.get_mut(subprogram);
+        entry.set(
+            gimli::DW_AT_name,
+            AttributeValue::String(func.name.as_bytes().to_vec()),
+        );
+        entry.set(
+            gimli::DW_AT_low_pc,
+            AttributeValue::Address(Address::Symbol {
+                symbol: symbol_index,
+                addend: 0,
+            }),
+        );
+        entry.set(
+            gimli::DW_AT_high_pc,
+            AttributeValue::Udata(func.code.len() as u64),
+        );
+        entry.set(
+            gimli::DW_AT_decl_file,
+            AttributeValue::FileIndex(Some(decl_file_id)),
+        );
+        entry.set(
+            gimli::DW_AT_decl_line,
+            AttributeValue::Udata(u64::from(declaration.line)),
+        );
+        entry.set(
+            gimli::DW_AT_decl_column,
+            AttributeValue::Udata(u64::from(declaration.column)),
+        );
+        entry.set(gimli::DW_AT_external, AttributeValue::Flag(!func.local));
+        entry.set(
+            gimli::DW_AT_frame_base,
+            AttributeValue::Exprloc(frame_base_expr()),
+        );
+    }
+
+    for compiled in &debug.variables {
+        let Some(variable) = debug.function.variables.get(compiled.variable as usize) else {
+            continue;
+        };
+        if compiled.ranges.len() != 1 {
+            continue;
+        }
+        let DebugVariableRange {
+            start,
+            end,
+            location,
+        } = &compiled.ranges[0];
+        if *start != 0 || *end != func.code.len() as u32 {
+            continue;
+        }
+        let tag = match variable.kind {
+            tuffy_ir::debug::DebugVariableKind::Parameter => gimli::DW_TAG_formal_parameter,
+            tuffy_ir::debug::DebugVariableKind::Local => gimli::DW_TAG_variable,
+        };
+        let decl_attrs = variable.declaration.as_ref().map(|decl| {
+            let file_id = ensure_file_id(
+                &mut unit.line_program,
+                &mut file_ids,
+                &working_dir,
+                &decl.file,
+            );
+            (file_id, decl.line, decl.column)
+        });
+        let entry_id = unit.add(subprogram, tag);
+        let entry = unit.get_mut(entry_id);
+        entry.set(
+            gimli::DW_AT_name,
+            AttributeValue::String(variable.name.as_bytes().to_vec()),
+        );
+        if let Some((file_id, line, column)) = decl_attrs {
+            entry.set(
+                gimli::DW_AT_decl_file,
+                AttributeValue::FileIndex(Some(file_id)),
+            );
+            entry.set(
+                gimli::DW_AT_decl_line,
+                AttributeValue::Udata(u64::from(line)),
+            );
+            entry.set(
+                gimli::DW_AT_decl_column,
+                AttributeValue::Udata(u64::from(column)),
+            );
+        }
+        entry.set(
+            gimli::DW_AT_location,
+            AttributeValue::Exprloc(debug_expr(location)),
+        );
+    }
+
+    Some(unit)
+}
+
+fn emit_dwarf(
+    obj: &mut Object,
+    functions: &[CompiledFunction],
+    sym_map: &HashMap<String, SymbolId>,
+) {
+    if !functions.iter().any(|func| func.debug.is_some()) {
+        return;
+    }
+
+    let encoding = Encoding {
+        format: Format::Dwarf32,
+        version: 5,
+        address_size: 8,
+    };
+    let line_encoding = LineEncoding::default();
+    let mut dwarf = Dwarf::new();
+    let mut symbol_ids = Vec::new();
+
+    for func in functions {
+        let Some(debug) = &func.debug else {
+            continue;
+        };
+        let Some(&symbol_id) = sym_map.get(&func.name) else {
+            continue;
+        };
+        let symbol_index = symbol_ids.len();
+        symbol_ids.push(symbol_id);
+        if let Some(unit) = build_dwarf_unit(encoding, line_encoding, func, debug, symbol_index) {
+            dwarf.units.add(unit);
+        }
+    }
+
+    if symbol_ids.is_empty() {
+        return;
+    }
+
+    let mut sections = Sections::new(DwarfSectionWriter::default());
+    dwarf
+        .write(&mut sections)
+        .expect("failed to build DWARF sections");
+
+    let mut section_map = HashMap::new();
+    sections
+        .for_each(|id, section| -> Result<(), ()> {
+            if section.slice().is_empty() {
+                return Ok(());
+            }
+            let kind = match id {
+                DwarfSectionId::DebugStr | DwarfSectionId::DebugLineStr => SectionKind::DebugString,
+                _ => SectionKind::Debug,
+            };
+            let sid = obj.add_section(vec![], id.name().as_bytes().to_vec(), kind);
+            obj.set_section_data(sid, section.slice().to_vec(), 1);
+            section_map.insert(id, sid);
+            Ok(())
+        })
+        .expect("failed to add DWARF sections");
+
+    sections
+        .for_each(|id, section| -> Result<(), ()> {
+            let Some(&section_id) = section_map.get(&id) else {
+                return Ok(());
+            };
+            for reloc in &section.relocations {
+                let target = match reloc.target {
+                    DwarfRelocationTarget::Symbol(index) => symbol_ids[index],
+                    DwarfRelocationTarget::Section(section_kind) => {
+                        obj.section_symbol(section_map[&section_kind])
+                    }
+                };
+                obj.add_relocation(
+                    section_id,
+                    ObjRelocation {
+                        offset: reloc.offset as u64,
+                        symbol: target,
+                        addend: reloc.addend,
+                        flags: RelocationFlags::Generic {
+                            kind: RelocationKind::Absolute,
+                            encoding: RelocationEncoding::Generic,
+                            size: reloc.size * 8,
+                        },
+                    },
+                )
+                .expect("failed to add DWARF relocation");
+            }
+            Ok(())
+        })
+        .expect("failed to wire DWARF relocations");
 }
 
 // ── .eh_frame generation ─────────────────────────────────────────────────────
