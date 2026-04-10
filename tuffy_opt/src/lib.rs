@@ -1,12 +1,12 @@
 //! tuffy_opt: Optimization pipeline and pass infrastructure.
 
+mod at_use;
 mod bulk_memory;
 mod cfg;
 mod cfg_cleanup;
 mod inline;
 mod peephole;
 mod promote;
-mod range;
 mod scalar_swap;
 
 use tuffy_ir::function::Function;

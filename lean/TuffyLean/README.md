@@ -48,6 +48,17 @@ lake env lean --run TuffyLean/Export/Json.lean --kind peephole
 
 - The exported JSON is the interface consumed by `tuffy_opt`; do not hand-maintain Rust copies of production rules.
 
+## At-Use Export Conventions
+
+- Lean-owned context-sensitive at-use analysis metadata lives under `TuffyLean/Rewrites/AtUse.lean`.
+- `TuffyLean/Export/Json.lean` also exports the at-use optimizer artifact:
+
+```bash
+lake env lean --run TuffyLean/Export/Json.lean --kind at_use
+```
+
+- The exported JSON is consumed by `tuffy_opt_gen` to generate the verified `at_use` cleanup family used by `tuffy_opt`.
+
 ## Optimizer Manifest Export
 
 - `TuffyLean/Export/Json.lean` also exports the non-inline `tuffy_opt` cleanup manifest:

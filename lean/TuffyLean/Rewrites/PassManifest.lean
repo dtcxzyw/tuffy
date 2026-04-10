@@ -41,10 +41,11 @@ def allCleanupPassFamilies : List CleanupPassFamily :=
       leanSource := some "TuffyLean.Rewrites.Basic"
     },
     {
-      name := "range"
+      name := "at_use"
       stage := .local
-      runner := "range"
-      verification := .legacy
+      runner := "at_use"
+      verification := .verified
+      leanSource := some "TuffyLean.Rewrites.AtUse"
     },
     {
       name := "cfg_cleanup"

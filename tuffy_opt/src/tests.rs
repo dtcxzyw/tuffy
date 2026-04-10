@@ -34,8 +34,8 @@ fn loads_default_rule_set() {
 #[test]
 fn loads_generated_cleanup_manifest() {
     assert_eq!(generated_cleanup_pass_count(), 6);
-    assert_eq!(generated_verified_cleanup_pass_count(), 1);
-    assert_eq!(generated_legacy_cleanup_pass_count(), 5);
+    assert_eq!(generated_verified_cleanup_pass_count(), 2);
+    assert_eq!(generated_legacy_cleanup_pass_count(), 4);
 }
 
 #[test]
@@ -190,9 +190,9 @@ func @branch_and_mask_three(bool) {
     let expected = r#"func @branch_and_mask_three(bool) {
   bb0:
     v0: bool = param 0
-    v1: int:s32 = iconst 1
-    v2: int:s32 = iconst 0
-    v3: int:s32 = select v0, v1, v2
+    v1: int:u1 = iconst 1
+    v2: int:u1 = iconst 0
+    v3: int:u1 = select v0, v1, v2
     v4: int:s32 = add v3, v1
     unreachable
 }"#;
@@ -216,8 +216,26 @@ func @branch_and_mask_two(bool) {
 }
 "#;
     let (output, stats) = optimize(input);
-    assert_eq!(normalize_ir(&output), normalize_ir(input));
-    assert_eq!(stats.rewrites, 0);
+    let expected = r#"func @branch_and_mask_two(bool) {
+  bb0:
+    v0: bool = param 0
+    v1: int:u1 = iconst 1
+    v2: int:u1 = iconst 0
+    v3: int:u1 = select v0, v1, v2
+    v4: int:u2 = iconst 2
+    v5: int:u2 = and v3, v4
+    v6: int:s32 = add v5, v1
+    unreachable
+}"#;
+    assert_eq!(normalize_ir(&output), normalize_ir(expected));
+    assert_eq!(
+        stats
+            .per_rule
+            .get("and_best_int_annotation_u1_lowbit_one")
+            .copied()
+            .unwrap_or(0),
+        0
+    );
 }
 
 #[test]
@@ -272,9 +290,9 @@ func @mask_value(bool) {
     let expected = r#"func @mask_value(bool) {
   bb0:
     v0: bool = param 0
-    v1: int:s32 = iconst 1
-    v2: int:s32 = iconst 0
-    v3: int:s32 = select v0, v1, v2
+    v1: int:u1 = iconst 1
+    v2: int:u1 = iconst 0
+    v3: int:u1 = select v0, v1, v2
     v4: int:s32 = add v3, v1
     unreachable
 }"#;
@@ -340,7 +358,7 @@ func @mem2reg_branch(bool, int:s32, int:s32) -> int:s32 {
   bb2:
     br bb3(v0, v3)
   bb3(v7: mem, v8: int:s32):
-    ret v8, v7
+    ret v8:s32, v7
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
     assert_eq!(stats.promoted_slots, 1);
@@ -532,11 +550,11 @@ func @range_refine(int:u64) {
     let expected = r#"func @range_refine(int:u64) {
   bb0(v0: mem):
     v1: int:u64 = param 0
-    v2: int:u64 = iconst 10
+    v2: int:u4 = iconst 10
     v3: bool = icmp.lt v1, v2
     brif v3, bb1(v0), bb2(v0)
   bb1(v5: mem):
-    v6: int:u64 = iconst 12
+    v6: int:u4 = iconst 12
     br bb3(v5)
   bb2(v8: mem):
     ret v8
@@ -547,6 +565,37 @@ func @range_refine(int:u64) {
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
     assert!(stats.rewrites > 0);
+}
+
+#[test]
+fn at_use_annotates_refined_branch_argument() {
+    let input = r#"
+func @annotates_branch_edge_arg(int:u64) {
+  bb0(v0: mem):
+    v1: int:u64 = param 0
+    v2: int:u64 = iconst 10
+    v3: bool = icmp.lt v1, v2
+    brif v3, bb1(v0, v1), bb2(v0, v1)
+  bb1(v4: mem, v5: int:u64):
+    ret v4
+  bb2(v6: mem, v7: int:u64):
+    ret v6
+}
+"#;
+    let (output, stats) = optimize(input);
+    let expected = r#"func @annotates_branch_edge_arg(int:u64) {
+  bb0(v0: mem):
+    v1: int:u64 = param 0
+    v2: int:u4 = iconst 10
+    v3: bool = icmp.lt v1, v2
+    brif v3, bb1(v0, v1:u4), bb2(v0, v1)
+  bb1(v5: mem, v6: int:u64):
+    ret v5
+  bb2(v8: mem, v9: int:u64):
+    ret v8
+}"#;
+    assert_eq!(normalize_ir(&output), normalize_ir(expected));
+    assert!(stats.per_rule["at_use_strengthen_operand"] > 0);
 }
 
 #[test]
@@ -642,9 +691,9 @@ func @thread_forward_args(int:s32) -> int:s32 {
     v1: int:s32 = param 0
     br bb2(v0, v1)
   bb1(v3: mem, v4: int:s32):
-    br bb2(v3, v4)
+    br bb2(v3, v4:s32)
   bb2(v6: mem, v7: int:s32):
-    ret v7, v6
+    ret v7:s32, v6
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
     assert!(stats.rewrites > 0);
@@ -1570,8 +1619,23 @@ func @mask_s1(int:s1) {
 }
 "#;
     let (output, stats) = optimize(input);
-    assert_eq!(normalize_ir(&output), normalize_ir(input));
-    assert_eq!(stats.rewrites, 0);
+    let expected = r#"func @mask_s1(int:s1) {
+  bb0:
+    v0: int:s1 = param 0
+    v1: int:u1 = iconst 1
+    v2: int:u1 = and v0, v1
+    v3: int:s1 = add v2, v0
+    unreachable
+}"#;
+    assert_eq!(normalize_ir(&output), normalize_ir(expected));
+    assert_eq!(
+        stats
+            .per_rule
+            .get("and_best_int_annotation_u1_lowbit_one")
+            .copied()
+            .unwrap_or(0),
+        0
+    );
 }
 
 #[test]
@@ -1590,7 +1654,7 @@ func @fold_integer_chain() {
     let (output, stats) = optimize(input);
     let expected = r#"func @fold_integer_chain() {
   bb0:
-    v0: int:s32 = iconst 20
+    v0: int:u5 = iconst 20
     unreachable
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
@@ -1614,7 +1678,7 @@ func @fold_select(int:s32) {
     let expected = r#"func @fold_select(int:s32) {
   bb0:
     v0: int:s32 = param 0
-    v1: int:s32 = iconst 7
+    v1: int:u3 = iconst 7
     unreachable
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
@@ -1635,11 +1699,34 @@ func @fold_annotated_add() {
     let (output, stats) = optimize(input);
     let expected = r#"func @fold_annotated_add() {
   bb0:
-    v0: int:u8 = iconst 1
+    v0: int:u1 = iconst 1
     unreachable
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
     assert_eq!(stats.per_rule["const_fold_add"], 1);
+}
+
+#[test]
+fn at_use_narrows_result_annotations() {
+    let input = r#"
+func @narrow_and_result(int:u64) {
+  bb0(v0: mem):
+    v1: int:u64 = param 0
+    v2: int:u64 = iconst 255
+    v3: int:u64 = and v1, v2
+    ret v3, v0
+}
+"#;
+    let (output, stats) = optimize(input);
+    let expected = r#"func @narrow_and_result(int:u64) {
+  bb0(v0: mem):
+    v1: int:u64 = param 0
+    v2: int:u8 = iconst 255
+    v3: int:u8 = and v1, v2
+    ret v3, v0
+}"#;
+    assert_eq!(normalize_ir(&output), normalize_ir(expected));
+    assert_eq!(stats.per_rule["at_use_strengthen_result"], 2);
 }
 
 #[test]
@@ -1659,7 +1746,7 @@ func @fold_bit_ops() {
     let (output, stats) = optimize(input);
     let expected = r#"func @fold_bit_ops() {
   bb0:
-    v0: int:s32 = iconst 9
+    v0: int:u4 = iconst 9
     unreachable
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
@@ -1680,8 +1767,18 @@ func @skip_div_zero() {
 }
 "#;
     let (output, stats) = optimize(input);
-    assert_eq!(normalize_ir(&output), normalize_ir(input));
-    assert_eq!(stats.rewrites, 0);
+    let expected = r#"func @skip_div_zero() {
+  bb0:
+    v0: int:u1 = iconst 1
+    v1: int:u1 = iconst 0
+    v2: int:s32 = div v0, v1
+    unreachable
+}"#;
+    assert_eq!(normalize_ir(&output), normalize_ir(expected));
+    assert_eq!(
+        stats.per_rule.get("const_fold_div").copied().unwrap_or(0),
+        0
+    );
 }
 
 #[test]

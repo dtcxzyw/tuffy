@@ -3,6 +3,7 @@
 -- Target-specific isel encoding lives under TuffyLean/Target/*.
 
 import TuffyLean.Rewrites.Basic
+import TuffyLean.Rewrites.AtUse
 import TuffyLean.Rewrites.Facts
 import TuffyLean.Rewrites.PassManifest
 import TuffyLean.Target.X86.Export
@@ -328,6 +329,43 @@ private def intAnnotationBackwardKindToJson : IntAnnotationBackwardKind → Stri
   | .select => quote "select"
   | .split => quote "split"
 
+private def summaryForwardKindToJson : TuffyLean.Rewrites.AtUse.SummaryForwardKind → String
+  | .unknown => quote "unknown"
+  | .const => quote "const"
+  | .select => quote "select"
+  | .bitAnd => quote "bit_and"
+  | .bitOr => quote "bit_or"
+  | .bitXor => quote "bit_xor"
+
+private def atUseForwardRuleToJson (rule : TuffyLean.Rewrites.AtUse.ForwardRule) : String :=
+  jsonObj [
+    ("op", quote rule.op),
+    ("known_bits_forward", knownBitsForwardKindToJson rule.knownBitsForward),
+    ("summary_forward", summaryForwardKindToJson rule.summaryForward),
+    ("proof_ref", quote rule.proofRef)
+  ]
+
+private def atUseTransformKindToJson : TuffyLean.Rewrites.AtUse.TransformKind → String
+  | .foldICmp => quote "fold_icmp"
+  | .foldBrIf => quote "fold_br_if"
+  | .strengthenOperand => quote "strengthen_operand"
+  | .strengthenResult => quote "strengthen_result"
+
+private def atUseTransformToJson (transform : TuffyLean.Rewrites.AtUse.Transform) : String :=
+  jsonObj [
+    ("name", quote transform.name),
+    ("kind", atUseTransformKindToJson transform.kind),
+    ("proof_ref", quote transform.proofRef)
+  ]
+
+private def exportAtUseSpec : String :=
+  jsonObj [
+    ("format_version", "1"),
+    ("kind", quote "at_use"),
+    ("forward_rules", jsonArr (TuffyLean.Rewrites.AtUse.forwardRules.map atUseForwardRuleToJson)),
+    ("transforms", jsonArr (TuffyLean.Rewrites.AtUse.allTransforms.map atUseTransformToJson))
+  ]
+
 private def resultFactRuleToJson (rule : ResultFactRule) : String :=
   jsonObj [
     ("op", quote rule.op),
@@ -393,6 +431,7 @@ private def exportCleanupPassManifest : String :=
 private inductive ExportRequest where
   | target (name : String)
   | peephole
+  | atUse
   | peepholeFacts
   | optPassManifest
 
@@ -405,6 +444,8 @@ private def usage : String :=
       "  lean --run TuffyLean/Export/Json.lean --target <target>",
       "  lean --run TuffyLean/Export/Json.lean peephole",
       "  lean --run TuffyLean/Export/Json.lean --kind peephole",
+      "  lean --run TuffyLean/Export/Json.lean at_use",
+      "  lean --run TuffyLean/Export/Json.lean --kind at_use",
       "  lean --run TuffyLean/Export/Json.lean peephole_facts",
       "  lean --run TuffyLean/Export/Json.lean --kind peephole_facts",
       "  lean --run TuffyLean/Export/Json.lean opt_pass_manifest",
@@ -416,6 +457,8 @@ private def parseRequest (args : List String) : Except String ExportRequest :=
   | [] => .ok (.target "x86")
   | ["peephole"] => .ok .peephole
   | ["--kind", "peephole"] => .ok .peephole
+  | ["at_use"] => .ok .atUse
+  | ["--kind", "at_use"] => .ok .atUse
   | ["peephole_facts"] => .ok .peepholeFacts
   | ["--kind", "peephole_facts"] => .ok .peepholeFacts
   | ["opt_pass_manifest"] => .ok .optPassManifest
@@ -426,6 +469,7 @@ private def parseRequest (args : List String) : Except String ExportRequest :=
 
 private def exportForRequest? : ExportRequest → Option String
   | .peephole => some exportPeepholeSpec
+  | .atUse => some exportAtUseSpec
   | .peepholeFacts => some exportPeepholeFactSpec
   | .optPassManifest => some exportCleanupPassManifest
   | .target "x86" => some TuffyLean.Target.X86.Export.exportIselSpec
@@ -442,6 +486,7 @@ def main (args : List String) : IO Unit := do
   | none =>
     match request with
     | .peephole => throw <| IO.userError "unknown peephole export request"
+    | .atUse => throw <| IO.userError "unknown at-use export request"
     | .peepholeFacts => throw <| IO.userError "unknown peephole fact export request"
     | .optPassManifest => throw <| IO.userError "unknown optimizer pass manifest request"
     | .target target => throw <| IO.userError s!"unknown target: {target}"
