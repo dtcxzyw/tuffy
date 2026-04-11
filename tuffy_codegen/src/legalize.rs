@@ -7062,7 +7062,9 @@ fn leg_call(
     };
 
     let cleanup_label = match &inst.op {
-        Op::Call(_, _, _, cleanup) => *cleanup,
+        Op::Call(_, _, _, cleanup) => cleanup
+            .and_then(|old_label| s.bmap.get(&old_label).copied())
+            .map(|new_block| new_block.index()),
         _ => None,
     };
     let (mem_out, data_out) = b.call(
@@ -7730,6 +7732,61 @@ mod tests {
         (func, symbols)
     }
 
+    fn build_cleanup_call_legalize_func() -> (Function, SymbolTable) {
+        let mut symbols = SymbolTable::new();
+        let name = symbols.intern("cleanup_call_legalize");
+        let sink = symbols.intern("sink");
+        let wide_ann = IntAnnotation {
+            bit_width: 128,
+            signedness: IntSignedness::Unsigned,
+        };
+        let mut func = Function::new(name, vec![], vec![], vec![], None, None);
+        let mut b = Builder::new(&mut func);
+        let root = b.create_region(RegionKind::Function);
+        b.enter_region(root);
+        let entry = b.create_block();
+        let plain = b.create_region(RegionKind::Plain);
+        b.enter_region(plain);
+        let normal = b.create_block();
+        b.exit_region();
+        let cleanup = b.create_block();
+
+        b.switch_to_block(entry);
+        let mem0 = b.add_block_arg(entry, Type::Mem, None);
+        let lhs = b.iconst(BigInt::from(1u8) << 96, 128, IntSignedness::Unsigned, o());
+        let rhs = b.iconst(7i64, 128, IntSignedness::Unsigned, o());
+        let _ = b.add(
+            Operand::annotated(lhs.raw(), Annotation::Int(wide_ann)).into(),
+            Operand::annotated(rhs.raw(), Annotation::Int(wide_ann)).into(),
+            wide_ann,
+            o(),
+        );
+        let sink = b.symbol_addr(sink, o());
+        let (mem1, None) = b.call(
+            sink.into(),
+            vec![],
+            Type::Unit,
+            mem0.into(),
+            Some(cleanup.index()),
+            None,
+            o(),
+        ) else {
+            panic!("expected void call");
+        };
+        b.ret(None, None, mem1.into(), o());
+
+        b.switch_to_block(normal);
+        let mem2 = b.add_block_arg(normal, Type::Mem, None);
+        b.ret(None, None, mem2.into(), o());
+
+        b.switch_to_block(cleanup);
+        let mem3 = b.add_block_arg(cleanup, Type::Mem, None);
+        let _ = b.landing_pad(o());
+        b.ret(None, None, mem3.into(), o());
+        b.exit_region();
+        (func, symbols)
+    }
+
     fn assert_legalized_widths(bits: u32, signed: bool) {
         let (func, mut symbols) = build_carrying_mul_add_func(bits, signed);
         let legalized =
@@ -8006,6 +8063,39 @@ mod tests {
             InterpResult::Ok(Some(Value::Bool(true))) => {}
             other => panic!("unexpected result: {other}"),
         }
+    }
+
+    #[test]
+    fn legalize_remaps_cleanup_labels_to_landing_pad_blocks() {
+        let (func, mut symbols) = build_cleanup_call_legalize_func();
+        let old_cleanup_label = func
+            .inst_pool
+            .iter_insts()
+            .find_map(|(_, inst)| match &inst.op {
+                Op::Call(_, _, _, Some(cleanup_label)) => Some(*cleanup_label),
+                _ => None,
+            })
+            .expect("test input should contain a cleanup-labeled call");
+        let legalized = legalize(&func, &X86LegalityInfo, &mut symbols).expect("legalized");
+        let new_cleanup_label = legalized
+            .inst_pool
+            .iter_insts()
+            .find_map(|(_, inst)| match &inst.op {
+                Op::Call(_, _, _, Some(cleanup_label)) => Some(*cleanup_label),
+                _ => None,
+            })
+            .expect("legalized function should retain the cleanup-labeled call");
+        assert_ne!(
+            new_cleanup_label, old_cleanup_label,
+            "nested regions should force cleanup block renumbering during legalization"
+        );
+        let first_inst = legalized.blocks[new_cleanup_label as usize]
+            .first_inst
+            .expect("cleanup block should contain landing_pad");
+        assert!(
+            matches!(legalized.inst(first_inst).op, Op::LandingPad),
+            "cleanup label must target a landing-pad wrapper block"
+        );
     }
 
     #[test]
