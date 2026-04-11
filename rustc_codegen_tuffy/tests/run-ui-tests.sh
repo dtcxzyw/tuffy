@@ -17,6 +17,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CRATE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$CRATE_ROOT/.." && pwd)"
+TOOLCHAIN="${TOOLCHAIN:-nightly-2026-03-28}"
+export RUSTUP_TOOLCHAIN="$TOOLCHAIN"
 
 # Options
 FAIL_FAST="${FAIL_FAST:-0}"

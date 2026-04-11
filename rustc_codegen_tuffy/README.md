@@ -109,6 +109,10 @@ pub fn add(a: i32, b: i32) -> i32 { a + b }
 
 Run with: `tests/run-codegen-tests.sh`
 
+These shell runners default to the CI-pinned toolchain `nightly-2026-03-28`.
+Override with `TOOLCHAIN=<toolchain>` when you intentionally need a different
+rustup toolchain.
+
 To automatically generate or update CHECK lines: `tests/update-codegen-test.sh <test.rs>`
 
 **IMPORTANT:** When modifying tests under `tests/codegen/`, always use `update-codegen-test.sh` to regenerate CHECK lines. Do not write CHECK lines manually — the script ensures they match the actual IR output format and indentation.

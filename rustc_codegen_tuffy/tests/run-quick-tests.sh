@@ -12,6 +12,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CRATE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$CRATE_ROOT/.." && pwd)"
 TEMP_DIR="$REPO_ROOT/scratch/rustc_codegen_tuffy_test"
+TOOLCHAIN="${TOOLCHAIN:-nightly-2026-03-28}"
+export RUSTUP_TOOLCHAIN="$TOOLCHAIN"
 
 # Clear and recreate temp directory for a clean run.
 rm -rf "$TEMP_DIR"

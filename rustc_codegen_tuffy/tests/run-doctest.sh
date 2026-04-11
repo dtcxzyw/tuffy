@@ -7,6 +7,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CRATE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+TOOLCHAIN="${TOOLCHAIN:-nightly-2026-03-28}"
+export RUSTUP_TOOLCHAIN="$TOOLCHAIN"
 
 # Resolve backend .so
 if [[ -n "${BACKEND:-}" ]]; then

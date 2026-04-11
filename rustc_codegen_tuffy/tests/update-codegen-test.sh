@@ -17,6 +17,8 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CRATE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+TOOLCHAIN="${TOOLCHAIN:-nightly-2026-03-28}"
+export RUSTUP_TOOLCHAIN="$TOOLCHAIN"
 
 # Find backend .so
 if [ -n "${BACKEND:-}" ]; then
