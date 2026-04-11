@@ -706,6 +706,11 @@ fn emit_one_caller_inst(
             *then_block = caller_block_map[then_block.index() as usize]?;
             *else_block = caller_block_map[else_block.index() as usize]?;
         }
+        Op::Call(_, _, _, cleanup_label) => {
+            *cleanup_label = cleanup_label
+                .and_then(|old| caller_block_map.get(old as usize).copied().flatten())
+                .map(|block| block.index());
+        }
         _ => {}
     }
     let new_idx = new_func.append_inst(emit_block, new_inst);
@@ -775,6 +780,11 @@ fn emit_callee_instructions(
                 Op::BrIf(_, then_block, _, else_block, _) => {
                     *then_block = callee_block_map[then_block.index() as usize]?;
                     *else_block = callee_block_map[else_block.index() as usize]?;
+                }
+                Op::Call(_, _, _, cleanup_label) => {
+                    *cleanup_label = cleanup_label
+                        .and_then(|old| callee_block_map.get(old as usize).copied().flatten())
+                        .map(|block| block.index());
                 }
                 _ => {}
             }

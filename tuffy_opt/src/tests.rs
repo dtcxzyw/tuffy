@@ -1247,6 +1247,100 @@ func @caller(int:s32) -> int:s32 {
 }
 
 #[test]
+fn inlining_remaps_cleanup_labels_to_cloned_landing_pad_blocks() {
+    let input = r#"
+func @sink() {
+  bb0(v0: mem):
+    ret v0
+}
+
+func @helper(int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    ret v1, v0
+}
+
+func @caller(int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    v2: ptr = symbol_addr @helper
+    v3: mem, v4: int:s32 = call v2(v1), v0 -> int:s32
+    v5: ptr = symbol_addr @sink
+    v6: mem = call v5(), v3
+    ret v4, v6
+  bb1(v7: mem):
+    v8: ptr = symbol_addr @sink
+    v9: int:s32 = iconst 0
+    ret v9, v7
+}
+"#;
+    let mut module = parse_module(input).unwrap_or_else(|e| panic!("parse error: {e}"));
+
+    let caller_idx = module
+        .functions
+        .iter()
+        .position(|func| module.symbols.resolve(func.name) == "caller")
+        .expect("caller function");
+    {
+        let caller = &mut module.functions[caller_idx];
+        let cleanup_block = collect_block_refs(caller)[1];
+        let cleanup_head = caller
+            .block(cleanup_block)
+            .first_inst
+            .expect("caller cleanup block should not be empty");
+        caller.inst_pool.inst_mut(cleanup_head).op = Op::LandingPad;
+        let mut caller_calls = 0;
+        for node in caller.inst_pool.iter_mut() {
+            if let Op::Call(_, _, _, cleanup_label) = &mut node.inst.op {
+                caller_calls += 1;
+                if caller_calls == 2 {
+                    *cleanup_label = Some(cleanup_block.index());
+                }
+            }
+        }
+        assert_eq!(caller_calls, 2, "caller should have exactly two calls");
+    }
+
+    let stats = optimize_module(&mut module);
+    let verify = verify_module(&module);
+    assert!(verify.is_ok(), "optimized module should verify: {verify}");
+    assert_eq!(stats.inlined_calls, 1);
+
+    let caller = module
+        .functions
+        .iter()
+        .find(|func| module.symbols.resolve(func.name) == "caller")
+        .expect("optimized caller function");
+    let cleanup_labels = caller
+        .inst_pool
+        .iter_insts()
+        .filter_map(|(_, inst)| match &inst.op {
+            Op::Call(_, _, _, Some(cleanup_label)) => Some(*cleanup_label),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        cleanup_labels.len(),
+        1,
+        "inlined caller should retain the cleanup-labeled sink call:\n{module}"
+    );
+    for cleanup_label in cleanup_labels {
+        let cleanup_block = collect_block_refs(caller)
+            .into_iter()
+            .find(|block| block.index() == cleanup_label)
+            .expect("cleanup label should name an existing block");
+        let first_inst = caller
+            .block(cleanup_block)
+            .first_inst
+            .expect("cleanup block should contain landing_pad");
+        assert!(
+            matches!(caller.inst(first_inst).op, Op::LandingPad),
+            "cleanup label must target a landing-pad wrapper block:\n{module}"
+        );
+    }
+}
+
+#[test]
 fn promotes_whole_aggregate_stack_slot() {
     let input = r#"
 func @aggregate_slot(struct{int, bool}) -> struct{int, bool} {

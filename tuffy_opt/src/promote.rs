@@ -688,11 +688,17 @@ fn build_transformed_function(
                 new_inst.op.for_each_value_ref_mut(&mut |value| {
                     *value = remap_value(value_map, *value);
                 });
-                if let Op::Br(target, args) = &mut new_inst.op {
-                    *target = block_map[target.index() as usize];
-                    for arg in args {
-                        arg.value = remap_value(value_map, arg.value);
+                match &mut new_inst.op {
+                    Op::Br(target, args) => {
+                        *target = block_map[target.index() as usize];
+                        for arg in args {
+                            arg.value = remap_value(value_map, arg.value);
+                        }
                     }
+                    Op::Call(_, _, _, cleanup_label) => {
+                        *cleanup_label = cleanup_label.map(|old| block_map[old as usize].index());
+                    }
+                    _ => {}
                 }
             }
         }
