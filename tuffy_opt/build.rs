@@ -1,8 +1,15 @@
+//! Build script for exporting Lean-owned optimizer rules and generating Rust matchers.
+
 use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+/// Export the current Lean peephole artifacts and generate Rust sources into `OUT_DIR`.
+///
+/// # Panics
+///
+/// Panics if Lean export, JSON decoding, or generated file writing fails.
 fn main() {
     println!("cargo:rerun-if-changed=../lean/TuffyLean");
     println!("cargo:rerun-if-changed=../lean/TuffyLean.lean");

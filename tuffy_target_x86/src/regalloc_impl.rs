@@ -17,6 +17,7 @@ const CALL_CLOBBERS: [PReg; 9] = [
     PReg(11), // R11
 ];
 
+/// Build a read-only register operand description.
 fn use_op(vreg: VReg) -> RegOp {
     RegOp {
         vreg,
@@ -24,6 +25,7 @@ fn use_op(vreg: VReg) -> RegOp {
     }
 }
 
+/// Build a write-only register operand description.
 fn def_op(vreg: VReg) -> RegOp {
     RegOp {
         vreg,
@@ -31,6 +33,7 @@ fn def_op(vreg: VReg) -> RegOp {
     }
 }
 
+/// Build a read-write register operand description.
 fn usedef_op(vreg: VReg) -> RegOp {
     RegOp {
         vreg,

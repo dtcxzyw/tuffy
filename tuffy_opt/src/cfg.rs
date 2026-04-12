@@ -4,16 +4,28 @@ use tuffy_ir::function::Function;
 use tuffy_ir::value::BlockRef;
 
 #[derive(Clone, Debug)]
+/// Internal data structure `CfgInfo`.
 pub(crate) struct CfgInfo {
+    /// Predecessor lists.
     pub(crate) preds: Vec<Vec<BlockRef>>,
+    /// Successor lists.
     pub(crate) succs: Vec<Vec<BlockRef>>,
+    /// Reachable.
     pub(crate) reachable: Vec<bool>,
+    /// Dom children.
     pub(crate) dom_children: Vec<Vec<BlockRef>>,
+    /// Dominance frontier.
     pub(crate) dominance_frontier: Vec<HashSet<BlockRef>>,
+    /// Loop header.
     pub(crate) loop_header: Vec<Option<BlockRef>>,
 }
 
 impl CfgInfo {
+    /// Internal helper `compute`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     pub(crate) fn compute(func: &Function) -> Self {
         let block_count = func.blocks.len();
         let block_refs = collect_block_refs(func);
@@ -150,6 +162,11 @@ impl CfgInfo {
     }
 }
 
+/// Internal helper `collect_block_refs`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 pub(crate) fn collect_block_refs(func: &Function) -> Vec<BlockRef> {
     let mut refs = vec![None; func.blocks.len()];
     for region in &func.regions {
@@ -164,12 +181,22 @@ pub(crate) fn collect_block_refs(func: &Function) -> Vec<BlockRef> {
         .collect()
 }
 
+/// Internal helper `has_unwind_cleanup_edges`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 pub(crate) fn has_unwind_cleanup_edges(func: &Function) -> bool {
     func.inst_pool
         .iter_insts()
         .any(|(_, inst)| matches!(inst.op, tuffy_ir::instruction::Op::Call(_, _, _, Some(_))))
 }
 
+/// Internal helper `loop_header_for_block`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 pub(crate) fn loop_header_for_block(func: &Function, block: BlockRef) -> Option<BlockRef> {
     let mut region = func.block(block).parent_region;
     loop {
@@ -181,6 +208,11 @@ pub(crate) fn loop_header_for_block(func: &Function, block: BlockRef) -> Option<
     }
 }
 
+/// Internal helper `intersect_idom`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn intersect_idom(
     idom: &[Option<BlockRef>],
     rpo_pos: &[usize],

@@ -1,11 +1,18 @@
 //! tuffy_opt: Optimization pipeline and pass infrastructure.
 
+/// Optimization module `bulk_memory`.
 mod bulk_memory;
+/// Optimization module `cfg`.
 mod cfg;
+/// Optimization module `cfg_cleanup`.
 mod cfg_cleanup;
+/// Optimization module `inline`.
 mod inline;
+/// Optimization module `peephole`.
 mod peephole;
+/// Optimization module `promote`.
 mod promote;
+/// Optimization module `scalar_swap`.
 mod scalar_swap;
 
 use std::time::Instant;
@@ -14,22 +21,47 @@ use tuffy_ir::module::Module;
 
 pub use peephole::{PeepholeStats, generated_rule_count};
 
+/// Generated cleanup pass count.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 pub fn generated_cleanup_pass_count() -> usize {
     GENERATED_LOCAL_CLEANUP_PASS_COUNT + GENERATED_MODULE_CLEANUP_PASS_COUNT
 }
 
+/// Generated verified cleanup pass count.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 pub fn generated_verified_cleanup_pass_count() -> usize {
     GENERATED_VERIFIED_CLEANUP_PASS_COUNT
 }
 
+/// Generated legacy cleanup pass count.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 pub fn generated_legacy_cleanup_pass_count() -> usize {
     GENERATED_LEGACY_CLEANUP_PASS_COUNT
 }
 
+/// Optimize function.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 pub fn optimize_function(func: &mut Function) -> PeepholeStats {
     run_local_cleanup(func)
 }
 
+/// Optimize module.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 pub fn optimize_module(module: &mut Module) -> PeepholeStats {
     let trace_timings = std::env::var_os("TUFFY_TRACE_TIMINGS").is_some();
     let mut total = run_module_cleanup(module, None);
@@ -72,7 +104,13 @@ pub fn optimize_module(module: &mut Module) -> PeepholeStats {
     total
 }
 
+/// Internal helper `run_local_cleanup`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn run_local_cleanup(func: &mut Function) -> PeepholeStats {
+    /// Internal constant `MAX_LOCAL_CLEANUP_ROUNDS`.
     const MAX_LOCAL_CLEANUP_ROUNDS: usize = 8;
 
     let mut total = PeepholeStats::default();
@@ -91,7 +129,13 @@ fn run_local_cleanup(func: &mut Function) -> PeepholeStats {
     total
 }
 
+/// Internal helper `run_module_cleanup`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn run_module_cleanup(module: &mut Module, changed_functions: Option<&[bool]>) -> PeepholeStats {
+    /// Internal constant `MAX_MODULE_CLEANUP_ROUNDS`.
     const MAX_MODULE_CLEANUP_ROUNDS: usize = 6;
 
     let trace_timings = std::env::var_os("TUFFY_TRACE_TIMINGS").is_some();
@@ -145,6 +189,7 @@ fn run_module_cleanup(module: &mut Module, changed_functions: Option<&[bool]>) -
 }
 
 #[cfg(test)]
+/// Optimization module `tests`.
 mod tests;
 
 include!(concat!(env!("OUT_DIR"), "/cleanup_pass_manifest_gen.rs"));

@@ -21,3 +21,12 @@ exclude = [
 version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
+
+[workspace.lints.rust]
+missing_docs = "deny"
+
+[workspace.lints.clippy]
+missing_docs_in_private_items = "deny"
+allow_attributes_without_reason = "deny"
+missing_panics_doc = "deny"
+missing_errors_doc = "deny"

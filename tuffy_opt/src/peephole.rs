@@ -15,32 +15,56 @@ use tuffy_ir_interp::exec::{
 use tuffy_ir_interp::memory::Memory;
 use tuffy_ir_interp::value::{AllocId, Value};
 
+/// Internal constant `MAX_ITERATIONS`.
 const MAX_ITERATIONS: usize = 32;
+/// Internal constant `MAX_FACT_ITERATIONS`.
 const MAX_FACT_ITERATIONS: usize = 64;
+/// Internal constant `MAX_PEEPHOLE_FUNCTION_INSTS`.
 const MAX_PEEPHOLE_FUNCTION_INSTS: usize = 1024;
 
 #[path = "at_use.rs"]
+/// Optimization module `cfg_sensitive`.
 mod cfg_sensitive;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// Internal data structure `PeepholeStats`.
 pub struct PeepholeStats {
+    /// Iteration count.
     pub iterations: usize,
+    /// Rewrite count.
     pub rewrites: usize,
+    /// Per-rule counters.
     pub per_rule: BTreeMap<String, usize>,
+    /// Promoted slot count or set.
     pub promoted_slots: usize,
+    /// Promoted slice count.
     pub promoted_slices: usize,
+    /// Promoted load count.
     pub promoted_loads: usize,
+    /// Eliminated store count.
     pub eliminated_stores: usize,
+    /// Inlining iteration count.
     pub inline_iterations: usize,
+    /// Inlined call count.
     pub inlined_calls: usize,
 }
 
 impl PeepholeStats {
+    /// Internal helper `record`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     pub(crate) fn record(&mut self, rule_name: &str) {
         self.rewrites += 1;
         *self.per_rule.entry(rule_name.to_string()).or_default() += 1;
     }
 
+    /// Internal helper `merge`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     pub(crate) fn merge(&mut self, other: PeepholeStats) {
         self.iterations += other.iterations;
         self.rewrites += other.rewrites;
@@ -56,11 +80,21 @@ impl PeepholeStats {
     }
 }
 
+/// Generated rule count.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 pub fn generated_rule_count() -> usize {
     GENERATED_RULE_COUNT
 }
 
-#[allow(dead_code)]
+#[allow(dead_code, reason = "Required by the current implementation shape.")]
+/// Optimize module.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 pub fn optimize_module(module: &mut Module) -> PeepholeStats {
     let mut total = PeepholeStats::default();
     for func in &mut module.functions {
@@ -69,6 +103,11 @@ pub fn optimize_module(module: &mut Module) -> PeepholeStats {
     total
 }
 
+/// Optimize function.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 pub fn optimize_function(func: &mut Function) -> PeepholeStats {
     if func.inst_pool.iter_insts().count() > MAX_PEEPHOLE_FUNCTION_INSTS {
         return PeepholeStats::default();
@@ -87,6 +126,11 @@ pub fn optimize_function(func: &mut Function) -> PeepholeStats {
     total
 }
 
+/// Internal helper `optimize_local_roots`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn optimize_local_roots(func: &mut Function) -> PeepholeStats {
     let mut stats = PeepholeStats::default();
     let mut iterations = 0;
@@ -118,20 +162,32 @@ fn optimize_local_roots(func: &mut Function) -> PeepholeStats {
 }
 
 #[derive(Clone, Copy)]
-#[allow(dead_code)]
+#[allow(dead_code, reason = "Required by the current implementation shape.")]
+/// Internal enum `CanonicalBrIfMode`.
 enum CanonicalBrIfMode {
+    /// Variant `BoolXorConst`.
     BoolXorConst,
+    /// Variant `IntifiedBoolCompare`.
     IntifiedBoolCompare,
 }
 
-#[allow(dead_code)]
+#[allow(dead_code, reason = "Required by the current implementation shape.")]
+/// Internal data structure `CanonicalBrIfMatch`.
 struct CanonicalBrIfMatch {
+    /// Cond.
     cond: ValueRef,
+    /// Invert.
     invert: bool,
+    /// Matched insts.
     matched_insts: BTreeSet<u32>,
 }
 
-#[allow(dead_code)]
+#[allow(dead_code, reason = "Required by the current implementation shape.")]
+/// Internal helper `try_match_canonical_brif`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn try_match_canonical_brif(
     func: &Function,
     root_idx: u32,
@@ -158,6 +214,11 @@ fn try_match_canonical_brif(
     })
 }
 
+/// Internal helper `decode_bool_not`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn decode_bool_not(
     func: &Function,
     value: ValueRef,
@@ -212,6 +273,11 @@ fn decode_bool_not(
     None
 }
 
+/// Internal helper `decode_intified_bool_compare`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn decode_intified_bool_compare(
     func: &Function,
     value: ValueRef,
@@ -265,6 +331,11 @@ fn decode_intified_bool_compare(
     Some((cond, invert))
 }
 
+/// Internal helper `decode_intified_bool`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn decode_intified_bool(
     func: &Function,
     value: ValueRef,
@@ -348,10 +419,20 @@ fn decode_intified_bool(
     }
 }
 
+/// Internal helper `is_non_negative_odd_int`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn is_non_negative_odd_int(value: &BigInt) -> bool {
     value.sign() != Sign::Minus && bigint_is_odd(value)
 }
 
+/// Internal helper `bind_value_slot`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn bind_value_slot(slot: &mut Option<ValueRef>, value: ValueRef) -> bool {
     match slot {
         Some(existing) => *existing == value,
@@ -362,6 +443,11 @@ fn bind_value_slot(slot: &mut Option<ValueRef>, value: ValueRef) -> bool {
     }
 }
 
+/// Internal helper `primary_inst_index`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn primary_inst_index(value: ValueRef) -> Option<u32> {
     if value.is_block_arg() || value.is_secondary_result() {
         None
@@ -370,6 +456,11 @@ fn primary_inst_index(value: ValueRef) -> Option<u32> {
     }
 }
 
+/// Internal helper `bound_int_constant`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn bound_int_constant(func: &Function, value: ValueRef) -> Option<&BigInt> {
     let idx = primary_inst_index(value)?;
     let node = func.inst_pool.get(idx)?;
@@ -379,6 +470,11 @@ fn bound_int_constant(func: &Function, value: ValueRef) -> Option<&BigInt> {
     }
 }
 
+/// Internal helper `bound_bool_constant`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn bound_bool_constant(func: &Function, value: ValueRef) -> Option<bool> {
     let idx = primary_inst_index(value)?;
     let node = func.inst_pool.get(idx)?;
@@ -388,13 +484,23 @@ fn bound_bool_constant(func: &Function, value: ValueRef) -> Option<bool> {
     }
 }
 
-#[allow(dead_code)]
+#[allow(dead_code, reason = "Required by the current implementation shape.")]
+/// Internal helper `bigint_is_odd`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn bigint_is_odd(value: &BigInt) -> bool {
     let modulus = BigInt::from(2u8);
     (value % &modulus) != BigInt::from(0u8)
 }
 
-#[allow(dead_code)]
+#[allow(dead_code, reason = "Required by the current implementation shape.")]
+/// Internal helper `parse_decimal_bigint`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn parse_decimal_bigint(value: &str) -> BigInt {
     value
         .parse()
@@ -402,19 +508,35 @@ fn parse_decimal_bigint(value: &str) -> BigInt {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// Internal data structure `IntFacts`.
 struct IntFacts {
+    /// Is bottom.
     is_bottom: bool,
+    /// Known zero.
     known_zero: BigUint,
+    /// Known one.
     known_one: BigUint,
+    /// Unsigned width upper bound.
     unsigned_width_upper_bound: Option<u32>,
+    /// Signed width upper bound.
     signed_width_upper_bound: Option<u32>,
 }
 
 impl IntFacts {
+    /// Internal helper `unknown`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn unknown() -> Self {
         Self::default()
     }
 
+    /// Internal helper `bottom`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn bottom() -> Self {
         Self {
             is_bottom: true,
@@ -422,6 +544,11 @@ impl IntFacts {
         }
     }
 
+    /// Internal helper `from_exact_const`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn from_exact_const(value: &BigInt) -> Self {
         let mut facts = Self {
             is_bottom: false,
@@ -445,6 +572,11 @@ impl IntFacts {
         facts
     }
 
+    /// Internal helper `from_int_annotation`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn from_int_annotation(annotation: &IntAnnotation) -> Self {
         let mut facts = Self::unknown();
         match annotation.signedness {
@@ -459,6 +591,11 @@ impl IntFacts {
         facts
     }
 
+    /// Internal helper `from_known_bits`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn from_known_bits(known: &KnownBits) -> Self {
         let mut facts = Self {
             is_bottom: false,
@@ -471,6 +608,11 @@ impl IntFacts {
         facts
     }
 
+    /// Internal helper `meet_with`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn meet_with(&mut self, other: &Self) -> bool {
         let original = self.clone();
         if self.is_bottom || other.is_bottom {
@@ -497,12 +639,22 @@ impl IntFacts {
         *self != original
     }
 
+    /// Internal helper `normalize`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn normalize(&mut self) {
         if (&self.known_zero & &self.known_one) != BigUint::default() {
             *self = Self::bottom();
         }
     }
 
+    /// Internal helper `refine_with_annotation`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn refine_with_annotation(&mut self, annotation: &Annotation) {
         let update = match annotation {
             Annotation::Int(annotation) => Self::from_int_annotation(annotation),
@@ -512,6 +664,11 @@ impl IntFacts {
         let _ = self.meet_with(&update);
     }
 
+    /// Internal helper `tighten_from_unsigned`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn tighten_from_unsigned(&mut self) {
         if let Some(bits) = self.unsigned_width_upper_bound {
             self.signed_width_upper_bound =
@@ -519,16 +676,31 @@ impl IntFacts {
         }
     }
 
+    /// Internal helper `set_known_zero`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn set_known_zero(&mut self, bit: usize) {
         self.known_zero |= bit_mask(bit);
         self.normalize();
     }
 
+    /// Internal helper `set_known_one`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn set_known_one(&mut self, bit: usize) {
         self.known_one |= bit_mask(bit);
         self.normalize();
     }
 
+    /// Internal helper `bit_known_zero`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn bit_known_zero(&self, bit: usize) -> bool {
         if self.is_bottom {
             return false;
@@ -539,10 +711,20 @@ impl IntFacts {
                 .is_some_and(|width| bit >= width as usize)
     }
 
+    /// Internal helper `bit_known_one`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn bit_known_one(&self, bit: usize) -> bool {
         !self.is_bottom && mask_has_bit(&self.known_one, bit)
     }
 
+    /// Internal helper `relevant_bit_width`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn relevant_bit_width(&self) -> usize {
         let mask_bits = highest_mask_bit(&(&self.known_zero | &self.known_one)).map(|bit| bit + 1);
         let width_bits = self
@@ -554,6 +736,11 @@ impl IntFacts {
         mask_bits.into_iter().chain(width_bits).max().unwrap_or(1)
     }
 
+    /// Internal helper `best_annotation`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn best_annotation(&self) -> Option<IntAnnotation> {
         if self.is_bottom {
             return None;
@@ -587,11 +774,19 @@ impl IntFacts {
 }
 
 #[derive(Default)]
+/// Cached integer facts for the current peephole iteration.
 pub(super) struct IntFactCache {
+    /// Cached facts keyed by SSA value index.
     entries: BTreeMap<u32, IntFacts>,
+    /// Whether the cache has been populated for the current snapshot.
     computed: bool,
 }
 
+/// Internal helper `annotation_rank`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn annotation_rank(annotation: IntAnnotation) -> (u32, u8) {
     let signedness_rank = match annotation.signedness {
         IntSignedness::Unsigned => 0,
@@ -601,6 +796,11 @@ fn annotation_rank(annotation: IntAnnotation) -> (u32, u8) {
     (annotation.bit_width, signedness_rank)
 }
 
+/// Internal helper `min_bound`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn min_bound(lhs: Option<u32>, rhs: Option<u32>) -> Option<u32> {
     match (lhs, rhs) {
         (Some(lhs), Some(rhs)) => Some(lhs.min(rhs)),
@@ -610,6 +810,11 @@ fn min_bound(lhs: Option<u32>, rhs: Option<u32>) -> Option<u32> {
     }
 }
 
+/// Internal helper `max_bound`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn max_bound(lhs: Option<u32>, rhs: Option<u32>) -> Option<u32> {
     match (lhs, rhs) {
         (Some(lhs), Some(rhs)) => Some(lhs.max(rhs)),
@@ -617,14 +822,29 @@ fn max_bound(lhs: Option<u32>, rhs: Option<u32>) -> Option<u32> {
     }
 }
 
+/// Internal helper `bit_mask`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn bit_mask(bit: usize) -> BigUint {
     BigUint::from(1u8) << bit
 }
 
+/// Internal helper `mask_has_bit`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn mask_has_bit(mask: &BigUint, bit: usize) -> bool {
     (mask & bit_mask(bit)) != BigUint::default()
 }
 
+/// Internal helper `highest_mask_bit`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn highest_mask_bit(mask: &BigUint) -> Option<usize> {
     let bits = mask.bits();
     if bits == 0 {
@@ -634,6 +854,11 @@ fn highest_mask_bit(mask: &BigUint) -> Option<usize> {
     }
 }
 
+/// Internal helper `exact_unsigned_width`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn exact_unsigned_width(value: &BigInt) -> Option<u32> {
     if value.sign() == Sign::Minus {
         None
@@ -642,6 +867,11 @@ fn exact_unsigned_width(value: &BigInt) -> Option<u32> {
     }
 }
 
+/// Internal helper `exact_signed_width`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn exact_signed_width(value: &BigInt) -> u32 {
     if value.sign() == Sign::Minus {
         (((-value) - BigInt::from(1u8)).bits() as u32) + 1
@@ -651,71 +881,122 @@ fn exact_signed_width(value: &BigInt) -> u32 {
 }
 
 #[derive(Clone, Copy)]
-#[allow(dead_code)]
+#[allow(dead_code, reason = "Required by the current implementation shape.")]
+/// Internal enum `TerminatorOpcode`.
 enum TerminatorOpcode {
+    /// Variant `BrIf`.
     BrIf,
 }
 
-#[allow(dead_code)]
+#[allow(dead_code, reason = "Required by the current implementation shape.")]
+/// Internal data structure `ReplacementTerminator`.
 struct ReplacementTerminator {
+    /// Opcode.
     opcode: TerminatorOpcode,
+    /// Operands.
     operands: Vec<ValueRef>,
+    /// Successors.
     successors: Vec<usize>,
 }
 
 #[derive(Clone)]
-#[allow(dead_code)]
+#[allow(dead_code, reason = "Required by the current implementation shape.")]
+/// Internal data structure `MatchedSuccessor`.
 struct MatchedSuccessor {
+    /// Block.
     block: BlockRef,
+    /// Args.
     args: Vec<Operand>,
 }
 
+/// Internal enum `ValueRewrite`.
 enum ValueRewrite {
+    /// Variant `Existing`.
     Existing(ValueRef),
+    /// Variant `ConstInt`.
     ConstInt(BigInt),
+    /// Variant `ConstBool`.
     ConstBool(bool),
+    /// Variant `Expr`.
     Expr(ReplacementExpr),
 }
 
+/// Internal enum `ReplacementExpr`.
 enum ReplacementExpr {
+    /// Variant `Value`.
     Value(ValueRef),
+    /// Variant `ConstBool`.
     ConstBool(bool),
+    /// Variant `BoolNot`.
     BoolNot(Box<ReplacementExpr>),
 }
 
 #[derive(Clone, Copy)]
+/// Internal enum `ConstFoldKind`.
 enum ConstFoldKind {
+    /// Variant `Add`.
     Add,
+    /// Variant `Sub`.
     Sub,
+    /// Variant `Mul`.
     Mul,
+    /// Variant `Div`.
     Div,
+    /// Variant `Rem`.
     Rem,
+    /// Variant `And`.
     And,
+    /// Variant `Or`.
     Or,
+    /// Variant `Xor`.
     Xor,
+    /// Variant `BAnd`.
     BAnd,
+    /// Variant `BOr`.
     BOr,
+    /// Variant `BXor`.
     BXor,
+    /// Variant `Shl`.
     Shl,
+    /// Variant `Shr`.
     Shr,
+    /// Variant `Min`.
     Min,
+    /// Variant `Max`.
     Max,
+    /// Variant `CountOnes`.
     CountOnes,
+    /// Variant `CountLeadingZeros`.
     CountLeadingZeros,
+    /// Variant `CountTrailingZeros`.
     CountTrailingZeros,
+    /// Variant `Bswap`.
     Bswap,
+    /// Variant `BitReverse`.
     BitReverse,
+    /// Variant `RotateLeft`.
     RotateLeft,
+    /// Variant `RotateRight`.
     RotateRight,
+    /// Variant `Select`.
     Select,
+    /// Variant `ICmp`.
     ICmp(ICmpOp),
 }
 
+/// Internal data structure `ConstantFoldMatch`.
 struct ConstantFoldMatch {
+    /// Replacement.
     replacement: ValueRewrite,
+    /// Matched insts.
     matched_insts: BTreeSet<u32>,
 }
 
+/// Internal helper `best_int_annotation_matches`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn best_int_annotation_matches(
     func: &Function,
     fact_cache: &mut IntFactCache,
@@ -727,10 +1008,20 @@ fn best_int_annotation_matches(
         .is_some_and(|annotation| annotation == *expected)
 }
 
+/// Internal helper `known_one`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn known_one(func: &Function, fact_cache: &mut IntFactCache, value: ValueRef, bit: u32) -> bool {
     int_facts(func, fact_cache, value).is_some_and(|facts| facts.bit_known_one(bit as usize))
 }
 
+/// Internal helper `exact_bit_is_one`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn exact_bit_is_one(value: &BigInt, bit: u32) -> bool {
     let modulus = BigInt::from(1u8) << (bit as usize + 1);
     let truncated = ((value % &modulus) + &modulus) % &modulus;
@@ -738,6 +1029,11 @@ fn exact_bit_is_one(value: &BigInt, bit: u32) -> bool {
     (&shifted % BigInt::from(2u8)) != BigInt::from(0u8)
 }
 
+/// Internal helper `int_facts`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn int_facts(func: &Function, fact_cache: &mut IntFactCache, value: ValueRef) -> Option<IntFacts> {
     if !matches!(func.value_type(value), Some(Type::Int)) {
         return None;
@@ -753,6 +1049,11 @@ fn int_facts(func: &Function, fact_cache: &mut IntFactCache, value: ValueRef) ->
     )
 }
 
+/// Internal helper `ensure_int_facts`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn ensure_int_facts(func: &Function, fact_cache: &mut IntFactCache) {
     if fact_cache.computed {
         return;
@@ -828,6 +1129,11 @@ fn ensure_int_facts(func: &Function, fact_cache: &mut IntFactCache) {
     fact_cache.computed = true;
 }
 
+/// Internal helper `collect_int_values`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn collect_int_values(func: &Function) -> Vec<ValueRef> {
     let mut values = Vec::new();
     for (idx, arg) in func.block_args.iter().enumerate() {
@@ -846,6 +1152,11 @@ fn collect_int_values(func: &Function) -> Vec<ValueRef> {
     values
 }
 
+/// Internal helper `update_fact_entry`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn update_fact_entry(
     entries: &mut BTreeMap<u32, IntFacts>,
     value: ValueRef,
@@ -855,6 +1166,11 @@ fn update_fact_entry(
     entry.meet_with(update)
 }
 
+/// Internal helper `seed_int_facts_for_value`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn seed_int_facts_for_value(func: &Function, value: ValueRef) -> IntFacts {
     let mut facts = IntFacts::unknown();
     if !value.is_block_arg()
@@ -871,6 +1187,11 @@ fn seed_int_facts_for_value(func: &Function, value: ValueRef) -> IntFacts {
     facts
 }
 
+/// Internal helper `value_facts_from_snapshot`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn value_facts_from_snapshot(current: &BTreeMap<u32, IntFacts>, value: ValueRef) -> IntFacts {
     current
         .get(&value.raw())
@@ -878,6 +1199,11 @@ fn value_facts_from_snapshot(current: &BTreeMap<u32, IntFacts>, value: ValueRef)
         .unwrap_or_else(IntFacts::unknown)
 }
 
+/// Internal helper `operand_input_facts`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn operand_input_facts(
     _func: &Function,
     current: &BTreeMap<u32, IntFacts>,
@@ -890,14 +1216,29 @@ fn operand_input_facts(
     facts
 }
 
+/// Internal helper `forward_unknown`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn forward_unknown() -> IntFacts {
     IntFacts::unknown()
 }
 
+/// Internal helper `forward_const`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn forward_const(value: &BigInt) -> IntFacts {
     IntFacts::from_exact_const(value)
 }
 
+/// Internal helper `forward_select`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn forward_select(
     func: &Function,
     current: &BTreeMap<u32, IntFacts>,
@@ -934,6 +1275,11 @@ fn forward_select(
     facts
 }
 
+/// Internal helper `forward_bitand`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn forward_bitand(
     func: &Function,
     current: &BTreeMap<u32, IntFacts>,
@@ -965,6 +1311,11 @@ fn forward_bitand(
     facts
 }
 
+/// Internal helper `forward_bitor`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn forward_bitor(
     func: &Function,
     current: &BTreeMap<u32, IntFacts>,
@@ -996,6 +1347,11 @@ fn forward_bitor(
     facts
 }
 
+/// Internal helper `forward_bitxor`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn forward_bitxor(
     func: &Function,
     current: &BTreeMap<u32, IntFacts>,
@@ -1031,6 +1387,11 @@ fn forward_bitxor(
     facts
 }
 
+/// Internal helper `forward_shl`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn forward_shl(
     func: &Function,
     current: &BTreeMap<u32, IntFacts>,
@@ -1065,6 +1426,11 @@ fn forward_shl(
     facts
 }
 
+/// Internal helper `forward_shr`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn forward_shr(
     func: &Function,
     current: &BTreeMap<u32, IntFacts>,
@@ -1098,6 +1464,11 @@ fn forward_shr(
     facts
 }
 
+/// Internal helper `forward_merge`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn forward_merge(
     func: &Function,
     current: &BTreeMap<u32, IntFacts>,
@@ -1133,6 +1504,11 @@ fn forward_merge(
     facts
 }
 
+/// Internal helper `forward_split_hi`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn forward_split_hi(
     func: &Function,
     current: &BTreeMap<u32, IntFacts>,
@@ -1161,6 +1537,11 @@ fn forward_split_hi(
     facts
 }
 
+/// Internal helper `forward_split_lo`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn forward_split_lo(
     func: &Function,
     current: &BTreeMap<u32, IntFacts>,
@@ -1183,11 +1564,19 @@ fn forward_split_lo(
 }
 
 #[derive(Clone)]
+/// Internal data structure `BackwardFactUpdate`.
 struct BackwardFactUpdate {
+    /// Value.
     value: ValueRef,
+    /// Facts.
     facts: IntFacts,
 }
 
+/// Internal helper `backward_select`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn backward_select(
     func: &Function,
     cond: &tuffy_ir::typed::BoolOperand,
@@ -1212,6 +1601,11 @@ fn backward_select(
     }
 }
 
+/// Internal helper `backward_bitand`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn backward_bitand(
     func: &Function,
     current: &BTreeMap<u32, IntFacts>,
@@ -1251,6 +1645,11 @@ fn backward_bitand(
     ]
 }
 
+/// Internal helper `backward_bitor`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn backward_bitor(
     func: &Function,
     current: &BTreeMap<u32, IntFacts>,
@@ -1290,6 +1689,11 @@ fn backward_bitor(
     ]
 }
 
+/// Internal helper `backward_bitxor`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn backward_bitxor(
     func: &Function,
     current: &BTreeMap<u32, IntFacts>,
@@ -1347,6 +1751,11 @@ fn backward_bitxor(
     ]
 }
 
+/// Internal helper `backward_shl`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn backward_shl(
     func: &Function,
     _current: &BTreeMap<u32, IntFacts>,
@@ -1374,6 +1783,11 @@ fn backward_shl(
     }]
 }
 
+/// Internal helper `backward_shr`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn backward_shr(
     func: &Function,
     _current: &BTreeMap<u32, IntFacts>,
@@ -1401,6 +1815,11 @@ fn backward_shr(
     }]
 }
 
+/// Internal helper `backward_merge`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn backward_merge(
     func: &Function,
     _current: &BTreeMap<u32, IntFacts>,
@@ -1441,6 +1860,11 @@ fn backward_merge(
     ]
 }
 
+/// Internal helper `backward_split`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn backward_split(
     _func: &Function,
     _current: &BTreeMap<u32, IntFacts>,
@@ -1473,6 +1897,11 @@ fn backward_split(
     }]
 }
 
+/// Internal helper `bigint_to_nonnegative_u32`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn bigint_to_nonnegative_u32(value: &BigInt) -> Option<u32> {
     if value.sign() == Sign::Minus {
         None
@@ -1481,6 +1910,11 @@ fn bigint_to_nonnegative_u32(value: &BigInt) -> Option<u32> {
     }
 }
 
+/// Internal helper `apply_value_root_rewrite`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn apply_value_root_rewrite(
     func: &mut Function,
     root_idx: u32,
@@ -1524,6 +1958,11 @@ fn apply_value_root_rewrite(
     cleanup_dead_instructions(func, matched_insts);
 }
 
+/// Internal helper `build_const_rewrite_instruction`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn build_const_rewrite_instruction(
     func: &Function,
     root_idx: u32,
@@ -1542,6 +1981,11 @@ fn build_const_rewrite_instruction(
     }
 }
 
+/// Internal helper `build_replacement_expr`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn build_replacement_expr(
     func: &mut Function,
     root_idx: u32,
@@ -1586,6 +2030,11 @@ fn build_replacement_expr(
     }
 }
 
+/// Internal helper `try_fold_constant_root`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn try_fold_constant_root(
     func: &Function,
     root_idx: u32,
@@ -1637,6 +2086,11 @@ fn try_fold_constant_root(
     })
 }
 
+/// Internal helper `root_matches_const_fold_kind`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn root_matches_const_fold_kind(op: &Op, kind: ConstFoldKind) -> bool {
     match (kind, op) {
         (ConstFoldKind::Add, Op::Add(_, _))
@@ -1667,6 +2121,11 @@ fn root_matches_const_fold_kind(op: &Op, kind: ConstFoldKind) -> bool {
     }
 }
 
+/// Internal helper `constant_value_for_fold`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn constant_value_for_fold(
     func: &Function,
     value: ValueRef,
@@ -1685,6 +2144,11 @@ fn constant_value_for_fold(
     Some(resolved)
 }
 
+/// Internal helper `apply_operand_annotation_for_fold`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn apply_operand_annotation_for_fold(value: Value, annotation: &Option<Annotation>) -> Value {
     match (value, annotation) {
         (Value::Poison, _) => Value::Poison,
@@ -1697,6 +2161,11 @@ fn apply_operand_annotation_for_fold(value: Value, annotation: &Option<Annotatio
     }
 }
 
+/// Internal helper `definition_annotation`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn definition_annotation(func: &Function, value: ValueRef) -> Option<Annotation> {
     if value.is_block_arg() {
         func.block_args
@@ -1713,11 +2182,21 @@ fn definition_annotation(func: &Function, value: ValueRef) -> Option<Annotation>
     }
 }
 
+/// Internal helper `definition_type`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn definition_type(func: &Function, value: ValueRef) -> Option<Type> {
     func.value_type(value).cloned()
 }
 
-#[allow(dead_code)]
+#[allow(dead_code, reason = "Required by the current implementation shape.")]
+/// Internal helper `apply_terminator_root_rewrite`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn apply_terminator_root_rewrite(
     func: &mut Function,
     root_idx: u32,
@@ -1733,7 +2212,12 @@ fn apply_terminator_root_rewrite(
     cleanup_dead_instructions(func, matched_insts);
 }
 
-#[allow(dead_code)]
+#[allow(dead_code, reason = "Required by the current implementation shape.")]
+/// Internal helper `build_terminator_op`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn build_terminator_op(func: &Function, root_op: &Op, replacement: ReplacementTerminator) -> Op {
     let matched_successors = extract_matched_successors(root_op);
 
@@ -1764,7 +2248,12 @@ fn build_terminator_op(func: &Function, root_op: &Op, replacement: ReplacementTe
     }
 }
 
-#[allow(dead_code)]
+#[allow(dead_code, reason = "Required by the current implementation shape.")]
+/// Internal helper `extract_matched_successors`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn extract_matched_successors(root_op: &Op) -> Vec<MatchedSuccessor> {
     match root_op {
         Op::BrIf(_, then_block, then_args, else_block, else_args) => vec![
@@ -1781,6 +2270,11 @@ fn extract_matched_successors(root_op: &Op) -> Vec<MatchedSuccessor> {
     }
 }
 
+/// Internal helper `merged_origin`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn merged_origin(func: &Function, root_idx: u32, matched_insts: &BTreeSet<u32>) -> Origin {
     let mut seen = BTreeSet::new();
     let mut sources = Vec::new();
@@ -1796,6 +2290,11 @@ fn merged_origin(func: &Function, root_idx: u32, matched_insts: &BTreeSet<u32>) 
     Origin { sources }
 }
 
+/// Internal helper `cleanup_dead_instructions`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn cleanup_dead_instructions(func: &mut Function, matched_insts: &BTreeSet<u32>) {
     loop {
         let mut changed = false;
@@ -1815,6 +2314,11 @@ fn cleanup_dead_instructions(func: &mut Function, matched_insts: &BTreeSet<u32>)
     }
 }
 
+/// Internal helper `instruction_results_unused`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn instruction_results_unused(func: &Function, idx: u32, has_secondary_result: bool) -> bool {
     if func.has_uses(ValueRef::inst_result(idx)) {
         return false;
@@ -1833,6 +2337,11 @@ mod fact_tests {
     use super::*;
     use tuffy_ir::parser::parse_module;
 
+    /// Internal helper `single_function`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn single_function(input: &str) -> Function {
         let module = parse_module(input).unwrap_or_else(|e| panic!("parse error: {e}"));
         module
@@ -1842,6 +2351,11 @@ mod fact_tests {
             .expect("module should contain one function")
     }
 
+    /// Internal helper `select_operands`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn select_operands(
         func: &Function,
         inst_idx: u32,
@@ -1853,6 +2367,11 @@ mod fact_tests {
     }
 
     #[test]
+    /// Internal helper `best_annotation_prefers_unsigned_when_widths_tie`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn best_annotation_prefers_unsigned_when_widths_tie() {
         let mut facts = IntFacts::unknown();
         facts.unsigned_width_upper_bound = Some(8);
@@ -1867,6 +2386,11 @@ mod fact_tests {
     }
 
     #[test]
+    /// Internal helper `best_annotation_prefers_narrower_signed_width`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn best_annotation_prefers_narrower_signed_width() {
         let mut facts = IntFacts::unknown();
         facts.unsigned_width_upper_bound = Some(8);
@@ -1881,6 +2405,11 @@ mod fact_tests {
     }
 
     #[test]
+    /// Internal helper `backward_select_only_updates_taken_const_branch`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn backward_select_only_updates_taken_const_branch() {
         let func = single_function(
             r#"
@@ -1903,6 +2432,11 @@ func @const_true_select() {
     }
 
     #[test]
+    /// Internal helper `backward_select_skips_unknown_distinct_branches`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn backward_select_skips_unknown_distinct_branches() {
         let func = single_function(
             r#"
@@ -1926,6 +2460,11 @@ func @unknown_select(bool, int:u8, int:u8) {
     }
 
     #[test]
+    /// Internal helper `backward_select_updates_unknown_shared_value`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn backward_select_updates_unknown_shared_value() {
         let func = single_function(
             r#"

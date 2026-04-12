@@ -63,7 +63,9 @@ pub enum IntSignedness {
 /// Integer type annotation with bit width and signedness.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct IntAnnotation {
+    /// Number of low bits constrained by the annotation.
     pub bit_width: u32,
+    /// Signedness interpretation attached to those low bits.
     pub signedness: IntSignedness,
 }
 
@@ -74,8 +76,11 @@ pub struct IntAnnotation {
 /// as don't-care (`x` in the text format).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct KnownBits {
+    /// Bits known to be one.
     pub ones: BigUint,
+    /// Bits known to be zero.
     pub zeros: BigUint,
+    /// Bits whose value matters to downstream consumers.
     pub demanded: BigUint,
 }
 
@@ -83,6 +88,11 @@ impl KnownBits {
     /// Parse a `known(...)` ternary payload.
     ///
     /// The rightmost character is bit 0. `_` separators are ignored.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the ternary payload contains an unknown character or
+    /// encodes inconsistent known-bit masks.
     pub fn from_ternary_str(input: &str) -> Result<Self, String> {
         let mut ones = BigUint::default();
         let mut zeros = BigUint::default();
@@ -204,15 +214,25 @@ pub enum Type {
 /// Mirrors `TuffyLean.IR.FpClassMask`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct FpClassMask {
+    /// Exclude signaling NaNs.
     pub snan: bool,
+    /// Exclude quiet NaNs.
     pub qnan: bool,
+    /// Exclude negative infinity.
     pub ninf: bool,
+    /// Exclude negative normal numbers.
     pub nnorm: bool,
+    /// Exclude negative subnormals.
     pub nsub: bool,
+    /// Exclude negative zero.
     pub nzero: bool,
+    /// Exclude positive zero.
     pub pzero: bool,
+    /// Exclude positive subnormals.
     pub psub: bool,
+    /// Exclude positive normal numbers.
     pub pnorm: bool,
+    /// Exclude positive infinity.
     pub pinf: bool,
 }
 

@@ -69,6 +69,7 @@ impl std::fmt::Display for InterpResult {
 
 /// A frame on the call stack.
 struct CallFrame<'a> {
+    /// Function executed by this frame.
     func: &'a Function,
     /// SSA value environment: maps ValueRef (raw encoding) to runtime Value
     /// along with the definition-site annotation (used as fallback when no
@@ -79,6 +80,7 @@ struct CallFrame<'a> {
 }
 
 impl<'a> CallFrame<'a> {
+    /// Create an empty frame for `func`.
     fn new(func: &'a Function) -> Self {
         Self {
             func,
@@ -87,16 +89,23 @@ impl<'a> CallFrame<'a> {
         }
     }
 
+    /// Record a runtime value for an SSA reference without a definition annotation.
     fn set_value(&mut self, vref: ValueRef, val: Value) {
         // Store with no definition annotation (callers that know the annotation
         // should use set_value_with_ann instead).
         self.env.insert(vref.raw(), (val, None));
     }
 
+    /// Record a runtime value and its definition-site annotation.
     fn set_value_with_ann(&mut self, vref: ValueRef, val: Value, ann: Option<Annotation>) {
         self.env.insert(vref.raw(), (val, ann));
     }
 
+    /// Fetch the runtime value bound to an SSA reference.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the value has not been defined in this frame.
     fn get_value(&self, vref: ValueRef) -> Value {
         self.env
             .get(&vref.raw())
@@ -104,6 +113,7 @@ impl<'a> CallFrame<'a> {
             .unwrap_or_else(|| panic!("undefined value reference: {:?} (raw={})", vref, vref.raw()))
     }
 
+    /// Fetch the definition-site annotation bound to an SSA reference.
     fn get_def_annotation(&self, vref: ValueRef) -> Option<Annotation> {
         self.env.get(&vref.raw()).and_then(|(_, ann)| ann.clone())
     }
@@ -111,8 +121,11 @@ impl<'a> CallFrame<'a> {
 
 /// The interpreter.
 pub struct Interpreter<'a> {
+    /// Module being interpreted.
     module: &'a Module,
+    /// Abstract memory state.
     memory: Memory,
+    /// UB handling mode.
     mode: ExecMode,
     /// Map from symbol name to function index.
     func_map: HashMap<String, usize>,
@@ -133,6 +146,7 @@ pub struct Interpreter<'a> {
     /// Captured template + args pointers from the most recent `Arguments::new` call.
     /// Used by the `__print` extern handler.
     pending_fmt_template: Option<Pointer>,
+    /// Captured format-argument pointer from the most recent `Arguments::new` call.
     pending_fmt_args: Option<Pointer>,
     /// Shadow hashers: maps hasher AllocId to a native DefaultHasher.
     /// Used to produce correct SipHash results despite codegen bugs in the
@@ -865,6 +879,7 @@ impl<'a> Interpreter<'a> {
         Ok(BlockResult::FallThrough)
     }
 
+    /// Apply a terminator action and update interpreter state.
     fn handle_terminator(&mut self, action: TerminatorAction) -> Result<BlockResult, UbViolation> {
         match action {
             TerminatorAction::Return(val) => {
@@ -1087,6 +1102,7 @@ impl<'a> Interpreter<'a> {
         }
     }
 
+    /// Handle integer-to-float extern shims that appear in core formatting paths.
     fn extern_int_to_fp(&self, name: &str, args: &[Value]) -> Result<Option<Value>, UbViolation> {
         let (signed, int_bits, ft) = match name {
             "__floattisf" => (true, 128u32, FloatType::F32),

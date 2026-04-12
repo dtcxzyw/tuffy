@@ -7,45 +7,61 @@ use crate::reloc::Relocation;
 /// A machine-code offset tagged with a source id from `FunctionDebugInfo`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DebugLineRecord {
+    /// Machine-code offset where the source location becomes active.
     pub offset: u32,
+    /// Index into `FunctionDebugInfo::sources`.
     pub source: u32,
 }
 
 /// A location that a debugger can use to recover a variable value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DebugLocation {
+    /// Variable lives in a machine register.
     Register(u16),
+    /// Variable lives at a frame-pointer-relative offset.
     FrameOffset(i32),
 }
 
 /// One half-open machine-code range where a variable lives in one location.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DebugVariableRange {
+    /// Inclusive machine-code range start.
     pub start: u32,
+    /// Exclusive machine-code range end.
     pub end: u32,
+    /// Location used for the variable within this range.
     pub location: DebugLocation,
 }
 
 /// Resolved machine locations for one source-level variable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompiledDebugVariable {
+    /// Index into `FunctionDebugInfo::variables`.
     pub variable: u32,
+    /// Machine-code ranges describing where the variable lives.
     pub ranges: Vec<DebugVariableRange>,
 }
 
 /// Debug info attached to a compiled function.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompiledDebugInfo {
+    /// Function-level debug side tables carried over from the IR.
     pub function: FunctionDebugInfo,
+    /// Source line records for machine-code offsets.
     pub lines: Vec<DebugLineRecord>,
+    /// Resolved machine locations for source variables.
     pub variables: Vec<CompiledDebugVariable>,
 }
 
 /// A compiled function ready for object file emission.
 pub struct CompiledFunction {
+    /// Symbol name emitted for the compiled function.
     pub name: String,
+    /// Encoded machine code bytes.
     pub code: Vec<u8>,
+    /// Relocations recorded within `code`.
     pub relocations: Vec<Relocation>,
+    /// Optional debug information for the function.
     pub debug: Option<CompiledDebugInfo>,
     /// If true, emit with weak binding (STB_WEAK) so the linker can
     /// deduplicate identical instantiations across codegen units.
@@ -89,7 +105,9 @@ pub struct CallSiteEntry {
 
 /// A static data blob to be placed in a data section.
 pub struct StaticData {
+    /// Symbol name emitted for the static blob.
     pub name: String,
+    /// Raw bytes stored in the static blob.
     pub data: Vec<u8>,
     /// Relocations within the data (e.g. function pointers in vtables).
     pub relocations: Vec<Relocation>,

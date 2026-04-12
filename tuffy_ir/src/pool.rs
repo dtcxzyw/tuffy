@@ -10,6 +10,7 @@ use crate::value::BlockRef;
 /// A node in the instruction pool: instruction data plus linked-list metadata.
 #[derive(Debug, Clone)]
 pub struct InstNode {
+    /// Instruction payload stored in this node.
     pub inst: Instruction,
     /// Previous instruction in the same basic block (`None` if first).
     pub prev: Option<u32>,
@@ -31,12 +32,16 @@ pub struct InstNode {
 /// but never invalidates other indices.
 #[derive(Debug, Clone)]
 pub struct InstPool {
+    /// Storage for live and vacant instruction slots.
     nodes: Vec<Option<InstNode>>,
+    /// Free-list of vacant instruction indices.
     free_list: Vec<u32>,
+    /// Number of live instructions currently stored.
     live_count: u32,
 }
 
 impl InstPool {
+    /// Create an empty instruction pool.
     pub fn new() -> Self {
         Self {
             nodes: Vec::new(),
@@ -80,11 +85,19 @@ impl InstPool {
     }
 
     /// Get the instruction at `index`, panicking if the slot is empty.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` does not refer to a live instruction slot.
     pub fn inst(&self, index: u32) -> &Instruction {
         &self.get(index).expect("invalid instruction index").inst
     }
 
     /// Get a mutable reference to the instruction at `index`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` does not refer to a live instruction slot.
     pub fn inst_mut(&mut self, index: u32) -> &mut Instruction {
         &mut self.get_mut(index).expect("invalid instruction index").inst
     }
@@ -145,11 +158,14 @@ pub struct UseNode {
 /// Pool-based arena for use-list nodes with free-list recycling.
 #[derive(Debug, Clone)]
 pub struct UsePool {
+    /// Storage for live and vacant use-node slots.
     nodes: Vec<Option<UseNode>>,
+    /// Free-list of vacant use-node indices.
     free_list: Vec<u32>,
 }
 
 impl UsePool {
+    /// Create an empty use-node pool.
     pub fn new() -> Self {
         Self {
             nodes: Vec::new(),
@@ -178,10 +194,12 @@ impl UsePool {
         node
     }
 
+    /// Get a reference to a use node by index.
     pub fn get(&self, index: u32) -> Option<&UseNode> {
         self.nodes.get(index as usize)?.as_ref()
     }
 
+    /// Get a mutable reference to a use node by index.
     pub fn get_mut(&mut self, index: u32) -> Option<&mut UseNode> {
         self.nodes.get_mut(index as usize)?.as_mut()
     }

@@ -9,53 +9,72 @@ use crate::value::ValueRef;
 
 // ── Value Wrappers ──
 
+/// Type-checked wrapper for integer SSA values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IntValue(ValueRef);
 
+/// Type-checked wrapper for boolean SSA values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BoolValue(ValueRef);
 
+/// Type-checked wrapper for floating-point SSA values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FloatValue(ValueRef);
 
+/// Type-checked wrapper for pointer SSA values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PtrValue(ValueRef);
 
+/// Type-checked wrapper for memory-token SSA values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MemValue(ValueRef);
 
+/// Type-checked wrapper for unit-typed SSA values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UnitValue(ValueRef);
 
+/// Type-checked wrapper for byte-array SSA values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ByteValue(ValueRef);
 
 // ── Operand Wrappers ──
 
+/// Type-checked wrapper for integer operands.
 #[derive(Debug, Clone)]
 pub struct IntOperand(pub(crate) Operand);
 
+/// Type-checked wrapper for boolean operands.
 #[derive(Debug, Clone)]
 pub struct BoolOperand(pub(crate) Operand);
 
+/// Type-checked wrapper for floating-point operands.
 #[derive(Debug, Clone)]
 pub struct FloatOperand(pub(crate) Operand);
 
+/// Type-checked wrapper for pointer operands.
 #[derive(Debug, Clone)]
 pub struct PtrOperand(pub(crate) Operand);
 
+/// Type-checked wrapper for memory-token operands.
 #[derive(Debug, Clone)]
 pub struct MemOperand(pub(crate) Operand);
 
+/// Type-checked wrapper for unit operands.
 #[derive(Debug, Clone)]
 pub struct UnitOperand(pub(crate) Operand);
 
+/// Type-checked wrapper for byte-array operands.
 #[derive(Debug, Clone)]
 pub struct ByteOperand(pub(crate) Operand);
 
 // ── Value Wrapper Implementations ──
 
 impl IntValue {
+    /// Create an integer value wrapper from a raw value reference.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `v` does not have IR type `int`.
     pub fn new(v: ValueRef, func: &Function) -> Self {
         assert!(
             matches!(func.value_type(v), Some(Type::Int)),
@@ -65,20 +84,28 @@ impl IntValue {
         Self(v)
     }
 
+    /// Return the wrapped raw value reference.
     pub fn raw(self) -> ValueRef {
         self.0
     }
 
+    /// Return whether the value is the secondary result of a multi-result instruction.
     pub fn is_secondary_result(self) -> bool {
         self.0.is_secondary_result()
     }
 
+    /// Return the underlying value index.
     pub fn index(self) -> u32 {
         self.0.index()
     }
 }
 
 impl BoolValue {
+    /// Create a boolean value wrapper from a raw value reference.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `v` does not have IR type `bool`.
     pub fn new(v: ValueRef, func: &Function) -> Self {
         assert!(
             matches!(func.value_type(v), Some(Type::Bool)),
@@ -88,20 +115,28 @@ impl BoolValue {
         Self(v)
     }
 
+    /// Return the wrapped raw value reference.
     pub fn raw(self) -> ValueRef {
         self.0
     }
 
+    /// Return whether the value is the secondary result of a multi-result instruction.
     pub fn is_secondary_result(self) -> bool {
         self.0.is_secondary_result()
     }
 
+    /// Return the underlying value index.
     pub fn index(self) -> u32 {
         self.0.index()
     }
 }
 
 impl FloatValue {
+    /// Create a floating-point value wrapper from a raw value reference.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `v` does not have a floating-point IR type.
     pub fn new(v: ValueRef, func: &Function) -> Self {
         assert!(
             matches!(func.value_type(v), Some(Type::Float(_))),
@@ -111,20 +146,28 @@ impl FloatValue {
         Self(v)
     }
 
+    /// Return the wrapped raw value reference.
     pub fn raw(self) -> ValueRef {
         self.0
     }
 
+    /// Return whether the value is the secondary result of a multi-result instruction.
     pub fn is_secondary_result(self) -> bool {
         self.0.is_secondary_result()
     }
 
+    /// Return the underlying value index.
     pub fn index(self) -> u32 {
         self.0.index()
     }
 }
 
 impl PtrValue {
+    /// Create a pointer value wrapper from a raw value reference.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `v` does not have a pointer IR type.
     pub fn new(v: ValueRef, func: &Function) -> Self {
         assert!(
             matches!(func.value_type(v), Some(Type::Ptr(_))),
@@ -134,20 +177,28 @@ impl PtrValue {
         Self(v)
     }
 
+    /// Return the wrapped raw value reference.
     pub fn raw(self) -> ValueRef {
         self.0
     }
 
+    /// Return whether the value is the secondary result of a multi-result instruction.
     pub fn is_secondary_result(self) -> bool {
         self.0.is_secondary_result()
     }
 
+    /// Return the underlying value index.
     pub fn index(self) -> u32 {
         self.0.index()
     }
 }
 
 impl MemValue {
+    /// Create a memory-token value wrapper from a raw value reference.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `v` does not have IR type `mem`.
     pub fn new(v: ValueRef, func: &Function) -> Self {
         assert!(
             matches!(func.value_type(v), Some(Type::Mem)),
@@ -157,20 +208,28 @@ impl MemValue {
         Self(v)
     }
 
+    /// Return the wrapped raw value reference.
     pub fn raw(self) -> ValueRef {
         self.0
     }
 
+    /// Return whether the value is the secondary result of a multi-result instruction.
     pub fn is_secondary_result(self) -> bool {
         self.0.is_secondary_result()
     }
 
+    /// Return the underlying value index.
     pub fn index(self) -> u32 {
         self.0.index()
     }
 }
 
 impl UnitValue {
+    /// Create a unit value wrapper from a raw value reference.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `v` does not have IR type `unit`.
     pub fn new(v: ValueRef, func: &Function) -> Self {
         assert!(
             matches!(func.value_type(v), Some(Type::Unit)),
@@ -180,20 +239,28 @@ impl UnitValue {
         Self(v)
     }
 
+    /// Return the wrapped raw value reference.
     pub fn raw(self) -> ValueRef {
         self.0
     }
 
+    /// Return whether the value is the secondary result of a multi-result instruction.
     pub fn is_secondary_result(self) -> bool {
         self.0.is_secondary_result()
     }
 
+    /// Return the underlying value index.
     pub fn index(self) -> u32 {
         self.0.index()
     }
 }
 
 impl ByteValue {
+    /// Create a byte-array value wrapper from a raw value reference.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `v` does not have IR type `byte`.
     pub fn new(v: ValueRef, func: &Function) -> Self {
         assert!(
             matches!(func.value_type(v), Some(Type::Byte(_))),
@@ -203,14 +270,17 @@ impl ByteValue {
         Self(v)
     }
 
+    /// Return the wrapped raw value reference.
     pub fn raw(self) -> ValueRef {
         self.0
     }
 
+    /// Return whether the value is the secondary result of a multi-result instruction.
     pub fn is_secondary_result(self) -> bool {
         self.0.is_secondary_result()
     }
 
+    /// Return the underlying value index.
     pub fn index(self) -> u32 {
         self.0.index()
     }
@@ -219,6 +289,11 @@ impl ByteValue {
 // ── Operand Wrapper Implementations ──
 
 impl IntOperand {
+    /// Create an integer operand wrapper from a raw operand.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `op.value` does not have IR type `int`.
     pub fn new(op: Operand, func: &Function) -> Self {
         assert!(
             matches!(func.value_type(op.value), Some(Type::Int)),
@@ -228,14 +303,17 @@ impl IntOperand {
         Self(op)
     }
 
+    /// Create an unannotated integer operand from a typed integer value.
     pub fn from_value(v: IntValue) -> Self {
         Self(Operand::new(v.0))
     }
 
+    /// Create an annotated integer operand from a typed integer value.
     pub fn annotated(v: IntValue, ann: Annotation) -> Self {
         Self(Operand::annotated(v.0, ann))
     }
 
+    /// Return the wrapped raw operand.
     pub fn raw(self) -> Operand {
         self.0
     }
@@ -254,6 +332,11 @@ impl From<IntValue> for IntOperand {
 }
 
 impl BoolOperand {
+    /// Create a boolean operand wrapper from a raw operand.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `op.value` does not have IR type `bool`.
     pub fn new(op: Operand, func: &Function) -> Self {
         assert!(
             matches!(func.value_type(op.value), Some(Type::Bool)),
@@ -263,14 +346,17 @@ impl BoolOperand {
         Self(op)
     }
 
+    /// Create an unannotated boolean operand from a typed boolean value.
     pub fn from_value(v: BoolValue) -> Self {
         Self(Operand::new(v.0))
     }
 
+    /// Create an annotated boolean operand from a typed boolean value.
     pub fn annotated(v: BoolValue, ann: Annotation) -> Self {
         Self(Operand::annotated(v.0, ann))
     }
 
+    /// Return the wrapped raw operand.
     pub fn raw(self) -> Operand {
         self.0
     }
@@ -289,6 +375,11 @@ impl From<BoolValue> for BoolOperand {
 }
 
 impl FloatOperand {
+    /// Create a floating-point operand wrapper from a raw operand.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `op.value` does not have a floating-point IR type.
     pub fn new(op: Operand, func: &Function) -> Self {
         assert!(
             matches!(func.value_type(op.value), Some(Type::Float(_))),
@@ -298,14 +389,17 @@ impl FloatOperand {
         Self(op)
     }
 
+    /// Create an unannotated floating-point operand from a typed value.
     pub fn from_value(v: FloatValue) -> Self {
         Self(Operand::new(v.0))
     }
 
+    /// Create an annotated floating-point operand from a typed value.
     pub fn annotated(v: FloatValue, ann: Annotation) -> Self {
         Self(Operand::annotated(v.0, ann))
     }
 
+    /// Return the wrapped raw operand.
     pub fn raw(self) -> Operand {
         self.0
     }
@@ -324,6 +418,11 @@ impl From<FloatValue> for FloatOperand {
 }
 
 impl PtrOperand {
+    /// Create a pointer operand wrapper from a raw operand.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `op.value` does not have a pointer IR type.
     pub fn new(op: Operand, func: &Function) -> Self {
         assert!(
             matches!(func.value_type(op.value), Some(Type::Ptr(_))),
@@ -333,14 +432,17 @@ impl PtrOperand {
         Self(op)
     }
 
+    /// Create an unannotated pointer operand from a typed value.
     pub fn from_value(v: PtrValue) -> Self {
         Self(Operand::new(v.0))
     }
 
+    /// Create an annotated pointer operand from a typed value.
     pub fn annotated(v: PtrValue, ann: Annotation) -> Self {
         Self(Operand::annotated(v.0, ann))
     }
 
+    /// Return the wrapped raw operand.
     pub fn raw(self) -> Operand {
         self.0
     }
@@ -353,6 +455,11 @@ impl From<Operand> for PtrOperand {
 }
 
 impl MemOperand {
+    /// Create a memory-token operand wrapper from a raw operand.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `op.value` does not have IR type `mem`.
     pub fn new(op: Operand, func: &Function) -> Self {
         assert!(
             matches!(func.value_type(op.value), Some(Type::Mem)),
@@ -362,14 +469,17 @@ impl MemOperand {
         Self(op)
     }
 
+    /// Create an unannotated memory-token operand from a typed value.
     pub fn from_value(v: MemValue) -> Self {
         Self(Operand::new(v.0))
     }
 
+    /// Create an annotated memory-token operand from a typed value.
     pub fn annotated(v: MemValue, ann: Annotation) -> Self {
         Self(Operand::annotated(v.0, ann))
     }
 
+    /// Return the wrapped raw operand.
     pub fn raw(self) -> Operand {
         self.0
     }
@@ -382,6 +492,11 @@ impl From<Operand> for MemOperand {
 }
 
 impl UnitOperand {
+    /// Create a unit operand wrapper from a raw operand.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `op.value` does not have IR type `unit`.
     pub fn new(op: Operand, func: &Function) -> Self {
         assert!(
             matches!(func.value_type(op.value), Some(Type::Unit)),
@@ -391,20 +506,28 @@ impl UnitOperand {
         Self(op)
     }
 
+    /// Create an unannotated unit operand from a typed value.
     pub fn from_value(v: UnitValue) -> Self {
         Self(Operand::new(v.0))
     }
 
+    /// Create an annotated unit operand from a typed value.
     pub fn annotated(v: UnitValue, ann: Annotation) -> Self {
         Self(Operand::annotated(v.0, ann))
     }
 
+    /// Return the wrapped raw operand.
     pub fn raw(self) -> Operand {
         self.0
     }
 }
 
 impl ByteOperand {
+    /// Create a byte-array operand wrapper from a raw operand.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `op.value` does not have IR type `byte`.
     pub fn new(op: Operand, func: &Function) -> Self {
         assert!(
             matches!(func.value_type(op.value), Some(Type::Byte(_))),
@@ -414,14 +537,17 @@ impl ByteOperand {
         Self(op)
     }
 
+    /// Create an unannotated byte-array operand from a typed value.
     pub fn from_value(v: ByteValue) -> Self {
         Self(Operand::new(v.0))
     }
 
+    /// Create an annotated byte-array operand from a typed value.
     pub fn annotated(v: ByteValue, ann: Annotation) -> Self {
         Self(Operand::annotated(v.0, ann))
     }
 
+    /// Return the wrapped raw operand.
     pub fn raw(self) -> Operand {
         self.0
     }

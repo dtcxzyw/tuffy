@@ -19,9 +19,13 @@ use crate::value::{BlockRef, RegionRef, ValueRef};
 /// Location context for a verification error.
 #[derive(Debug, Clone)]
 pub enum Location {
+    /// Module-level context.
     Module,
+    /// Function-level context with the function name.
     Function(String),
+    /// Basic-block context with function name and block index.
     Block(String, u32),
+    /// Instruction context with function name, block index, and instruction ordinal.
     Instruction(String, u32, u32),
 }
 
@@ -41,7 +45,9 @@ impl fmt::Display for Location {
 /// A single verification error.
 #[derive(Debug, Clone)]
 pub struct VerifyError {
+    /// Location where verification failed.
     pub location: Location,
+    /// Human-readable verification failure description.
     pub message: String,
 }
 
@@ -54,14 +60,17 @@ impl fmt::Display for VerifyError {
 /// Collected verification results.
 #[derive(Debug, Default)]
 pub struct VerifyResult {
+    /// Accumulated verification failures.
     pub errors: Vec<VerifyError>,
 }
 
 impl VerifyResult {
+    /// Return whether no verification errors were collected.
     pub fn is_ok(&self) -> bool {
         self.errors.is_empty()
     }
 
+    /// Record a verification error.
     fn error(&mut self, location: Location, message: impl Into<String>) {
         self.errors.push(VerifyError {
             location,
@@ -91,13 +100,18 @@ impl fmt::Display for VerifyResult {
 // Per-function verification context
 // ---------------------------------------------------------------------------
 
+/// Per-function verification state shared by the checker passes.
 struct FuncVerifier<'a> {
+    /// Function being verified.
     func: &'a Function,
+    /// Resolved function name used in diagnostics.
     func_name: String,
+    /// Shared verification result accumulator.
     result: &'a mut VerifyResult,
 }
 
 impl<'a> FuncVerifier<'a> {
+    /// Create a verifier for one function.
     fn new(func: &'a Function, func_name: String, result: &'a mut VerifyResult) -> Self {
         Self {
             func,
@@ -106,18 +120,22 @@ impl<'a> FuncVerifier<'a> {
         }
     }
 
+    /// Return the function-level diagnostic location.
     fn func_loc(&self) -> Location {
         Location::Function(self.func_name.clone())
     }
 
+    /// Return the block-level diagnostic location.
     fn block_loc(&self, bi: u32) -> Location {
         Location::Block(self.func_name.clone(), bi)
     }
 
+    /// Return the instruction-level diagnostic location.
     fn inst_loc(&self, bi: u32, ii: u32) -> Location {
         Location::Instruction(self.func_name.clone(), bi, ii)
     }
 
+    /// Look up the type of a referenced SSA value.
     fn value_type(&self, v: ValueRef) -> Option<&Type> {
         if v.is_block_arg() {
             self.func
@@ -134,6 +152,7 @@ impl<'a> FuncVerifier<'a> {
         }
     }
 
+    /// Return whether `v` references a live value in the function.
     fn is_valid_value(&self, v: ValueRef) -> bool {
         if v.is_block_arg() {
             (v.index() as usize) < self.func.block_args.len()
@@ -142,14 +161,17 @@ impl<'a> FuncVerifier<'a> {
         }
     }
 
+    /// Return whether `b` references an existing basic block.
     fn is_valid_block(&self, b: BlockRef) -> bool {
         (b.index() as usize) < self.func.blocks.len()
     }
 
+    /// Return whether `r` references an existing region.
     fn is_valid_region(&self, r: RegionRef) -> bool {
         (r.index() as usize) < self.func.regions.len()
     }
 
+    /// Return whether an opcode is a terminator.
     fn is_terminator(op: &Op) -> bool {
         matches!(
             op,
@@ -163,6 +185,7 @@ impl<'a> FuncVerifier<'a> {
         )
     }
 
+    /// Validate one operand reference.
     fn check_operand(&mut self, op: &Operand, loc: &Location) {
         if !self.is_valid_value(op.value) {
             let tag = if op.value.is_block_arg() {
@@ -177,12 +200,14 @@ impl<'a> FuncVerifier<'a> {
         }
     }
 
+    /// Validate a slice of operand references.
     fn check_operands(&mut self, ops: &[Operand], loc: &Location) {
         for op in ops {
             self.check_operand(op, loc);
         }
     }
 
+    /// Require an operand to have an exact type.
     fn expect_type(&mut self, op: &Operand, expected: &Type, ctx: &str, loc: &Location) {
         if let Some(ty) = self.value_type(op.value)
             && ty != expected
@@ -194,6 +219,7 @@ impl<'a> FuncVerifier<'a> {
         }
     }
 
+    /// Require an operand to have integer type.
     fn expect_int(&mut self, op: &Operand, ctx: &str, loc: &Location) {
         if let Some(ty) = self.value_type(op.value)
             && !matches!(ty, Type::Int)
@@ -203,10 +229,12 @@ impl<'a> FuncVerifier<'a> {
         }
     }
 
+    /// Require an operand to have boolean type.
     fn expect_bool(&mut self, op: &Operand, ctx: &str, loc: &Location) {
         self.expect_type(op, &Type::Bool, ctx, loc);
     }
 
+    /// Require an operand to have pointer type.
     fn expect_ptr(&mut self, op: &Operand, ctx: &str, loc: &Location) {
         if let Some(ty) = self.value_type(op.value)
             && !matches!(ty, Type::Ptr(_))
@@ -216,6 +244,7 @@ impl<'a> FuncVerifier<'a> {
         }
     }
 
+    /// Require an operand to have floating-point type.
     fn expect_float(&mut self, op: &Operand, ctx: &str, loc: &Location) {
         if let Some(ty) = self.value_type(op.value)
             && !matches!(ty, Type::Float(_))
@@ -225,6 +254,7 @@ impl<'a> FuncVerifier<'a> {
         }
     }
 
+    /// Require a type expression to be integer-typed.
     fn check_int_type(&mut self, ty: &Type, ctx: &str, loc: &Location) {
         // Int type validation - bit_width is now in result_annotation
         if !matches!(ty, Type::Int) {
@@ -233,10 +263,12 @@ impl<'a> FuncVerifier<'a> {
         }
     }
 
+    /// Require an operand to have memory-token type.
     fn expect_mem(&mut self, op: &Operand, ctx: &str, loc: &Location) {
         self.expect_type(op, &Type::Mem, ctx, loc);
     }
 
+    /// Validate that a type may legally be loaded or stored.
     fn check_loadable_type(&mut self, ty: &Type, _ctx: &str, _loc: &Location) {
         match ty {
             Type::Int
@@ -249,6 +281,7 @@ impl<'a> FuncVerifier<'a> {
         }
     }
 
+    /// Require two operands to have the same type.
     fn expect_same_type(&mut self, a: &Operand, b: &Operand, ctx: &str, loc: &Location) {
         if let (Some(ta), Some(tb)) = (self.value_type(a.value), self.value_type(b.value))
             && ta != tb
@@ -260,6 +293,7 @@ impl<'a> FuncVerifier<'a> {
         }
     }
 
+    /// Validate a branch target and its block arguments.
     fn check_branch_target(&mut self, target: BlockRef, args: &[Operand], loc: &Location) {
         if !self.is_valid_block(target) {
             self.result.error(
@@ -302,6 +336,7 @@ impl<'a> FuncVerifier<'a> {
         }
     }
 
+    /// Validate that an annotation is legal for the given type.
     fn check_annotation(&mut self, ann: &Annotation, ty: &Type, ctx: &str, loc: &Location) {
         match ann {
             Annotation::Align(_) => {
@@ -353,6 +388,7 @@ impl<'a> FuncVerifier<'a> {
 // ---------------------------------------------------------------------------
 
 impl FuncVerifier<'_> {
+    /// Verify one instruction in block order.
     fn verify_instruction(&mut self, inst: &Instruction, bi: u32, ii: u32) {
         let loc = self.inst_loc(bi, ii);
 
@@ -713,6 +749,7 @@ impl FuncVerifier<'_> {
 // ---------------------------------------------------------------------------
 
 impl FuncVerifier<'_> {
+    /// Verify the memory-focused subset of instruction rules.
     fn verify_instruction_rest(&mut self, inst: &Instruction, loc: &Location) {
         match &inst.op {
             // -- Memory --
@@ -854,6 +891,7 @@ impl FuncVerifier<'_> {
         }
     }
 
+    /// Validate the ordering used by `load.atomic`.
     fn check_load_ordering(&mut self, ord: &MemoryOrdering, loc: &Location) {
         if matches!(ord, MemoryOrdering::Release | MemoryOrdering::AcqRel) {
             self.result.error(
@@ -863,6 +901,7 @@ impl FuncVerifier<'_> {
         }
     }
 
+    /// Validate the ordering used by `store.atomic`.
     fn check_store_ordering(&mut self, ord: &MemoryOrdering, loc: &Location) {
         if matches!(ord, MemoryOrdering::Acquire | MemoryOrdering::AcqRel) {
             self.result.error(
@@ -878,6 +917,7 @@ impl FuncVerifier<'_> {
 // ---------------------------------------------------------------------------
 
 impl FuncVerifier<'_> {
+    /// Verify the remaining instruction classes after the core checks.
     fn verify_instruction_final(&mut self, inst: &Instruction, loc: &Location) {
         match &inst.op {
             // -- Float binary --
@@ -1162,7 +1202,10 @@ impl FuncVerifier<'_> {
 
             // All ops should be covered above; if we reach here it's a bug
             // in the verifier, not the IR.
-            #[allow(unreachable_patterns)]
+            #[allow(
+                unreachable_patterns,
+                reason = "The final catch-all keeps the verifier exhaustive while earlier arms are grouped by concern."
+            )]
             _ => {}
         }
     }
@@ -1173,6 +1216,7 @@ impl FuncVerifier<'_> {
 // ---------------------------------------------------------------------------
 
 impl FuncVerifier<'_> {
+    /// Verify per-block linked-list structure and instruction placement.
     fn verify_blocks(&mut self) {
         for (bi, bb) in self.func.blocks.iter().enumerate() {
             let bi = bi as u32;
@@ -1340,6 +1384,7 @@ impl FuncVerifier<'_> {
         }
     }
 
+    /// Verify region nesting and block ownership.
     fn verify_regions(&mut self) {
         if self.func.regions.is_empty() {
             self.result
@@ -1449,6 +1494,7 @@ impl FuncVerifier<'_> {
 // ---------------------------------------------------------------------------
 
 impl FuncVerifier<'_> {
+    /// Run all per-function verification passes.
     fn verify_all(&mut self) {
         // Function-level structural checks.
         if self.func.param_annotations.len() != self.func.params.len() {

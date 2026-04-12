@@ -18,9 +18,13 @@ pub type VInst = MInst<VReg>;
 /// Operand size for x86 instructions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpSize {
+    /// 8-bit operand.
     S8,
+    /// 16-bit operand.
     S16,
+    /// 32-bit operand.
     S32,
+    /// 64-bit operand.
     S64,
 }
 
@@ -83,37 +87,121 @@ pub type PInst = MInst<Gpr>;
 #[derive(Debug, Clone)]
 pub enum MInst<R: RegType> {
     /// mov reg, reg
-    MovRR { size: OpSize, dst: R, src: R },
+    MovRR {
+        /// Operand size.
+        size: OpSize,
+        /// Destination register.
+        dst: R,
+        /// Source register.
+        src: R,
+    },
     /// mov reg, imm32
-    MovRI { size: OpSize, dst: R, imm: i64 },
+    MovRI {
+        /// Operand size.
+        size: OpSize,
+        /// Destination register.
+        dst: R,
+        /// Immediate value.
+        imm: i64,
+    },
     /// add dst, src (dst += src)
-    AddRR { size: OpSize, dst: R, src: R },
+    AddRR {
+        /// Operand size.
+        size: OpSize,
+        /// Destination register.
+        dst: R,
+        /// Source register.
+        src: R,
+    },
     /// sub dst, src (dst -= src)
-    SubRR { size: OpSize, dst: R, src: R },
+    SubRR {
+        /// Operand size.
+        size: OpSize,
+        /// Destination register.
+        dst: R,
+        /// Source register.
+        src: R,
+    },
     /// adc dst, src — add with carry (dst += src + CF)
-    AdcRR { size: OpSize, dst: R, src: R },
+    AdcRR {
+        /// Operand size.
+        size: OpSize,
+        /// Destination register.
+        dst: R,
+        /// Source register.
+        src: R,
+    },
     /// sbb dst, src — subtract with borrow (dst -= src + CF)
-    SbbRR { size: OpSize, dst: R, src: R },
+    SbbRR {
+        /// Operand size.
+        size: OpSize,
+        /// Destination register.
+        dst: R,
+        /// Source register.
+        src: R,
+    },
     /// imul dst, src (dst *= src)
-    ImulRR { size: OpSize, dst: R, src: R },
+    ImulRR {
+        /// Operand size.
+        size: OpSize,
+        /// Destination register.
+        dst: R,
+        /// Source register.
+        src: R,
+    },
     /// ret
     Ret,
     /// Label (pseudo-instruction, not emitted as code).
-    Label { id: u32 },
+    Label {
+        /// Label identifier.
+        id: u32,
+    },
     /// jmp rel32 (unconditional jump to label)
-    Jmp { target: u32 },
+    Jmp {
+        /// Target label id.
+        target: u32,
+    },
     /// jcc rel32 (conditional jump to label)
-    Jcc { cc: CondCode, target: u32 },
+    Jcc {
+        /// Condition code.
+        cc: CondCode,
+        /// Target label id.
+        target: u32,
+    },
     /// cmp r/m, r (compare two registers, sets flags)
-    CmpRR { size: OpSize, src1: R, src2: R },
+    CmpRR {
+        /// Operand size.
+        size: OpSize,
+        /// First source register.
+        src1: R,
+        /// Second source register.
+        src2: R,
+    },
     /// cmp r/m, imm32 (compare register with immediate)
-    CmpRI { size: OpSize, src: R, imm: i32 },
+    CmpRI {
+        /// Operand size.
+        size: OpSize,
+        /// Source register.
+        src: R,
+        /// Immediate value.
+        imm: i32,
+    },
     /// test r/m, r (AND without storing, sets flags)
-    TestRR { size: OpSize, src1: R, src2: R },
+    TestRR {
+        /// Operand size.
+        size: OpSize,
+        /// First source register.
+        src1: R,
+        /// Second source register.
+        src2: R,
+    },
     /// call to named symbol (uses relocation)
     CallSym {
+        /// Referenced symbol name.
         name: String,
+        /// Primary return register, if any.
         ret: Option<R>,
+        /// Secondary return register, if any.
         ret2: Option<R>,
         /// If present, this call has a cleanup landing pad at the given
         /// label (used for LSDA generation).
@@ -121,90 +209,237 @@ pub enum MInst<R: RegType> {
     },
     /// indirect call through register (call *%reg)
     CallReg {
+        /// Callee.
         callee: R,
+        /// Primary return register, if any.
         ret: Option<R>,
+        /// Secondary return register, if any.
         ret2: Option<R>,
         /// If present, this call has a cleanup landing pad at the given
         /// label (used for LSDA generation).
         cleanup_label: Option<u32>,
     },
     /// push reg onto stack
-    Push { reg: R },
+    Push {
+        /// Register operand.
+        reg: R,
+    },
     /// pop reg from stack
-    Pop { reg: R },
+    Pop {
+        /// Register operand.
+        reg: R,
+    },
     /// sub rsp, imm32 (allocate stack space)
-    SubSPI { imm: i32 },
+    SubSPI {
+        /// Immediate value.
+        imm: i32,
+    },
     /// add rsp, imm32 (deallocate stack space)
-    AddSPI { imm: i32 },
+    AddSPI {
+        /// Immediate value.
+        imm: i32,
+    },
     /// mov reg, [base+offset] (load from memory)
     MovRM {
+        /// Operand size.
         size: OpSize,
+        /// Destination register.
         dst: R,
+        /// Base register.
         base: R,
+        /// Displacement from the base register.
         offset: i32,
     },
     /// mov [base+offset], reg (store to memory)
     MovMR {
+        /// Operand size.
         size: OpSize,
+        /// Base register.
         base: R,
+        /// Displacement from the base register.
         offset: i32,
+        /// Source register.
         src: R,
     },
     /// lea reg, [base+offset] (load effective address)
-    Lea { dst: R, base: R, offset: i32 },
+    Lea {
+        /// Destination register.
+        dst: R,
+        /// Base register.
+        base: R,
+        /// Displacement from the base register.
+        offset: i32,
+    },
     /// mov reg, imm64 (64-bit immediate, REX.W + B8+rd io)
-    MovRI64 { dst: R, imm: i64 },
+    MovRI64 {
+        /// Destination register.
+        dst: R,
+        /// Immediate value.
+        imm: i64,
+    },
     /// mov [base+offset], imm32 (store immediate to memory)
     MovMI {
+        /// Operand size.
         size: OpSize,
+        /// Base register.
         base: R,
+        /// Displacement from the base register.
         offset: i32,
+        /// Immediate value.
         imm: i32,
     },
     /// lea reg, [rip+symbol] (RIP-relative address of named symbol)
-    LeaSymbol { dst: R, symbol: String },
+    LeaSymbol {
+        /// Destination register.
+        dst: R,
+        /// Referenced symbol name.
+        symbol: String,
+    },
     /// Load the address of a thread-local symbol using Initial Exec TLS model.
     /// Emits: mov %fs:0, dst ; add symbol@GOTTPOFF(%rip), dst
-    TlsLeaSymbol { dst: R, symbol: String },
+    TlsLeaSymbol {
+        /// Destination register.
+        dst: R,
+        /// Referenced symbol name.
+        symbol: String,
+    },
     /// or dst, src (dst |= src)
-    OrRR { size: OpSize, dst: R, src: R },
+    OrRR {
+        /// Operand size.
+        size: OpSize,
+        /// Destination register.
+        dst: R,
+        /// Source register.
+        src: R,
+    },
     /// and dst, src (dst &= src)
-    AndRR { size: OpSize, dst: R, src: R },
+    AndRR {
+        /// Operand size.
+        size: OpSize,
+        /// Destination register.
+        dst: R,
+        /// Source register.
+        src: R,
+    },
     /// xor dst, src (dst ^= src)
-    XorRR { size: OpSize, dst: R, src: R },
+    XorRR {
+        /// Operand size.
+        size: OpSize,
+        /// Destination register.
+        dst: R,
+        /// Source register.
+        src: R,
+    },
     /// shl dst, cl (dst <<= cl)
-    ShlRCL { size: OpSize, dst: R },
+    ShlRCL {
+        /// Operand size.
+        size: OpSize,
+        /// Destination register.
+        dst: R,
+    },
     /// shr dst, cl (logical right shift by cl)
-    ShrRCL { size: OpSize, dst: R },
+    ShrRCL {
+        /// Operand size.
+        size: OpSize,
+        /// Destination register.
+        dst: R,
+    },
     /// sar dst, cl (arithmetic right shift by cl)
-    SarRCL { size: OpSize, dst: R },
+    SarRCL {
+        /// Operand size.
+        size: OpSize,
+        /// Destination register.
+        dst: R,
+    },
     /// shl dst, imm8 (dst <<= imm8)
-    ShlImm { size: OpSize, dst: R, imm: u8 },
+    ShlImm {
+        /// Operand size.
+        size: OpSize,
+        /// Destination register.
+        dst: R,
+        /// Immediate value.
+        imm: u8,
+    },
     /// shr dst, imm8 (logical right shift by immediate)
-    ShrImm { size: OpSize, dst: R, imm: u8 },
+    ShrImm {
+        /// Operand size.
+        size: OpSize,
+        /// Destination register.
+        dst: R,
+        /// Immediate value.
+        imm: u8,
+    },
     /// sar dst, imm8 (arithmetic right shift by immediate)
-    SarImm { size: OpSize, dst: R, imm: u8 },
+    SarImm {
+        /// Operand size.
+        size: OpSize,
+        /// Destination register.
+        dst: R,
+        /// Immediate value.
+        imm: u8,
+    },
     /// and dst, imm32 (dst &= imm32)
-    AndRI { size: OpSize, dst: R, imm: i64 },
+    AndRI {
+        /// Operand size.
+        size: OpSize,
+        /// Destination register.
+        dst: R,
+        /// Immediate value.
+        imm: i64,
+    },
     /// cmovcc dst, src (conditional move based on condition code)
     CMOVcc {
+        /// Operand size.
         size: OpSize,
+        /// Condition code.
         cc: CondCode,
+        /// Destination register.
         dst: R,
+        /// Source register.
         src: R,
     },
     /// setcc dst (set byte based on condition code)
-    SetCC { cc: CondCode, dst: R },
+    SetCC {
+        /// Condition code.
+        cc: CondCode,
+        /// Destination register.
+        dst: R,
+    },
     /// movzx r64, r8 (zero-extend byte to qword)
-    MovzxB { dst: R, src: R },
+    MovzxB {
+        /// Destination register.
+        dst: R,
+        /// Source register.
+        src: R,
+    },
     /// movzx r64, r16 (zero-extend word to qword)
-    MovzxW { dst: R, src: R },
+    MovzxW {
+        /// Destination register.
+        dst: R,
+        /// Source register.
+        src: R,
+    },
     /// movsx r64, r8 (sign-extend byte to qword)
-    MovsxB { dst: R, src: R },
+    MovsxB {
+        /// Destination register.
+        dst: R,
+        /// Source register.
+        src: R,
+    },
     /// movsx r64, r16 (sign-extend word to qword)
-    MovsxW { dst: R, src: R },
+    MovsxW {
+        /// Destination register.
+        dst: R,
+        /// Source register.
+        src: R,
+    },
     /// movsxd r64, r32 (sign-extend dword to qword)
-    MovsxD { dst: R, src: R },
+    MovsxD {
+        /// Destination register.
+        dst: R,
+        /// Source register.
+        src: R,
+    },
     /// cqo (sign-extend RAX into RDX:RAX)
     Cqo,
     /// Pseudo-instruction: 64-bit division/remainder.
@@ -216,10 +451,15 @@ pub enum MInst<R: RegType> {
     /// allocator, which cannot reliably handle multiple fixed-register
     /// constraints in the same function.
     DivRem {
+        /// Destination register.
         dst: R,
+        /// Left-hand input register.
         lhs: R,
+        /// Right-hand input register.
         rhs: R,
+        /// Whether the operation uses signed arithmetic.
         signed: bool,
+        /// Whether the operation returns the remainder instead of the quotient.
         rem: bool,
     },
     /// Pseudo-instruction: 64-bit unsigned multiply with overflow detection.
@@ -229,19 +469,64 @@ pub enum MInst<R: RegType> {
     ///
     /// Uses the one-operand MUL which produces a 128-bit result in RDX:RAX.
     /// Overflow is detected when RDX != 0.
-    UMulOverflow { dst: R, overflow: R, lhs: R, rhs: R },
+    UMulOverflow {
+        /// Destination register.
+        dst: R,
+        /// Register receiving the overflow flag/result.
+        overflow: R,
+        /// Left-hand input register.
+        lhs: R,
+        /// Right-hand input register.
+        rhs: R,
+    },
     /// popcnt r32/r64, r32/r64 (population count)
-    Popcnt { size: OpSize, dst: R, src: R },
+    Popcnt {
+        /// Operand size.
+        size: OpSize,
+        /// Destination register.
+        dst: R,
+        /// Source register.
+        src: R,
+    },
     /// lzcnt r32/r64, r32/r64 (count leading zeros)
-    Lzcnt { size: OpSize, dst: R, src: R },
+    Lzcnt {
+        /// Operand size.
+        size: OpSize,
+        /// Destination register.
+        dst: R,
+        /// Source register.
+        src: R,
+    },
     /// tzcnt r32/r64, r32/r64 (count trailing zeros)
-    Tzcnt { size: OpSize, dst: R, src: R },
+    Tzcnt {
+        /// Operand size.
+        size: OpSize,
+        /// Destination register.
+        dst: R,
+        /// Source register.
+        src: R,
+    },
     /// bswap r32/r64 (byte-swap in place)
-    Bswap { size: OpSize, dst: R },
+    Bswap {
+        /// Operand size.
+        size: OpSize,
+        /// Destination register.
+        dst: R,
+    },
     /// rol dst, cl (rotate left by cl)
-    RolRCL { size: OpSize, dst: R },
+    RolRCL {
+        /// Operand size.
+        size: OpSize,
+        /// Destination register.
+        dst: R,
+    },
     /// ror dst, cl (rotate right by cl)
-    RorRCL { size: OpSize, dst: R },
+    RorRCL {
+        /// Operand size.
+        size: OpSize,
+        /// Destination register.
+        dst: R,
+    },
     /// ud2 (undefined instruction trap)
     Ud2,
     /// Pseudo-instruction: parallel copy of two register pairs.
@@ -250,34 +535,78 @@ pub enum MInst<R: RegType> {
     /// registers to unconstrained vregs without cross-clobbering. The encoder
     /// emits two `mov` instructions in the correct order (or uses `xchg` if
     /// the destinations cross).
-    MovRR2 { dst1: R, src1: R, dst2: R, src2: R },
+    MovRR2 {
+        /// First destination register.
+        dst1: R,
+        /// First source register.
+        src1: R,
+        /// Second destination register.
+        dst2: R,
+        /// Second source register.
+        src2: R,
+    },
     /// Pseudo-instruction: SSE2 f64 binary operation.
     ///
     /// Performs direct XMM register operations (dst = lhs op rhs).
     FpBinOp {
+        /// Operation kind.
         op: FpBinOpKind,
+        /// Destination register.
         dst: R,
+        /// Left-hand input register.
         lhs: R,
+        /// Right-hand input register.
         rhs: R,
+        /// Whether the operation uses the f64 encoding instead of f32.
         double: bool,
     },
     /// Pseudo-instruction: convert float (in XMM) to signed integer (in GPR).
     ///
     /// Uses cvttsd2si (double=true) or cvttss2si (double=false).
-    CvtFpToInt { dst: R, src: R, double: bool },
+    CvtFpToInt {
+        /// Destination register.
+        dst: R,
+        /// Source register.
+        src: R,
+        /// Whether the operation uses the f64 encoding instead of f32.
+        double: bool,
+    },
     /// Pseudo-instruction: convert signed integer (in GPR) to float (in XMM).
     ///
     /// Uses cvtsi2sd (double=true) or cvtsi2ss (double=false).
-    CvtIntToFp { dst: R, src: R, double: bool },
+    CvtIntToFp {
+        /// Destination register.
+        dst: R,
+        /// Source register.
+        src: R,
+        /// Whether the operation uses the f64 encoding instead of f32.
+        double: bool,
+    },
     /// Pseudo-instruction: move XMM to GPR (for external float-returning calls).
-    MoveXmmToGpr { dst: R, src: R, double: bool },
+    MoveXmmToGpr {
+        /// Destination register.
+        dst: R,
+        /// Source register.
+        src: R,
+        /// Whether the operation uses the f64 encoding instead of f32.
+        double: bool,
+    },
     /// Pseudo-instruction: GPR → XMM bit-reinterpretation (movd for f32, movq for f64).
-    GprToXmm { dst: R, src: R, double: bool },
+    GprToXmm {
+        /// Destination register.
+        dst: R,
+        /// Source register.
+        src: R,
+        /// Whether the operation uses the f64 encoding instead of f32.
+        double: bool,
+    },
     /// Pseudo-instruction: convert between float formats (f32↔f64).
     ///
     /// Uses cvtss2sd (src_double=false) or cvtsd2ss (src_double=true).
     CvtFpToFp {
+        /// Destination register.
         dst: R,
+        /// Source register.
         src: R,
         /// true if source is f64 (narrowing to f32), false if source is f32 (widening to f64).
         src_double: bool,
@@ -286,13 +615,17 @@ pub enum MInst<R: RegType> {
     ///
     /// Performs direct XMM comparison and produces a bool result in dst GPR.
     FpCmp {
+        /// Destination register.
         dst: R,
+        /// Left-hand input register.
         lhs: R,
+        /// Right-hand input register.
         rhs: R,
         /// Scratch GPR for two-setcc patterns (OEq, OLt, OLe).
         tmp: R,
         /// FCmpOp discriminant (see tuffy_ir::instruction::FCmpOp).
         kind: u8,
+        /// Whether the operation uses the f64 encoding instead of f32.
         double: bool,
     },
     /// Pseudo-instruction: atomic read-modify-write.
@@ -306,10 +639,15 @@ pub enum MInst<R: RegType> {
     /// - Sub:  `neg val; lock xadd [base], val`
     /// - And/Or/Xor: cmpxchg loop
     AtomicRmw {
+        /// Operation kind.
         op: AtomicRmwOpKind,
+        /// Operand size.
         size: OpSize,
+        /// Destination register.
         dst: R,
+        /// Base register.
         base: R,
+        /// Value register.
         val: R,
     },
     /// Pseudo-instruction: atomic compare-and-exchange.
@@ -320,10 +658,15 @@ pub enum MInst<R: RegType> {
     /// Expanded by the encoder into:
     /// `mov rax, expected; lock cmpxchg [base], desired; mov dst, rax`
     AtomicCmpXchg {
+        /// Operand size.
         size: OpSize,
+        /// Destination register.
         dst: R,
+        /// Base register.
         base: R,
+        /// Register holding the expected value.
         expected: R,
+        /// Register holding the replacement value.
         desired: R,
     },
     /// Pseudo-instruction: landing pad entry.
@@ -331,27 +674,42 @@ pub enum MInst<R: RegType> {
     /// Marks the definition of `dst` which receives the exception pointer
     /// from %rax (deposited by the unwinder).  Emits no machine code —
     /// the physical register is already correct.
-    LandingPadCapture { dst: R },
+    LandingPadCapture {
+        /// Destination register.
+        dst: R,
+    },
 }
 
 /// SSE2 floating-point binary operation kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FpBinOpKind {
+    /// Addition.
     Add,
+    /// Subtraction.
     Sub,
+    /// Multiplication.
     Mul,
+    /// Division.
     Div,
+    /// Minimum.
     Min,
+    /// Maximum.
     Max,
 }
 
 /// Atomic read-modify-write operation kind (x86 encoding).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AtomicRmwOpKind {
+    /// Exchange.
     Xchg,
+    /// Addition.
     Add,
+    /// Subtraction.
     Sub,
+    /// Bitwise and.
     And,
+    /// Bitwise or.
     Or,
+    /// Bitwise xor.
     Xor,
 }

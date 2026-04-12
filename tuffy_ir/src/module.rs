@@ -21,7 +21,9 @@ pub struct SymbolId(pub u32);
 /// Avoids repeated String allocation and enables O(1) equality comparison.
 #[derive(Debug, Clone)]
 pub struct SymbolTable {
+    /// Interned symbol strings indexed by [`SymbolId`].
     names: Vec<String>,
+    /// Reverse map from symbol string to its interned identifier.
     lookup: HashMap<String, SymbolId>,
 }
 
@@ -72,7 +74,9 @@ impl Default for SymbolTable {
 /// A static data blob (emitted in .rodata or similar section).
 #[derive(Debug, Clone)]
 pub struct StaticData {
+    /// Symbol naming this static-data blob.
     pub name: SymbolId,
+    /// Raw bytes emitted for the blob.
     pub data: Vec<u8>,
     /// Relocations: at `offset`, write the address of `symbol`.
     pub relocations: Vec<StaticRelocation>,
@@ -82,7 +86,9 @@ pub struct StaticData {
 /// patched with the address of `symbol`.
 #[derive(Debug, Clone)]
 pub struct StaticRelocation {
+    /// Byte offset within the static-data blob.
     pub offset: usize,
+    /// Symbol whose address should be written at `offset`.
     pub symbol: SymbolId,
 }
 
@@ -90,9 +96,13 @@ pub struct StaticRelocation {
 ///
 /// Owns the symbol table, all functions, and static data.
 pub struct Module {
+    /// Human-readable module name.
     pub name: String,
+    /// Interned symbol table shared by the module.
     pub symbols: SymbolTable,
+    /// Functions defined in the module.
     pub functions: Vec<Function>,
+    /// Static-data blobs owned by the module.
     pub static_data: Vec<StaticData>,
 }
 

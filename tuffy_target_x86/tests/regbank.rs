@@ -1,3 +1,5 @@
+//! Tests for x86 register-bank classification and aliasing.
+
 use tuffy_target::regbank::{RegBank, RegClass, make_preg, preg_class, preg_reg_num};
 use tuffy_target_x86::reg::{X86RegBank, Xmm, Ymm, Zmm};
 

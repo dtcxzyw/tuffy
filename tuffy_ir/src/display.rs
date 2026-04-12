@@ -32,6 +32,7 @@ use crate::value::{BlockRef, RegionRef, ValueRef};
 struct DisplayCtx<'a> {
     /// Map from ValueRef raw encoding to display number.
     value_names: HashMap<u32, u32>,
+    /// Next display number to allocate.
     next_value: u32,
     /// Optional symbol table for resolving SymbolId names.
     symbols: Option<&'a SymbolTable>,
@@ -40,6 +41,7 @@ struct DisplayCtx<'a> {
 }
 
 impl<'a> DisplayCtx<'a> {
+    /// Create a display context without symbol resolution.
     fn new(func: &'a Function) -> Self {
         Self {
             value_names: HashMap::new(),
@@ -49,6 +51,7 @@ impl<'a> DisplayCtx<'a> {
         }
     }
 
+    /// Create a display context with symbol resolution.
     fn with_symbols(symbols: &'a SymbolTable, func: &'a Function) -> Self {
         Self {
             value_names: HashMap::new(),
@@ -130,6 +133,7 @@ impl<'a> DisplayCtx<'a> {
     }
 }
 
+/// Format a type in the textual IR syntax.
 fn fmt_type(ty: &Type) -> String {
     match ty {
         Type::Int => "int".to_string(),
@@ -159,6 +163,7 @@ fn fmt_type(ty: &Type) -> String {
     }
 }
 
+/// Format an integer annotation payload in the textual IR syntax.
 fn fmt_int_annotation(ann: &crate::types::IntAnnotation) -> String {
     use crate::types::IntSignedness;
     match ann.signedness {
@@ -168,6 +173,7 @@ fn fmt_int_annotation(ann: &crate::types::IntAnnotation) -> String {
     }
 }
 
+/// Format a general annotation in the textual IR syntax.
 fn fmt_annotation(ann: &Annotation) -> String {
     match ann {
         Annotation::Align(n) => format!(":align{n}"),
@@ -177,6 +183,7 @@ fn fmt_annotation(ann: &Annotation) -> String {
     }
 }
 
+/// Format an integer-compare predicate mnemonic.
 fn fmt_icmp_op(op: &ICmpOp) -> &'static str {
     match op {
         ICmpOp::Eq => "eq",
@@ -188,6 +195,7 @@ fn fmt_icmp_op(op: &ICmpOp) -> &'static str {
     }
 }
 
+/// Format a floating-point compare predicate mnemonic.
 fn fmt_fcmp_op(op: &FCmpOp) -> &'static str {
     match op {
         FCmpOp::False => "false",
@@ -209,6 +217,7 @@ fn fmt_fcmp_op(op: &FCmpOp) -> &'static str {
     }
 }
 
+/// Format a memory-ordering mnemonic.
 fn fmt_memory_ordering(ord: &MemoryOrdering) -> &'static str {
     match ord {
         MemoryOrdering::Relaxed => "relaxed",
@@ -219,6 +228,7 @@ fn fmt_memory_ordering(ord: &MemoryOrdering) -> &'static str {
     }
 }
 
+/// Format a floating-point type mnemonic.
 fn fmt_float_type(ft: &FloatType) -> &'static str {
     match ft {
         FloatType::F32 => "f32",
@@ -229,6 +239,7 @@ fn fmt_float_type(ft: &FloatType) -> &'static str {
     }
 }
 
+/// Format an atomic-RMW opcode mnemonic.
 fn fmt_atomic_rmw_op(op: &AtomicRmwOp) -> &'static str {
     match op {
         AtomicRmwOp::Xchg => "xchg",
@@ -256,6 +267,7 @@ fn fmt_fp_rewrite_flags(flags: &FpRewriteFlags) -> String {
     }
 }
 
+/// Format a region kind mnemonic.
 fn fmt_region_kind(kind: &RegionKind) -> &'static str {
     match kind {
         RegionKind::Function => "function",
@@ -929,6 +941,7 @@ fn fmt_inst(
     }
 }
 
+/// Format a branch target and its arguments in textual IR syntax.
 fn fmt_branch_target(block: BlockRef, args: &[Operand], ctx: &DisplayCtx) -> String {
     if args.is_empty() {
         format!("bb{}", block.index())
@@ -1091,7 +1104,9 @@ impl fmt::Display for Function {
 
 /// Wrapper for displaying a `Function` with symbol table context.
 pub struct FunctionDisplay<'a> {
+    /// Function being formatted.
     func: &'a Function,
+    /// Symbol table used to resolve interned names.
     symbols: &'a SymbolTable,
 }
 
@@ -1158,8 +1173,11 @@ fn write_static_data(
 
 /// Wrapper for displaying static data with a resolved symbol name.
 pub struct StaticDataDisplay<'a> {
+    /// Resolved static-data symbol name.
     pub name: &'a str,
+    /// Raw bytes stored in the static-data blob.
     pub data: &'a [u8],
+    /// Resolved relocation list as `(offset, symbol_name)` pairs.
     pub relocs: &'a [(usize, &'a str)],
 }
 

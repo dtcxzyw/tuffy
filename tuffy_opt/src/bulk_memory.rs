@@ -9,65 +9,110 @@ use tuffy_ir::value::{BlockRef, ValueRef};
 
 use crate::peephole::PeepholeStats;
 
+/// Internal constant `MIN_BULK_MEMORY_BYTES`.
 const MIN_BULK_MEMORY_BYTES: usize = 32;
 
 #[derive(Clone)]
+/// Internal data structure `StaticInfo`.
 struct StaticInfo {
+    /// Data.
     data: Vec<u8>,
+    /// Relocations.
     relocations: Vec<usize>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+/// Internal enum `RootKind`.
 enum RootKind {
+    /// Variant `StackSlot`.
     StackSlot,
+    /// Variant `Symbol`.
     Symbol(SymbolId),
+    /// Variant `Other`.
     Other,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+/// Internal data structure `PtrExpr`.
 struct PtrExpr {
+    /// Root value.
     root: ValueRef,
+    /// Offset.
     offset: i64,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+/// Internal enum `SourcePattern`.
 enum SourcePattern {
+    /// Variant `FillZero`.
     FillZero,
+    /// Variant `CopyFrom`.
     CopyFrom(PtrExpr),
 }
 
 #[derive(Clone)]
+/// Internal data structure `StorePattern`.
 struct StorePattern {
+    /// Store instruction index.
     store_idx: u32,
+    /// Incoming memory value.
     mem_in: ValueRef,
+    /// Outgoing memory value.
     mem_out: ValueRef,
+    /// Size.
     size: u32,
+    /// Destination operand.
     dst: PtrExpr,
+    /// Source operand.
     src: SourcePattern,
+    /// Matched instruction ids.
     matched: BTreeSet<u32>,
 }
 
 #[derive(Clone)]
+/// Internal enum `BulkOpKind`.
 enum BulkOpKind {
-    MemCopy { src_root: ValueRef },
+    /// Variant `MemCopy`.
+    MemCopy {
+        /// Root source pointer value.
+        src_root: ValueRef,
+    },
+    /// Variant `MemSetZero`.
     MemSetZero,
 }
 
 #[derive(Clone)]
+/// Internal data structure `BulkCandidate`.
 struct BulkCandidate {
+    /// Block.
     block: BlockRef,
+    /// First store index.
     first_store: u32,
+    /// Last store index.
     last_store: u32,
+    /// Incoming memory value.
     mem_in: ValueRef,
+    /// Outgoing memory value.
     mem_out: ValueRef,
+    /// Dst root.
     dst_root: ValueRef,
+    /// Total byte count.
     total_bytes: usize,
+    /// Operation kind.
     op_kind: BulkOpKind,
+    /// Matched instruction ids.
     matched: BTreeSet<u32>,
+    /// Load instruction indices.
     load_indices: Vec<u32>,
+    /// Store instruction indices.
     store_indices: Vec<u32>,
 }
 
+/// Internal helper `optimize_module`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 pub(crate) fn optimize_module(
     module: &mut Module,
     changed_functions: Option<&[bool]>,
@@ -93,6 +138,11 @@ pub(crate) fn optimize_module(
     stats
 }
 
+/// Internal helper `build_static_map`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn build_static_map(module: &Module) -> HashMap<SymbolId, StaticInfo> {
     module
         .static_data
@@ -109,6 +159,11 @@ fn build_static_map(module: &Module) -> HashMap<SymbolId, StaticInfo> {
         .collect()
 }
 
+/// Internal helper `find_candidate`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn find_candidate(
     func: &Function,
     static_data: &HashMap<SymbolId, StaticInfo>,
@@ -196,10 +251,20 @@ fn find_candidate(
     None
 }
 
+/// Internal helper `previous_value`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn previous_value(store_idx: u32) -> ValueRef {
     ValueRef::inst_result(store_idx)
 }
 
+/// Internal helper `has_external_mem_uses`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn has_external_mem_uses(func: &Function, store_idx: u32, next_store_idx: u32) -> bool {
     let produced = ValueRef::inst_result(store_idx);
     for use_node in func.uses_of(produced) {
@@ -215,6 +280,11 @@ fn has_external_mem_uses(func: &Function, store_idx: u32, next_store_idx: u32) -
     false
 }
 
+/// Internal helper `start_candidate`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn start_candidate(func: &Function, pattern: StorePattern) -> Option<BulkCandidate> {
     if pattern.dst.offset != 0 {
         return None;
@@ -258,6 +328,11 @@ fn start_candidate(func: &Function, pattern: StorePattern) -> Option<BulkCandida
     })
 }
 
+/// Internal helper `static_range_is_zero`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn static_range_is_zero(info: Option<&StaticInfo>, start: usize, len: usize) -> bool {
     let Some(info) = info else {
         return false;
@@ -276,6 +351,11 @@ fn static_range_is_zero(info: Option<&StaticInfo>, start: usize, len: usize) -> 
     info.data[start..end].iter().all(|&byte| byte == 0)
 }
 
+/// Internal helper `load_index_for_store`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn load_index_for_store(func: &Function, store_idx: u32) -> Option<u32> {
     let Op::Store(value, _, _, _) = &func.inst(store_idx).op else {
         return None;
@@ -287,6 +367,11 @@ fn load_index_for_store(func: &Function, store_idx: u32) -> Option<u32> {
     matches!(node.inst.op, Op::Load(_, _, _)).then_some(value.value.index())
 }
 
+/// Internal helper `parse_store_pattern_with_static`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn parse_store_pattern_with_static(
     func: &Function,
     store_idx: u32,
@@ -316,6 +401,11 @@ fn parse_store_pattern_with_static(
     })
 }
 
+/// Internal helper `collect_block_refs`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn collect_block_refs(func: &Function) -> Vec<BlockRef> {
     let mut refs = vec![None; func.blocks.len()];
     for region in &func.regions {
@@ -330,6 +420,11 @@ fn collect_block_refs(func: &Function) -> Vec<BlockRef> {
         .collect()
 }
 
+/// Internal helper `parse_store_source`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn parse_store_source(
     func: &Function,
     value: &Operand,
@@ -369,6 +464,11 @@ fn parse_store_source(
     Some(SourcePattern::CopyFrom(src))
 }
 
+/// Internal helper `ptr_expr`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn ptr_expr(func: &Function, value: ValueRef, matched: &mut BTreeSet<u32>) -> Option<PtrExpr> {
     if value.is_secondary_result() {
         return None;
@@ -407,6 +507,11 @@ fn ptr_expr(func: &Function, value: ValueRef, matched: &mut BTreeSet<u32>) -> Op
     }
 }
 
+/// Internal helper `root_kind`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn root_kind(func: &Function, value: ValueRef) -> RootKind {
     if value.is_block_arg() || value.is_secondary_result() {
         return RootKind::Other;
@@ -418,10 +523,20 @@ fn root_kind(func: &Function, value: ValueRef) -> RootKind {
     }
 }
 
+/// Internal helper `const_i64`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn const_i64(func: &Function, value: ValueRef) -> Option<i64> {
     const_bigint(func, value)?.to_string().parse().ok()
 }
 
+/// Internal helper `const_bigint`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn const_bigint(func: &Function, value: ValueRef) -> Option<&BigInt> {
     if value.is_block_arg() || value.is_secondary_result() {
         return None;
@@ -433,6 +548,11 @@ fn const_bigint(func: &Function, value: ValueRef) -> Option<&BigInt> {
     Some(int)
 }
 
+/// Internal helper `apply_candidate`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn apply_candidate(func: &mut Function, candidate: BulkCandidate) {
     let mut matched = candidate.matched.clone();
     let count_idx = func.insert_inst_before(
@@ -517,6 +637,11 @@ fn apply_candidate(func: &mut Function, candidate: BulkCandidate) {
     func.rebuild_use_lists();
 }
 
+/// Internal helper `cleanup_dead_instructions`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn cleanup_dead_instructions(func: &mut Function, matched_insts: &BTreeSet<u32>) {
     loop {
         let mut changed = false;
@@ -546,6 +671,11 @@ fn cleanup_dead_instructions(func: &mut Function, matched_insts: &BTreeSet<u32>)
     }
 }
 
+/// Internal helper `merged_origin`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn merged_origin(func: &Function, root_idx: u32, matched_insts: &BTreeSet<u32>) -> Origin {
     let mut seen = BTreeSet::new();
     let mut sources = Vec::new();

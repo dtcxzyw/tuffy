@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 build = "build.rs"
 
+[lints]
+workspace = true
+
 [dependencies]
 num-bigint = "0.4"
 tuffy_ir = { path = "../tuffy_ir" }

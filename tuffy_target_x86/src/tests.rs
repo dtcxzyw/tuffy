@@ -283,6 +283,53 @@ func @branch_ladder(int:s32, int:s32) {
     );
 }
 
+#[test]
+fn isel_materializes_cmp_values_before_later_compares_clobber_flags() {
+    let module = parse_module(
+        r#"
+func @cmp_value_reuse(int:u64, int:u64, int:u64, int:u64) -> int:u64 {
+  bb0(v0: mem):
+    v1: int:u64 = param 0
+    v2: int:u64 = param 1
+    v3: int:u64 = param 2
+    v4: int:u64 = param 3
+    v5: bool = icmp.lt v1, v2
+    v6: bool = icmp.lt v3, v4
+    v7: int:u64 = iconst 1
+    v8: int:u64 = iconst 0
+    v9: int:u64 = select v5, v7, v8
+    v10: int:u64 = select v6, v7, v8
+    v11: int:u64 = add v9, v10
+    ret v11, v0
+}
+"#,
+    )
+    .expect("module should parse");
+    let func = &module.functions[0];
+    let result = isel::isel(func, &module.symbols).expect("isel should succeed");
+
+    let cmp_positions: Vec<_> = result
+        .insts
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, inst)| matches!(inst, MInst::CmpRR { .. }).then_some(idx))
+        .collect();
+    assert!(
+        cmp_positions.len() >= 2,
+        "expected at least two compare instructions: {:?}",
+        result.insts
+    );
+    let first_cmp = cmp_positions[0];
+    let second_cmp = cmp_positions[1];
+    assert!(
+        result.insts[first_cmp + 1..second_cmp]
+            .iter()
+            .any(|inst| matches!(inst, MInst::SetCC { .. })),
+        "first compare result must be materialized before the next compare clobbers flags: {:?}",
+        result.insts
+    );
+}
+
 fn build_add_func() -> (Function, SymbolTable) {
     let i32_type = Type::Int;
     let mut st = SymbolTable::new();

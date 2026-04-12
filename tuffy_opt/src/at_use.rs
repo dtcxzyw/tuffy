@@ -10,44 +10,73 @@ use tuffy_ir::value::{BlockRef, ValueRef};
 use crate::cfg::{CfgInfo, collect_block_refs};
 use crate::peephole::PeepholeStats;
 
+/// Internal constant `MAX_SIMPLIFY_ITERATIONS`.
 const MAX_SIMPLIFY_ITERATIONS: usize = 16;
+/// Internal constant `MAX_BLOCK_ENV_UPDATES`.
 const MAX_BLOCK_ENV_UPDATES: usize = 256;
 
+/// Fact map keyed by SSA value index.
 type FactMap = HashMap<u32, AtUseFacts>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Generated at-use transform kinds.
 pub(super) enum AtUseTransformKind {
+    /// Fold integer comparisons.
     FoldIcmp,
+    /// Fold `brif` terminators.
     FoldBrIf,
+    /// Strengthen operand annotations.
     StrengthenOperand,
+    /// Strengthen result annotations.
     StrengthenResult,
 }
 
 #[derive(Clone, Copy, Debug)]
+/// Descriptor for one generated at-use transform.
 pub(super) struct AtUseTransformDescriptor {
+    /// Transform name.
     name: &'static str,
+    /// Transform kind.
     kind: AtUseTransformKind,
+    /// Lean proof reference backing the transform.
     proof_ref: &'static str,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// Internal data structure `AtUseFacts`.
 struct AtUseFacts {
+    /// Is bottom.
     is_bottom: bool,
+    /// Known zero.
     known_zero: BigUint,
+    /// Known one.
     known_one: BigUint,
+    /// Demanded.
     demanded: BigUint,
+    /// Signed min.
     signed_min: Option<BigInt>,
+    /// Signed max.
     signed_max: Option<BigInt>,
+    /// Unsigned min.
     unsigned_min: Option<BigInt>,
+    /// Unsigned max.
     unsigned_max: Option<BigInt>,
+    /// Dontcare width upper bound.
     dontcare_width_upper_bound: Option<u32>,
 }
 
 #[derive(Clone)]
+/// Internal data structure `AtUseAnalysis`.
 struct AtUseAnalysis {
+    /// Entry block.
     entry: Vec<Option<FactMap>>,
 }
 
+/// Internal helper `optimize_function`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 pub(crate) fn optimize_function(func: &mut Function) -> PeepholeStats {
     if function_is_pointer_sensitive(func) {
         return PeepholeStats::default();
@@ -55,6 +84,11 @@ pub(crate) fn optimize_function(func: &mut Function) -> PeepholeStats {
     optimize_with_generated_transforms(func, GENERATED_AT_USE_TRANSFORMS)
 }
 
+/// Internal helper `function_is_pointer_sensitive`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn function_is_pointer_sensitive(func: &Function) -> bool {
     func.params.iter().any(|ty| matches!(ty, Type::Ptr(_)))
         || func
@@ -93,6 +127,11 @@ fn function_is_pointer_sensitive(func: &Function) -> bool {
         })
 }
 
+/// Internal helper `optimize_with_generated_transforms`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn optimize_with_generated_transforms(
     func: &mut Function,
     transforms: &[AtUseTransformDescriptor],
@@ -165,11 +204,19 @@ fn optimize_with_generated_transforms(
 }
 
 #[cfg(test)]
-#[allow(clippy::items_after_test_module)]
+#[allow(
+    clippy::items_after_test_module,
+    reason = "Required by the current implementation shape."
+)]
 mod tests {
     use super::{function_is_pointer_sensitive, optimize_function};
     use tuffy_ir::parser::parse_module;
 
+    /// Internal helper `parse_single_function`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn parse_single_function(input: &str) -> tuffy_ir::function::Function {
         let module = parse_module(input).unwrap_or_else(|err| panic!("parse error: {err}"));
         module
@@ -180,6 +227,11 @@ mod tests {
     }
 
     #[test]
+    /// Internal helper `detects_pointer_sensitive_functions`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn detects_pointer_sensitive_functions() {
         let func = parse_single_function(
             r#"
@@ -201,6 +253,11 @@ func @ptr_sensitive(ptr) {
     }
 
     #[test]
+    /// Internal helper `skips_pointer_sensitive_at_use_optimization`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn skips_pointer_sensitive_at_use_optimization() {
         let mut func = parse_single_function(
             r#"
@@ -224,6 +281,11 @@ func @ptr_sensitive(ptr) {
 }
 
 impl AtUseAnalysis {
+    /// Internal helper `compute`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn compute(func: &Function) -> Self {
         let cfg = CfgInfo::compute(func);
         let mut entry = vec![None; func.blocks.len()];
@@ -274,11 +336,21 @@ impl AtUseAnalysis {
         Self { entry }
     }
 
+    /// Internal helper `entry_env`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn entry_env(&self, block: BlockRef) -> Option<&FactMap> {
         self.entry[block.index() as usize].as_ref()
     }
 }
 
+/// Internal helper `seed_block_args`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn seed_block_args(func: &Function, block: BlockRef, env: &mut FactMap) {
     for (arg_ref, block_arg) in func
         .block_arg_values(block)
@@ -296,6 +368,11 @@ fn seed_block_args(func: &Function, block: BlockRef, env: &mut FactMap) {
     }
 }
 
+/// Internal helper `successor_envs`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn successor_envs(
     func: &Function,
     cfg: &CfgInfo,
@@ -330,6 +407,11 @@ fn successor_envs(
     }
 }
 
+/// Internal helper `successor_env`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn successor_env(
     func: &Function,
     env: &FactMap,
@@ -366,6 +448,11 @@ fn successor_env(
     next
 }
 
+/// Internal helper `merge_env`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn merge_env(existing: &mut FactMap, incoming: &FactMap) -> bool {
     let original = existing.clone();
     if original.is_empty() {
@@ -396,6 +483,11 @@ fn merge_env(existing: &mut FactMap, incoming: &FactMap) -> bool {
     changed
 }
 
+/// Internal helper `try_fold_icmp`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn try_fold_icmp(
     func: &mut Function,
     env: &FactMap,
@@ -418,6 +510,11 @@ fn try_fold_icmp(
     true
 }
 
+/// Internal helper `try_fold_brif`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn try_fold_brif(
     func: &mut Function,
     env: &FactMap,
@@ -451,6 +548,11 @@ fn try_fold_brif(
     true
 }
 
+/// Internal helper `try_strengthen_result`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn try_strengthen_result(
     func: &mut Function,
     env: &FactMap,
@@ -478,6 +580,11 @@ fn try_strengthen_result(
     true
 }
 
+/// Internal helper `try_strengthen_operands`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn try_strengthen_operands(
     func: &mut Function,
     env: &FactMap,
@@ -609,6 +716,11 @@ fn try_strengthen_operands(
     true
 }
 
+/// Internal helper `branch_refined_env`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn branch_refined_env(
     func: &Function,
     env: &FactMap,
@@ -629,6 +741,11 @@ fn branch_refined_env(
     next
 }
 
+/// Internal helper `strengthen_operand_from_env`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn strengthen_operand_from_env(func: &Function, env: &FactMap, operand: &Operand) -> Operand {
     let Some(facts) = operand_facts(func, env, operand) else {
         return operand.clone();
@@ -646,6 +763,11 @@ fn strengthen_operand_from_env(func: &Function, env: &FactMap, operand: &Operand
     }
 }
 
+/// Internal helper `materialize_result_annotation`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn materialize_result_annotation(
     current: Option<&Annotation>,
     facts: &AtUseFacts,
@@ -664,6 +786,11 @@ fn materialize_result_annotation(
     }
 }
 
+/// Internal helper `materialize_operand_annotation`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn materialize_operand_annotation(
     current: Option<&Annotation>,
     facts: &AtUseFacts,
@@ -690,6 +817,11 @@ fn materialize_operand_annotation(
     facts.materialize_known_bits().map(Annotation::KnownBits)
 }
 
+/// Internal helper `known_bits_stricter`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn known_bits_stricter(candidate: &KnownBits, current: &KnownBits) -> bool {
     let current_known = &current.ones | &current.zeros;
     let candidate_known = &candidate.ones | &candidate.zeros;
@@ -698,6 +830,11 @@ fn known_bits_stricter(candidate: &KnownBits, current: &KnownBits) -> bool {
             && candidate_known != current_known)
 }
 
+/// Internal helper `annotation_rank`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn annotation_rank(annotation: IntAnnotation) -> (u32, u8) {
     let signedness_rank = match annotation.signedness {
         IntSignedness::Unsigned => 0,
@@ -707,6 +844,11 @@ fn annotation_rank(annotation: IntAnnotation) -> (u32, u8) {
     (annotation.bit_width, signedness_rank)
 }
 
+/// Internal helper `transfer_inst`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn transfer_inst(
     func: &Function,
     env: &FactMap,
@@ -736,6 +878,11 @@ fn transfer_inst(
     Some(facts)
 }
 
+/// Internal helper `operand_facts`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn operand_facts(func: &Function, env: &FactMap, operand: &Operand) -> Option<AtUseFacts> {
     if !matches!(func.value_type(operand.value), Some(Type::Int)) {
         return None;
@@ -753,6 +900,11 @@ fn operand_facts(func: &Function, env: &FactMap, operand: &Operand) -> Option<At
     Some(facts)
 }
 
+/// Internal helper `facts_from_operand_annotation_or_def`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn facts_from_operand_annotation_or_def(func: &Function, operand: &Operand) -> Option<AtUseFacts> {
     if let Some(annotation) = &operand.annotation {
         return Some(AtUseFacts::from_annotation(annotation));
@@ -792,6 +944,11 @@ fn facts_from_operand_annotation_or_def(func: &Function, operand: &Operand) -> O
         .map(AtUseFacts::from_annotation)
 }
 
+/// Internal helper `facts_from_block_arg`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn facts_from_block_arg(block_arg: &BlockArg) -> Option<AtUseFacts> {
     block_arg
         .annotation
@@ -799,14 +956,29 @@ fn facts_from_block_arg(block_arg: &BlockArg) -> Option<AtUseFacts> {
         .map(AtUseFacts::from_annotation)
 }
 
+/// Internal helper `forward_unknown`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn forward_unknown() -> AtUseFacts {
     AtUseFacts::unknown()
 }
 
+/// Internal helper `forward_const`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn forward_const(value: &BigInt) -> AtUseFacts {
     AtUseFacts::exact(value.clone())
 }
 
+/// Internal helper `forward_select`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn forward_select(
     func: &Function,
     current: &FactMap,
@@ -818,6 +990,11 @@ fn forward_select(
     lhs.join(&rhs)
 }
 
+/// Internal helper `forward_bitand`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn forward_bitand(func: &Function, current: &FactMap, lhs: &Operand, rhs: &Operand) -> AtUseFacts {
     let lhs_facts = operand_facts(func, current, lhs).unwrap_or_else(AtUseFacts::unknown);
     let rhs_facts = operand_facts(func, current, rhs).unwrap_or_else(AtUseFacts::unknown);
@@ -832,6 +1009,11 @@ fn forward_bitand(func: &Function, current: &FactMap, lhs: &Operand, rhs: &Opera
     facts
 }
 
+/// Internal helper `forward_bitor`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn forward_bitor(func: &Function, current: &FactMap, lhs: &Operand, rhs: &Operand) -> AtUseFacts {
     let lhs_facts = operand_facts(func, current, lhs).unwrap_or_else(AtUseFacts::unknown);
     let rhs_facts = operand_facts(func, current, rhs).unwrap_or_else(AtUseFacts::unknown);
@@ -846,6 +1028,11 @@ fn forward_bitor(func: &Function, current: &FactMap, lhs: &Operand, rhs: &Operan
     facts
 }
 
+/// Internal helper `forward_bitxor`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn forward_bitxor(func: &Function, current: &FactMap, lhs: &Operand, rhs: &Operand) -> AtUseFacts {
     let lhs_facts = operand_facts(func, current, lhs).unwrap_or_else(AtUseFacts::unknown);
     let rhs_facts = operand_facts(func, current, rhs).unwrap_or_else(AtUseFacts::unknown);
@@ -866,6 +1053,11 @@ fn forward_bitxor(func: &Function, current: &FactMap, lhs: &Operand, rhs: &Opera
     facts
 }
 
+/// Internal helper `and_facts`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn and_facts(func: &Function, env: &FactMap, lhs: &Operand, rhs: &Operand) -> Option<AtUseFacts> {
     let lhs_const = bound_int_constant(func, lhs.value);
     let rhs_const = bound_int_constant(func, rhs.value);
@@ -882,6 +1074,11 @@ fn and_facts(func: &Function, env: &FactMap, lhs: &Operand, rhs: &Operand) -> Op
     Some(facts)
 }
 
+/// Internal helper `branch_refinement`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn branch_refinement(
     func: &Function,
     cond_value: ValueRef,
@@ -906,6 +1103,11 @@ fn branch_refinement(
     None
 }
 
+/// Internal helper `decode_condition`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn decode_condition(
     func: &Function,
     value: ValueRef,
@@ -953,6 +1155,11 @@ fn decode_condition(
     }
 }
 
+/// Internal helper `decode_intified_bool_compare`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn decode_intified_bool_compare(
     func: &Function,
     pred: ICmpOp,
@@ -981,6 +1188,11 @@ fn decode_intified_bool_compare(
     Some((cmp_op, lhs, rhs, invert ^ source_invert))
 }
 
+/// Internal helper `decode_intified_bool`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn decode_intified_bool(func: &Function, value: ValueRef) -> Option<(ValueRef, bool)> {
     if value.is_block_arg() || value.is_secondary_result() {
         return None;
@@ -1027,6 +1239,11 @@ fn decode_intified_bool(func: &Function, value: ValueRef) -> Option<(ValueRef, b
     }
 }
 
+/// Internal helper `evaluate_bool`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn evaluate_bool(func: &Function, env: &FactMap, value: ValueRef) -> Option<bool> {
     if let Some(value) = bound_bool_constant(func, value) {
         return Some(value);
@@ -1036,6 +1253,11 @@ fn evaluate_bool(func: &Function, env: &FactMap, value: ValueRef) -> Option<bool
     Some(if invert { !result } else { result })
 }
 
+/// Internal helper `evaluate_icmp`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn evaluate_icmp(
     func: &Function,
     env: &FactMap,
@@ -1108,6 +1330,11 @@ fn evaluate_icmp(
     }
 }
 
+/// Internal helper `refine_compare`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn refine_compare(
     mut current: AtUseFacts,
     op: ICmpOp,
@@ -1140,6 +1367,11 @@ fn refine_compare(
     (!current.is_bottom).then_some(current)
 }
 
+/// Internal helper `flip_cmp`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn flip_cmp(op: ICmpOp) -> ICmpOp {
     match op {
         ICmpOp::Eq => ICmpOp::Eq,
@@ -1151,6 +1383,11 @@ fn flip_cmp(op: ICmpOp) -> ICmpOp {
     }
 }
 
+/// Internal helper `bound_int_constant`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn bound_int_constant(func: &Function, value: ValueRef) -> Option<&BigInt> {
     if value.is_block_arg() || value.is_secondary_result() {
         return None;
@@ -1162,6 +1399,11 @@ fn bound_int_constant(func: &Function, value: ValueRef) -> Option<&BigInt> {
     Some(int)
 }
 
+/// Internal helper `bound_bool_constant`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn bound_bool_constant(func: &Function, value: ValueRef) -> Option<bool> {
     if value.is_block_arg() || value.is_secondary_result() {
         return None;
@@ -1173,10 +1415,20 @@ fn bound_bool_constant(func: &Function, value: ValueRef) -> Option<bool> {
     Some(*value)
 }
 
+/// Internal helper `is_non_negative_odd_int`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn is_non_negative_odd_int(value: &BigInt) -> bool {
     value.sign() != Sign::Minus && (value & BigInt::from(1u8)) == BigInt::from(1u8)
 }
 
+/// Internal helper `rewrite_icmp_to_const`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn rewrite_icmp_to_const(func: &mut Function, root_idx: u32, value: bool) {
     let origin = func.inst(root_idx).origin.clone();
     let new_idx = func.insert_inst_before(
@@ -1197,6 +1449,11 @@ fn rewrite_icmp_to_const(func: &mut Function, root_idx: u32, value: bool) {
     let _ = func.remove_inst(root_idx);
 }
 
+/// Internal helper `rewrite_brif_to_br`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn rewrite_brif_to_br(
     func: &mut Function,
     root_idx: u32,
@@ -1218,6 +1475,11 @@ fn rewrite_brif_to_br(
     let _ = func.remove_inst(root_idx);
 }
 
+/// Internal helper `cleanup_dead_value`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn cleanup_dead_value(func: &mut Function, value: ValueRef) {
     if value.is_block_arg() || value.is_secondary_result() || func.has_uses(value) {
         return;
@@ -1235,12 +1497,22 @@ fn cleanup_dead_value(func: &mut Function, value: ValueRef) {
     }
 }
 
+/// Internal helper `annotation_only_env`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn annotation_only_env(func: &Function, block: BlockRef) -> FactMap {
     let mut env = FactMap::new();
     seed_block_args(func, block, &mut env);
     env
 }
 
+/// Internal helper `is_cleanup_pure_op`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn is_cleanup_pure_op(op: &Op) -> bool {
     matches!(
         op,
@@ -1258,10 +1530,20 @@ fn is_cleanup_pure_op(op: &Op) -> bool {
 }
 
 impl AtUseFacts {
+    /// Internal helper `unknown`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn unknown() -> Self {
         Self::default()
     }
 
+    /// Internal helper `bottom`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn bottom() -> Self {
         Self {
             is_bottom: true,
@@ -1269,6 +1551,11 @@ impl AtUseFacts {
         }
     }
 
+    /// Internal helper `exact`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn exact(value: BigInt) -> Self {
         let mut facts = Self {
             is_bottom: false,
@@ -1297,6 +1584,11 @@ impl AtUseFacts {
         facts
     }
 
+    /// Internal helper `from_annotation`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn from_annotation(annotation: &Annotation) -> Self {
         match annotation {
             Annotation::Int(int_ann) => {
@@ -1340,6 +1632,11 @@ impl AtUseFacts {
         }
     }
 
+    /// Internal helper `normalize`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn normalize(&mut self) {
         self.demanded |= &self.known_zero | &self.known_one;
         self.known_zero &= &self.demanded;
@@ -1363,6 +1660,11 @@ impl AtUseFacts {
         }
     }
 
+    /// Internal helper `meet_with`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn meet_with(&mut self, other: &Self) -> bool {
         let original = self.clone();
         if self.is_bottom || other.is_bottom {
@@ -1385,6 +1687,11 @@ impl AtUseFacts {
         *self != original
     }
 
+    /// Internal helper `join`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn join(&self, other: &Self) -> Self {
         if self.is_bottom {
             return other.clone();
@@ -1411,12 +1718,22 @@ impl AtUseFacts {
         facts
     }
 
+    /// Internal helper `intersect`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn intersect(&self, other: &Self) -> Self {
         let mut result = self.clone();
         let _ = result.meet_with(other);
         result
     }
 
+    /// Internal helper `is_unknown`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn is_unknown(&self) -> bool {
         !self.is_bottom
             && self.known_zero == BigUint::default()
@@ -1429,10 +1746,20 @@ impl AtUseFacts {
             && self.dontcare_width_upper_bound.is_none()
     }
 
+    /// Internal helper `is_exact`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn is_exact(&self, value: &BigInt) -> bool {
         self.signed_min.as_ref() == Some(value) && self.signed_max.as_ref() == Some(value)
     }
 
+    /// Internal helper `exact_value`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn exact_value(&self) -> Option<BigInt> {
         self.signed_min
             .as_ref()
@@ -1441,18 +1768,33 @@ impl AtUseFacts {
             .map(|(lo, _)| lo.clone())
     }
 
+    /// Internal helper `unsigned_width_upper_bound`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn unsigned_width_upper_bound(&self) -> Option<u32> {
         self.unsigned_max
             .as_ref()
             .map(|max| exact_unsigned_width(max).unwrap_or(1))
     }
 
+    /// Internal helper `signed_width_upper_bound`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn signed_width_upper_bound(&self) -> Option<u32> {
         let min = self.signed_min.as_ref()?;
         let max = self.signed_max.as_ref()?;
         Some(bits_for_signed_range(min, max))
     }
 
+    /// Internal helper `best_int_annotation`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn best_int_annotation(&self) -> Option<IntAnnotation> {
         if self.is_bottom {
             return None;
@@ -1475,6 +1817,11 @@ impl AtUseFacts {
         best
     }
 
+    /// Internal helper `materialized_demanded`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn materialized_demanded(&self) -> BigUint {
         let mut demanded = self.demanded.clone();
         if let Some(bits) = self.dontcare_width_upper_bound {
@@ -1484,6 +1831,11 @@ impl AtUseFacts {
         demanded
     }
 
+    /// Internal helper `materialize_known_bits`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn materialize_known_bits(&self) -> Option<KnownBits> {
         if self.is_bottom {
             return None;
@@ -1502,14 +1854,29 @@ impl AtUseFacts {
         })
     }
 
+    /// Internal helper `math_min`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn math_min(&self) -> Option<&BigInt> {
         self.signed_min.as_ref().or(self.unsigned_min.as_ref())
     }
 
+    /// Internal helper `math_max`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn math_max(&self) -> Option<&BigInt> {
         self.signed_max.as_ref().or(self.unsigned_max.as_ref())
     }
 
+    /// Internal helper `refine_math_lower`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn refine_math_lower(&mut self, lower: BigInt) {
         self.signed_min = max_bound(&self.signed_min, &Some(lower.clone()));
         if lower >= BigInt::from(0u8) {
@@ -1518,6 +1885,11 @@ impl AtUseFacts {
         self.normalize();
     }
 
+    /// Internal helper `refine_math_upper`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn refine_math_upper(&mut self, upper: BigInt) {
         self.signed_max = min_bound(&self.signed_max, &Some(upper.clone()));
         if upper >= BigInt::from(0u8) {
@@ -1529,6 +1901,11 @@ impl AtUseFacts {
     }
 }
 
+/// Internal helper `max_bound`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn max_bound(lhs: &Option<BigInt>, rhs: &Option<BigInt>) -> Option<BigInt> {
     match (lhs, rhs) {
         (Some(lhs), Some(rhs)) => Some(lhs.max(rhs).clone()),
@@ -1538,6 +1915,11 @@ fn max_bound(lhs: &Option<BigInt>, rhs: &Option<BigInt>) -> Option<BigInt> {
     }
 }
 
+/// Internal helper `min_bound`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn min_bound(lhs: &Option<BigInt>, rhs: &Option<BigInt>) -> Option<BigInt> {
     match (lhs, rhs) {
         (Some(lhs), Some(rhs)) => Some(lhs.min(rhs).clone()),
@@ -1547,6 +1929,11 @@ fn min_bound(lhs: &Option<BigInt>, rhs: &Option<BigInt>) -> Option<BigInt> {
     }
 }
 
+/// Internal helper `min_bound_u32`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn min_bound_u32(lhs: Option<u32>, rhs: Option<u32>) -> Option<u32> {
     match (lhs, rhs) {
         (Some(lhs), Some(rhs)) => Some(lhs.min(rhs)),
@@ -1556,6 +1943,11 @@ fn min_bound_u32(lhs: Option<u32>, rhs: Option<u32>) -> Option<u32> {
     }
 }
 
+/// Internal helper `max_bound_u32`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn max_bound_u32(lhs: Option<u32>, rhs: Option<u32>) -> Option<u32> {
     match (lhs, rhs) {
         (Some(lhs), Some(rhs)) => Some(lhs.max(rhs)),
@@ -1563,10 +1955,20 @@ fn max_bound_u32(lhs: Option<u32>, rhs: Option<u32>) -> Option<u32> {
     }
 }
 
+/// Internal helper `bit_mask`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn bit_mask(bit: usize) -> BigUint {
     BigUint::from(1u8) << bit
 }
 
+/// Internal helper `low_mask`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn low_mask(bits: usize) -> BigUint {
     if bits == 0 {
         BigUint::default()
@@ -1575,6 +1977,11 @@ fn low_mask(bits: usize) -> BigUint {
     }
 }
 
+/// Internal helper `exact_bit_is_one`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn exact_bit_is_one(value: &BigInt, bit: u32) -> bool {
     let modulus = BigInt::from(1u8) << (bit as usize + 1);
     let truncated = ((value % &modulus) + &modulus) % &modulus;
@@ -1582,6 +1989,11 @@ fn exact_bit_is_one(value: &BigInt, bit: u32) -> bool {
     (&shifted % BigInt::from(2u8)) != BigInt::from(0u8)
 }
 
+/// Internal helper `exact_unsigned_width`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn exact_unsigned_width(value: &BigInt) -> Option<u32> {
     if value.sign() == Sign::Minus {
         None
@@ -1590,6 +2002,11 @@ fn exact_unsigned_width(value: &BigInt) -> Option<u32> {
     }
 }
 
+/// Internal helper `exact_signed_width`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn exact_signed_width(value: &BigInt) -> u32 {
     if value.sign() == Sign::Minus {
         (((-value) - BigInt::from(1u8)).bits() as u32) + 1
@@ -1598,6 +2015,11 @@ fn exact_signed_width(value: &BigInt) -> u32 {
     }
 }
 
+/// Internal helper `bits_for_signed_range`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn bits_for_signed_range(min: &BigInt, max: &BigInt) -> u32 {
     let mut bits = 1u32;
     loop {

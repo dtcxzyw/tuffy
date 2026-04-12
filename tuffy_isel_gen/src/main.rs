@@ -6,6 +6,12 @@ mod schema;
 use std::fs;
 use std::path::PathBuf;
 
+/// Read the exported isel JSON and write the generated Rust source file.
+///
+/// # Panics
+///
+/// Panics if the input JSON cannot be read, parsed, or written to the output
+/// path.
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() != 3 {

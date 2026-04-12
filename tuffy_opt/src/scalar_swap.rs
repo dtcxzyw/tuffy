@@ -11,54 +11,93 @@ use crate::cfg::collect_block_refs;
 use crate::peephole::PeepholeStats;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+/// Internal data structure `PtrExpr`.
 struct PtrExpr {
+    /// Root value.
     root: ValueRef,
+    /// Offset.
     offset: i64,
 }
 
 #[derive(Clone)]
+/// Internal data structure `MemcpyCall`.
 struct MemcpyCall {
+    /// Call instruction index.
     call_idx: u32,
+    /// Incoming memory value.
     mem_in: ValueRef,
+    /// Outgoing memory value.
     mem_out: ValueRef,
+    /// Destination operand.
     dst: Operand,
+    /// Source operand.
     src: Operand,
+    /// Size.
     size: u32,
+    /// Matched instruction ids.
     matched: BTreeSet<u32>,
 }
 
 #[derive(Clone)]
+/// Internal data structure `MemmoveOp`.
 struct MemmoveOp {
+    /// Instruction index.
     inst_idx: u32,
+    /// Incoming memory value.
     mem_in: ValueRef,
+    /// Outgoing memory value.
     mem_out: ValueRef,
+    /// Destination operand.
     dst: Operand,
+    /// Source operand.
     src: Operand,
+    /// Size.
     size: u32,
+    /// Matched instruction ids.
     matched: BTreeSet<u32>,
 }
 
 #[derive(Clone)]
+/// Internal data structure `PreludeStore`.
 struct PreludeStore {
+    /// Store instruction index.
     store_idx: u32,
+    /// Incoming memory value.
     mem_in: ValueRef,
+    /// Matched instruction ids.
     matched: BTreeSet<u32>,
 }
 
 #[derive(Clone)]
+/// Internal data structure `SwapCandidate`.
 struct SwapCandidate {
+    /// Size.
     size: u32,
+    /// Left pointer operand.
     left_ptr: Operand,
+    /// Right pointer operand.
     right_ptr: Operand,
+    /// Initial memory token.
     initial_mem: ValueRef,
+    /// Final memory token.
     final_mem: ValueRef,
+    /// First call index.
     first_call_idx: u32,
+    /// Memmove instruction index.
     memmove_idx: u32,
+    /// Second call index.
     second_call_idx: u32,
+    /// Prelude store index.
     prelude_store_idx: Option<u32>,
+    /// Matched instruction ids.
     matched: BTreeSet<u32>,
 }
 
+/// Internal helper `optimize_module`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 pub(crate) fn optimize_module(
     module: &mut Module,
     changed_functions: Option<&[bool]>,
@@ -78,6 +117,11 @@ pub(crate) fn optimize_module(
     stats
 }
 
+/// Internal helper `find_candidate`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn find_candidate(
     func: &Function,
     symbols: &tuffy_ir::module::SymbolTable,
@@ -179,6 +223,11 @@ fn find_candidate(
     None
 }
 
+/// Internal helper `apply_candidate`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn apply_candidate(func: &mut Function, candidate: SwapCandidate) {
     let origin = merged_origin(func, candidate.first_call_idx, &candidate.matched);
     let tmp_load_idx = func.insert_inst_before(
@@ -257,6 +306,11 @@ fn apply_candidate(func: &mut Function, candidate: SwapCandidate) {
     func.rebuild_use_lists();
 }
 
+/// Internal helper `parse_prelude_store`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn parse_prelude_store(
     func: &Function,
     temp_root: ValueRef,
@@ -286,6 +340,11 @@ fn parse_prelude_store(
     })
 }
 
+/// Internal helper `parse_memcpy_call`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn parse_memcpy_call(
     func: &Function,
     inst_idx: u32,
@@ -322,6 +381,11 @@ fn parse_memcpy_call(
     })
 }
 
+/// Internal helper `parse_memmove_op`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn parse_memmove_op(func: &Function, inst_idx: u32) -> Option<MemmoveOp> {
     let node = func.inst_pool.get(inst_idx)?;
     let Op::MemMove(dst, src, count, mem) = &node.inst.op else {
@@ -346,6 +410,11 @@ fn parse_memmove_op(func: &Function, inst_idx: u32) -> Option<MemmoveOp> {
     })
 }
 
+/// Internal helper `ptr_expr`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn ptr_expr(func: &Function, operand: &Operand, matched: &mut BTreeSet<u32>) -> Option<PtrExpr> {
     let value = operand.value;
     if value.is_secondary_result() {
@@ -385,6 +454,11 @@ fn ptr_expr(func: &Function, operand: &Operand, matched: &mut BTreeSet<u32>) -> 
     }
 }
 
+/// Internal helper `direct_call_symbol`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn direct_call_symbol(func: &Function, value: ValueRef) -> Option<SymbolId> {
     if value.is_block_arg() || value.is_secondary_result() {
         return None;
@@ -395,6 +469,11 @@ fn direct_call_symbol(func: &Function, value: ValueRef) -> Option<SymbolId> {
     }
 }
 
+/// Internal helper `stack_slot_size`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn stack_slot_size(func: &Function, value: ValueRef) -> Option<u32> {
     if value.is_block_arg() || value.is_secondary_result() {
         return None;
@@ -405,14 +484,29 @@ fn stack_slot_size(func: &Function, value: ValueRef) -> Option<u32> {
     }
 }
 
+/// Internal helper `first_call_secondary_used`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn first_call_secondary_used(func: &Function, call: &MemcpyCall) -> bool {
     func.has_uses(ValueRef::inst_secondary_result(call.call_idx))
 }
 
+/// Internal helper `second_call_secondary_used`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn second_call_secondary_used(func: &Function, call: &MemcpyCall) -> bool {
     func.has_uses(ValueRef::inst_secondary_result(call.call_idx))
 }
 
+/// Internal helper `temp_root_uses_are_local`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn temp_root_uses_are_local(
     func: &Function,
     temp_root: ValueRef,
@@ -427,12 +521,22 @@ fn temp_root_uses_are_local(
     })
 }
 
+/// Internal helper `sole_mem_user`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn sole_mem_user(func: &Function, value: ValueRef) -> Option<u32> {
     let mut users = func.uses_of(value).map(|use_node| use_node.user);
     let first = users.next()?;
     users.next().is_none().then_some(first)
 }
 
+/// Internal helper `const_u32`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn const_u32(func: &Function, value: ValueRef) -> Option<u32> {
     let constant = const_bigint(func, value)?;
     if constant.sign() == num_bigint::Sign::Minus {
@@ -441,10 +545,20 @@ fn const_u32(func: &Function, value: ValueRef) -> Option<u32> {
     constant.to_string().parse().ok()
 }
 
+/// Internal helper `const_i64`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn const_i64(func: &Function, value: ValueRef) -> Option<i64> {
     const_bigint(func, value)?.to_string().parse().ok()
 }
 
+/// Internal helper `const_bigint`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn const_bigint(func: &Function, value: ValueRef) -> Option<BigInt> {
     if value.is_block_arg() || value.is_secondary_result() {
         return None;
@@ -468,6 +582,11 @@ fn const_bigint(func: &Function, value: ValueRef) -> Option<BigInt> {
     }
 }
 
+/// Internal helper `cleanup_dead_instructions`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn cleanup_dead_instructions(func: &mut Function, matched_insts: &BTreeSet<u32>) {
     loop {
         let mut changed = false;
@@ -497,6 +616,11 @@ fn cleanup_dead_instructions(func: &mut Function, matched_insts: &BTreeSet<u32>)
     }
 }
 
+/// Internal helper `int_annotation`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn int_annotation(size: u32) -> Annotation {
     Annotation::Int(IntAnnotation {
         bit_width: size * 8,
@@ -504,6 +628,11 @@ fn int_annotation(size: u32) -> Annotation {
     })
 }
 
+/// Internal helper `merged_origin`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn merged_origin(func: &Function, root_idx: u32, matched_insts: &BTreeSet<u32>) -> Origin {
     let mut seen = BTreeSet::new();
     let mut sources = Vec::new();

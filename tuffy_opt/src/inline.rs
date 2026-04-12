@@ -9,43 +9,74 @@ use tuffy_ir::value::{BlockRef, RegionRef, ValueRef};
 
 use crate::peephole::PeepholeStats;
 
+/// Internal constant `MAX_INLINE_ITERATIONS`.
 const MAX_INLINE_ITERATIONS: usize = 128;
+/// Internal constant `INLINE_SCORE_THRESHOLD`.
 const INLINE_SCORE_THRESHOLD: u32 = 24;
+/// Internal constant `INLINE_SINGLE_CALLER_THRESHOLD`.
 const INLINE_SINGLE_CALLER_THRESHOLD: u32 = 48;
+/// Internal constant `INLINE_SINGLE_CALLER_LEAF_THRESHOLD`.
 const INLINE_SINGLE_CALLER_LEAF_THRESHOLD: u32 = 64;
+/// Internal constant `INLINE_SINGLE_CALLER_SIMPLE_CFG_THRESHOLD`.
 const INLINE_SINGLE_CALLER_SIMPLE_CFG_THRESHOLD: u32 = 128;
+/// Internal constant `INLINE_MEMORY_WRAPPER_THRESHOLD`.
 const INLINE_MEMORY_WRAPPER_THRESHOLD: u32 = 96;
 
+/// Internal data structure `InlineResult`.
 pub(crate) struct InlineResult {
+    /// Stats.
     pub(crate) stats: PeepholeStats,
+    /// Changed functions.
     pub(crate) changed_functions: Vec<bool>,
 }
 
 #[derive(Clone)]
+/// Internal data structure `Ret2Spec`.
 struct Ret2Spec {
+    /// Ty.
     ty: Type,
+    /// Annotation.
     annotation: Option<Annotation>,
+    /// Users.
     users: Vec<u32>,
 }
 
 #[derive(Clone)]
+/// Internal data structure `InlineSite`.
 struct InlineSite {
+    /// Caller idx.
     caller_idx: usize,
+    /// Callee idx.
     callee_idx: usize,
+    /// Call instruction index.
     call_idx: u32,
+    /// Call block.
     call_block: BlockRef,
+    /// Ret2.
     ret2: Option<Ret2Spec>,
 }
 
+/// Internal data structure `ModuleAnalysis`.
 struct ModuleAnalysis {
+    /// Func by symbol.
     func_by_symbol: HashMap<SymbolId, usize>,
+    /// Scc ids.
     scc_ids: Vec<usize>,
+    /// Scc sizes.
     scc_sizes: Vec<usize>,
+    /// Inline scores.
     inline_scores: Vec<Option<u32>>,
+    /// Call site counts.
     call_site_counts: Vec<usize>,
+    /// Local callee counts.
     local_callee_counts: Vec<usize>,
 }
 
+/// Internal helper `inline_module`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 pub(crate) fn inline_module(module: &mut Module) -> InlineResult {
     let mut stats = PeepholeStats::default();
     let mut changed_functions = vec![false; module.functions.len()];
@@ -76,6 +107,11 @@ pub(crate) fn inline_module(module: &mut Module) -> InlineResult {
 }
 
 impl ModuleAnalysis {
+    /// Internal helper `compute`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn compute(module: &Module) -> Self {
         let func_by_symbol = module
             .functions
@@ -116,6 +152,11 @@ impl ModuleAnalysis {
         }
     }
 
+    /// Internal helper `is_recursive_edge`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn is_recursive_edge(&self, caller_idx: usize, callee_idx: usize) -> bool {
         caller_idx == callee_idx
             || (self.scc_ids[caller_idx] == self.scc_ids[callee_idx]
@@ -123,6 +164,11 @@ impl ModuleAnalysis {
     }
 }
 
+/// Internal helper `find_inline_site`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn find_inline_site(module: &Module, analysis: &ModuleAnalysis) -> Option<InlineSite> {
     for (caller_idx, caller) in module.functions.iter().enumerate() {
         let block_refs = collect_block_refs(caller);
@@ -193,6 +239,11 @@ fn find_inline_site(module: &Module, analysis: &ModuleAnalysis) -> Option<Inline
     None
 }
 
+/// Internal helper `callee_is_leaf`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn callee_is_leaf(func: &Function) -> bool {
     !func
         .inst_pool
@@ -200,6 +251,11 @@ fn callee_is_leaf(func: &Function) -> bool {
         .any(|(_, inst)| matches!(inst.op, Op::Call(..)))
 }
 
+/// Internal helper `callee_is_scalar_simple_cfg`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn callee_is_scalar_simple_cfg(func: &Function) -> bool {
     !func.inst_pool.iter_insts().any(|(_, inst)| {
         matches!(
@@ -224,6 +280,11 @@ fn callee_is_scalar_simple_cfg(func: &Function) -> bool {
     })
 }
 
+/// Internal helper `callee_is_memory_wrapper`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn callee_is_memory_wrapper(func: &Function) -> bool {
     !func.inst_pool.iter_insts().any(|(_, inst)| {
         matches!(
@@ -248,12 +309,22 @@ fn callee_is_memory_wrapper(func: &Function) -> bool {
     })
 }
 
+/// Internal helper `supported_entry_block`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn supported_entry_block(func: &Function) -> bool {
     let entry = func.entry_block();
     let args = func.block_args(entry);
     args.len() == 1 && args[0].ty == Type::Mem
 }
 
+/// Internal helper `call_signature_matches`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn call_signature_matches(
     caller: &Function,
     call_inst: &Instruction,
@@ -303,6 +374,11 @@ fn call_signature_matches(
     true
 }
 
+/// Internal helper `collect_ret2_spec`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn collect_ret2_spec(func: &Function, call_idx: u32) -> Option<Option<Ret2Spec>> {
     let call_value = ValueRef::inst_result(call_idx);
     let mut spec: Option<Ret2Spec> = None;
@@ -332,6 +408,11 @@ fn collect_ret2_spec(func: &Function, call_idx: u32) -> Option<Option<Ret2Spec>>
     Some(spec)
 }
 
+/// Internal helper `inline_score`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn inline_score(func: &Function) -> Option<u32> {
     let mut score = 0u32;
     for (_, inst) in func.inst_pool.iter_insts() {
@@ -361,6 +442,11 @@ fn inline_score(func: &Function) -> Option<u32> {
     Some(score)
 }
 
+/// Internal helper `direct_local_callees`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn direct_local_callees(func: &Function, func_by_symbol: &HashMap<SymbolId, usize>) -> Vec<usize> {
     let mut callees = Vec::new();
     for (_, inst) in func.inst_pool.iter_insts() {
@@ -380,6 +466,11 @@ fn direct_local_callees(func: &Function, func_by_symbol: &HashMap<SymbolId, usiz
     callees
 }
 
+/// Internal helper `direct_call_symbol`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn direct_call_symbol(func: &Function, value: ValueRef) -> Option<SymbolId> {
     if value.is_block_arg() || value.is_secondary_result() {
         return None;
@@ -390,19 +481,38 @@ fn direct_call_symbol(func: &Function, value: ValueRef) -> Option<SymbolId> {
     }
 }
 
+/// Internal helper `compute_sccs`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn compute_sccs(adjacency: &[Vec<usize>]) -> (Vec<usize>, Vec<usize>) {
+    /// Internal data structure `Tarjan`.
     struct Tarjan<'a> {
+        /// Adjacency.
         adjacency: &'a [Vec<usize>],
+        /// Index.
         index: usize,
+        /// Indices.
         indices: Vec<Option<usize>>,
+        /// Lowlinks.
         lowlinks: Vec<usize>,
+        /// Stack.
         stack: Vec<usize>,
+        /// On stack.
         on_stack: Vec<bool>,
+        /// Scc ids.
         scc_ids: Vec<usize>,
+        /// Scc sizes.
         scc_sizes: Vec<usize>,
     }
 
     impl Tarjan<'_> {
+        /// Internal helper `strong_connect`.
+        ///
+        /// # Panics
+        ///
+        /// May panic if internal IR invariants are violated.
         fn strong_connect(&mut self, node: usize) {
             self.indices[node] = Some(self.index);
             self.lowlinks[node] = self.index;
@@ -460,6 +570,11 @@ fn compute_sccs(adjacency: &[Vec<usize>]) -> (Vec<usize>, Vec<usize>) {
     (tarjan.scc_ids, tarjan.scc_sizes)
 }
 
+/// Internal helper `collect_block_refs`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn collect_block_refs(func: &Function) -> Vec<BlockRef> {
     let mut refs = vec![None; func.blocks.len()];
     for region in &func.regions {
@@ -474,6 +589,11 @@ fn collect_block_refs(func: &Function) -> Vec<BlockRef> {
         .collect()
 }
 
+/// Internal helper `build_inlined_function`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn build_inlined_function(
     caller: &Function,
     callee: &Function,
@@ -603,7 +723,15 @@ fn build_inlined_function(
     Some(new_func)
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Required by the current implementation shape."
+)]
+/// Internal helper `emit_caller_instructions`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn emit_caller_instructions(
     caller: &Function,
     callee: &Function,
@@ -688,6 +816,11 @@ fn emit_caller_instructions(
     Some(())
 }
 
+/// Internal helper `emit_one_caller_inst`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn emit_one_caller_inst(
     caller_block_map: &[Option<BlockRef>],
     caller_value_map: &mut HashMap<u32, ValueRef>,
@@ -727,7 +860,15 @@ fn emit_one_caller_inst(
     Some(())
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Required by the current implementation shape."
+)]
+/// Internal helper `emit_callee_instructions`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn emit_callee_instructions(
     callee: &Function,
     callee_block_map: &[Option<BlockRef>],
@@ -804,10 +945,20 @@ fn emit_callee_instructions(
     Some(())
 }
 
+/// Internal helper `remap_value`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn remap_value(value_map: &HashMap<u32, ValueRef>, value: ValueRef) -> Option<ValueRef> {
     value_map.get(&value.raw()).copied()
 }
 
+/// Internal helper `remap_operand`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn remap_operand(value_map: &HashMap<u32, ValueRef>, operand: &Operand) -> Option<Operand> {
     Some(Operand {
         value: remap_value(value_map, operand.value)?,
@@ -815,7 +966,15 @@ fn remap_operand(value_map: &HashMap<u32, ValueRef>, operand: &Operand) -> Optio
     })
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Required by the current implementation shape."
+)]
+/// Internal helper `clone_caller_regions_with_inline`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn clone_caller_regions_with_inline(
     caller: &Function,
     builder: &mut Builder<'_>,
@@ -864,6 +1023,11 @@ fn clone_caller_regions_with_inline(
     builder.exit_region();
 }
 
+/// Internal helper `clone_callee_root_children`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn clone_callee_root_children(
     callee: &Function,
     builder: &mut Builder<'_>,
@@ -889,6 +1053,11 @@ fn clone_callee_root_children(
     }
 }
 
+/// Internal helper `clone_callee_region`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn clone_callee_region(
     callee: &Function,
     builder: &mut Builder<'_>,

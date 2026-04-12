@@ -19,12 +19,14 @@ use tuffy_ir::types::{Annotation, FloatType, IntAnnotation, IntSignedness, Type}
 use tuffy_ir::value::{BlockRef, ValueRef};
 
 // 64-bit unsigned IntAnnotation for legalized operations
+/// Internal constant `I64`.
 const I64: IntAnnotation = IntAnnotation {
     bit_width: 64,
     signedness: IntSignedness::Unsigned,
 };
 
 // 64-bit unsigned Type for legalized operations
+/// Internal constant `I64_TYPE`.
 const I64_TYPE: Type = Type::Int;
 use tuffy_target::legality::LegalityInfo;
 
@@ -32,11 +34,13 @@ use tuffy_target::legality::LegalityInfo;
 // Helper constants
 // ---------------------------------------------------------------------------
 
+/// Internal constant `SIGNED_64_INT`.
 const SIGNED_64_INT: IntAnnotation = IntAnnotation {
     bit_width: 64,
     signedness: IntSignedness::Signed,
 };
 
+/// Internal constant `UNSIGNED_64_INT`.
 const UNSIGNED_64_INT: IntAnnotation = IntAnnotation {
     bit_width: 64,
     signedness: IntSignedness::Unsigned,
@@ -47,21 +51,41 @@ const UNSIGNED_64_INT: IntAnnotation = IntAnnotation {
 // ---------------------------------------------------------------------------
 
 #[derive(Clone)]
+/// Internal enum `Mapped`.
 enum Mapped {
+    /// Variant `One`.
     One(ValueRef),
+    /// Variant `Pair`.
     Pair(ValueRef, ValueRef),
+    /// Variant `Parts`.
     Parts(Vec<ValueRef>),
 }
 
+/// Internal data structure `VMap`.
 struct VMap(HashMap<u32, Mapped>);
 
 impl VMap {
+    /// Internal helper `new`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn new() -> Self {
         Self(HashMap::new())
     }
+    /// Internal helper `set`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn set(&mut self, old: ValueRef, m: Mapped) {
         self.0.insert(old.raw(), m);
     }
+    /// Internal helper `set_parts`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn set_parts(&mut self, old: ValueRef, parts: Vec<ValueRef>) {
         match parts.as_slice() {
             [v] => self.set(old, Mapped::One(*v)),
@@ -69,15 +93,30 @@ impl VMap {
             _ => self.set(old, Mapped::Parts(parts)),
         }
     }
+    /// Internal helper `get`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn get(&self, old: ValueRef) -> Mapped {
         self.0.get(&old.raw()).cloned().unwrap_or(Mapped::One(old))
     }
+    /// Internal helper `one`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn one(&self, old: ValueRef) -> ValueRef {
         match self.get(old) {
             Mapped::One(v) | Mapped::Pair(v, _) => v,
             Mapped::Parts(parts) => parts[0],
         }
     }
+    /// Internal helper `pair`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn pair(&self, old: ValueRef) -> (ValueRef, ValueRef) {
         match self.get(old) {
             Mapped::Pair(lo, hi) => (lo, hi),
@@ -90,6 +129,11 @@ impl VMap {
             ),
         }
     }
+    /// Internal helper `parts`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn parts(&self, old: ValueRef) -> Vec<ValueRef> {
         match self.get(old) {
             Mapped::One(v) => vec![v],
@@ -97,6 +141,11 @@ impl VMap {
             Mapped::Parts(parts) => parts,
         }
     }
+    /// Internal helper `remap_op`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn remap_op(&self, op: &Operand) -> Operand {
         let v = self.one(op.value);
         match &op.annotation {
@@ -110,6 +159,11 @@ impl VMap {
 // Detection
 // ---------------------------------------------------------------------------
 
+/// Internal helper `type_width`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn type_width(ty: &Type) -> Option<u32> {
     match ty {
         Type::Int => None,
@@ -117,6 +171,11 @@ fn type_width(ty: &Type) -> Option<u32> {
     }
 }
 
+/// Internal helper `is_wide_width`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn is_wide_width(width: Option<u32>, legality: &impl LegalityInfo) -> bool {
     match width {
         Some(w) => w > legality.max_int_width(),
@@ -124,6 +183,11 @@ fn is_wide_width(width: Option<u32>, legality: &impl LegalityInfo) -> bool {
     }
 }
 
+/// Internal helper `is_wide_int_with_annotation_limit`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn is_wide_int_with_annotation_limit(
     ty: &Type,
     ann: &Option<Annotation>,
@@ -135,6 +199,11 @@ fn is_wide_int_with_annotation_limit(
             .is_some_and(|a| matches!(a, Annotation::Int(ia) if ia.bit_width > max_int_width))
 }
 
+/// Internal helper `is_wide_int_value_with_limit`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn is_wide_int_value_with_limit(func: &Function, v: ValueRef, max_int_width: u32) -> bool {
     let Some(ty) = value_type(func, v) else {
         return false;
@@ -143,10 +212,20 @@ fn is_wide_int_value_with_limit(func: &Function, v: ValueRef, max_int_width: u32
         && int_annotation_bits(value_annotation(func, v)).is_some_and(|bits| bits > max_int_width)
 }
 
+/// Internal helper `is_exact_double_width_int_annotation`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn is_exact_double_width_int_annotation(ann: Option<&Annotation>, part_bits: u32) -> bool {
     int_annotation_bits(ann).is_some_and(|bits| bits == part_bits * 2)
 }
 
+/// Internal helper `int_annotation_bits`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn int_annotation_bits(ann: Option<&Annotation>) -> Option<u32> {
     match ann {
         Some(Annotation::Int(ia)) => Some(ia.bit_width),
@@ -154,11 +233,21 @@ fn int_annotation_bits(ann: Option<&Annotation>) -> Option<u32> {
     }
 }
 
+/// Internal helper `operand_int_bits`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn operand_int_bits(func: &Function, op: &Operand) -> Option<u32> {
     int_annotation_bits(op.annotation.as_ref())
         .or_else(|| value_annotation(func, op.value).and_then(|ann| int_annotation_bits(Some(ann))))
 }
 
+/// Internal helper `compiler_rt_int_suffix`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn compiler_rt_int_suffix(bits: u32) -> &'static str {
     match bits {
         16 => "hi",
@@ -169,6 +258,11 @@ fn compiler_rt_int_suffix(bits: u32) -> &'static str {
     }
 }
 
+/// Internal helper `compiler_rt_float_suffix`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn compiler_rt_float_suffix(ft: FloatType) -> &'static str {
     match ft {
         FloatType::F32 => "sf",
@@ -177,6 +271,11 @@ fn compiler_rt_float_suffix(ft: FloatType) -> &'static str {
     }
 }
 
+/// Internal helper `fp_to_int_double_width_libcall_name`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn fp_to_int_double_width_libcall_name(bits: u32, signed: bool, ft: FloatType) -> String {
     let int_suffix = compiler_rt_int_suffix(bits);
     let float_suffix = compiler_rt_float_suffix(ft);
@@ -187,6 +286,11 @@ fn fp_to_int_double_width_libcall_name(bits: u32, signed: bool, ft: FloatType) -
     }
 }
 
+/// Internal helper `int_to_fp_double_width_libcall_name`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn int_to_fp_double_width_libcall_name(bits: u32, signed: bool, ft: FloatType) -> String {
     let int_suffix = compiler_rt_int_suffix(bits);
     let float_suffix = compiler_rt_float_suffix(ft);
@@ -197,6 +301,11 @@ fn int_to_fp_double_width_libcall_name(bits: u32, signed: bool, ft: FloatType) -
     }
 }
 
+/// Internal helper `div_rem_double_width_libcall_name`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn div_rem_double_width_libcall_name(bits: u32, is_div: bool, signed: bool) -> String {
     let int_suffix = compiler_rt_int_suffix(bits);
     match (is_div, signed) {
@@ -218,6 +327,11 @@ fn is_signed_annotation(ann: Option<&Annotation>) -> bool {
     )
 }
 
+/// Internal helper `value_type`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn value_type(func: &Function, v: ValueRef) -> Option<&Type> {
     if v.is_block_arg() {
         func.block_args.get(v.index() as usize).map(|ba| &ba.ty)
@@ -232,6 +346,11 @@ fn value_type(func: &Function, v: ValueRef) -> Option<&Type> {
     }
 }
 
+/// Internal helper `value_annotation`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn value_annotation(func: &Function, v: ValueRef) -> Option<&Annotation> {
     if v.is_block_arg() || v.is_secondary_result() {
         None
@@ -242,10 +361,20 @@ fn value_annotation(func: &Function, v: ValueRef) -> Option<&Annotation> {
     }
 }
 
+/// Internal helper `needs_wide_const`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn needs_wide_const(v: &BigInt) -> bool {
     !v.is_zero() && v.to_i64().is_none() && v.to_u64().is_none()
 }
 
+/// Internal helper `has_wide_values`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn has_wide_values(func: &Function, legality: &impl LegalityInfo) -> bool {
     // Check for wide parameters
     for (ty, ann) in func.params.iter().zip(func.param_annotations.iter()) {
@@ -402,8 +531,11 @@ pub fn legalize(
 // State (separate from Function so Builder can borrow Function independently)
 // ---------------------------------------------------------------------------
 
+/// Internal data structure `State`.
 struct State {
+    /// Value mapping state.
     vmap: VMap,
+    /// Bmap.
     bmap: HashMap<u32, BlockRef>,
     /// Old param index → (new_lo_index, Option<new_hi_index>).
     param_map: Vec<(u32, Option<u32>)>,
@@ -413,14 +545,26 @@ struct State {
     /// Used to thread the mem token when expanding a wide Div/Rem into a
     /// libcall (which requires a mem operand that the pure Div/Rem lacks).
     current_old_mem: Option<ValueRef>,
+    /// Part bits.
     part_bits: u32,
+    /// Limb bits.
     limb_bits: u32,
 }
 
+/// Internal helper `o`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn o() -> Origin {
     Origin::synthetic()
 }
 
+/// Internal helper `build_new_func`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn build_new_func(old: &Function, legality: &impl LegalityInfo) -> (Function, State) {
     let mut params = Vec::new();
     let mut param_anns = Vec::new();
@@ -495,6 +639,11 @@ fn build_new_func(old: &Function, legality: &impl LegalityInfo) -> (Function, St
 // Pre-scan: identify wide values in the old function
 // ---------------------------------------------------------------------------
 
+/// Internal helper `collect_wide_values`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn collect_wide_values(old: &Function, legality: &impl LegalityInfo) -> HashSet<u32> {
     let mut wide = HashSet::new();
 
@@ -604,6 +753,11 @@ fn collect_wide_values(old: &Function, legality: &impl LegalityInfo) -> HashSet<
     wide
 }
 
+/// Internal helper `is_wide`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn is_wide(s: &State, v: ValueRef) -> bool {
     s.wide.contains(&v.raw()) || matches!(s.vmap.get(v), Mapped::Pair(_, _) | Mapped::Parts(_))
 }
@@ -647,6 +801,11 @@ fn wide_pair(s: &State, old: &Function, b: &mut Builder, op: &Operand) -> (Value
 // Main legalization loop
 // ---------------------------------------------------------------------------
 
+/// Internal helper `run_legalize`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn run_legalize(
     old: &Function,
     mut out: Function,
@@ -665,6 +824,11 @@ fn run_legalize(
     out
 }
 
+/// Internal helper `remap_debug_bindings`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn remap_debug_bindings(func: &mut Function, vmap: &VMap) {
     for binding in &mut func.debug.bindings {
         let tuffy_ir::debug::DebugValue::IrValue(value) = &mut binding.value;
@@ -672,6 +836,11 @@ fn remap_debug_bindings(func: &mut Function, vmap: &VMap) {
     }
 }
 
+/// Internal helper `walk_region`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn walk_region(
     old: &Function,
     s: &mut State,
@@ -696,6 +865,11 @@ fn walk_region(
     }
 }
 
+/// Internal helper `precreate_blocks`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn precreate_blocks(
     old: &Function,
     s: &mut State,
@@ -727,6 +901,11 @@ fn precreate_blocks(
     }
 }
 
+/// Internal helper `walk_block_insts`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn walk_block_insts(
     old: &Function,
     s: &mut State,
@@ -766,7 +945,15 @@ fn walk_block_insts(
 // Instruction dispatch
 // ---------------------------------------------------------------------------
 
-#[allow(clippy::too_many_lines)]
+#[allow(
+    clippy::too_many_lines,
+    reason = "Required by the current implementation shape."
+)]
+/// Internal helper `legalize_inst`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn legalize_inst(
     old: &Function,
     s: &mut State,
@@ -1492,15 +1679,33 @@ fn legalize_inst(
 // Copy non-wide instruction with remapped operands
 // ---------------------------------------------------------------------------
 
+/// Internal helper `remap_op`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn remap_op(s: &State, op: &Operand) -> Operand {
     s.vmap.remap_op(op)
 }
 
+/// Internal helper `new_block`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn new_block(s: &State, old: BlockRef) -> BlockRef {
     s.bmap[&old.index()]
 }
 
-#[allow(clippy::too_many_lines)]
+#[allow(
+    clippy::too_many_lines,
+    reason = "Required by the current implementation shape."
+)]
+/// Internal helper `copy_inst`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn copy_inst(
     old: &Function,
     s: &mut State,
@@ -2416,9 +2621,13 @@ fn copy_inst(
 // Bitwise operation kind
 // ---------------------------------------------------------------------------
 
+/// Internal enum `BitwiseKind`.
 enum BitwiseKind {
+    /// Variant `And`.
     And,
+    /// Variant `Or`.
     Or,
+    /// Variant `Xor`.
     Xor,
 }
 
@@ -2426,6 +2635,11 @@ enum BitwiseKind {
 // Wide parameter split into legal parts
 // ---------------------------------------------------------------------------
 
+/// Internal helper `leg_param`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_param(s: &mut State, b: &mut Builder, old_vref: ValueRef, lo_idx: u32, hi_idx: u32) {
     let ann64 = Some(Annotation::Int(IntAnnotation {
         bit_width: 64,
@@ -2440,6 +2654,11 @@ fn leg_param(s: &mut State, b: &mut Builder, old_vref: ValueRef, lo_idx: u32, hi
 // Wide constant (> 64 bits)
 // ---------------------------------------------------------------------------
 
+/// Internal helper `leg_wide_const`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_wide_const(
     old: &Function,
     s: &mut State,
@@ -2454,14 +2673,29 @@ fn leg_wide_const(
     s.vmap.set_parts(old_vref, parts);
 }
 
+/// Internal helper `num_parts64`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn num_parts64(bits: u32, part_bits: u32) -> usize {
     bits.div_ceil(part_bits) as usize
 }
 
+/// Internal helper `num_limbs32`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn num_limbs32(bits: u32, limb_bits: u32) -> usize {
     bits.div_ceil(limb_bits) as usize
 }
 
+/// Internal helper `const_parts_for_bits`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn const_parts_for_bits(b: &mut Builder, val: &BigInt, bits: u32, part_bits: u32) -> Vec<ValueRef> {
     let modulus = BigInt::from(1u8) << bits;
     let mut truncated = val % &modulus;
@@ -2480,6 +2714,11 @@ fn const_parts_for_bits(b: &mut Builder, val: &BigInt, bits: u32, part_bits: u32
     parts
 }
 
+/// Internal helper `part_sign_fill`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn part_sign_fill(
     old: &Function,
     b: &mut Builder,
@@ -2515,6 +2754,11 @@ fn part_sign_fill(
     }
 }
 
+/// Internal helper `operand_parts64`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn operand_parts64(
     old: &Function,
     s: &State,
@@ -2548,6 +2792,11 @@ fn operand_parts64(
     parts
 }
 
+/// Internal helper `split_parts64_to_limbs32`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn split_parts64_to_limbs32(
     s: &State,
     b: &mut Builder,
@@ -2600,6 +2849,11 @@ fn split_parts64_to_limbs32(
     limbs
 }
 
+/// Internal helper `limbs32_to_parts64`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn limbs32_to_parts64(s: &State, b: &mut Builder, limbs: &[ValueRef]) -> Vec<ValueRef> {
     let limbs_per_part = (s.part_bits / s.limb_bits).max(1) as usize;
     let mut parts = Vec::with_capacity(limbs.len().div_ceil(limbs_per_part));
@@ -2647,6 +2901,11 @@ fn limbs32_to_parts64(s: &State, b: &mut Builder, limbs: &[ValueRef]) -> Vec<Val
     parts
 }
 
+/// Internal helper `limb_ann`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn limb_ann(s: &State) -> IntAnnotation {
     IntAnnotation {
         bit_width: s.limb_bits,
@@ -2654,6 +2913,11 @@ fn limb_ann(s: &State) -> IntAnnotation {
     }
 }
 
+/// Internal helper `part_ann`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn part_ann(s: &State) -> IntAnnotation {
     IntAnnotation {
         bit_width: s.part_bits,
@@ -2661,6 +2925,11 @@ fn part_ann(s: &State) -> IntAnnotation {
     }
 }
 
+/// Internal helper `bool_to_u32`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn bool_to_u32(s: &State, b: &mut Builder, val: tuffy_ir::typed::BoolValue) -> ValueRef {
     let zero = b.iconst(0i64, s.limb_bits, IntSignedness::Unsigned, o());
     let one = b.iconst(1i64, s.limb_bits, IntSignedness::Unsigned, o());
@@ -2677,6 +2946,11 @@ fn bool_to_u32(s: &State, b: &mut Builder, val: tuffy_ir::typed::BoolValue) -> V
     )
 }
 
+/// Internal helper `bool_to_part`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn bool_to_part(s: &State, b: &mut Builder, val: tuffy_ir::typed::BoolValue) -> ValueRef {
     let zero = b
         .iconst(0i64, s.part_bits, IntSignedness::Unsigned, o())
@@ -2694,6 +2968,11 @@ fn bool_to_part(s: &State, b: &mut Builder, val: tuffy_ir::typed::BoolValue) -> 
     )
 }
 
+/// Internal helper `add3_u32`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn add3_u32(
     s: &State,
     b: &mut Builder,
@@ -2727,6 +3006,11 @@ fn add3_u32(
     (sum2.raw(), carry_out.raw())
 }
 
+/// Internal helper `sub2_u32`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn sub2_u32(
     s: &State,
     b: &mut Builder,
@@ -2760,6 +3044,11 @@ fn sub2_u32(
     (diff2.raw(), borrow_out.raw())
 }
 
+/// Internal helper `add_into_limbs`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn add_into_limbs(
     s: &State,
     b: &mut Builder,
@@ -2779,6 +3068,11 @@ fn add_into_limbs(
     }
 }
 
+/// Internal helper `mask_limb_to_width`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn mask_limb_to_width(s: &State, b: &mut Builder, limb: ValueRef, width: u32) -> ValueRef {
     if width >= s.limb_bits {
         return limb;
@@ -2798,6 +3092,11 @@ fn mask_limb_to_width(s: &State, b: &mut Builder, limb: ValueRef, width: u32) ->
     .raw()
 }
 
+/// Internal helper `normalize_limbs32`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn normalize_limbs32(s: &State, b: &mut Builder, limbs: &[ValueRef], bits: u32) -> Vec<ValueRef> {
     let widths = wide_limb_widths(s, bits);
     limbs
@@ -2808,6 +3107,11 @@ fn normalize_limbs32(s: &State, b: &mut Builder, limbs: &[ValueRef], bits: u32) 
         .collect()
 }
 
+/// Internal helper `sub_from_limbs`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn sub_from_limbs(s: &State, b: &mut Builder, dst: &mut [ValueRef], src: &[ValueRef]) {
     let zero = b
         .iconst(0i64, s.limb_bits, IntSignedness::Unsigned, o())
@@ -2821,6 +3125,11 @@ fn sub_from_limbs(s: &State, b: &mut Builder, dst: &mut [ValueRef], src: &[Value
     }
 }
 
+/// Internal helper `zero_limbs32`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn zero_limbs32(s: &State, b: &mut Builder, len: usize) -> Vec<ValueRef> {
     let zero = b
         .iconst(0i64, s.limb_bits, IntSignedness::Unsigned, o())
@@ -2828,6 +3137,11 @@ fn zero_limbs32(s: &State, b: &mut Builder, len: usize) -> Vec<ValueRef> {
     vec![zero; len]
 }
 
+/// Internal helper `poison_limb32`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn poison_limb32(s: &State, b: &mut Builder) -> ValueRef {
     let zero = b.iconst(0i64, s.limb_bits, IntSignedness::Unsigned, o());
     b.div(
@@ -2839,11 +3153,21 @@ fn poison_limb32(s: &State, b: &mut Builder) -> ValueRef {
     .raw()
 }
 
+/// Internal helper `poison_limbs32`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn poison_limbs32(s: &State, b: &mut Builder, len: usize) -> Vec<ValueRef> {
     let poison = poison_limb32(s, b);
     vec![poison; len]
 }
 
+/// Internal helper `select_limbs32`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn select_limbs32(
     s: &State,
     b: &mut Builder,
@@ -2867,6 +3191,11 @@ fn select_limbs32(
         .collect()
 }
 
+/// Internal helper `limbs32_are_zero`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn limbs32_are_zero(s: &State, b: &mut Builder, limbs: &[ValueRef]) -> tuffy_ir::typed::BoolValue {
     let zero = b
         .iconst(0i64, s.limb_bits, IntSignedness::Unsigned, o())
@@ -2884,6 +3213,11 @@ fn limbs32_are_zero(s: &State, b: &mut Builder, limbs: &[ValueRef]) -> tuffy_ir:
     eq
 }
 
+/// Internal helper `icmp_unsigned_ge_limbs32`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn icmp_unsigned_ge_limbs32(
     s: &State,
     b: &mut Builder,
@@ -2912,12 +3246,22 @@ fn icmp_unsigned_ge_limbs32(
     b.bor(gt.into(), eq.into(), o())
 }
 
+/// Internal helper `negate_limbs32`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn negate_limbs32(s: &State, b: &mut Builder, limbs: &[ValueRef], bits: u32) -> Vec<ValueRef> {
     let zeroes = zero_limbs32(s, b, limbs.len());
     let (neg, _) = sub_limbs32(s, b, &zeroes, limbs);
     normalize_limbs32(s, b, &neg, bits)
 }
 
+/// Internal helper `limb_sign_bool`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn limb_sign_bool(
     s: &State,
     b: &mut Builder,
@@ -2940,10 +3284,20 @@ fn limb_sign_bool(
     b.icmp(ICmpOp::Ne, sign.into(), zero.into(), o())
 }
 
+/// Internal helper `u32_sign_bool`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn u32_sign_bool(s: &State, b: &mut Builder, v: ValueRef) -> tuffy_ir::typed::BoolValue {
     limb_sign_bool(s, b, v, s.limb_bits)
 }
 
+/// Internal helper `widening_mul_u32`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn widening_mul_u32(s: &State, b: &mut Builder, x: ValueRef, y: ValueRef) -> (ValueRef, ValueRef) {
     let xw = b.zext(
         Operand::annotated(x, Annotation::Int(limb_ann(s))).into(),
@@ -2985,12 +3339,22 @@ fn widening_mul_u32(s: &State, b: &mut Builder, x: ValueRef, y: ValueRef) -> (Va
     (lo.raw(), hi.raw())
 }
 
+/// Internal helper `result_bits`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn result_bits(s: &State, old: &Function, old_vref: ValueRef) -> u32 {
     value_annotation(old, old_vref)
         .and_then(|ann| int_annotation_bits(Some(ann)))
         .unwrap_or(s.part_bits * 2)
 }
 
+/// Internal helper `chunk_widths`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn chunk_widths(bits: u32, chunk_bits: u32) -> Vec<u32> {
     let mut remaining = bits;
     let mut widths = Vec::with_capacity(bits.div_ceil(chunk_bits) as usize);
@@ -3002,10 +3366,20 @@ fn chunk_widths(bits: u32, chunk_bits: u32) -> Vec<u32> {
     widths
 }
 
+/// Internal helper `wide_limb_widths`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn wide_limb_widths(s: &State, bits: u32) -> Vec<u32> {
     chunk_widths(bits, s.limb_bits)
 }
 
+/// Internal helper `operand_limbs32`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn operand_limbs32(
     old: &Function,
     s: &State,
@@ -3017,6 +3391,11 @@ fn operand_limbs32(
     split_parts64_to_limbs32(s, b, &parts, num_limbs32(bits, s.limb_bits))
 }
 
+/// Internal helper `add_limbs32`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn add_limbs32(
     s: &State,
     b: &mut Builder,
@@ -3036,6 +3415,11 @@ fn add_limbs32(
     (out, carry)
 }
 
+/// Internal helper `sub_limbs32`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn sub_limbs32(
     s: &State,
     b: &mut Builder,
@@ -3055,16 +3439,31 @@ fn sub_limbs32(
     (out, borrow)
 }
 
+/// Internal helper `nonzero_u32`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn nonzero_u32(s: &State, b: &mut Builder, v: ValueRef) -> tuffy_ir::typed::BoolValue {
     let zero = b.iconst(0i64, s.limb_bits, IntSignedness::Unsigned, o());
     b.icmp(ICmpOp::Ne, Operand::new(v).into(), zero.into(), o())
 }
 
+/// Internal helper `bool_not`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn bool_not(b: &mut Builder, val: tuffy_ir::typed::BoolValue) -> tuffy_ir::typed::BoolValue {
     let t = b.bconst(true, o());
     b.bxor(val.into(), t.into(), o())
 }
 
+/// Internal helper `fp_format_params`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn fp_format_params(ft: FloatType) -> Option<(u32, u32, u32, u32)> {
     match ft {
         FloatType::F16 => Some((16, 5, 10, 15)),
@@ -3075,6 +3474,11 @@ fn fp_format_params(ft: FloatType) -> Option<(u32, u32, u32, u32)> {
     }
 }
 
+/// Internal helper `wide_uint_from_small_value`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn wide_uint_from_small_value(
     s: &State,
     b: &mut Builder,
@@ -3116,6 +3520,11 @@ fn wide_uint_from_small_value(
     normalize_limbs32(s, b, &limbs, bits)
 }
 
+/// Internal helper `wide_shift_amount`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn wide_shift_amount(
     s: &State,
     b: &mut Builder,
@@ -3139,6 +3548,11 @@ fn wide_shift_amount(
     (whole.raw(), rem.raw(), rem_zero)
 }
 
+/// Internal helper `wide_shl_limbs`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn wide_shl_limbs(
     s: &State,
     b: &mut Builder,
@@ -3217,6 +3631,11 @@ fn wide_shl_limbs(
     out
 }
 
+/// Internal helper `wide_shr_limbs`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn wide_shr_limbs(
     s: &State,
     b: &mut Builder,
@@ -3323,7 +3742,15 @@ fn wide_shr_limbs(
     out
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Required by the current implementation shape."
+)]
+/// Internal helper `full_mul_add_limbs32`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn full_mul_add_limbs32(
     s: &State,
     b: &mut Builder,
@@ -3435,6 +3862,11 @@ fn full_mul_add_limbs32(
     full
 }
 
+/// Internal helper `udivrem_limbs32`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn udivrem_limbs32(
     s: &State,
     b: &mut Builder,
@@ -3491,12 +3923,22 @@ fn udivrem_limbs32(
     )
 }
 
+/// Internal helper `limb_mask_const`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn limb_mask_const(s: &State, b: &mut Builder, bits: u32) -> ValueRef {
     let val = (BigInt::from(1u8) << bits) - BigInt::from(1u8);
     b.iconst(val, s.limb_bits, IntSignedness::Unsigned, o())
         .raw()
 }
 
+/// Internal helper `signed_sat_limbs32`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn signed_sat_limbs32(
     s: &State,
     b: &mut Builder,
@@ -3547,6 +3989,11 @@ fn signed_sat_limbs32(
     out
 }
 
+/// Internal helper `unsigned_sat_limbs32`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn unsigned_sat_limbs32(s: &State, b: &mut Builder, bits: u32, is_add: bool) -> Vec<ValueRef> {
     let widths = wide_limb_widths(s, bits);
     let zero = b
@@ -3564,7 +4011,15 @@ fn unsigned_sat_limbs32(s: &State, b: &mut Builder, bits: u32, is_add: bool) -> 
         .collect()
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Required by the current implementation shape."
+)]
+/// Internal helper `leg_carrying_mul_add_small`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_carrying_mul_add_small(
     s: &mut State,
     b: &mut Builder,
@@ -3658,7 +4113,15 @@ fn leg_carrying_mul_add_small(
     s.vmap.set(old_sec, Mapped::One(high.raw()));
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Required by the current implementation shape."
+)]
+/// Internal helper `leg_carrying_mul_add_64`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_carrying_mul_add_64(
     s: &mut State,
     b: &mut Builder,
@@ -3759,7 +4222,15 @@ fn leg_carrying_mul_add_64(
     s.vmap.set(old_sec, Mapped::One(hi));
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Required by the current implementation shape."
+)]
+/// Internal helper `leg_carrying_mul_add_128`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_carrying_mul_add_128(
     old: &Function,
     s: &mut State,
@@ -3918,7 +4389,15 @@ fn leg_carrying_mul_add_128(
     s.vmap.set(old_sec, Mapped::Pair(full[2], full[3]));
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Required by the current implementation shape."
+)]
+/// Internal helper `leg_carrying_mul_add_wide`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_carrying_mul_add_wide(
     old: &Function,
     s: &mut State,
@@ -3973,6 +4452,11 @@ fn leg_carrying_mul_add_wide(
 // Double-width add: low part add, carry into high part
 // ---------------------------------------------------------------------------
 
+/// Internal helper `leg_add`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_add(
     old: &Function,
     s: &mut State,
@@ -4016,6 +4500,11 @@ fn leg_add(
 // Double-width sub
 // ---------------------------------------------------------------------------
 
+/// Internal helper `leg_sub`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_sub(
     _old: &Function,
     s: &mut State,
@@ -4059,7 +4548,15 @@ fn leg_sub(
 // Double-width multiply
 // ---------------------------------------------------------------------------
 
-#[allow(clippy::too_many_lines)]
+#[allow(
+    clippy::too_many_lines,
+    reason = "Required by the current implementation shape."
+)]
+/// Internal helper `leg_mul`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_mul(
     old: &Function,
     s: &mut State,
@@ -4204,6 +4701,11 @@ fn add3_u64(b: &mut Builder, x: ValueRef, y: ValueRef, z: ValueRef) -> (ValueRef
     (sum.raw(), carry.raw())
 }
 
+/// Internal helper `sub2_u64`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn sub2_u64(b: &mut Builder, x: ValueRef, y: ValueRef, borrow: ValueRef) -> (ValueRef, ValueRef) {
     let x_op = Operand::annotated(x, Annotation::Int(I64));
     let y_op = Operand::annotated(y, Annotation::Int(I64));
@@ -4223,6 +4725,11 @@ fn sub2_u64(b: &mut Builder, x: ValueRef, y: ValueRef, borrow: ValueRef) -> (Val
     (diff2.raw(), borrow_out.raw())
 }
 
+/// Internal helper `add_word_pair_u64`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn add_word_pair_u64(
     b: &mut Builder,
     lo: ValueRef,
@@ -4258,6 +4765,11 @@ fn add_word_pair_u64(
     (new_lo.raw(), new_hi.raw())
 }
 
+/// Internal helper `add_into_words64`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn add_into_words64(b: &mut Builder, dst: &mut [ValueRef], start: usize, src: &[ValueRef]) {
     let zero = b.iconst(0, 64, IntSignedness::Unsigned, o()).raw();
     let mut carry = zero;
@@ -4269,6 +4781,11 @@ fn add_into_words64(b: &mut Builder, dst: &mut [ValueRef], start: usize, src: &[
     }
 }
 
+/// Internal helper `sub_from_words64`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn sub_from_words64(b: &mut Builder, dst: &mut [ValueRef], src: &[ValueRef]) {
     let zero = b.iconst(0, 64, IntSignedness::Unsigned, o()).raw();
     let mut borrow = zero;
@@ -4315,6 +4832,11 @@ fn leg_add128_core(
     (lo.raw(), hi.raw(), a_hi, b_hi)
 }
 
+/// Internal helper `leg_uadd_with_overflow_wide`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_uadd_with_overflow_wide(
     old: &Function,
     s: &mut State,
@@ -4398,6 +4920,11 @@ fn leg_uadd_with_overflow_wide(
     s.vmap.set(old_sec, Mapped::One(overflow.into()));
 }
 
+/// Internal helper `leg_sadd_with_overflow_wide`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_sadd_with_overflow_wide(
     old: &Function,
     s: &mut State,
@@ -4452,6 +4979,11 @@ fn leg_sadd_with_overflow_wide(
     s.vmap.set(old_sec, Mapped::One(overflow.into()));
 }
 
+/// Internal helper `leg_usub_with_overflow_wide`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_usub_with_overflow_wide(
     old: &Function,
     s: &mut State,
@@ -4846,6 +5378,11 @@ fn leg_unsigned_saturating_addsub_wide(
     }
 }
 
+/// Internal helper `leg_ssub_with_overflow_wide`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_ssub_with_overflow_wide(
     old: &Function,
     s: &mut State,
@@ -4925,6 +5462,11 @@ fn leg_ssub_with_overflow_wide(
     s.vmap.set(old_sec, Mapped::One(overflow.into()));
 }
 
+/// Internal helper `leg_smul_with_overflow_wide`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_smul_with_overflow_wide(
     old: &Function,
     s: &mut State,
@@ -5083,6 +5625,11 @@ fn leg_smul_with_overflow_wide(
     s.vmap.set(old_sec, Mapped::One(overflow.into()));
 }
 
+/// Internal helper `leg_umul_with_overflow_wide`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_umul_with_overflow_wide(
     old: &Function,
     s: &mut State,
@@ -5162,6 +5709,11 @@ fn leg_umul_with_overflow_wide(
     s.vmap.set(old_sec, Mapped::One(overflow.into()));
 }
 
+/// Internal helper `leg_bitwise`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_bitwise(
     old: &Function,
     s: &mut State,
@@ -5242,6 +5794,11 @@ fn leg_bitwise(
 // Wide left shift
 // ---------------------------------------------------------------------------
 
+/// Internal helper `leg_shl`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_shl(
     old: &Function,
     s: &mut State,
@@ -5308,6 +5865,11 @@ fn leg_shl(
 // Wide right shift (logical or arithmetic based on annotation)
 // ---------------------------------------------------------------------------
 
+/// Internal helper `leg_shr`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_shr(
     old: &Function,
     s: &mut State,
@@ -5491,6 +6053,11 @@ fn shr_double_width_pair(
     (lo, hi)
 }
 
+/// Internal helper `leg_rotate_wide`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_rotate_wide(
     old: &Function,
     s: &mut State,
@@ -5579,6 +6146,11 @@ fn leg_rotate_wide(
 // Wide bit reverse
 // ---------------------------------------------------------------------------
 
+/// Internal helper `leg_bit_reverse_wide`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_bit_reverse_wide(
     old: &Function,
     s: &mut State,
@@ -5613,6 +6185,11 @@ fn leg_bit_reverse_wide(
 // Two-part integer comparison
 // ---------------------------------------------------------------------------
 
+/// Internal helper `leg_icmp`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_icmp(
     old: &Function,
     s: &mut State,
@@ -5761,6 +6338,11 @@ fn leg_icmp(
 // Wide load
 // ---------------------------------------------------------------------------
 
+/// Internal helper `leg_load_wide`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_load_wide(
     s: &mut State,
     b: &mut Builder,
@@ -5813,7 +6395,15 @@ fn leg_load_wide(
 // Wide store
 // ---------------------------------------------------------------------------
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Required by the current implementation shape."
+)]
+/// Internal helper `leg_store_wide`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_store_wide(
     old: &Function,
     s: &mut State,
@@ -5896,6 +6486,11 @@ fn leg_store_wide(
 // Sign-extend to a wider-than-legal integer
 // ---------------------------------------------------------------------------
 
+/// Internal helper `leg_sext_wide`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_sext_wide(s: &mut State, b: &mut Builder, old_vref: ValueRef, bits: u32, val: &Operand) {
     if bits > s.part_bits {
         let lo = s.vmap.one(val.value);
@@ -5936,6 +6531,11 @@ fn leg_sext_wide(s: &mut State, b: &mut Builder, old_vref: ValueRef, bits: u32, 
 // Zero-extend to a wider-than-legal integer
 // ---------------------------------------------------------------------------
 
+/// Internal helper `leg_zext_wide`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_zext_wide(s: &mut State, b: &mut Builder, old_vref: ValueRef, bits: u32, val: &Operand) {
     if bits > s.part_bits {
         let lo = s.vmap.one(val.value);
@@ -5980,7 +6580,15 @@ fn get_fp_to_int_float_type(vref: ValueRef, old: &Function) -> Option<FloatType>
 // to provide correct saturation semantics for overflow/infinity/NaN.
 // ---------------------------------------------------------------------------
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Required by the current implementation shape."
+)]
+/// Internal helper `leg_fp_to_int_double_width`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_fp_to_int_double_width(
     s: &mut State,
     b: &mut Builder,
@@ -6067,6 +6675,11 @@ fn leg_fp_to_int_double_width(
     s.vmap.set(old_vref, Mapped::Pair(data, hi_capture));
 }
 
+/// Internal helper `leg_fp_to_int_wide`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_fp_to_int_wide(
     s: &mut State,
     b: &mut Builder,
@@ -6333,6 +6946,11 @@ fn leg_fp_to_int_wide(
 // Wide bswap
 // ---------------------------------------------------------------------------
 
+/// Internal helper `leg_bswap_wide`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_bswap_wide(s: &mut State, b: &mut Builder, old_vref: ValueRef, bytes: u32, val: &Operand) {
     let part_bytes = s.part_bits / 8;
     let limb_bytes = s.limb_bits / 8;
@@ -6363,6 +6981,11 @@ fn leg_bswap_wide(s: &mut State, b: &mut Builder, old_vref: ValueRef, bytes: u32
 // Wide select
 // ---------------------------------------------------------------------------
 
+/// Internal helper `leg_select_wide`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_select_wide(
     old: &Function,
     s: &mut State,
@@ -6421,6 +7044,11 @@ fn leg_select_wide(
 // Wide integer Div/Rem
 // ---------------------------------------------------------------------------
 
+/// Internal helper `leg_div_rem_wide`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_div_rem_wide(
     old: &Function,
     s: &mut State,
@@ -6469,7 +7097,15 @@ fn leg_div_rem_wide(
 //   (`si` / `di` / `ti`), e.g. `__divdi3` or `__udivti3`.
 // ---------------------------------------------------------------------------
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Required by the current implementation shape."
+)]
+/// Internal helper `leg_div_rem_double_width`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_div_rem_double_width(
     old: &Function,
     s: &mut State,
@@ -6535,6 +7171,11 @@ fn leg_div_rem_double_width(
 // Wide integer to float: lower via target-derived limb rounding
 // ---------------------------------------------------------------------------
 
+/// Internal helper `wide_bit_length`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn wide_bit_length(s: &State, b: &mut Builder, limbs: &[ValueRef], bits: u32) -> ValueRef {
     let widths = wide_limb_widths(s, bits);
     let zero_part = b
@@ -6612,6 +7253,11 @@ fn wide_bit_length(s: &State, b: &mut Builder, limbs: &[ValueRef], bits: u32) ->
     .raw()
 }
 
+/// Internal helper `leg_int_to_fp_wide`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_int_to_fp_wide(
     old: &Function,
     s: &mut State,
@@ -6901,6 +7547,11 @@ fn leg_int_to_fp_wide(
 //   (`si` / `di` / `ti`), e.g. `__floatdisf` or `__floatuntidf`.
 // ---------------------------------------------------------------------------
 
+/// Internal helper `leg_int_to_fp_double_width`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_int_to_fp_double_width(
     s: &mut State,
     b: &mut Builder,
@@ -6968,6 +7619,11 @@ fn leg_int_to_fp_double_width(
 // Exact double-width return: low part → RAX, second part → RDX (via metadata)
 // ---------------------------------------------------------------------------
 
+/// Internal helper `leg_ret`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_ret(
     s: &mut State,
     b: &mut Builder,
@@ -7012,7 +7668,15 @@ fn leg_ret(
 // Call: split wide integer args, handle double-width returns
 // ---------------------------------------------------------------------------
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Required by the current implementation shape."
+)]
+/// Internal helper `leg_call`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_call(
     _old: &Function,
     s: &mut State,
@@ -7102,6 +7766,11 @@ fn leg_call(
 // Branch argument remapping: split wide integer args into legalized parts
 // ---------------------------------------------------------------------------
 
+/// Internal helper `remap_branch_args`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn remap_branch_args(s: &State, args: &[Operand]) -> Vec<Operand> {
     let mut out = Vec::new();
     for arg in args {
@@ -7120,6 +7789,11 @@ fn remap_branch_args(s: &State, args: &[Operand]) -> Vec<Operand> {
 // Unconditional branch
 // ---------------------------------------------------------------------------
 
+/// Internal helper `leg_br`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_br(s: &mut State, b: &mut Builder, old_vref: ValueRef, target: BlockRef, args: &[Operand]) {
     let new_target = new_block(s, target);
     let new_args = remap_branch_args(s, args);
@@ -7131,7 +7805,15 @@ fn leg_br(s: &mut State, b: &mut Builder, old_vref: ValueRef, target: BlockRef, 
 // Conditional branch
 // ---------------------------------------------------------------------------
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Required by the current implementation shape."
+)]
+/// Internal helper `leg_brif`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_brif(
     s: &mut State,
     b: &mut Builder,
@@ -7162,6 +7844,11 @@ fn leg_brif(
 // Continue (loop back-edge)
 // ---------------------------------------------------------------------------
 
+/// Internal helper `leg_continue`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_continue(s: &mut State, b: &mut Builder, old_vref: ValueRef, args: &[Operand]) {
     let new_args = remap_branch_args(s, args);
     let v = b.continue_(new_args, o());
@@ -7172,6 +7859,11 @@ fn leg_continue(s: &mut State, b: &mut Builder, old_vref: ValueRef, args: &[Oper
 // Region yield
 // ---------------------------------------------------------------------------
 
+/// Internal helper `leg_region_yield`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn leg_region_yield(s: &mut State, b: &mut Builder, old_vref: ValueRef, args: &[Operand]) {
     let new_args = remap_branch_args(s, args);
     let v = b.region_yield(new_args, o());
@@ -7186,6 +7878,11 @@ mod tests {
     use tuffy_ir_interp::{ExecMode, InterpResult, Interpreter, Value};
     use tuffy_target_x86::legality::X86LegalityInfo;
 
+    /// Internal helper `build_carrying_mul_add_func`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn build_carrying_mul_add_func(bits: u32, signed: bool) -> (Function, SymbolTable) {
         let mut symbols = SymbolTable::new();
         let name = symbols.intern("wide_mul_add");
@@ -7234,7 +7931,15 @@ mod tests {
         (func, symbols)
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Required by the current implementation shape."
+    )]
+    /// Internal helper `build_carrying_mul_add_check_func`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn build_carrying_mul_add_check_func(
         bits: u32,
         signed: bool,
@@ -7310,6 +8015,11 @@ mod tests {
         (func, symbols)
     }
 
+    /// Internal helper `build_add_func`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn build_add_func(bits: u32) -> (Function, SymbolTable) {
         let mut symbols = SymbolTable::new();
         let name = symbols.intern("wide_add");
@@ -7345,6 +8055,11 @@ mod tests {
         (func, symbols)
     }
 
+    /// Internal helper `build_overflow_func`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn build_overflow_func(bits: u32, signed: bool, is_mul: bool) -> (Function, SymbolTable) {
         let mut symbols = SymbolTable::new();
         let name = symbols.intern("wide_overflow");
@@ -7397,6 +8112,11 @@ mod tests {
         (func, symbols)
     }
 
+    /// Internal helper `build_shift_func`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn build_shift_func(bits: u32, rotate: bool) -> (Function, SymbolTable) {
         let mut symbols = SymbolTable::new();
         let name = symbols.intern("wide_shift");
@@ -7438,6 +8158,11 @@ mod tests {
         (func, symbols)
     }
 
+    /// Internal helper `build_divrem_func`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn build_divrem_func(bits: u32, is_div: bool, signed: bool) -> (Function, SymbolTable) {
         let mut symbols = SymbolTable::new();
         let name = symbols.intern("wide_divrem");
@@ -7483,6 +8208,11 @@ mod tests {
         (func, symbols)
     }
 
+    /// Internal helper `build_int_to_fp_func`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn build_int_to_fp_func(bits: u32, signed: bool) -> (Function, SymbolTable) {
         let mut symbols = SymbolTable::new();
         let name = symbols.intern("wide_int_to_fp");
@@ -7525,6 +8255,11 @@ mod tests {
         (func, symbols)
     }
 
+    /// Internal helper `build_int_to_fp_check_func`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn build_int_to_fp_check_func(
         bits: u32,
         signed: bool,
@@ -7569,6 +8304,11 @@ mod tests {
         (func, symbols)
     }
 
+    /// Internal helper `build_fp_to_int_func`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn build_fp_to_int_func(bits: u32, signed: bool, float_bits: u128) -> (Function, SymbolTable) {
         let mut symbols = SymbolTable::new();
         let name = symbols.intern("wide_fp_to_int");
@@ -7602,6 +8342,11 @@ mod tests {
         (func, symbols)
     }
 
+    /// Internal helper `build_fp_to_int_check_func`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn build_fp_to_int_check_func(
         bits: u32,
         signed: bool,
@@ -7663,6 +8408,11 @@ mod tests {
         (func, symbols)
     }
 
+    /// Internal helper `build_icmp_func`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn build_icmp_func(bits: u32, signed: bool) -> (Function, SymbolTable) {
         let mut symbols = SymbolTable::new();
         let name = symbols.intern("wide_icmp");
@@ -7704,6 +8454,11 @@ mod tests {
         (func, symbols)
     }
 
+    /// Internal helper `build_clz_check_func`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn build_clz_check_func(bits: u32, value: BigInt, expected: u64) -> (Function, SymbolTable) {
         let mut symbols = SymbolTable::new();
         let name = symbols.intern("wide_clz_check");
@@ -7732,6 +8487,11 @@ mod tests {
         (func, symbols)
     }
 
+    /// Internal helper `build_cleanup_call_legalize_func`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn build_cleanup_call_legalize_func() -> (Function, SymbolTable) {
         let mut symbols = SymbolTable::new();
         let name = symbols.intern("cleanup_call_legalize");
@@ -7787,6 +8547,11 @@ mod tests {
         (func, symbols)
     }
 
+    /// Internal helper `assert_legalized_widths`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn assert_legalized_widths(bits: u32, signed: bool) {
         let (func, mut symbols) = build_carrying_mul_add_func(bits, signed);
         let legalized =
@@ -7807,6 +8572,11 @@ mod tests {
     }
 
     #[test]
+    /// Internal helper `legalize_ucarrying_mul_add_widths`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn legalize_ucarrying_mul_add_widths() {
         for bits in [128, 160, 192, 256] {
             assert_legalized_widths(bits, false);
@@ -7814,6 +8584,11 @@ mod tests {
     }
 
     #[test]
+    /// Internal helper `legalize_scarrying_mul_add_widths`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn legalize_scarrying_mul_add_widths() {
         for bits in [128, 160, 192, 256] {
             assert_legalized_widths(bits, true);
@@ -7821,6 +8596,11 @@ mod tests {
     }
 
     #[test]
+    /// Internal helper `legalize_wide_add_160`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn legalize_wide_add_160() {
         let (func, mut symbols) = build_add_func(160);
         let legalized =
@@ -7833,6 +8613,11 @@ mod tests {
     }
 
     #[test]
+    /// Internal helper `legalize_wide_overflow_widths`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn legalize_wide_overflow_widths() {
         for (bits, signed, is_mul) in [
             (160, false, false),
@@ -7852,6 +8637,11 @@ mod tests {
     }
 
     #[test]
+    /// Internal helper `legalize_wide_shift_and_rotate_widths`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn legalize_wide_shift_and_rotate_widths() {
         for rotate in [false, true] {
             let (func, mut symbols) = build_shift_func(160, rotate);
@@ -7866,6 +8656,11 @@ mod tests {
     }
 
     #[test]
+    /// Internal helper `legalize_double_width_divrem_paths`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn legalize_double_width_divrem_paths() {
         for (is_div, signed) in [(true, false), (true, true), (false, false), (false, true)] {
             let (func, mut symbols) = build_divrem_func(128, is_div, signed);
@@ -7880,6 +8675,11 @@ mod tests {
     }
 
     #[test]
+    /// Internal helper `legalize_wide_divrem_paths`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn legalize_wide_divrem_paths() {
         for (bits, is_div, signed) in [
             (160, true, false),
@@ -7899,6 +8699,11 @@ mod tests {
     }
 
     #[test]
+    /// Internal helper `legalize_double_width_int_to_fp_paths`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn legalize_double_width_int_to_fp_paths() {
         for signed in [false, true] {
             let (func, mut symbols) = build_int_to_fp_func(128, signed);
@@ -7913,6 +8718,11 @@ mod tests {
     }
 
     #[test]
+    /// Internal helper `legalize_wide_int_to_fp_paths`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn legalize_wide_int_to_fp_paths() {
         for (bits, signed) in [(160, false), (192, true)] {
             let (func, mut symbols) = build_int_to_fp_func(bits, signed);
@@ -7934,6 +8744,11 @@ mod tests {
     }
 
     #[test]
+    /// Internal helper `legalize_wide_fp_to_int_paths`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn legalize_wide_fp_to_int_paths() {
         for signed in [false, true] {
             let bits = 160;
@@ -7954,6 +8769,11 @@ mod tests {
     }
 
     #[test]
+    /// Internal helper `compiler_rt_double_width_libcall_names_follow_width`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn compiler_rt_double_width_libcall_names_follow_width() {
         assert_eq!(
             div_rem_double_width_libcall_name(64, true, true),
@@ -7992,6 +8812,11 @@ mod tests {
     }
 
     #[test]
+    /// Internal helper `legalize_wide_icmp_paths`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn legalize_wide_icmp_paths() {
         for signed in [false, true] {
             let (func, mut symbols) = build_icmp_func(160, signed);
@@ -8006,6 +8831,11 @@ mod tests {
     }
 
     #[test]
+    /// Internal helper `interpret_legalized_smul_overflow_128_regression`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn interpret_legalized_smul_overflow_128_regression() {
         let mut symbols = SymbolTable::new();
         let name = symbols.intern("main");
@@ -8066,6 +8896,11 @@ mod tests {
     }
 
     #[test]
+    /// Internal helper `legalize_remaps_cleanup_labels_to_landing_pad_blocks`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn legalize_remaps_cleanup_labels_to_landing_pad_blocks() {
         let (func, mut symbols) = build_cleanup_call_legalize_func();
         let old_cleanup_label = func
@@ -8099,6 +8934,11 @@ mod tests {
     }
 
     #[test]
+    /// Internal helper `legalize_double_width_int_to_fp_uses_compiler_rt_helpers`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn legalize_double_width_int_to_fp_uses_compiler_rt_helpers() {
         for (signed, expected) in [(false, "__floatuntidf"), (true, "__floattidf")] {
             let (func, mut symbols) = build_int_to_fp_func(128, signed);
@@ -8112,6 +8952,11 @@ mod tests {
     }
 
     #[test]
+    /// Internal helper `interpret_legalized_double_width_int_to_fp_regressions`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn interpret_legalized_double_width_int_to_fp_regressions() {
         for (signed, value, expected_bits) in [
             (
@@ -8140,6 +8985,11 @@ mod tests {
     }
 
     #[test]
+    /// Internal helper `interpret_legalized_wide_int_to_fp_regressions`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn interpret_legalized_wide_int_to_fp_regressions() {
         for (bits, signed, value, expected_bits) in [
             (
@@ -8172,6 +9022,11 @@ mod tests {
     }
 
     #[test]
+    /// Internal helper `interpret_legalized_carrying_mul_add_small_and_double_width_regressions`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn interpret_legalized_carrying_mul_add_small_and_double_width_regressions() {
         for (bits, signed, a, op_b, carry, add, expected_lo, expected_hi) in [
             (
@@ -8219,6 +9074,11 @@ mod tests {
     }
 
     #[test]
+    /// Internal helper `interpret_legalized_exact_double_width_clz_regression`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn interpret_legalized_exact_double_width_clz_regression() {
         let (func, mut symbols) = build_clz_check_func(128, BigInt::from(u128::MAX), 0);
         let legalized = legalize(&func, &X86LegalityInfo, &mut symbols).expect("legalized");
@@ -8234,6 +9094,11 @@ mod tests {
     }
 
     #[test]
+    /// Internal helper `interpret_legalized_wide_fp_to_int_regressions`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn interpret_legalized_wide_fp_to_int_regressions() {
         let (func, mut symbols) = build_fp_to_int_check_func(
             160,

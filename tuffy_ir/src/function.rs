@@ -17,7 +17,9 @@ use crate::value::{BlockRef, RegionRef, ValueRef};
 /// A block argument (replaces PHI nodes).
 #[derive(Debug, Clone)]
 pub struct BlockArg {
+    /// Type carried by the block argument.
     pub ty: Type,
+    /// Optional annotation attached to the block argument.
     pub annotation: Option<Annotation>,
     /// Head of the use-list for this block argument.
     pub(crate) use_list_head: Option<u32>,
@@ -54,15 +56,20 @@ pub enum RegionKind {
 /// A node in the CFG: either a block or a nested region.
 #[derive(Debug, Clone)]
 pub enum CfgNode {
+    /// A basic block child within the region.
     Block(BlockRef),
+    /// A nested child region.
     Region(RegionRef),
 }
 
 /// A SESE region in the hierarchical CFG.
 #[derive(Debug, Clone)]
 pub struct Region {
+    /// Region kind within the hierarchical CFG.
     pub kind: RegionKind,
+    /// Parent region, or `None` for the root function region.
     pub parent: Option<RegionRef>,
+    /// Entry block of the region.
     pub entry_block: BlockRef,
     /// Ordered sequence of blocks and child regions.
     pub children: Vec<CfgNode>,
@@ -71,13 +78,16 @@ pub struct Region {
 /// A function in the tuffy IR.
 #[derive(Debug, Clone)]
 pub struct Function {
+    /// Interned symbol naming the function.
     pub name: SymbolId,
+    /// ABI parameter types.
     pub params: Vec<Type>,
     /// Annotations on function parameters (ABI-level caller guarantees).
     pub param_annotations: Vec<Option<Annotation>>,
     /// Optional source-level names for parameters (for display only).
     /// Indexed by ABI parameter index. `None` means no name available.
     pub param_names: Vec<Option<SymbolId>>,
+    /// Optional return type, or `None` for `unit`.
     pub ret_ty: Option<Type>,
     /// Annotation on the return type (ABI-level callee guarantee).
     pub ret_annotation: Option<Annotation>,
@@ -103,6 +113,7 @@ pub struct Function {
 }
 
 impl Function {
+    /// Create a new function with an empty body and a root region.
     pub fn new(
         name: SymbolId,
         params: Vec<Type>,
@@ -140,6 +151,10 @@ impl Function {
     }
 
     /// Get the instruction node (with linked-list metadata) by pool index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is not a valid instruction index in `inst_pool`.
     pub fn inst_node(&self, index: u32) -> &InstNode {
         self.inst_pool
             .get(index)
@@ -218,6 +233,10 @@ impl Function {
 
     /// Append an instruction to the end of a basic block.
     /// Returns the pool index (usable for `ValueRef::inst_result`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `block` does not refer to a valid basic block.
     pub fn append_inst(&mut self, block: BlockRef, inst: Instruction) -> u32 {
         let bb = &self.blocks[block.index() as usize];
         let prev = bb.last_inst;
@@ -250,6 +269,10 @@ impl Function {
     }
 
     /// Insert an instruction before `before_idx` in its block.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `before_idx` is not a valid instruction index.
     pub fn insert_inst_before(&mut self, before_idx: u32, inst: Instruction) -> u32 {
         let before_node = self.inst_pool.get(before_idx).expect("invalid before_idx");
         let block = before_node.parent_block;
@@ -281,6 +304,10 @@ impl Function {
     }
 
     /// Insert an instruction after `after_idx` in its block.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `after_idx` is not a valid instruction index.
     pub fn insert_inst_after(&mut self, after_idx: u32, inst: Instruction) -> u32 {
         let after_node = self.inst_pool.get(after_idx).expect("invalid after_idx");
         let block = after_node.parent_block;
@@ -312,6 +339,10 @@ impl Function {
     }
 
     /// Remove an instruction from its block and free the pool slot.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the surrounding instruction links are internally inconsistent.
     pub fn remove_inst(&mut self, index: u32) -> Option<Instruction> {
         // Unregister uses before freeing
         self.unregister_uses(index);
@@ -477,6 +508,7 @@ impl Function {
         self.uses_of(value).count()
     }
 
+    /// Collect stable use-node ids for a value before mutating its use-list.
     fn collect_use_ids(&self, value: ValueRef) -> Vec<u32> {
         let mut use_ids = Vec::new();
         let mut current = self.use_list_head(value);
@@ -490,6 +522,11 @@ impl Function {
 
     /// Replace all uses of `old` with `new`. Updates operands in-place and
     /// moves use-list entries from `old` to `new`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a recorded use references an invalid instruction or operand
+    /// slot.
     pub fn replace_all_uses(&mut self, old: ValueRef, new: ValueRef) {
         if old == new {
             return;
@@ -539,7 +576,9 @@ impl Function {
 
 /// Iterator over instructions in a basic block (follows linked list).
 pub struct BlockInstIter<'a> {
+    /// Instruction pool being walked.
     pool: &'a InstPool,
+    /// Next instruction index to yield.
     current: Option<u32>,
 }
 
@@ -556,7 +595,9 @@ impl<'a> Iterator for BlockInstIter<'a> {
 
 /// Iterator over `(ValueRef, &Instruction)` pairs in a basic block.
 pub struct BlockInstValueIter<'a> {
+    /// Instruction pool being walked.
     pool: &'a InstPool,
+    /// Next instruction index to yield.
     current: Option<u32>,
 }
 
@@ -573,7 +614,9 @@ impl<'a> Iterator for BlockInstValueIter<'a> {
 
 /// Iterator over uses of a value (walks the use-list).
 pub struct UseIter<'a> {
+    /// Use-list pool being walked.
     pool: &'a UsePool,
+    /// Next use-node index to yield.
     current: Option<u32>,
 }
 

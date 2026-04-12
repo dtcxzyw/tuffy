@@ -14,6 +14,10 @@ pub type AllocatorPair<'a> = (&'a str, &'a str);
 /// emission, and generation of runtime stubs for a specific architecture.
 pub trait Backend {
     /// Compile a single IR function to machine code.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if backend lowering or encoding fails.
     fn compile_function(
         &self,
         func: &Function,

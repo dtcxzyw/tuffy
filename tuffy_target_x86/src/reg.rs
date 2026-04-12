@@ -7,21 +7,37 @@ use tuffy_target::regbank::{RegBank, RegClass, make_preg, preg_class, preg_reg_n
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum Gpr {
+    /// `%rax`
     Rax = 0,
+    /// `%rcx`
     Rcx = 1,
+    /// `%rdx`
     Rdx = 2,
+    /// `%rbx`
     Rbx = 3,
+    /// `%rsp`
     Rsp = 4,
+    /// `%rbp`
     Rbp = 5,
+    /// `%rsi`
     Rsi = 6,
+    /// `%rdi`
     Rdi = 7,
+    /// `%r8`
     R8 = 8,
+    /// `%r9`
     R9 = 9,
+    /// `%r10`
     R10 = 10,
+    /// `%r11`
     R11 = 11,
+    /// `%r12`
     R12 = 12,
+    /// `%r13`
     R13 = 13,
+    /// `%r14`
     R14 = 14,
+    /// `%r15`
     R15 = 15,
 }
 
@@ -120,26 +136,44 @@ const ALL_GPRS: [Gpr; 16] = [
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
+/// x86-64 XMM registers.
 pub enum Xmm {
+    /// `%xmm0`
     Xmm0 = 0,
+    /// `%xmm1`
     Xmm1 = 1,
+    /// `%xmm2`
     Xmm2 = 2,
+    /// `%xmm3`
     Xmm3 = 3,
+    /// `%xmm4`
     Xmm4 = 4,
+    /// `%xmm5`
     Xmm5 = 5,
+    /// `%xmm6`
     Xmm6 = 6,
+    /// `%xmm7`
     Xmm7 = 7,
+    /// `%xmm8`
     Xmm8 = 8,
+    /// `%xmm9`
     Xmm9 = 9,
+    /// `%xmm10`
     Xmm10 = 10,
+    /// `%xmm11`
     Xmm11 = 11,
+    /// `%xmm12`
     Xmm12 = 12,
+    /// `%xmm13`
     Xmm13 = 13,
+    /// `%xmm14`
     Xmm14 = 14,
+    /// `%xmm15`
     Xmm15 = 15,
 }
 
 impl Xmm {
+    /// Convert to a target-agnostic physical register.
     pub fn to_preg(self) -> PReg {
         make_preg(RegClass::XMM, self as u8)
     }
@@ -147,26 +181,44 @@ impl Xmm {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
+/// x86-64 YMM registers.
 pub enum Ymm {
+    /// `%ymm0`
     Ymm0 = 0,
+    /// `%ymm1`
     Ymm1 = 1,
+    /// `%ymm2`
     Ymm2 = 2,
+    /// `%ymm3`
     Ymm3 = 3,
+    /// `%ymm4`
     Ymm4 = 4,
+    /// `%ymm5`
     Ymm5 = 5,
+    /// `%ymm6`
     Ymm6 = 6,
+    /// `%ymm7`
     Ymm7 = 7,
+    /// `%ymm8`
     Ymm8 = 8,
+    /// `%ymm9`
     Ymm9 = 9,
+    /// `%ymm10`
     Ymm10 = 10,
+    /// `%ymm11`
     Ymm11 = 11,
+    /// `%ymm12`
     Ymm12 = 12,
+    /// `%ymm13`
     Ymm13 = 13,
+    /// `%ymm14`
     Ymm14 = 14,
+    /// `%ymm15`
     Ymm15 = 15,
 }
 
 impl Ymm {
+    /// Convert to a target-agnostic physical register.
     pub fn to_preg(self) -> PReg {
         make_preg(RegClass::YMM, self as u8)
     }
@@ -174,47 +226,82 @@ impl Ymm {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
+/// x86-64 ZMM registers.
 pub enum Zmm {
+    /// `%zmm0`
     Zmm0 = 0,
+    /// `%zmm1`
     Zmm1 = 1,
+    /// `%zmm2`
     Zmm2 = 2,
+    /// `%zmm3`
     Zmm3 = 3,
+    /// `%zmm4`
     Zmm4 = 4,
+    /// `%zmm5`
     Zmm5 = 5,
+    /// `%zmm6`
     Zmm6 = 6,
+    /// `%zmm7`
     Zmm7 = 7,
+    /// `%zmm8`
     Zmm8 = 8,
+    /// `%zmm9`
     Zmm9 = 9,
+    /// `%zmm10`
     Zmm10 = 10,
+    /// `%zmm11`
     Zmm11 = 11,
+    /// `%zmm12`
     Zmm12 = 12,
+    /// `%zmm13`
     Zmm13 = 13,
+    /// `%zmm14`
     Zmm14 = 14,
+    /// `%zmm15`
     Zmm15 = 15,
+    /// `%zmm16`
     Zmm16 = 16,
+    /// `%zmm17`
     Zmm17 = 17,
+    /// `%zmm18`
     Zmm18 = 18,
+    /// `%zmm19`
     Zmm19 = 19,
+    /// `%zmm20`
     Zmm20 = 20,
+    /// `%zmm21`
     Zmm21 = 21,
+    /// `%zmm22`
     Zmm22 = 22,
+    /// `%zmm23`
     Zmm23 = 23,
+    /// `%zmm24`
     Zmm24 = 24,
+    /// `%zmm25`
     Zmm25 = 25,
+    /// `%zmm26`
     Zmm26 = 26,
+    /// `%zmm27`
     Zmm27 = 27,
+    /// `%zmm28`
     Zmm28 = 28,
+    /// `%zmm29`
     Zmm29 = 29,
+    /// `%zmm30`
     Zmm30 = 30,
+    /// `%zmm31`
     Zmm31 = 31,
 }
 
 impl Zmm {
+    /// Convert to a target-agnostic physical register.
     pub fn to_preg(self) -> PReg {
         make_preg(RegClass::ZMM, self as u8)
     }
 }
 
+/// Register-bank implementation for x86 register aliasing rules.
 pub struct X86RegBank;
 
 impl RegBank for X86RegBank {

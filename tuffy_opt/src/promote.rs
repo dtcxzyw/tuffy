@@ -11,61 +11,101 @@ use crate::cfg::{CfgInfo, collect_block_refs, has_unwind_cleanup_edges};
 use crate::peephole::PeepholeStats;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// Internal data structure `SliceKey`.
 struct SliceKey {
+    /// Offset.
     offset: i64,
+    /// Size.
     size: u32,
 }
 
 #[derive(Clone, Debug)]
+/// Internal enum `AccessKind`.
 enum AccessKind {
+    /// Variant `Load`.
     Load,
+    /// Variant `Store`.
     Store,
 }
 
 #[derive(Clone, Debug)]
+/// Internal data structure `AccessInfo`.
 struct AccessInfo {
+    /// Instruction index.
     inst_idx: u32,
+    /// Block.
     block: BlockRef,
+    /// Key.
     key: SliceKey,
+    /// Ty.
     ty: Type,
+    /// Annotation.
     annotation: Option<Annotation>,
+    /// Kind.
     kind: AccessKind,
 }
 
 #[derive(Clone, Debug)]
+/// Internal data structure `SlicePlan`.
 struct SlicePlan {
+    /// Key.
     key: SliceKey,
+    /// Ty.
     ty: Type,
+    /// Annotation.
     annotation: Option<Annotation>,
+    /// Accesses.
     accesses: Vec<AccessInfo>,
+    /// Phi blocks.
     phi_blocks: HashSet<BlockRef>,
 }
 
 #[derive(Clone, Debug)]
+/// Internal data structure `SlotPlan`.
 struct SlotPlan {
+    /// Slot.
     slot: ValueRef,
+    /// Slice plans.
     slices: Vec<SlicePlan>,
 }
 
 #[derive(Clone, Debug)]
+/// Internal data structure `FlattenedSlice`.
 struct FlattenedSlice {
+    /// Slot.
     slot: ValueRef,
+    /// Key.
     key: SliceKey,
+    /// Ty.
     ty: Type,
+    /// Annotation.
     annotation: Option<Annotation>,
+    /// Phi blocks.
     phi_blocks: HashSet<BlockRef>,
 }
 
 #[derive(Clone, Debug, Default)]
+/// Internal data structure `PromotionPlan`.
 struct PromotionPlan {
+    /// Slots.
     slots: Vec<SlotPlan>,
+    /// Slice plans.
     slices: Vec<FlattenedSlice>,
+    /// Load to slice.
     load_to_slice: HashMap<u32, usize>,
+    /// Store to slice.
     store_to_slice: HashMap<u32, usize>,
+    /// Promoted insts.
     promoted_insts: HashSet<u32>,
+    /// Promoted slot count or set.
     promoted_slots: HashSet<u32>,
 }
 
+/// Internal helper `value_annotation`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn value_annotation(func: &Function, value: ValueRef) -> Option<Annotation> {
     if value.is_block_arg() {
         return func
@@ -84,14 +124,29 @@ fn value_annotation(func: &Function, value: ValueRef) -> Option<Annotation> {
         .and_then(|node| node.inst.result_annotation.clone())
 }
 
+/// Internal helper `value_type`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn value_type(func: &Function, value: ValueRef) -> Option<Type> {
     func.value_type(value).cloned()
 }
 
+/// Internal helper `primary_value_ref`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn primary_value_ref(inst_idx: u32) -> ValueRef {
     ValueRef::inst_result(inst_idx)
 }
 
+/// Internal helper `const_i64`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn const_i64(func: &Function, value: ValueRef) -> Option<i64> {
     if value.is_block_arg() || value.is_secondary_result() {
         return None;
@@ -103,6 +158,11 @@ fn const_i64(func: &Function, value: ValueRef) -> Option<i64> {
     int.to_string().parse().ok()
 }
 
+/// Internal helper `address_root_slot`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn address_root_slot(func: &Function, value: ValueRef) -> Option<ValueRef> {
     if value.is_block_arg() || value.is_secondary_result() {
         return None;
@@ -118,6 +178,11 @@ fn address_root_slot(func: &Function, value: ValueRef) -> Option<ValueRef> {
     }
 }
 
+/// Internal helper `mark_required_address_chain`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn mark_required_address_chain(func: &Function, value: ValueRef, required: &mut HashSet<u32>) {
     let Some(root) = address_root_slot(func, value) else {
         return;
@@ -137,6 +202,11 @@ fn mark_required_address_chain(func: &Function, value: ValueRef, required: &mut 
     }
 }
 
+/// Internal helper `collect_slot_plan`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn collect_slot_plan(func: &Function, cfg: &CfgInfo, slot: ValueRef) -> Option<SlotPlan> {
     let mut work = VecDeque::from([(slot, 0i64)]);
     let mut visited = HashMap::<u32, i64>::from([(slot.raw(), 0)]);
@@ -220,6 +290,11 @@ fn collect_slot_plan(func: &Function, cfg: &CfgInfo, slot: ValueRef) -> Option<S
     Some(SlotPlan { slot, slices })
 }
 
+/// Internal helper `classify_pointer_use`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn classify_pointer_use(
     func: &Function,
     pointer: ValueRef,
@@ -294,6 +369,11 @@ fn classify_pointer_use(
     }
 }
 
+/// Internal helper `compute_phi_blocks`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn compute_phi_blocks(cfg: &CfgInfo, def_blocks: &HashSet<BlockRef>) -> HashSet<BlockRef> {
     let mut phis = HashSet::new();
     let mut work = def_blocks.iter().copied().collect::<VecDeque<_>>();
@@ -307,6 +387,11 @@ fn compute_phi_blocks(cfg: &CfgInfo, def_blocks: &HashSet<BlockRef>) -> HashSet<
     phis
 }
 
+/// Internal helper `validate_slice`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn validate_slice(func: &Function, cfg: &CfgInfo, slice: &SlicePlan) -> bool {
     if slice
         .accesses
@@ -323,6 +408,11 @@ fn validate_slice(func: &Function, cfg: &CfgInfo, slice: &SlicePlan) -> bool {
         return false;
     }
 
+    /// Internal helper `visit`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn visit(
         func: &Function,
         cfg: &CfgInfo,
@@ -372,6 +462,11 @@ fn validate_slice(func: &Function, cfg: &CfgInfo, slice: &SlicePlan) -> bool {
     visit(func, cfg, slice, func.entry_block(), false)
 }
 
+/// Internal helper `collect_promotion_plan`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn collect_promotion_plan(func: &Function, cfg: &CfgInfo) -> PromotionPlan {
     let mut plans = Vec::new();
     for (inst_idx, inst) in func.inst_pool.iter_insts() {
@@ -436,6 +531,11 @@ fn collect_promotion_plan(func: &Function, cfg: &CfgInfo) -> PromotionPlan {
     plan
 }
 
+/// Internal helper `clone_regions`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn clone_regions(
     old_func: &Function,
     builder: &mut Builder<'_>,
@@ -461,6 +561,11 @@ fn clone_regions(
     builder.exit_region();
 }
 
+/// Internal helper `build_transformed_function`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 fn build_transformed_function(
     func: &Function,
     cfg: &CfgInfo,
@@ -550,6 +655,11 @@ fn build_transformed_function(
     let mut emitted = HashSet::<u32>::new();
     let mut current_slice_values = vec![None::<ValueRef>; plan.slices.len()];
 
+    /// Internal helper `remap_value`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn remap_value(value_map: &HashMap<u32, ValueRef>, value: ValueRef) -> ValueRef {
         value_map
             .get(&value.raw())
@@ -557,6 +667,11 @@ fn build_transformed_function(
             .unwrap_or_else(|| panic!("missing remap for value raw={}", value.raw()))
     }
 
+    /// Internal helper `remap_operand`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn remap_operand(value_map: &HashMap<u32, ValueRef>, operand: &Operand) -> Operand {
         Operand {
             value: remap_value(value_map, operand.value),
@@ -564,6 +679,11 @@ fn build_transformed_function(
         }
     }
 
+    /// Internal helper `append_phi_args`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn append_phi_args(
         args: &mut Vec<Operand>,
         current_slice_values: &[Option<ValueRef>],
@@ -577,7 +697,15 @@ fn build_transformed_function(
         Some(())
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Required by the current implementation shape."
+    )]
+    /// Internal helper `transform_and_append_instruction`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn transform_and_append_instruction(
         func: &Function,
         cfg: &CfgInfo,
@@ -718,7 +846,15 @@ fn build_transformed_function(
         Some(())
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Required by the current implementation shape."
+    )]
+    /// Internal helper `emit_reachable_subtree`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn emit_reachable_subtree(
         func: &Function,
         cfg: &CfgInfo,
@@ -842,6 +978,11 @@ fn build_transformed_function(
     Some(new_func)
 }
 
+/// Internal helper `promote_function`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 pub(crate) fn promote_function(func: &mut Function) -> PeepholeStats {
     if has_unwind_cleanup_edges(func) {
         return PeepholeStats::default();

@@ -4,6 +4,7 @@
 //! later rewrites these to `MInst<Gpr>` (physical register instructions).
 
 #[path = "isel_gen.rs"]
+/// Generated instruction-selection rules for common patterns.
 mod isel_gen;
 
 use std::collections::{HashMap, HashSet};
@@ -23,11 +24,17 @@ use tuffy_target::isel::{
 
 /// Mutable instruction selection state, bundled to reduce parameter counts.
 struct IselCtx {
+    /// Value-to-register map for already selected values.
     regs: VRegMap,
+    /// Deferred compare-flag results.
     cmps: CmpMap<CondCode>,
+    /// Stack-slot allocations created during selection.
     stack: StackMap,
+    /// Virtual-register allocator and fixed-register constraints.
     alloc: VRegAlloc,
+    /// Next synthetic label id.
     next_label: u32,
+    /// Output machine instructions collected so far.
     out: Vec<VInst>,
     /// Deferred symbol addresses: value index → symbol name.
     /// `LeaSymbol` is only emitted when `ensure_in_reg` is called,
@@ -99,6 +106,7 @@ impl IselCtx {
         None
     }
 
+    /// Look up or allocate the virtual register assigned to a block argument.
     fn block_arg_reg(&mut self, val: ValueRef) -> VReg {
         debug_assert!(val.is_block_arg());
         if let Some(vreg) = self.regs.get(val) {
@@ -120,6 +128,7 @@ fn bytes_to_opsize(bytes: u32) -> OpSize {
     }
 }
 
+/// Emit parallel copies into the target block-argument registers.
 fn emit_block_arg_copies(
     ctx: &mut IselCtx,
     target: tuffy_ir::value::BlockRef,
@@ -464,6 +473,7 @@ fn emit_partial_load(ctx: &mut IselCtx, base: VReg, base_offset: i32, dst: VReg,
     }
 }
 
+/// Resolve the direct-call symbol referenced by a callee value when possible.
 fn direct_call_symbol(func: &Function, value: ValueRef) -> Option<tuffy_ir::module::SymbolId> {
     if value.is_block_arg() || value.is_secondary_result() {
         return None;
@@ -831,11 +841,16 @@ fn select_double_width_int_op(
     }
 }
 
+/// Integer argument registers used by the SysV x86-64 ABI.
 const ARG_REGS: [Gpr; 6] = [Gpr::Rdi, Gpr::Rsi, Gpr::Rdx, Gpr::Rcx, Gpr::R8, Gpr::R9];
+/// Maximum number of XMM argument registers used by the SysV x86-64 ABI.
 const MAX_XMM_ARGS: usize = 8;
+/// Bit width of one general-purpose register.
 const GPR_BITS: u32 = 64;
+/// Bit width covered by two general-purpose registers.
 const DOUBLE_GPR_BITS: u32 = GPR_BITS * 2;
 
+/// Return whether an annotation describes an exact two-register integer width.
 fn is_exact_double_gpr_int_annotation(ann: Option<&Annotation>) -> bool {
     matches!(
         ann,
@@ -848,7 +863,12 @@ enum ParamAbi {
     /// Passed in the n-th integer register (rdi, rsi, rdx, rcx, r8, r9).
     Gpr(usize),
     /// Passed in the n-th XMM register (xmm0 .. xmm7); `double` = f64.
-    Xmm { idx: usize, double: bool },
+    Xmm {
+        /// XMM argument register index.
+        idx: usize,
+        /// Whether the argument is carried as `f64`.
+        double: bool,
+    },
     /// Passed on the stack; `stack_idx` is 0-based (0 → [rbp+16]).
     Stack(i32),
 }
@@ -859,6 +879,7 @@ fn is_wide_scalar_type(ty: &Type, ann: &Option<Annotation>) -> bool {
     matches!(ty, Type::Int) && is_exact_double_gpr_int_annotation(ann.as_ref())
 }
 
+/// Classify one parameter under the SysV x86-64 ABI.
 fn classify_param_abi(
     params: &[Type],
     param_annotations: &[Option<Annotation>],
@@ -923,11 +944,15 @@ fn classify_param_abi(
 }
 
 #[derive(Clone, Copy)]
+/// Return-shape classification for one call instruction.
 struct CallAbiPlan {
+    /// Whether the call returns a primary data value in addition to memory.
     has_primary_return: bool,
+    /// Whether the call returns a second data value.
     has_secondary_return: bool,
 }
 
+/// Collect call instructions whose secondary return is observed through `call_ret2`.
 fn collect_call_ret2_users(func: &Function) -> HashSet<u32> {
     let mut calls = HashSet::new();
     for (_, inst) in func.inst_pool.iter_insts() {
@@ -938,12 +963,14 @@ fn collect_call_ret2_users(func: &Function) -> HashSet<u32> {
     calls
 }
 
+/// Return whether an instruction produces an exact double-width integer result.
 fn has_exact_double_gpr_int_result(func: &Function, inst_idx: u32) -> bool {
     let inst = func.inst(inst_idx);
     inst.secondary_ty.is_some()
         && is_exact_double_gpr_int_annotation(inst.secondary_result_annotation.as_ref())
 }
 
+/// Classify the return ABI for one call instruction.
 fn classify_call_abi(
     func: &Function,
     call_vref: ValueRef,
@@ -963,6 +990,10 @@ fn classify_call_abi(
 ///
 /// Emits `MInst<VReg>` with constraint metadata. Prologue/epilogue
 /// insertion is deferred to a post-regalloc step.
+///
+/// # Errors
+///
+/// Returns an error if any IR instruction cannot be lowered to x86.
 pub fn isel(func: &Function, symbols: &SymbolTable) -> Result<IselResult<VInst>, String> {
     let call_has_ret2 = collect_call_ret2_users(func);
     let ba_cap = func.block_args.len();
@@ -1033,6 +1064,7 @@ pub fn isel(func: &Function, symbols: &SymbolTable) -> Result<IselResult<VInst>,
     })
 }
 
+/// Collect blocks in region order for lowering.
 fn collect_block_order(
     func: &Function,
     region: tuffy_ir::value::RegionRef,
@@ -1042,6 +1074,7 @@ fn collect_block_order(
     out
 }
 
+/// Append blocks in region order to an existing output vector.
 fn collect_block_order_into(
     func: &Function,
     region: tuffy_ir::value::RegionRef,
@@ -1055,7 +1088,11 @@ fn collect_block_order_into(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Instruction lowering depends on the current IR node, function context, symbols, and call-return analysis."
+)]
+/// Lower one IR instruction to x86 machine instructions.
 fn select_inst(
     ctx: &mut IselCtx,
     vref: ValueRef,
@@ -3569,6 +3606,7 @@ fn select_inst(
 
 // --- Helper functions ---
 
+/// Lower a `brif` terminator.
 fn select_brif(
     ctx: &mut IselCtx,
     cond: &Operand,
@@ -3608,7 +3646,11 @@ fn select_brif(
     Some(())
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Call lowering needs callee, arguments, cleanup metadata, and return-shape analysis together."
+)]
+/// Lower a call instruction.
 fn select_call(
     ctx: &mut IselCtx,
     vref: ValueRef,
@@ -3967,6 +4009,7 @@ fn select_call(
     Some(())
 }
 
+/// Lower a `select` instruction.
 fn select_select(
     ctx: &mut IselCtx,
     vref: ValueRef,
@@ -4014,6 +4057,7 @@ fn select_select(
     Some(())
 }
 
+/// Lower a sign-extension instruction.
 fn select_sext(ctx: &mut IselCtx, vref: ValueRef, val: &Operand, func: &Function) -> Option<()> {
     let src = ctx.ensure_in_reg(val.value)?;
     let dst = ctx.alloc.alloc();
@@ -4087,6 +4131,7 @@ fn select_sext(ctx: &mut IselCtx, vref: ValueRef, val: &Operand, func: &Function
     Some(())
 }
 
+/// Lower a zero-extension instruction.
 fn select_zext(ctx: &mut IselCtx, vref: ValueRef, val: &Operand, func: &Function) -> Option<()> {
     let src = ctx.ensure_in_reg(val.value)?;
     let dst = ctx.alloc.alloc();
@@ -4153,10 +4198,13 @@ fn select_zext(ctx: &mut IselCtx, vref: ValueRef, val: &Operand, func: &Function
 
 /// Whether we want the quotient or remainder from division.
 enum DivRemKind {
+    /// Produce the quotient.
     Div,
+    /// Produce the remainder.
     Rem,
 }
 
+/// Lower integer division and remainder instructions.
 fn select_divrem(
     ctx: &mut IselCtx,
     vref: ValueRef,
@@ -4242,6 +4290,7 @@ fn select_divrem(
     Some(())
 }
 
+/// Map an integer-compare predicate and annotation to an x86 condition code.
 fn icmp_to_cc(op: ICmpOp, ann: Option<IntAnnotation>) -> CondCode {
     let signed = matches!(
         ann,
@@ -4284,6 +4333,7 @@ fn icmp_to_cc(op: ICmpOp, ann: Option<IntAnnotation>) -> CondCode {
     }
 }
 
+/// Lower a `memcopy` operation.
 fn select_memcopy(
     ctx: &mut IselCtx,
     dst: &Operand,
@@ -4299,6 +4349,7 @@ fn select_memcopy(
     emit_libc_call(ctx, "memcpy", &[dst, src, count])
 }
 
+/// Lower a `memmove` operation.
 fn select_memmove(
     ctx: &mut IselCtx,
     dst: &Operand,
@@ -4314,10 +4365,12 @@ fn select_memmove(
     emit_libc_call(ctx, "memmove", &[dst, src, count])
 }
 
+/// Lower a `memset` operation.
 fn select_memset(ctx: &mut IselCtx, dst: &Operand, val: &Operand, count: &Operand) -> Option<()> {
     emit_libc_call(ctx, "memset", &[dst, val, count])
 }
 
+/// Emit a helper call to a libc routine.
 fn emit_libc_call(ctx: &mut IselCtx, name: &str, args: &[&Operand]) -> Option<()> {
     let arg_regs = [Gpr::Rdi, Gpr::Rsi, Gpr::Rdx];
     for (i, arg) in args.iter().enumerate() {
@@ -4339,12 +4392,22 @@ fn emit_libc_call(ctx: &mut IselCtx, name: &str, args: &[&Operand]) -> Option<()
 }
 
 #[derive(Clone, Copy)]
+/// Decoded branch test used to lower `brif`.
 enum BranchTest {
+    /// Branch outcome is already known.
     Always(bool),
+    /// Branch on the current flags register state.
     Flags(CondCode),
-    Value { reg: VReg, size: OpSize },
+    /// Branch by testing a materialized integer value.
+    Value {
+        /// Register holding the tested value.
+        reg: VReg,
+        /// Operand size used by the emitted test instruction.
+        size: OpSize,
+    },
 }
 
+/// Emit the branch jump sequence for a decoded branch test.
 fn emit_branch_jump(
     ctx: &mut IselCtx,
     branch_test: Option<BranchTest>,
@@ -4375,6 +4438,7 @@ fn emit_branch_jump(
     Some(())
 }
 
+/// Build a fallback branch test when no flag-producing compare is available.
 fn fallback_branch_test(
     ctx: &mut IselCtx,
     cond_value: ValueRef,
@@ -4394,6 +4458,7 @@ fn fallback_branch_test(
     })
 }
 
+/// Decode a value into a branch-test form when possible.
 fn decode_branch_test(ctx: &mut IselCtx, func: &Function, value: ValueRef) -> Option<BranchTest> {
     if value.is_block_arg() || value.is_secondary_result() {
         return None;
@@ -4497,6 +4562,7 @@ fn decode_branch_test(ctx: &mut IselCtx, func: &Function, value: ValueRef) -> Op
     }
 }
 
+/// Decode compares whose boolean result has been intified.
 fn decode_intified_bool_compare(
     ctx: &mut IselCtx,
     func: &Function,
@@ -4515,6 +4581,7 @@ fn decode_intified_bool_compare(
     }
 }
 
+/// Invert a decoded branch test.
 fn invert_branch_test(branch_test: BranchTest) -> BranchTest {
     match branch_test {
         BranchTest::Always(value) => BranchTest::Always(!value),
@@ -4523,6 +4590,7 @@ fn invert_branch_test(branch_test: BranchTest) -> BranchTest {
     }
 }
 
+/// Invert an x86 condition code.
 fn invert_cc(cc: CondCode) -> CondCode {
     match cc {
         CondCode::E => CondCode::Ne,
@@ -4540,6 +4608,7 @@ fn invert_cc(cc: CondCode) -> CondCode {
     }
 }
 
+/// Flip an integer-compare predicate when swapping operands.
 fn flip_cmp_inputs(pred: ICmpOp) -> ICmpOp {
     match pred {
         ICmpOp::Eq => ICmpOp::Eq,
@@ -4551,6 +4620,7 @@ fn flip_cmp_inputs(pred: ICmpOp) -> ICmpOp {
     }
 }
 
+/// Emit the compare instructions for an integer comparison.
 fn emit_icmp_compare(
     ctx: &mut IselCtx,
     func: &Function,
@@ -4580,6 +4650,7 @@ fn emit_icmp_compare(
     ))
 }
 
+/// Look up the integer annotation carried by an operand.
 fn operand_int_annotation(func: &Function, operand: &Operand) -> Option<IntAnnotation> {
     operand
         .annotation
@@ -4591,10 +4662,12 @@ fn operand_int_annotation(func: &Function, operand: &Operand) -> Option<IntAnnot
         .or_else(|| get_int_annotation(func, operand.value))
 }
 
+/// Resolve an integer operand to a constant byte count when possible.
 fn const_byte_count(func: &Function, operand: &Operand) -> Option<u32> {
     int_const(func, operand.value).and_then(|constant| u32::try_from(constant).ok())
 }
 
+/// Inline a small fixed-size memory transfer.
 fn lower_small_memtransfer(
     ctx: &mut IselCtx,
     dst: &Operand,
@@ -4626,6 +4699,7 @@ fn lower_small_memtransfer(
     Some(())
 }
 
+/// Resolve a value to a constant integer when possible.
 fn int_const(func: &Function, value: ValueRef) -> Option<i64> {
     if value.is_block_arg() || value.is_secondary_result() {
         return None;
@@ -4637,6 +4711,7 @@ fn int_const(func: &Function, value: ValueRef) -> Option<i64> {
     constant.to_i64()
 }
 
+/// Resolve a value to a constant boolean when possible.
 fn bool_const(func: &Function, value: ValueRef) -> Option<bool> {
     if value.is_block_arg() || value.is_secondary_result() {
         return None;
@@ -4648,6 +4723,7 @@ fn bool_const(func: &Function, value: ValueRef) -> Option<bool> {
     }
 }
 
+/// Return whether an integer is non-negative and odd.
 fn is_non_negative_odd(value: i64) -> bool {
     value >= 0 && value & 1 == 1
 }

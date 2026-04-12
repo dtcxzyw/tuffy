@@ -27,8 +27,11 @@ use crate::value::{BlockRef, RegionRef, ValueRef};
 /// A parse error with location information.
 #[derive(Debug, Clone)]
 pub struct ParseError {
+    /// 1-based source line where parsing failed.
     pub line: usize,
+    /// 1-based source column where parsing failed.
     pub col: usize,
+    /// Human-readable parse failure description.
     pub message: String,
 }
 
@@ -42,45 +45,71 @@ impl std::error::Error for ParseError {}
 
 // ── Lexer ───────────────────────────────────────────────────────────────────
 
+/// Tokens produced by the text-format lexer.
 #[derive(Debug, Clone, PartialEq)]
 enum Token {
-    // Keywords
+    /// `func`
     Func,
+    /// `region`
     Region,
-    Arrow,     // ->
-    Eq,        // =
-    Comma,     // ,
-    Colon,     // :
-    Dot,       // .
-    LParen,    // (
-    RParen,    // )
-    LBrace,    // {
-    RBrace,    // }
-    LBracket,  // [
-    RBracket,  // ]
+    /// `->`
+    Arrow, // ->
+    /// `=`
+    Eq, // =
+    /// `,`
+    Comma, // ,
+    /// `:`
+    Colon, // :
+    /// `.`
+    Dot, // .
+    /// `(`
+    LParen, // (
+    /// `)`
+    RParen, // )
+    /// `{`
+    LBrace, // {
+    /// `}`
+    RBrace, // }
+    /// `[`
+    LBracket, // [
+    /// `]`
+    RBracket, // ]
+    /// `;`
     Semicolon, // ;
-    Percent,   // %
-    At,        // @
+    /// `%`
+    Percent, // %
+    /// `@`
+    At, // @
+    /// One or more newline characters.
     Newline,
-    // Identifiers and literals
+    /// Generic identifier token.
     Ident(String),
+    /// Decimal integer literal.
     Integer(String), // stored as string to handle negatives and large values
+    /// Hexadecimal integer literal without the `0x` prefix.
     HexInteger(String),
     /// vN value reference
     Value(u32),
     /// bbN block reference
     Block(u32),
+    /// End of input.
     Eof,
 }
 
+/// Byte-oriented lexer for the textual IR format.
 struct Lexer<'a> {
+    /// Input buffer being tokenized.
     input: &'a [u8],
+    /// Current byte offset into `input`.
     pos: usize,
+    /// Current 1-based source line.
     line: usize,
+    /// Current 1-based source column.
     col: usize,
 }
 
 impl<'a> Lexer<'a> {
+    /// Create a lexer for one input string.
     fn new(input: &'a str) -> Self {
         Self {
             input: input.as_bytes(),
@@ -90,10 +119,12 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Peek the next input byte without consuming it.
     fn peek_byte(&self) -> Option<u8> {
         self.input.get(self.pos).copied()
     }
 
+    /// Consume and return the next input byte.
     fn advance(&mut self) -> Option<u8> {
         let b = self.input.get(self.pos).copied()?;
         self.pos += 1;
@@ -106,6 +137,7 @@ impl<'a> Lexer<'a> {
         Some(b)
     }
 
+    /// Skip spaces, tabs, carriage returns, and `//` line comments.
     fn skip_whitespace_no_newline(&mut self) {
         while let Some(b) = self.peek_byte() {
             if b == b' ' || b == b'\t' || b == b'\r' {
@@ -124,6 +156,12 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Lex the next token from the input stream.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a `vN` or `bbN` token contains a decimal number that does not
+    /// fit in `u32`.
     fn next_token(&mut self) -> Token {
         self.skip_whitespace_no_newline();
         let Some(b) = self.peek_byte() else {
@@ -249,6 +287,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Read a run of decimal digits.
     fn read_number_str(&mut self) -> String {
         let mut s = String::new();
         while let Some(b) = self.peek_byte() {
@@ -262,6 +301,7 @@ impl<'a> Lexer<'a> {
         s
     }
 
+    /// Read a run of hexadecimal digits.
     fn read_hex_str(&mut self) -> String {
         let mut s = String::new();
         while let Some(b) = self.peek_byte() {
@@ -275,6 +315,7 @@ impl<'a> Lexer<'a> {
         s
     }
 
+    /// Read an identifier made of alphanumeric and underscore characters.
     fn read_ident(&mut self) -> String {
         let mut s = String::new();
         while let Some(b) = self.peek_byte() {
@@ -291,8 +332,11 @@ impl<'a> Lexer<'a> {
 
 // ── Parser ──────────────────────────────────────────────────────────────────
 
+/// Recursive-descent parser for the textual IR format.
 struct Parser<'a> {
+    /// Underlying lexer.
     lexer: Lexer<'a>,
+    /// Current lookahead token.
     current: Token,
     /// Map from display value number (vN) → ValueRef
     value_map: HashMap<u32, ValueRef>,
@@ -301,6 +345,7 @@ struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
+    /// Create a parser for one input string.
     fn new(input: &'a str) -> Self {
         let mut lexer = Lexer::new(input);
         let current = lexer.next_token();
@@ -312,6 +357,7 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Construct a parse error at the current lexer position.
     fn error(&self, msg: impl Into<String>) -> ParseError {
         ParseError {
             line: self.lexer.line,
@@ -320,16 +366,23 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Consume the current token and replace it with the next token.
     fn advance(&mut self) -> Token {
         std::mem::replace(&mut self.current, self.lexer.next_token())
     }
 
+    /// Skip any pending newline tokens.
     fn skip_newlines(&mut self) {
         while self.current == Token::Newline {
             self.advance();
         }
     }
 
+    /// Consume one token of the expected kind.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the current token does not match `expected`.
     fn expect(&mut self, expected: &Token) -> Result<Token, ParseError> {
         if std::mem::discriminant(&self.current) == std::mem::discriminant(expected) {
             Ok(self.advance())
@@ -338,6 +391,11 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Consume and return an identifier token.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the current token is not an identifier.
     fn expect_ident(&mut self) -> Result<String, ParseError> {
         match self.advance() {
             Token::Ident(s) => Ok(s),
@@ -345,6 +403,11 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Consume and return a decimal integer literal.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the current token is not a decimal integer.
     fn expect_integer(&mut self) -> Result<String, ParseError> {
         match self.advance() {
             Token::Integer(s) => Ok(s),
@@ -352,12 +415,22 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Consume and return a decimal integer that fits in `u32`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the current token is not a valid `u32`.
     fn expect_u32(&mut self) -> Result<u32, ParseError> {
         let s = self.expect_integer()?;
         s.parse::<u32>()
             .map_err(|_| self.error(format!("invalid u32: {}", s)))
     }
 
+    /// Consume and return a textual block reference number.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the current token is not `bbN`.
     fn expect_block_ref(&mut self) -> Result<u32, ParseError> {
         match self.advance() {
             Token::Block(n) => Ok(n),
@@ -365,6 +438,11 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Consume and return a textual value reference number.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the current token is not `vN`.
     fn expect_value_num(&mut self) -> Result<u32, ParseError> {
         match self.advance() {
             Token::Value(n) => Ok(n),
@@ -373,6 +451,10 @@ impl<'a> Parser<'a> {
     }
 
     /// Resolve a display value number to a ValueRef.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `num` has not been defined yet.
     fn resolve_value(&self, num: u32) -> Result<ValueRef, ParseError> {
         self.value_map
             .get(&num)
@@ -386,6 +468,10 @@ impl<'a> Parser<'a> {
     }
 
     /// Read a symbol name after '@': sequence of alphanumeric/underscore/dot/dash chars.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the `@name` sequence is malformed.
     fn read_symbol_name(&mut self) -> Result<String, ParseError> {
         self.expect(&Token::At)?;
         // The ident may contain dots, so gather a continuous identifier
@@ -394,6 +480,11 @@ impl<'a> Parser<'a> {
     }
 
     /// Read an extended identifier (allows dots and dashes).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the current token cannot begin an extended
+    /// identifier.
     fn read_extended_ident(&mut self) -> Result<String, ParseError> {
         let mut name = match &self.current {
             Token::Ident(s) => {
@@ -448,6 +539,12 @@ impl<'a> Parser<'a> {
 
     // ── Type parsing ────────────────────────────────────────────────────
 
+    /// Parse one textual IR type.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the current token sequence does not encode a
+    /// supported type.
     fn parse_type(&mut self) -> Result<Type, ParseError> {
         match &self.current {
             Token::Ident(s) => {
@@ -547,6 +644,10 @@ impl<'a> Parser<'a> {
 
     /// Try to parse an annotation after a colon (`:s32`, `:u64`, `:i8`, `:alignN`).
     /// Returns None if no colon follows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if an annotation is present but malformed.
     fn try_parse_annotation(&mut self) -> Result<Option<Annotation>, ParseError> {
         if self.current != Token::Colon {
             return Ok(None);
@@ -556,6 +657,10 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse annotation text after the colon has already been consumed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the annotation syntax is not recognized.
     fn parse_annotation_after_colon(&mut self) -> Result<Annotation, ParseError> {
         match &self.current {
             Token::Ident(s) => {
@@ -609,6 +714,12 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Parse the payload inside `known(...)`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the payload contains invalid tokens or is
+    /// unterminated.
     fn parse_known_bits_payload(&mut self) -> Result<String, ParseError> {
         let mut payload = String::new();
         while self.current != Token::RParen {
@@ -639,6 +750,10 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse `type` optionally followed by `:annotation`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if either the type or annotation is malformed.
     fn parse_type_with_annotation(&mut self) -> Result<(Type, Option<Annotation>), ParseError> {
         let ty = self.parse_type()?;
         let ann = self.try_parse_annotation()?;
@@ -648,6 +763,10 @@ impl<'a> Parser<'a> {
     // ── Operand parsing ─────────────────────────────────────────────────
 
     /// Parse a value reference: `vN` optionally followed by `:annotation`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the value reference is undefined or malformed.
     fn parse_operand(&mut self) -> Result<Operand, ParseError> {
         let vnum = self.expect_value_num()?;
         let vref = self.resolve_value(vnum)?;
@@ -659,6 +778,10 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse comma-separated operands.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any operand in the list is malformed.
     fn parse_operand_list(&mut self) -> Result<Vec<Operand>, ParseError> {
         let mut ops = vec![self.parse_operand()?];
         while self.current == Token::Comma {
@@ -669,6 +792,10 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse optional parenthesized operand list: `(v0, v1)` or empty.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operand list syntax is malformed.
     fn parse_paren_operands(&mut self) -> Result<Vec<Operand>, ParseError> {
         if self.current != Token::LParen {
             return Ok(Vec::new());
@@ -684,6 +811,10 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse a branch target: `bbN` or `bbN(v0, v1)`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the target block or argument list is malformed.
     fn parse_branch_target(&mut self) -> Result<(u32, Vec<Operand>), ParseError> {
         let bb_num = self.expect_block_ref()?;
         let args = self.parse_paren_operands()?;
@@ -692,6 +823,7 @@ impl<'a> Parser<'a> {
 
     // ── ICmpOp / FCmpOp parsing ─────────────────────────────────────────
 
+    /// Parse an integer-compare predicate mnemonic.
     fn parse_icmp_op(s: &str) -> Option<ICmpOp> {
         match s {
             "eq" => Some(ICmpOp::Eq),
@@ -704,6 +836,7 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Parse a floating-point compare predicate mnemonic.
     fn parse_fcmp_op(s: &str) -> Option<FCmpOp> {
         match s {
             "false" => Some(FCmpOp::False),
@@ -726,6 +859,7 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Parse a memory-ordering mnemonic.
     fn parse_memory_ordering(s: &str) -> Option<MemoryOrdering> {
         match s {
             "relaxed" => Some(MemoryOrdering::Relaxed),
@@ -737,6 +871,7 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Parse an atomic-RMW opcode mnemonic.
     fn parse_atomic_rmw_op(s: &str) -> Option<AtomicRmwOp> {
         match s {
             "xchg" => Some(AtomicRmwOp::Xchg),
@@ -749,6 +884,7 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Parse a floating-point type mnemonic.
     fn parse_float_type(s: &str) -> Option<FloatType> {
         match s {
             "f16" | "F16" => Some(FloatType::F16),
@@ -785,6 +921,10 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse a dot-suffix as u32 (for width parameters).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the suffix is missing or is not a valid `u32`.
     fn parse_dot_u32(&mut self) -> Result<u32, ParseError> {
         self.expect(&Token::Dot)?;
         let s = match &self.current {
@@ -827,6 +967,12 @@ impl<'a> Parser<'a> {
 
     // ── Top-level parsing ───────────────────────────────────────────────
 
+    /// Parse a whole module.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the top-level sequence contains malformed functions
+    /// or static-data declarations.
     fn parse_module(&mut self) -> Result<Module, ParseError> {
         let mut module = Module::new("parsed");
         let mut functions = Vec::new();
@@ -860,6 +1006,12 @@ impl<'a> Parser<'a> {
         Ok(module)
     }
 
+    /// Parse one `data` declaration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the declaration syntax, string literal, or
+    /// relocation list is malformed.
     fn parse_static_data(&mut self, module: &mut Module) -> Result<(), ParseError> {
         self.expect(&Token::Ident("data".into()))?;
         let name = self.read_symbol_name()?;
@@ -897,6 +1049,12 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
+    /// Parse a quoted byte string used by static-data declarations.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the string literal or one of its escapes is
+    /// malformed.
     fn parse_string_literal(&mut self) -> Result<Vec<u8>, ParseError> {
         // The opening `"` may have already been consumed by the lexer as a token
         // (since `"` is not a recognized token, the lexer produces Ident("\"")).
@@ -952,6 +1110,11 @@ impl<'a> Parser<'a> {
 
     // ── Function parsing ────────────────────────────────────────────────
 
+    /// Parse one function definition.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the function signature or body is malformed.
     fn parse_function(&mut self) -> Result<Function, ParseError> {
         self.value_map.clear();
 
@@ -1038,6 +1201,10 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse the body of a region (blocks and nested regions).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any nested block or region is malformed.
     fn parse_region_body(
         &mut self,
         func: &mut Function,
@@ -1069,6 +1236,11 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
+    /// Parse one nested region declaration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the region kind or nested body is malformed.
     fn parse_nested_region(
         &mut self,
         func: &mut Function,
@@ -1104,6 +1276,12 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
+    /// Parse one basic block and its contained instructions.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the block header, block arguments, or contained
+    /// instructions are malformed.
     fn parse_block(
         &mut self,
         func: &mut Function,
@@ -1181,6 +1359,11 @@ impl<'a> Parser<'a> {
 
     // ── Instruction parsing ─────────────────────────────────────────────
 
+    /// Parse one instruction or terminator in `block`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the instruction syntax is malformed.
     fn parse_instruction(
         &mut self,
         func: &mut Function,
@@ -1289,6 +1472,11 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
+    /// Parse one terminator instruction.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the terminator syntax is malformed.
     fn parse_terminator(&mut self, func: &mut Function, block: BlockRef) -> Result<(), ParseError> {
         let opcode = self.expect_ident()?;
 
@@ -1376,7 +1564,16 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    #[allow(clippy::type_complexity)]
+    #[allow(
+        clippy::type_complexity,
+        reason = "The parser returns the fully-decoded primary and optional secondary result metadata together."
+    )]
+    /// Parse the opcode-specific operand payload for a value-producing instruction.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the opcode-specific syntax is malformed or
+    /// unsupported.
     fn parse_op_body(
         &mut self,
         func: &mut Function,
@@ -2132,6 +2329,10 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse `[N, M, ...]` index list.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the bracketed index list is malformed.
     fn parse_index_list(&mut self) -> Result<Vec<u32>, ParseError> {
         self.expect(&Token::LBracket)?;
         let mut indices = Vec::new();
@@ -2147,6 +2348,11 @@ impl<'a> Parser<'a> {
     }
 }
 
+/// Convert one ASCII hex digit into its numeric value.
+///
+/// # Errors
+///
+/// Returns an error if `b` is not an ASCII hexadecimal digit.
 fn hex_digit(b: u8) -> Result<u8, ParseError> {
     match b {
         b'0'..=b'9' => Ok(b - b'0'),
@@ -2163,6 +2369,10 @@ fn hex_digit(b: u8) -> Result<u8, ParseError> {
 // ── Public API ──────────────────────────────────────────────────────────────
 
 /// Parse a tuffy IR text format string into a `Module`.
+///
+/// # Errors
+///
+/// Returns an error if `input` is not valid textual tuffy IR.
 pub fn parse_module(input: &str) -> Result<Module, ParseError> {
     let mut parser = Parser::new(input);
     parser.parse_module()

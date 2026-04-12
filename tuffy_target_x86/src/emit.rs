@@ -43,8 +43,11 @@ pub fn emit_elf_multi(functions: &[CompiledFunction]) -> Vec<u8> {
 }
 
 // ELF section flags needed for COMDAT group member sections.
+/// ELF `SHF_ALLOC`.
 const SHF_ALLOC: u64 = 0x2;
+/// ELF `SHF_EXECINSTR`.
 const SHF_EXECINSTR: u64 = 0x4;
+/// ELF `SHF_GROUP`.
 const SHF_GROUP: u64 = 0x200;
 
 /// Override a section's ELF flags. Used to set SHF_GROUP on COMDAT member
@@ -54,6 +57,11 @@ fn set_shf_group(obj: &mut Object, section: SectionId, flags: u64) {
 }
 
 /// Emit multiple functions and static data as a single ELF object file.
+///
+/// # Panics
+///
+/// Panics if object-file or DWARF emission encounters internally inconsistent
+/// relocation or debug data.
 pub fn emit_elf_with_data(functions: &[CompiledFunction], statics: &[StaticData]) -> Vec<u8> {
     let mut obj = Object::new(BinaryFormat::Elf, Architecture::X86_64, Endianness::Little);
     let text = obj.section_id(object::write::StandardSection::Text);
@@ -344,12 +352,16 @@ pub fn emit_elf_with_data(functions: &[CompiledFunction], statics: &[StaticData]
 }
 
 #[derive(Debug, Clone)]
+/// Writable DWARF section plus its pending relocations.
 struct DwarfSectionWriter {
+    /// Encoded DWARF bytes.
     writer: EndianVec<gimli::LittleEndian>,
+    /// Relocations targeting this DWARF section.
     relocations: Vec<DwarfRelocation>,
 }
 
 impl DwarfSectionWriter {
+    /// Borrow the encoded bytes accumulated for this section.
     fn slice(&self) -> &[u8] {
         self.writer.slice()
     }
@@ -380,6 +392,7 @@ impl RelocateWriter for DwarfSectionWriter {
     }
 }
 
+/// Split a source path into directory and file name components for DWARF.
 fn split_source_path(path: &str) -> (String, String) {
     let source_path = Path::new(path);
     let file = source_path
@@ -394,6 +407,7 @@ fn split_source_path(path: &str) -> (String, String) {
     (dir, file)
 }
 
+/// Build a DWARF expression describing one variable location.
 fn debug_expr(location: &DebugLocation) -> Expression {
     let mut expr = Expression::new();
     match location {
@@ -403,12 +417,14 @@ fn debug_expr(location: &DebugLocation) -> Expression {
     expr
 }
 
+/// Build the DWARF frame-base expression used for stack-relative locations.
 fn frame_base_expr() -> Expression {
     let mut expr = Expression::new();
     expr.op(gimli::DW_OP_call_frame_cfa);
     expr
 }
 
+/// Ensure that a source file is present in the line program and return its id.
 fn ensure_file_id(
     program: &mut LineProgram,
     file_ids: &mut HashMap<String, gimli::write::FileId>,
@@ -443,6 +459,7 @@ fn ensure_file_id(
     file_id
 }
 
+/// Build a DWARF compilation unit for one compiled function.
 fn build_dwarf_unit(
     encoding: Encoding,
     line_encoding: LineEncoding,
@@ -624,6 +641,7 @@ fn build_dwarf_unit(
     Some(unit)
 }
 
+/// Emit DWARF sections for the compiled functions that carry debug info.
 fn emit_dwarf(
     obj: &mut Object,
     functions: &[CompiledFunction],
@@ -717,8 +735,11 @@ fn emit_dwarf(
 // ── .eh_frame generation ─────────────────────────────────────────────────────
 
 /// DWARF register numbers for x86-64.
+/// DWARF register number for `%rbp`.
 const DW_REG_RBP: u8 = 6;
+/// DWARF register number for `%rsp`.
 const DW_REG_RSP: u8 = 7;
+/// DWARF register number for the return address (`%rip`).
 const DW_REG_RA: u8 = 16; // return address (rip)
 
 /// Pointer size for x86-64.

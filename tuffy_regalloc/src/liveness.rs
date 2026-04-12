@@ -11,16 +11,23 @@ use crate::{OpKind, RegAllocInst, VReg};
 /// A live range for a single VReg: [start, end) in instruction indices.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveRange {
+    /// The virtual register covered by this interval.
     pub vreg: VReg,
+    /// The first instruction index included in the live range.
     pub start: u32,
+    /// One past the last instruction index included in the live range.
     pub end: u32,
 }
 
 /// A basic block in the linear instruction stream.
 struct Block {
+    /// The inclusive start instruction index of the block.
     start: u32,
+    /// The inclusive end instruction index of the block.
     end: u32,
+    /// The label that starts this block, if the block begins at a label.
     label: Option<u32>,
+    /// Successor block indices in the derived CFG.
     successors: Vec<usize>,
 }
 

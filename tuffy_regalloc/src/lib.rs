@@ -23,7 +23,9 @@ pub enum OpKind {
 /// A register operand declaration for the allocator.
 #[derive(Debug, Clone, Copy)]
 pub struct RegOp {
+    /// The virtual register referenced by this operand.
     pub vreg: VReg,
+    /// Whether the instruction reads, writes, or both reads and writes `vreg`.
     pub kind: OpKind,
 }
 

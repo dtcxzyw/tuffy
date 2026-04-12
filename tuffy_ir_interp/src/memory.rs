@@ -18,7 +18,10 @@ struct Allocation {
     /// Whether this allocation is still live.
     live: bool,
     /// Human-readable name for debugging.
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "Allocation names are kept for diagnostics even when a given build does not print them."
+    )]
     name: String,
 }
 
@@ -29,9 +32,13 @@ pub enum MemoryError {
     UseAfterFree(AllocId),
     /// Access outside allocation bounds.
     OutOfBounds {
+        /// Allocation being accessed.
         alloc_id: AllocId,
+        /// Byte offset of the attempted access.
         offset: i64,
+        /// Access size in bytes.
         size: usize,
+        /// Allocation size in bytes.
         alloc_size: usize,
     },
     /// Invalid (null/dangling) pointer.
@@ -72,11 +79,14 @@ impl std::fmt::Display for MemoryError {
 /// The memory subsystem.
 #[derive(Debug)]
 pub struct Memory {
+    /// Live and freed allocations keyed by allocation id.
     allocations: HashMap<AllocId, Allocation>,
+    /// Next allocation id to hand out.
     next_alloc_id: u64,
 }
 
 impl Memory {
+    /// Create an empty memory state.
     pub fn new() -> Self {
         Self {
             allocations: HashMap::new(),
@@ -116,6 +126,10 @@ impl Memory {
     }
 
     /// Free an allocation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the allocation is unknown or already freed.
     pub fn deallocate(&mut self, id: AllocId) -> Result<(), MemoryError> {
         let alloc = self
             .allocations
@@ -129,6 +143,10 @@ impl Memory {
     }
 
     /// Get the size of an allocation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the allocation is unknown or has been freed.
     pub fn alloc_size(&self, id: AllocId) -> Result<usize, MemoryError> {
         let alloc = self
             .allocations
@@ -162,6 +180,10 @@ impl Memory {
     }
 
     /// Read `size` bytes from memory at `ptr`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the access is invalid or out of bounds.
     pub fn read(&self, ptr: &Pointer, size: usize) -> Result<Vec<AbstractByte>, MemoryError> {
         // Zero-size reads are always valid (even to freed memory).
         if size == 0 {
@@ -174,6 +196,14 @@ impl Memory {
     }
 
     /// Write bytes to memory at `ptr`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the access is invalid or out of bounds.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the allocation disappears after `validate_access` succeeds.
     pub fn write(&mut self, ptr: &Pointer, bytes: &[AbstractByte]) -> Result<(), MemoryError> {
         if bytes.is_empty() {
             return Ok(());
@@ -186,6 +216,10 @@ impl Memory {
     }
 
     /// Memory copy (non-overlapping).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if either access is invalid or out of bounds.
     pub fn memcpy(
         &mut self,
         dst: &Pointer,
@@ -200,6 +234,10 @@ impl Memory {
     }
 
     /// Memory move (may overlap).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if either access is invalid or out of bounds.
     pub fn memmove(
         &mut self,
         dst: &Pointer,
@@ -211,6 +249,14 @@ impl Memory {
     }
 
     /// Memory set.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the access is invalid or out of bounds.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the allocation disappears after `validate_access` succeeds.
     pub fn memset(&mut self, dst: &Pointer, val: u8, count: usize) -> Result<(), MemoryError> {
         if count == 0 {
             return Ok(());

@@ -18,12 +18,16 @@ use crate::value::{BlockRef, RegionRef, ValueRef};
 
 /// Builder for constructing a function's IR.
 pub struct Builder<'a> {
+    /// Function currently being constructed.
     func: &'a mut Function,
+    /// Current insertion block for newly emitted instructions.
     current_block: Option<BlockRef>,
+    /// Active region nesting from outermost to innermost.
     region_stack: Vec<RegionRef>,
 }
 
 impl<'a> Builder<'a> {
+    /// Create a builder for an existing function body.
     pub fn new(func: &'a mut Function) -> Self {
         Self {
             func,
@@ -66,6 +70,11 @@ impl<'a> Builder<'a> {
         self.region_stack.pop();
     }
 
+    /// Return the currently active region.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no region has been entered yet.
     fn current_region(&self) -> RegionRef {
         *self.region_stack.last().expect("no active region")
     }
@@ -131,6 +140,7 @@ impl<'a> Builder<'a> {
         }
     }
 
+    /// Query the result-side annotation attached to a value, if any.
     pub fn value_annotation(&self, v: ValueRef) -> Option<&Annotation> {
         if v.is_block_arg() {
             None
@@ -233,6 +243,11 @@ impl<'a> Builder<'a> {
         }
     }
 
+    /// Append a block argument to `block`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if block arguments for the block are not added contiguously.
     pub fn add_block_arg(
         &mut self,
         block: BlockRef,
@@ -261,6 +276,11 @@ impl<'a> Builder<'a> {
 
     // ── Instruction emission ──
 
+    /// Append a single-result instruction to the current block.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no current block is selected.
     fn push_inst(
         &mut self,
         op: Op,
@@ -282,6 +302,11 @@ impl<'a> Builder<'a> {
         ValueRef::inst_result(idx)
     }
 
+    /// Append a two-result instruction to the current block.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no current block is selected.
     fn push_inst_with_secondary(
         &mut self,
         op: Op,
@@ -795,6 +820,11 @@ impl<'a> Builder<'a> {
     }
 
     /// Byte-swap: reverse byte order of the low `bytes` bytes.
+    /// Byte-swap an integer value with the given byte width.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `val` does not refer to an integer-typed value.
     pub fn bswap(&mut self, val: IntOperand, bytes: u32, origin: Origin) -> IntValue {
         let op = val.clone().raw();
         let _ty = self
@@ -807,6 +837,11 @@ impl<'a> Builder<'a> {
     }
 
     /// Bit-reverse: reverse bit order of the low `bits` bits.
+    /// Reverse the low `bits` bits of an integer value.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `val` does not refer to an integer-typed value.
     pub fn bit_reverse(&mut self, val: IntOperand, bits: u32, origin: Origin) -> IntValue {
         let op = val.clone().raw();
         let _ty = self
@@ -819,6 +854,11 @@ impl<'a> Builder<'a> {
     }
 
     /// Merge: replace the low `width` bits of `a` with the low `width` bits of `b`.
+    /// Merge two integer halves into one integer value.
+    ///
+    /// # Panics
+    ///
+    /// Panics if either operand does not refer to an integer-typed value.
     pub fn merge(&mut self, a: IntOperand, b: IntOperand, width: u32, origin: Origin) -> IntValue {
         let op_a = a.clone().raw();
         let _op_b = b.clone().raw();
@@ -835,6 +875,11 @@ impl<'a> Builder<'a> {
     }
 
     /// Carry-less multiplication (polynomial multiplication over GF(2)).
+    /// Emit a carry-less integer multiply.
+    ///
+    /// # Panics
+    ///
+    /// Panics if either operand does not refer to an integer-typed value.
     pub fn clmul(&mut self, a: IntOperand, b: IntOperand, origin: Origin) -> IntValue {
         let op_a = a.clone().raw();
         let _op_b = b.clone().raw();
@@ -851,6 +896,11 @@ impl<'a> Builder<'a> {
     }
 
     /// Split: decompose `a` at bit position `width`. Returns (hi, lo).
+    /// Split an integer into low and high parts.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `a` does not refer to an integer-typed value.
     pub fn split(&mut self, a: IntOperand, width: u32, origin: Origin) -> (IntValue, IntValue) {
         let op = a.clone().raw();
         let ty = self
@@ -1341,7 +1391,10 @@ impl<'a> Builder<'a> {
     }
 
     /// Atomic read-modify-write. Returns (mem_out, old_value).
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Atomic RMW needs the full typed opcode payload plus result annotation metadata."
+    )]
     pub fn atomic_rmw(
         &mut self,
         op: AtomicRmwOp,
@@ -1366,7 +1419,10 @@ impl<'a> Builder<'a> {
     }
 
     /// Atomic compare-and-exchange. Returns (mem_out, old_value).
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Cmpxchg mirrors the IR opcode shape, including both orderings and result annotation."
+    )]
     pub fn atomic_cmpxchg(
         &mut self,
         ptr: PtrOperand,
@@ -1423,7 +1479,10 @@ impl<'a> Builder<'a> {
     /// Call function with arguments. Takes mem token.
     /// For void calls, returns mem token only.
     /// For non-void calls, returns (mem_out, data_value).
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Calls must expose callee, arguments, memory token, cleanup label, and result metadata."
+    )]
     pub fn call(
         &mut self,
         callee: PtrOperand,

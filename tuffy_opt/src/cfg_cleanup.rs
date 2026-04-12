@@ -7,8 +7,10 @@ use tuffy_ir::value::{BlockRef, ValueRef};
 use crate::cfg::{CfgInfo, collect_block_refs};
 use crate::peephole::PeepholeStats;
 
+/// Maximum number of CFG cleanup iterations.
 const MAX_CLEANUP_ITERATIONS: usize = 8;
 
+/// Optimize CFG structure within one function.
 pub(crate) fn optimize_function(func: &mut Function) -> PeepholeStats {
     if func
         .inst_pool
@@ -37,6 +39,7 @@ pub(crate) fn optimize_function(func: &mut Function) -> PeepholeStats {
     stats
 }
 
+/// Thread trivial forwarder blocks through their predecessors.
 fn thread_forwarders(func: &mut Function) -> bool {
     let cfg = CfgInfo::compute(func);
     let forwarders = compute_forwarders(func, &cfg);
@@ -115,11 +118,15 @@ fn thread_forwarders(func: &mut Function) -> bool {
 }
 
 #[derive(Clone)]
+/// Forwarding edge discovered during CFG cleanup.
 struct Forwarder {
+    /// Final target block after following the forwarder.
     target: BlockRef,
+    /// Rewritten block arguments for the forwarded target.
     args: Vec<Operand>,
 }
 
+/// Compute trivial forwarder blocks in the reachable CFG.
 fn compute_forwarders(func: &Function, cfg: &CfgInfo) -> HashMap<BlockRef, Forwarder> {
     let entry = func.entry_block();
     let region_entries = func
@@ -164,6 +171,7 @@ fn compute_forwarders(func: &Function, cfg: &CfgInfo) -> HashMap<BlockRef, Forwa
     forwarders
 }
 
+/// Resolve a branch target through chains of trivial forwarders.
 fn resolve_forward_target(
     func: &Function,
     forwarders: &HashMap<BlockRef, Forwarder>,
@@ -198,6 +206,7 @@ fn resolve_forward_target(
     (target, args)
 }
 
+/// Rewrite an operand through a forwarded block-argument map.
 fn remap_forward_operand(operand: &Operand, arg_map: &HashMap<ValueRef, Operand>) -> Operand {
     arg_map
         .get(&operand.value)
@@ -205,6 +214,7 @@ fn remap_forward_operand(operand: &Operand, arg_map: &HashMap<ValueRef, Operand>
         .unwrap_or_else(|| operand.clone())
 }
 
+/// Compare operand lists including use-site annotations.
 fn operands_eq(lhs: &[Operand], rhs: &[Operand]) -> bool {
     lhs.len() == rhs.len()
         && lhs

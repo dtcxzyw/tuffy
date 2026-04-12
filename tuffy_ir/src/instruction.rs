@@ -14,7 +14,9 @@ use crate::value::{BlockRef, ValueRef};
 /// An operand: a value reference with an optional use-side annotation.
 #[derive(Debug, Clone)]
 pub struct Operand {
+    /// Referenced SSA value.
     pub value: ValueRef,
+    /// Optional use-site annotation attached to the reference.
     pub annotation: Option<Annotation>,
 }
 
@@ -64,10 +66,13 @@ impl Origin {
 /// An instruction in the tuffy IR.
 #[derive(Debug, Clone)]
 pub struct Instruction {
+    /// Instruction opcode and its operands.
     pub op: Op,
+    /// Primary result type.
     pub ty: Type,
     /// Secondary result type for multi-result instructions (e.g., load.atomic produces mem + data).
     pub secondary_ty: Option<Type>,
+    /// Origin/provenance information attached to the instruction.
     pub origin: Origin,
     /// Result-side annotation. Violation causes this instruction to produce poison.
     pub result_annotation: Option<Annotation>,
@@ -82,12 +87,18 @@ impl Instruction {
     }
 }
 
+/// Internal storage for `FloatConst` values keyed by float width.
 #[derive(Clone, Copy)]
 enum FloatConstRepr {
+    /// bfloat16 constant payload.
     BF16(BFloat),
+    /// IEEE half-precision constant payload.
     F16(Half),
+    /// IEEE single-precision constant payload.
     F32(Single),
+    /// IEEE double-precision constant payload.
     F64(Double),
+    /// IEEE quadruple-precision constant payload.
     F128(Quad),
 }
 
@@ -156,11 +167,17 @@ impl fmt::Debug for FloatConst {
 /// In infinite precision, comparison is purely mathematical.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ICmpOp {
+    /// Equal.
     Eq,
+    /// Not equal.
     Ne,
+    /// Less than.
     Lt,
+    /// Less than or equal.
     Le,
+    /// Greater than.
     Gt,
+    /// Greater than or equal.
     Ge,
 }
 
@@ -726,6 +743,11 @@ impl Op {
     }
 
     /// Update the operand at `operand_index`, returning false if the slot is invalid.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internal optional operand slot is unexpectedly absent while
+    /// rewriting a valid operand index.
     pub fn set_value_ref(&mut self, operand_index: u32, new: ValueRef) -> bool {
         use Op::*;
 

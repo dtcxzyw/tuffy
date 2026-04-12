@@ -7,132 +7,213 @@ use serde::Deserialize;
 
 use crate::GenerateError;
 
+/// Top-level peephole optimization specification exported from Lean.
 #[derive(Debug, Deserialize)]
 pub struct PeepholeSpec {
+    /// Schema format version expected by the generator.
     pub format_version: u32,
+    /// Schema kind discriminator.
     pub kind: String,
+    /// Local peephole rewrite rules.
     pub rules: Vec<PeepholeRule>,
+    /// Forward at-use fact-transfer rules.
     #[serde(default)]
     pub at_use_forward_rules: Vec<AtUseForwardRule>,
+    /// Context-sensitive transforms driven by at-use facts.
     #[serde(default)]
     pub at_use_transforms: Vec<AtUseTransform>,
 }
 
+/// One peephole rewrite rule.
 #[derive(Debug, Deserialize)]
 pub struct PeepholeRule {
+    /// Stable rule name used for diagnostics and generated helper names.
     pub name: String,
+    /// Proof/categorization tag for the transform family.
     pub transform_kind: String,
+    /// Lean theorem or definition that justifies the transform.
     pub proof_ref: String,
+    /// Extra predicates that must hold before the rewrite can fire.
     #[serde(default)]
     pub side_conditions: Vec<SideCondition>,
+    /// Match and replacement payload for the rule.
     pub rewrite: RewriteBody,
 }
 
+/// A forward at-use fact-transfer rule.
 #[derive(Debug, Deserialize)]
 pub struct AtUseForwardRule {
+    /// Opcode handled by this rule.
     pub op: String,
+    /// Known-bits transfer function applied to the result.
     pub known_bits_forward: AtUseKnownBitsForwardKind,
+    /// Summary transfer function applied to the result.
     pub summary_forward: AtUseSummaryForwardKind,
+    /// Lean theorem or definition that justifies the transfer rule.
     pub proof_ref: String,
 }
 
+/// A generated transform driven by at-use facts.
 #[derive(Debug, Deserialize)]
 pub struct AtUseTransform {
+    /// Stable transform name used for diagnostics.
     pub name: String,
+    /// Runtime transform kind to invoke.
     pub kind: AtUseTransformKind,
+    /// Lean theorem or definition that justifies the transform.
     pub proof_ref: String,
 }
 
+/// Known-bits transfer function used by an at-use forward rule.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AtUseKnownBitsForwardKind {
+    /// Produce no additional known-bits information.
     Unknown,
+    /// Derive facts from a constant result.
     Const,
+    /// Merge facts from a `select`.
     Select,
+    /// Derive facts from a bitwise `and`.
     BitAnd,
+    /// Derive facts from a bitwise `or`.
     BitOr,
+    /// Derive facts from a bitwise `xor`.
     BitXor,
 }
 
+/// Summary transfer function used by an at-use forward rule.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AtUseSummaryForwardKind {
+    /// Produce no additional summary information.
     Unknown,
+    /// Derive summary facts from a constant result.
     Const,
+    /// Merge summary facts from a `select`.
     Select,
+    /// Derive summary facts from a bitwise `and`.
     BitAnd,
+    /// Derive summary facts from a bitwise `or`.
     BitOr,
+    /// Derive summary facts from a bitwise `xor`.
     BitXor,
 }
 
+/// Runtime transform kind selected by an at-use descriptor.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AtUseTransformKind {
+    /// Fold an `icmp` based on at-use information.
     FoldIcmp,
+    /// Fold a `brif` based on at-use information.
     FoldBrIf,
+    /// Strengthen operand annotations.
     StrengthenOperand,
+    /// Strengthen result annotations.
     StrengthenResult,
 }
 
+/// Match and replacement payload for a peephole rule.
 #[derive(Debug, Deserialize)]
 pub struct RewriteBody {
+    /// Root shape that must match before the rule can fire.
     pub match_root: MatchRoot,
+    /// Replacement emitted after a successful match.
     pub replacement: RootReplacement,
 }
 
+/// Root shape that anchors a peephole rewrite.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MatchRoot {
+    /// Match a value-producing instruction tree.
     Value {
+        /// Root pattern of the matched value tree.
         root: Pattern,
     },
+    /// Match a terminator instruction with explicit operands and successor arity.
     Terminator {
+        /// Terminator opcode name.
         op: String,
+        /// Operand patterns matched against the terminator operands.
         operands: Vec<Pattern>,
+        /// Number of successors the matched terminator must expose.
         successor_count: usize,
     },
+    /// Match a canonical `brif` form recognized by the runtime.
     #[serde(rename = "canonical_brif")]
     CanonicalBrIf {
+        /// Binding that receives the canonicalized branch condition.
         binding: String,
+        /// Canonicalization mode used while matching the branch.
         mode: CanonicalBrIfMode,
     },
+    /// Match a root that is eligible for const-folding.
     ConstFold {
+        /// Opcode to const-fold.
         op: String,
+        /// Attributes that further constrain the root opcode.
         #[serde(default)]
         attrs: Vec<PatternAttr>,
     },
 }
 
+/// Canonical form expected when matching a `brif` root.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CanonicalBrIfMode {
+    /// Match `bool xor const` canonicalization.
     BoolXorConst,
+    /// Match compares whose boolean result has been intified.
     IntifiedBoolCompare,
 }
 
+/// Replacement emitted for a matched root.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RootReplacement {
+    /// Replace a value root with a new value expression.
     Value {
+        /// Replacement value expression.
         value: Replacement,
     },
+    /// Replace a terminator root with a new terminator payload.
     Terminator {
+        /// Replacement terminator opcode.
         op: String,
+        /// Replacement operands.
         operands: Vec<Replacement>,
+        /// Successor remapping expressed as indices into the matched successors.
         successors: Vec<usize>,
     },
+    /// Replace a const-fold root with the runtime const-fold result.
     ConstFold,
 }
 
+/// Replacement expression used inside a root replacement.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Replacement {
-    Binding { name: String },
-    BoolConst { value: bool },
-    BoolNot { value: Box<Replacement> },
+    /// Reuse a previously bound value.
+    Binding {
+        /// Binding name to reuse.
+        name: String,
+    },
+    /// Materialize a boolean constant.
+    BoolConst {
+        /// Boolean literal to materialize.
+        value: bool,
+    },
+    /// Materialize the logical negation of another replacement expression.
+    BoolNot {
+        /// Nested replacement expression to negate.
+        value: Box<Replacement>,
+    },
 }
 
 impl Replacement {
+    /// Collect every binding name referenced by this replacement expression.
     fn collect_bindings<'a>(&'a self, out: &mut Vec<&'a str>) {
         match self {
             Replacement::Binding { name } => {
@@ -145,6 +226,7 @@ impl Replacement {
         }
     }
 
+    /// Return the binding name for direct binding replacements.
     pub fn binding_name(&self) -> Option<&str> {
         match self {
             Replacement::Binding { name } => Some(name),
@@ -153,33 +235,49 @@ impl Replacement {
     }
 }
 
+/// Value-pattern shape used while matching a rewrite root.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Pattern {
+    /// Capture any value and optionally constrain its type.
     Capture {
+        /// Binding name assigned to the captured value.
         name: String,
+        /// Optional value type required for the capture.
         #[serde(default)]
         ty: Option<ValueType>,
     },
+    /// Bind a nested pattern to a name for later reuse.
     Bind {
+        /// Binding name assigned to the nested pattern result.
         name: String,
+        /// Nested pattern to match.
         pattern: Box<Pattern>,
     },
+    /// Match a literal integer constant.
     IntConst {
+        /// Decimal string form of the constant.
         value: String,
     },
+    /// Match an integer constant and bind its literal value.
     IntConstBinding {
+        /// Binding name assigned to the matched integer constant.
         name: String,
     },
+    /// Match an instruction by opcode, attributes, and operand patterns.
     Inst {
+        /// Lowercase opcode name.
         op: String,
+        /// Additional attributes constraining the instruction.
         #[serde(default)]
         attrs: Vec<PatternAttr>,
+        /// Operand patterns matched against the instruction operands.
         args: Vec<Pattern>,
     },
 }
 
 impl Pattern {
+    /// Collect every binding introduced by this pattern tree.
     pub fn collect_bindings<'a>(&'a self, out: &mut Vec<&'a str>) {
         match self {
             Pattern::Capture { name, .. }
@@ -201,6 +299,7 @@ impl Pattern {
         }
     }
 
+    /// Infer the value type produced by this pattern when possible.
     fn inferred_value_type(&self) -> Option<ValueType> {
         match self {
             Pattern::Capture { ty, .. } => *ty,
@@ -226,6 +325,7 @@ impl Pattern {
         }
     }
 
+    /// Record the binding kinds implied by this pattern tree.
     fn collect_binding_kinds(&self, out: &mut BTreeMap<String, BindingKind>) {
         match self {
             Pattern::Capture { name, ty } => {
@@ -252,73 +352,120 @@ impl Pattern {
     }
 }
 
+/// Coarse value type used during schema validation.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ValueType {
+    /// Integer value.
     Int,
+    /// Boolean value.
     Bool,
 }
 
+/// Attribute attached to a pattern-matched instruction.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PatternAttr {
-    IcmpPred { value: String },
+    /// Integer-compare predicate attached to an `icmp`.
+    IcmpPred {
+        /// Predicate name encoded in the exported schema.
+        value: String,
+    },
 }
 
+/// Additional predicate that must hold before a rewrite can fire.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SideCondition {
+    /// Apply an integer predicate to a bound integer constant.
     IntPredicate {
+        /// Binding to inspect.
         binding: String,
+        /// Predicate that must hold for the binding.
         predicate: IntPredicate,
     },
+    /// Require a bound value to have a best-known integer annotation.
     BestIntAnnotation {
+        /// Binding to inspect.
         binding: String,
+        /// Required annotation.
         annotation: IntAnnotationSpec,
     },
+    /// Require a known-one bit on a bound integer value.
     KnownOne {
+        /// Binding to inspect.
         binding: String,
+        /// Bit index that must be known one.
         bit: u32,
     },
+    /// Require every nested condition to hold.
     AllOf {
+        /// Nested conditions combined with logical `and`.
         conditions: Vec<SideCondition>,
     },
+    /// Require at least one nested condition to hold.
     AnyOf {
+        /// Nested conditions combined with logical `or`.
         conditions: Vec<SideCondition>,
     },
+    /// Negate a nested condition.
     Not {
+        /// Nested condition to negate.
         condition: Box<SideCondition>,
     },
 }
 
+/// Integer-constant predicate supported by side conditions.
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IntPredicate {
     #[serde(rename = "is_zero")]
+    /// Match the integer literal zero.
     Zero,
     #[serde(rename = "is_one")]
+    /// Match the integer literal one.
     One,
     #[serde(rename = "is_odd")]
+    /// Match an odd integer literal.
     Odd,
 }
 
+/// Integer annotation constraint used by side conditions.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum IntAnnotationSpec {
-    Signed { bits: u32 },
-    Unsigned { bits: u32 },
-    DontCare { bits: u32 },
+    /// Require a signed integer annotation with the given bit width.
+    Signed {
+        /// Bit width carried by the annotation.
+        bits: u32,
+    },
+    /// Require an unsigned integer annotation with the given bit width.
+    Unsigned {
+        /// Bit width carried by the annotation.
+        bits: u32,
+    },
+    /// Require any signedness as long as the bit width matches.
+    DontCare {
+        /// Bit width carried by the annotation.
+        bits: u32,
+    },
 }
 
+/// Internal classification used while validating binding types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BindingKind {
+    /// Binding type is unknown.
     UnknownValue,
+    /// Binding is known to hold an integer value.
     IntValue,
+    /// Binding is known to hold a boolean value.
     BoolValue,
+    /// Binding is an integer constant literal.
     IntConst,
 }
 
 impl BindingKind {
+    /// Derive a binding kind from an optional value type.
     fn from_value_type(ty: Option<ValueType>) -> Self {
         match ty {
             Some(ValueType::Int) => Self::IntValue,
@@ -327,6 +474,7 @@ impl BindingKind {
         }
     }
 
+    /// Recover the public-facing value type, if known.
     fn value_type(self) -> Option<ValueType> {
         match self {
             BindingKind::UnknownValue => None,
@@ -336,6 +484,12 @@ impl BindingKind {
     }
 }
 
+/// Validate a decoded peephole specification before code generation.
+///
+/// # Errors
+///
+/// Returns an error if the schema version, root shape, replacement, or side
+/// conditions are unsupported or ill-typed.
 pub fn validate_spec(spec: &PeepholeSpec) -> Result<(), GenerateError> {
     if spec.format_version != 4 {
         return Err(GenerateError::UnsupportedFormatVersion(spec.format_version));
@@ -476,6 +630,11 @@ pub fn validate_spec(spec: &PeepholeSpec) -> Result<(), GenerateError> {
     Ok(())
 }
 
+/// Validate that a pattern uses only supported constructs.
+///
+/// # Errors
+///
+/// Returns an error if the pattern contains an invalid integer literal.
 fn validate_pattern(pattern: &Pattern) -> Result<(), GenerateError> {
     match pattern {
         Pattern::Capture { .. } | Pattern::IntConstBinding { .. } => Ok(()),
@@ -495,6 +654,7 @@ fn validate_pattern(pattern: &Pattern) -> Result<(), GenerateError> {
     }
 }
 
+/// Merge binding-kind information for a binding name discovered in a pattern.
 fn register_binding_kind(out: &mut BTreeMap<String, BindingKind>, name: &str, kind: BindingKind) {
     match out.get_mut(name) {
         Some(existing) => match (*existing, kind) {
@@ -512,6 +672,12 @@ fn register_binding_kind(out: &mut BTreeMap<String, BindingKind>, name: &str, ki
     }
 }
 
+/// Validate a value replacement against the matched root and binding set.
+///
+/// # Errors
+///
+/// Returns an error if the replacement references missing bindings or has an
+/// incompatible inferred type.
 fn validate_value_replacement(
     root: &Pattern,
     replacement: &Replacement,
@@ -536,6 +702,12 @@ fn validate_value_replacement(
     Ok(())
 }
 
+/// Validate one terminator replacement operand.
+///
+/// # Errors
+///
+/// Returns an error if the operand is not a direct binding or references a
+/// binding outside the matched root.
 fn validate_terminator_replacement_operand(
     replacement: &Replacement,
     bindings: &[&str],
@@ -556,6 +728,11 @@ fn validate_terminator_replacement_operand(
     Ok(())
 }
 
+/// Ensure that every binding referenced by a replacement was matched.
+///
+/// # Errors
+///
+/// Returns an error if the replacement refers to an unknown binding.
 fn validate_replacement_bindings(
     replacement: &Replacement,
     bindings: &[&str],
@@ -574,6 +751,11 @@ fn validate_replacement_bindings(
     Ok(())
 }
 
+/// Infer the value type produced by a replacement expression.
+///
+/// # Errors
+///
+/// Returns an error if the replacement is internally ill-typed.
 fn replacement_value_type(
     replacement: &Replacement,
     binding_kinds: &BTreeMap<String, BindingKind>,
@@ -601,6 +783,12 @@ fn replacement_value_type(
     }
 }
 
+/// Validate a side condition against the binding kinds inferred from the root.
+///
+/// # Errors
+///
+/// Returns an error if the side condition references unknown bindings or is
+/// not well-typed for the matched values.
 fn validate_side_condition(
     condition: &SideCondition,
     binding_kinds: &BTreeMap<String, BindingKind>,
@@ -675,6 +863,7 @@ fn validate_side_condition(
 }
 
 impl IntAnnotationSpec {
+    /// Return the annotation bit width regardless of signedness.
     fn bits(self) -> u32 {
         match self {
             IntAnnotationSpec::Signed { bits }
@@ -684,6 +873,11 @@ impl IntAnnotationSpec {
     }
 }
 
+/// Validate a const-fold root against the operations supported by the runtime.
+///
+/// # Errors
+///
+/// Returns an error if the opcode or attribute set is not supported.
 fn validate_const_fold(op: &str, attrs: &[PatternAttr], rule: &str) -> Result<(), GenerateError> {
     match op {
         "add"

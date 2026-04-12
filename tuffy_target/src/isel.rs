@@ -6,19 +6,27 @@
 use tuffy_ir::value::ValueRef;
 use tuffy_regalloc::{PReg, VReg};
 
+/// Register slots keyed by IR value index.
 type RegSlots = Vec<Option<VReg>>;
+/// Stack slots keyed by IR value index as `(offset, alignment)`.
 type StackSlots = Vec<Option<(i32, u32)>>;
 
 /// Location hints for IR values after instruction selection.
 pub struct SelectedValueLocations {
+    /// Primary instruction-result registers.
     primary_regs: Vec<Option<VReg>>,
+    /// Secondary instruction-result registers.
     secondary_regs: Vec<Option<VReg>>,
+    /// Block-argument registers.
     block_arg_regs: Vec<Option<VReg>>,
+    /// Instruction-result stack slots.
     stack_slots: Vec<Option<(i32, u32)>>,
+    /// Block-argument stack slots.
     block_arg_stack_slots: Vec<Option<(i32, u32)>>,
 }
 
 impl SelectedValueLocations {
+    /// Look up the assigned virtual register for a value.
     pub fn reg(&self, value: ValueRef) -> Option<VReg> {
         if value.is_block_arg() {
             *self.block_arg_regs.get(value.index() as usize)?
@@ -29,6 +37,7 @@ impl SelectedValueLocations {
         }
     }
 
+    /// Look up the assigned stack slot for a value.
     pub fn stack_slot(&self, value: ValueRef) -> Option<(i32, u32)> {
         if value.is_block_arg() {
             *self.block_arg_stack_slots.get(value.index() as usize)?
@@ -53,6 +62,7 @@ pub struct VRegMap {
 }
 
 impl VRegMap {
+    /// Create empty register maps sized for instruction and block-argument arenas.
     pub fn new(inst_capacity: usize, block_arg_capacity: usize) -> Self {
         Self {
             map: vec![None; inst_capacity],
@@ -61,6 +71,7 @@ impl VRegMap {
         }
     }
 
+    /// Record the virtual register assigned to a value.
     pub fn assign(&mut self, val: ValueRef, vreg: VReg) {
         if val.is_block_arg() {
             self.block_arg_map[val.index() as usize] = Some(vreg);
@@ -71,6 +82,7 @@ impl VRegMap {
         }
     }
 
+    /// Look up the virtual register assigned to a value.
     pub fn get(&self, val: ValueRef) -> Option<VReg> {
         if val.is_block_arg() {
             *self.block_arg_map.get(val.index() as usize)?
@@ -81,6 +93,7 @@ impl VRegMap {
         }
     }
 
+    /// Split the map into its internal storage vectors.
     fn into_parts(self) -> (RegSlots, RegSlots, RegSlots) {
         (self.map, self.secondary_map, self.block_arg_map)
     }
@@ -97,6 +110,7 @@ pub struct StackMap {
 }
 
 impl StackMap {
+    /// Create empty stack-slot maps sized for instruction and block-argument arenas.
     pub fn new(inst_capacity: usize, block_arg_capacity: usize) -> Self {
         Self {
             slots: vec![None; inst_capacity],
@@ -105,6 +119,7 @@ impl StackMap {
         }
     }
 
+    /// Allocate a stack slot for a value and return its frame-pointer offset.
     pub fn alloc(&mut self, val: ValueRef, bytes: u32, align: u32) -> i32 {
         // Explicit alignment from the caller (the actual type alignment).
         // When 0, default to 8 (natural register size).
@@ -177,6 +192,7 @@ impl StackMap {
         }
     }
 
+    /// Split the stack map into its internal storage vectors.
     fn into_parts(self) -> (StackSlots, StackSlots) {
         (self.slots, self.block_arg_slots)
     }
@@ -186,20 +202,24 @@ impl StackMap {
 ///
 /// Generic over the condition code type (`CC`), which is target-specific.
 pub struct CmpMap<CC: Copy> {
+    /// Condition-code slots keyed by value index.
     map: Vec<Option<CC>>,
 }
 
 impl<CC: Copy> CmpMap<CC> {
+    /// Create an empty comparison map.
     pub fn new(capacity: usize) -> Self {
         Self {
             map: vec![None; capacity],
         }
     }
 
+    /// Record the condition code assigned to a value.
     pub fn set(&mut self, val: ValueRef, cc: CC) {
         self.map[val.index() as usize] = Some(cc);
     }
 
+    /// Look up the condition code assigned to a value.
     pub fn get(&self, val: ValueRef) -> Option<CC> {
         self.map[val.index() as usize]
     }
@@ -207,6 +227,7 @@ impl<CC: Copy> CmpMap<CC> {
 
 /// Sequential virtual register allocator.
 pub struct VRegAlloc {
+    /// Next virtual-register number to allocate.
     pub next: u32,
     /// Fixed physical register constraint per VReg (indexed by VReg.0).
     /// None means the allocator is free to choose.
@@ -216,6 +237,7 @@ pub struct VRegAlloc {
 }
 
 impl VRegAlloc {
+    /// Create a fresh virtual-register allocator.
     pub fn new() -> Self {
         Self {
             next: 0,
@@ -262,9 +284,13 @@ impl Default for VRegAlloc {
 ///
 /// Generic over the instruction type (`I`), which is target-specific.
 pub struct IselResult<I> {
+    /// Function name for diagnostics and downstream consumers.
     pub name: String,
+    /// Selected machine instructions.
     pub insts: Vec<I>,
+    /// Optional origin source id for each machine instruction.
     pub inst_sources: Vec<Option<u32>>,
+    /// Register and stack-slot locations for selected IR values.
     pub value_locations: SelectedValueLocations,
     /// Number of virtual registers allocated.
     pub vreg_count: u32,
@@ -280,6 +306,7 @@ pub struct IselResult<I> {
 }
 
 impl SelectedValueLocations {
+    /// Construct value-location tables from the temporary selection maps.
     pub fn from_maps(regs: VRegMap, stack: StackMap) -> Self {
         let (primary_regs, secondary_regs, block_arg_regs) = regs.into_parts();
         let (stack_slots, block_arg_stack_slots) = stack.into_parts();

@@ -7,6 +7,7 @@ use tuffy_ir::types::{Annotation, IntAnnotation, IntSignedness};
 use tuffy_ir::value::ValueRef;
 use tuffy_regalloc::VReg;
 
+/// Emit the machine instructions for the `add` rule.
 fn gen_add(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::MovRR {
@@ -23,6 +24,7 @@ fn gen_add(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Op
     Some(())
 }
 
+/// Emit the machine instructions for the `sub` rule.
 fn gen_sub(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::MovRR {
@@ -39,6 +41,7 @@ fn gen_sub(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Op
     Some(())
 }
 
+/// Emit the machine instructions for the `mul` rule.
 fn gen_mul(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::MovRR {
@@ -55,6 +58,7 @@ fn gen_mul(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Op
     Some(())
 }
 
+/// Emit the machine instructions for the `or` rule.
 fn gen_or(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::MovRR {
@@ -71,6 +75,7 @@ fn gen_or(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Opt
     Some(())
 }
 
+/// Emit the machine instructions for the `and` rule.
 fn gen_and(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::MovRR {
@@ -87,6 +92,7 @@ fn gen_and(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Op
     Some(())
 }
 
+/// Emit the machine instructions for the `xor` rule.
 fn gen_xor(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::MovRR {
@@ -103,6 +109,7 @@ fn gen_xor(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Op
     Some(())
 }
 
+/// Emit the machine instructions for the `band` rule.
 fn gen_band(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::MovRR {
@@ -119,6 +126,7 @@ fn gen_band(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> O
     Some(())
 }
 
+/// Emit the machine instructions for the `bor` rule.
 fn gen_bor(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::MovRR {
@@ -135,6 +143,7 @@ fn gen_bor(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Op
     Some(())
 }
 
+/// Emit the machine instructions for the `bxor` rule.
 fn gen_bxor(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::MovRR {
@@ -151,7 +160,14 @@ fn gen_bxor(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> O
     Some(())
 }
 
-fn gen_shl(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Option<()> {
+/// Emit the machine instructions for the `shl` rule.
+fn gen_shl(
+    ctx: &mut super::IselCtx,
+    vref: ValueRef,
+    lhs: VReg,
+    rhs: VReg,
+    lhs_ann: Option<Annotation>,
+) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::MovRR {
         size: OpSize::S64,
@@ -164,14 +180,24 @@ fn gen_shl(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Op
         dst: v1,
         src: rhs,
     });
+    let size_2 = match lhs_ann {
+        Some(Annotation::Int(int_ann)) => match int_ann.bit_width {
+            8 => OpSize::S8,
+            16 => OpSize::S16,
+            32 => OpSize::S32,
+            _ => OpSize::S64,
+        },
+        _ => OpSize::S64,
+    };
     ctx.out.push(MInst::ShlRCL {
-        size: OpSize::S64,
+        size: size_2,
         dst: v0,
     });
     ctx.regs.assign(vref, v0);
     Some(())
 }
 
+/// Emit the machine instructions for the `shr_signed` rule.
 fn gen_shr_signed(
     ctx: &mut super::IselCtx,
     vref: ValueRef,
@@ -208,6 +234,7 @@ fn gen_shr_signed(
     Some(())
 }
 
+/// Emit the machine instructions for the `shr_unsigned` rule.
 fn gen_shr_unsigned(
     ctx: &mut super::IselCtx,
     vref: ValueRef,
@@ -244,6 +271,7 @@ fn gen_shr_unsigned(
     Some(())
 }
 
+/// Emit the machine instructions for the `min_signed` rule.
 fn gen_min_signed(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::MovRR {
@@ -266,6 +294,7 @@ fn gen_min_signed(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg
     Some(())
 }
 
+/// Emit the machine instructions for the `min_unsigned` rule.
 fn gen_min_unsigned(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::MovRR {
@@ -288,6 +317,7 @@ fn gen_min_unsigned(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VR
     Some(())
 }
 
+/// Emit the machine instructions for the `max_signed` rule.
 fn gen_max_signed(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::MovRR {
@@ -310,6 +340,7 @@ fn gen_max_signed(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg
     Some(())
 }
 
+/// Emit the machine instructions for the `max_unsigned` rule.
 fn gen_max_unsigned(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::MovRR {
@@ -332,6 +363,7 @@ fn gen_max_unsigned(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VR
     Some(())
 }
 
+/// Emit the machine instructions for the `count_ones` rule.
 fn gen_count_ones(ctx: &mut super::IselCtx, vref: ValueRef, src: VReg) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::Popcnt {
@@ -343,6 +375,7 @@ fn gen_count_ones(ctx: &mut super::IselCtx, vref: ValueRef, src: VReg) -> Option
     Some(())
 }
 
+/// Emit the machine instructions for the `count_leading_zeros` rule.
 fn gen_count_leading_zeros(ctx: &mut super::IselCtx, vref: ValueRef, src: VReg) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::Lzcnt {
@@ -354,6 +387,7 @@ fn gen_count_leading_zeros(ctx: &mut super::IselCtx, vref: ValueRef, src: VReg) 
     Some(())
 }
 
+/// Emit the machine instructions for the `count_trailing_zeros` rule.
 fn gen_count_trailing_zeros(ctx: &mut super::IselCtx, vref: ValueRef, src: VReg) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::Tzcnt {
@@ -365,6 +399,7 @@ fn gen_count_trailing_zeros(ctx: &mut super::IselCtx, vref: ValueRef, src: VReg)
     Some(())
 }
 
+/// Emit the machine instructions for the `icmp` rule.
 fn gen_icmp(
     ctx: &mut super::IselCtx,
     vref: ValueRef,
@@ -373,6 +408,11 @@ fn gen_icmp(
     cmp_op: ICmpOp,
     lhs_ann: Option<Annotation>,
 ) -> Option<()> {
+    ctx.out.push(MInst::CmpRR {
+        size: OpSize::S64,
+        src1: lhs,
+        src2: rhs,
+    });
     let int_ann = lhs_ann.and_then(|a| {
         if let Annotation::Int(ia) = a {
             Some(ia)
@@ -380,32 +420,16 @@ fn gen_icmp(
             None
         }
     });
-    // Use the annotation's bit_width for comparison size.  Sub-64-bit values
-    // loaded from stack slots are zero-extended (movzx), which loses sign
-    // information.  A 64-bit signed compare on zero-extended i8/i16 values
-    // gives wrong results for negative operands.
-    let cmp_size = match int_ann.as_ref().map(|a| a.bit_width) {
-        Some(8) => OpSize::S8,
-        Some(16) => OpSize::S16,
-        Some(32) => OpSize::S32,
-        _ => OpSize::S64,
-    };
-    ctx.out.push(MInst::CmpRR {
-        size: cmp_size,
-        src1: lhs,
-        src2: rhs,
-    });
     let cc = super::icmp_to_cc(cmp_op, int_ann);
-    // Materialize the comparison result into a register immediately so that
-    // intervening instructions cannot clobber the FLAGS register.
-    let tmp = ctx.alloc.alloc();
+    let tmp_cc = ctx.alloc.alloc();
     let dst = ctx.alloc.alloc();
-    ctx.out.push(MInst::SetCC { cc, dst: tmp });
-    ctx.out.push(MInst::MovzxB { dst, src: tmp });
+    ctx.out.push(MInst::SetCC { cc, dst: tmp_cc });
+    ctx.out.push(MInst::MovzxB { dst, src: tmp_cc });
     ctx.regs.assign(vref, dst);
     Some(())
 }
 
+/// Emit the machine instructions for the `ptr_add` rule.
 fn gen_ptr_add(ctx: &mut super::IselCtx, vref: ValueRef, ptr: VReg, offset: VReg) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::MovRR {
@@ -422,6 +446,7 @@ fn gen_ptr_add(ctx: &mut super::IselCtx, vref: ValueRef, ptr: VReg, offset: VReg
     Some(())
 }
 
+/// Emit the machine instructions for the `ptr_diff` rule.
 fn gen_ptr_diff(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::MovRR {
@@ -438,7 +463,11 @@ fn gen_ptr_diff(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) 
     Some(())
 }
 
-#[allow(unused_variables)]
+#[allow(
+    unused_variables,
+    reason = "Generated selector arms do not consume every bound operand in every rule."
+)]
+/// Try the generated instruction-selection rules for a single IR operation.
 pub(super) fn try_select_generated(
     ctx: &mut super::IselCtx,
     vref: ValueRef,
@@ -493,7 +522,7 @@ pub(super) fn try_select_generated(
         Op::Shl(lhs, rhs) => {
             let l = ctx.ensure_in_reg(lhs.clone().raw().value)?;
             let r = ctx.ensure_in_reg(rhs.clone().raw().value)?;
-            gen_shl(ctx, vref, l, r)
+            gen_shl(ctx, vref, l, r, lhs.clone().raw().annotation)
         }
         Op::Shr(lhs, rhs) => {
             let l = ctx.ensure_in_reg(lhs.clone().raw().value)?;

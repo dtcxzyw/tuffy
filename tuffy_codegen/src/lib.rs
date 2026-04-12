@@ -4,6 +4,7 @@
 //! backend based on the target triple and delegates all code generation
 //! calls through enum dispatch.
 
+/// Optimization module `legalize`.
 mod legalize;
 
 use tuffy_ir::function::Function;
@@ -19,10 +20,13 @@ use tuffy_target_x86::legality::X86LegalityInfo;
 /// Created from a target triple string, dispatches to the appropriate
 /// backend implementation via enum variants.
 pub struct CodegenSession {
+    /// Inner.
     inner: CodegenInner,
 }
 
+/// Internal enum `CodegenInner`.
 enum CodegenInner {
+    /// Variant `X86`.
     X86(X86Backend),
 }
 
@@ -31,6 +35,10 @@ impl CodegenSession {
     ///
     /// Currently only x86-64 targets are supported. Panics if the
     /// target is not recognized.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `target_triple` does not name a supported backend.
     pub fn new(target_triple: &str) -> Self {
         if target_triple.starts_with("x86_64") {
             CodegenSession {
@@ -66,6 +74,10 @@ impl CodegenSession {
     ///
     /// Runs legalization according to the target's legality rules before
     /// dispatching to the backend.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if legalization or backend compilation fails.
     pub fn compile_function(
         &self,
         func: &Function,
@@ -119,6 +131,11 @@ mod tests {
     use tuffy_ir::module::SymbolTable;
 
     #[test]
+    /// Internal helper `compile_function_fails_fast_on_unsupported_ir`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn compile_function_fails_fast_on_unsupported_ir() {
         let mut symbols = SymbolTable::new();
         let name = symbols.intern("continue_fail");

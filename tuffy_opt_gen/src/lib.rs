@@ -18,24 +18,67 @@ pub use pass_manifest_codegen::generate as generate_pass_manifest;
 pub use pass_manifest_schema::OptPassManifestSpec;
 pub use schema::PeepholeSpec;
 
+/// Errors returned while validating or lowering exported optimizer rules.
 #[derive(Debug)]
 pub enum GenerateError {
+    /// JSON deserialization failed.
     Json(serde_json::Error),
+    /// The peephole schema version is newer than this generator supports.
     UnsupportedFormatVersion(u32),
+    /// The fact-transfer schema version is newer than this generator supports.
     UnsupportedFactsFormatVersion(u32),
+    /// The peephole schema `kind` field does not match this generator.
     UnsupportedKind(String),
+    /// The fact-transfer schema `kind` field does not match this generator.
     UnsupportedFactsKind(String),
+    /// The cleanup-pass manifest schema version is newer than this generator supports.
     UnsupportedPassManifestFormatVersion(u32),
+    /// The cleanup-pass manifest `kind` field does not match this generator.
     UnsupportedPassManifestKind(String),
+    /// A transform kind is not supported by the current code generator.
     UnsupportedTransformKind(String),
-    UnsupportedRootRewrite { rule: String, message: String },
+    /// The matched root and replacement shape are incompatible.
+    UnsupportedRootRewrite {
+        /// Name of the rule that failed validation.
+        rule: String,
+        /// Human-readable explanation of the unsupported rewrite.
+        message: String,
+    },
+    /// A pattern form is not supported by the current generator.
     UnsupportedPattern(String),
+    /// A fact-transfer rule requests an unsupported operation or transfer function.
     UnsupportedFactsRule(String),
+    /// A cleanup-pass family references an unsupported runtime entry point.
     UnsupportedPassFamilyRunner(String),
-    IllTypedReplacement { rule: String, message: String },
-    MissingReplacementBinding { rule: String, binding: String },
-    MissingSideConditionBinding { rule: String, binding: String },
-    IllTypedSideCondition { rule: String, message: String },
+    /// A replacement expression is not type-correct for the matched root.
+    IllTypedReplacement {
+        /// Name of the rule that failed validation.
+        rule: String,
+        /// Human-readable explanation of the type mismatch.
+        message: String,
+    },
+    /// A replacement references a binding that is not produced by the match pattern.
+    MissingReplacementBinding {
+        /// Name of the rule that failed validation.
+        rule: String,
+        /// Binding name referenced by the replacement.
+        binding: String,
+    },
+    /// A side condition references a binding that is not produced by the match pattern.
+    MissingSideConditionBinding {
+        /// Name of the rule that failed validation.
+        rule: String,
+        /// Binding name referenced by the side condition.
+        binding: String,
+    },
+    /// A side condition is not type-correct for the binding it references.
+    IllTypedSideCondition {
+        /// Name of the rule that failed validation.
+        rule: String,
+        /// Human-readable explanation of the type mismatch.
+        message: String,
+    },
+    /// An integer literal in the exported rule set could not be parsed.
     InvalidIntConstant(String),
 }
 
@@ -115,18 +158,36 @@ impl From<serde_json::Error> for GenerateError {
     }
 }
 
+/// Deserialize and validate a peephole-rule specification.
+///
+/// # Errors
+///
+/// Returns an error if the JSON payload cannot be deserialized or if the
+/// decoded schema is not supported by this generator.
 pub fn load_spec_from_json_str(json: &str) -> Result<PeepholeSpec, GenerateError> {
     let spec: PeepholeSpec = serde_json::from_str(json)?;
     schema::validate_spec(&spec)?;
     Ok(spec)
 }
 
+/// Deserialize and validate a peephole fact-transfer specification.
+///
+/// # Errors
+///
+/// Returns an error if the JSON payload cannot be deserialized or if the
+/// decoded schema is not supported by this generator.
 pub fn load_facts_spec_from_json_str(json: &str) -> Result<FactSpec, GenerateError> {
     let spec: FactSpec = serde_json::from_str(json)?;
     facts_schema::validate_spec(&spec)?;
     Ok(spec)
 }
 
+/// Deserialize and validate a cleanup-pass manifest specification.
+///
+/// # Errors
+///
+/// Returns an error if the JSON payload cannot be deserialized or if the
+/// decoded schema is not supported by this generator.
 pub fn load_pass_manifest_spec_from_json_str(
     json: &str,
 ) -> Result<OptPassManifestSpec, GenerateError> {

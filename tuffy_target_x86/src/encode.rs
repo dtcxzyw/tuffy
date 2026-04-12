@@ -151,6 +151,7 @@ fn add_code(size: OpSize) -> Code {
     }
 }
 
+/// Return the iced-x86 opcode used for sub.
 fn sub_code(size: OpSize) -> Code {
     match size {
         OpSize::S64 => Code::Sub_rm64_r64,
@@ -160,6 +161,7 @@ fn sub_code(size: OpSize) -> Code {
     }
 }
 
+/// Return the iced-x86 opcode used for adc.
 fn adc_code(size: OpSize) -> Code {
     match size {
         OpSize::S64 => Code::Adc_rm64_r64,
@@ -169,6 +171,7 @@ fn adc_code(size: OpSize) -> Code {
     }
 }
 
+/// Return the iced-x86 opcode used for sbb.
 fn sbb_code(size: OpSize) -> Code {
     match size {
         OpSize::S64 => Code::Sbb_rm64_r64,
@@ -178,6 +181,7 @@ fn sbb_code(size: OpSize) -> Code {
     }
 }
 
+/// Return the iced-x86 opcode used for or.
 fn or_code(size: OpSize) -> Code {
     match size {
         OpSize::S64 => Code::Or_rm64_r64,
@@ -187,6 +191,7 @@ fn or_code(size: OpSize) -> Code {
     }
 }
 
+/// Return the iced-x86 opcode used for and.
 fn and_code(size: OpSize) -> Code {
     match size {
         OpSize::S64 => Code::And_rm64_r64,
@@ -196,6 +201,7 @@ fn and_code(size: OpSize) -> Code {
     }
 }
 
+/// Return the iced-x86 opcode used for xor.
 fn xor_code(size: OpSize) -> Code {
     match size {
         OpSize::S64 => Code::Xor_rm64_r64,
@@ -205,6 +211,7 @@ fn xor_code(size: OpSize) -> Code {
     }
 }
 
+/// Return the iced-x86 opcode used for cmp rr.
 fn cmp_rr_code(size: OpSize) -> Code {
     match size {
         OpSize::S64 => Code::Cmp_rm64_r64,
@@ -214,6 +221,7 @@ fn cmp_rr_code(size: OpSize) -> Code {
     }
 }
 
+/// Return the iced-x86 opcode used for test rr.
 fn test_rr_code(size: OpSize) -> Code {
     match size {
         OpSize::S64 => Code::Test_rm64_r64,
@@ -223,6 +231,7 @@ fn test_rr_code(size: OpSize) -> Code {
     }
 }
 
+/// Return the iced-x86 opcode used for mov rr.
 fn mov_rr_code(size: OpSize) -> Code {
     match size {
         OpSize::S64 => Code::Mov_rm64_r64,
@@ -232,6 +241,7 @@ fn mov_rr_code(size: OpSize) -> Code {
     }
 }
 
+/// Return the iced-x86 opcode used for imul rr.
 fn imul_rr_code(size: OpSize) -> Code {
     match size {
         OpSize::S64 => Code::Imul_r64_rm64,
@@ -241,6 +251,7 @@ fn imul_rr_code(size: OpSize) -> Code {
     }
 }
 
+/// Return the iced-x86 opcode used for cmp ri.
 fn cmp_ri_code(size: OpSize) -> Code {
     match size {
         OpSize::S64 => Code::Cmp_rm64_imm32,
@@ -250,6 +261,7 @@ fn cmp_ri_code(size: OpSize) -> Code {
     }
 }
 
+/// Return the iced-x86 opcode used for and ri.
 fn and_ri_code(size: OpSize) -> Code {
     match size {
         OpSize::S64 => Code::And_rm64_imm32,
@@ -261,6 +273,7 @@ fn and_ri_code(size: OpSize) -> Code {
 
 // --- Shift codes ---
 
+/// Return the iced-x86 opcode used for shl cl.
 fn shl_cl_code(size: OpSize) -> Code {
     match size {
         OpSize::S64 => Code::Shl_rm64_CL,
@@ -270,6 +283,7 @@ fn shl_cl_code(size: OpSize) -> Code {
     }
 }
 
+/// Return the iced-x86 opcode used for shr cl.
 fn shr_cl_code(size: OpSize) -> Code {
     match size {
         OpSize::S64 => Code::Shr_rm64_CL,
@@ -279,6 +293,7 @@ fn shr_cl_code(size: OpSize) -> Code {
     }
 }
 
+/// Return the iced-x86 opcode used for sar cl.
 fn sar_cl_code(size: OpSize) -> Code {
     match size {
         OpSize::S64 => Code::Sar_rm64_CL,
@@ -288,6 +303,7 @@ fn sar_cl_code(size: OpSize) -> Code {
     }
 }
 
+/// Return the iced-x86 opcode used for rol cl.
 fn rol_cl_code(size: OpSize) -> Code {
     match size {
         OpSize::S64 => Code::Rol_rm64_CL,
@@ -297,6 +313,7 @@ fn rol_cl_code(size: OpSize) -> Code {
     }
 }
 
+/// Return the iced-x86 opcode used for ror cl.
 fn ror_cl_code(size: OpSize) -> Code {
     match size {
         OpSize::S64 => Code::Ror_rm64_CL,
@@ -306,6 +323,7 @@ fn ror_cl_code(size: OpSize) -> Code {
     }
 }
 
+/// Return the iced-x86 opcode used for shl imm.
 fn shl_imm_code(size: OpSize) -> Code {
     match size {
         OpSize::S64 => Code::Shl_rm64_imm8,
@@ -315,6 +333,7 @@ fn shl_imm_code(size: OpSize) -> Code {
     }
 }
 
+/// Return the iced-x86 opcode used for sar imm.
 fn sar_imm_code(size: OpSize) -> Code {
     match size {
         OpSize::S64 => Code::Sar_rm64_imm8,
@@ -324,6 +343,7 @@ fn sar_imm_code(size: OpSize) -> Code {
     }
 }
 
+/// Return the iced-x86 opcode used for shr imm.
 fn shr_imm_code(size: OpSize) -> Code {
     match size {
         OpSize::S64 => Code::Shr_rm64_imm8,
@@ -335,6 +355,7 @@ fn shr_imm_code(size: OpSize) -> Code {
 
 // --- Branch / conditional codes ---
 
+/// Return the iced-x86 opcode used for jcc.
 fn jcc_code(cc: CondCode) -> Code {
     match cc {
         CondCode::E => Code::Je_rel32_64,
@@ -352,6 +373,7 @@ fn jcc_code(cc: CondCode) -> Code {
     }
 }
 
+/// Return the iced-x86 opcode used for cmovcc.
 fn cmovcc_code(cc: CondCode, size: OpSize) -> Code {
     match (cc, size) {
         (CondCode::E, OpSize::S64) => Code::Cmove_r64_rm64,
@@ -394,6 +416,7 @@ fn cmovcc_code(cc: CondCode, size: OpSize) -> Code {
     }
 }
 
+/// Return the iced-x86 opcode used for setcc.
 fn setcc_code(cc: CondCode) -> Code {
     match cc {
         CondCode::E => Code::Sete_rm8,
@@ -413,6 +436,7 @@ fn setcc_code(cc: CondCode) -> Code {
 
 // --- Memory load/store codes ---
 
+/// Return the iced-x86 opcode used for mov load.
 fn mov_load_code(size: OpSize) -> Code {
     match size {
         OpSize::S64 => Code::Mov_r64_rm64,
@@ -422,6 +446,7 @@ fn mov_load_code(size: OpSize) -> Code {
     }
 }
 
+/// Return the iced-x86 opcode used for mov store.
 fn mov_store_code(size: OpSize) -> Code {
     match size {
         OpSize::S64 => Code::Mov_rm64_r64,
@@ -431,6 +456,7 @@ fn mov_store_code(size: OpSize) -> Code {
     }
 }
 
+/// Return the iced-x86 opcode used for mov store imm.
 fn mov_store_imm_code(size: OpSize) -> Code {
     match size {
         OpSize::S64 => Code::Mov_rm64_imm32,
@@ -440,6 +466,7 @@ fn mov_store_imm_code(size: OpSize) -> Code {
     }
 }
 
+/// Return the iced-x86 opcode used for bswap.
 fn bswap_code(size: OpSize) -> Code {
     match size {
         OpSize::S64 => Code::Bswap_r64,
@@ -452,11 +479,17 @@ fn bswap_code(size: OpSize) -> Code {
 // Encode context
 // ---------------------------------------------------------------------------
 
+/// Stateful encoder context for one physical x86 function.
 struct EncodeContext {
+    /// iced-x86 encoder used to append instructions.
     encoder: Encoder,
+    /// Current code position in bytes.
     pos: usize,
+    /// Resolved label positions keyed by label id.
     labels: HashMap<u32, usize>,
+    /// Pending jump fixups waiting for label resolution.
     fixups: Vec<JumpFixup>,
+    /// Recorded relocations for the encoded function.
     relocations: Vec<Relocation>,
     /// Raw call-site entries: (call_start, call_length, cleanup_label).
     /// `Some(label)` → cleanup landing pad; `None` → no handler (cs_lpad = 0).
@@ -468,6 +501,7 @@ struct EncodeContext {
 }
 
 impl EncodeContext {
+    /// Internal x86 encoding helper `new`.
     fn new() -> Self {
         Self {
             encoder: Encoder::new(64),
@@ -598,6 +632,7 @@ pub fn encode_function(insts: &[PInst], inst_sources: &[Option<u32>]) -> EncodeR
 // Per-instruction encoding
 // ---------------------------------------------------------------------------
 
+/// Encode one physical x86 instruction into the current context.
 fn encode_inst(inst: &PInst, ctx: &mut EncodeContext) {
     match inst {
         // --- Register-register ALU ---
@@ -1395,6 +1430,7 @@ fn encode_gpr_to_xmm(ctx: &mut EncodeContext, dst: Gpr, src: Gpr, double: bool) 
     };
     ctx.emit(Instruction::with2(load_code, xmm_to_iced(dst), rsp_m8).unwrap());
 }
+/// Encode a floating-point widening or narrowing conversion.
 fn encode_cvt_fp_to_fp(
     ctx: &mut EncodeContext,
     dst: Gpr,
@@ -1430,7 +1466,11 @@ fn encode_cvt_fp_to_fp(
 ///
 /// kind values match tuffy_ir::instruction::FCmpOp discriminants:
 ///   1=OEq, 2=OGt, 3=OGe, 4=OLt, 5=OLe, 6=ONe, 7=Ord, 8=Uno
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Floating-point compare lowering needs both operands, result registers, predicate kind, and width."
+)]
+/// Internal x86 encoding helper `encode_fp_cmp`.
 fn encode_fp_cmp(
     ctx: &mut EncodeContext,
     dst: Gpr,
@@ -1558,6 +1598,7 @@ fn encode_fp_cmp(
 // Atomic pseudo-instruction expansions
 // ---------------------------------------------------------------------------
 
+/// Return the iced-x86 opcode used for xadd.
 fn xadd_code(size: OpSize) -> Code {
     match size {
         OpSize::S64 => Code::Xadd_rm64_r64,
@@ -1567,6 +1608,7 @@ fn xadd_code(size: OpSize) -> Code {
     }
 }
 
+/// Return the iced-x86 opcode used for xchg.
 fn xchg_code(size: OpSize) -> Code {
     match size {
         OpSize::S64 => Code::Xchg_rm64_r64,
@@ -1576,6 +1618,7 @@ fn xchg_code(size: OpSize) -> Code {
     }
 }
 
+/// Return the iced-x86 opcode used for cmpxchg.
 fn cmpxchg_code(size: OpSize) -> Code {
     match size {
         OpSize::S64 => Code::Cmpxchg_rm64_r64,
@@ -1585,6 +1628,7 @@ fn cmpxchg_code(size: OpSize) -> Code {
     }
 }
 
+/// Return the iced-x86 opcode used for neg.
 fn neg_code(size: OpSize) -> Code {
     match size {
         OpSize::S64 => Code::Neg_rm64,

@@ -38,7 +38,10 @@ pub struct AllocResult {
 /// `spill_reg`: physical register reserved for spill loads/stores (must NOT
 ///   be in `allocatable`).
 /// `aliases_fn`: function to check if two physical registers alias.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "The allocator entry point models the complete target register policy explicitly."
+)]
 pub fn allocate<I: RegAllocInst, F>(
     insts: &[I],
     vreg_count: u32,
@@ -397,7 +400,10 @@ where
 
 /// Handle a fixed-constraint interval. If the required PReg is occupied,
 /// evict the conflicting interval and reassign it to a safe register.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Fixed-register handling needs the full allocator state to preserve allocation invariants."
+)]
 fn handle_fixed<F>(
     fixed: PReg,
     range: &LiveRange,
@@ -544,7 +550,10 @@ fn handle_fixed<F>(
 /// an active interval that does NOT span a call. The evicted interval is
 /// reassigned to a free caller-saved register (safe because it doesn't cross
 /// a call boundary). Returns the freed callee-saved register encoding.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "The eviction helper operates on several allocator data structures in lockstep."
+)]
 fn evict_callee_saved_for_call(
     active: &mut Vec<(u32, u32)>,
     free: &mut BTreeSet<u8>,
@@ -597,7 +606,10 @@ fn evict_callee_saved_for_call(
 /// Spill: when no free register is available, try to reuse a register
 /// from a non-overlapping interval. If truly no register works, spill
 /// to a stack slot.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Spill decisions need access to the same allocation context as register assignment."
+)]
 fn spill_at<F>(
     range: &LiveRange,
     active: &mut Vec<(u32, u32)>,

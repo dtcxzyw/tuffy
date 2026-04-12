@@ -21,7 +21,9 @@ pub struct AllocId(pub u64);
 /// A pointer with provenance: allocation ID + byte offset.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pointer {
+    /// Referenced allocation id.
     pub alloc_id: AllocId,
+    /// Byte offset within the allocation.
     pub offset: i64,
 }
 

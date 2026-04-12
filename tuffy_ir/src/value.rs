@@ -12,8 +12,11 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ValueRef(pub(crate) u32);
 
+/// Tag bit marking block-argument references.
 const BLOCK_ARG_BIT: u32 = 1 << 31;
+/// Tag bit marking secondary instruction results.
 const SECONDARY_BIT: u32 = 1 << 30;
+/// Mask covering all [`ValueRef`] tag bits.
 const TAG_MASK: u32 = BLOCK_ARG_BIT | SECONDARY_BIT;
 
 impl ValueRef {

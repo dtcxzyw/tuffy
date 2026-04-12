@@ -27,6 +27,7 @@ Match the user's language in conversation. All committed content (code, comments
 - **Component conventions:** Follow each component's `README.md`. Do not insert workarounds or special-case logic in the wrong component.
 - **Wide integer lowering:** Derive split widths, limb widths, and ABI thresholds from target legality or backend abstractions. Do not hardcode `32`, `64`, or `128` for target-independent wide integer logic.
 - **Comments:** Do not add comments that the code itself explains. Only comment non-obvious logic — comments should explain *why*, not *what*. Do not delete or modify comments in code you are not otherwise changing.
+- **Rustdoc lint policy:** Workspace crates opt into workspace lint inheritance, and doc-related lints are enforced in `Cargo.toml` via `missing_docs`, `clippy::missing_docs_in_private_items`, `clippy::missing_panics_doc`, `clippy::missing_errors_doc`, and `clippy::allow_attributes_without_reason`. New `#[allow(...)]` attributes must include `reason = "..."`.
 
 ## Testing Policy
 

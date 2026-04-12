@@ -69,10 +69,15 @@ pub enum TerminatorAction {
     Branch(tuffy_ir::value::BlockRef, Vec<Value>),
     /// Conditional branch.
     BranchIf {
+        /// Branch condition value.
         cond: Value,
+        /// Target block when the condition is true.
         then_block: tuffy_ir::value::BlockRef,
+        /// Block arguments passed to `then_block`.
         then_args: Vec<Value>,
+        /// Target block when the condition is false.
         else_block: tuffy_ir::value::BlockRef,
+        /// Block arguments passed to `else_block`.
         else_args: Vec<Value>,
     },
     /// Loop backedge with values.
@@ -88,10 +93,13 @@ pub enum TerminatorAction {
 /// UB violation detected during execution.
 #[derive(Debug, Clone)]
 pub struct UbViolation {
+    /// UB category.
     pub kind: UbKind,
+    /// Human-readable UB description.
     pub message: String,
 }
 
+/// Categories of undefined behavior detected by the interpreter.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UbKind {
     /// Annotation violation producing poison was observed.
@@ -139,6 +147,7 @@ pub fn apply_annotation(val: &BigInt, ann: &IntAnnotation) -> Value {
     }
 }
 
+/// Return whether the given bit is one in the mathematical integer value.
 fn int_bit_is_one(value: &BigInt, bit: u64) -> bool {
     let modulus = BigInt::one() << (bit as usize + 1);
     let truncated = ((value % &modulus) + &modulus) % &modulus;
@@ -146,6 +155,7 @@ fn int_bit_is_one(value: &BigInt, bit: u64) -> bool {
     (&shifted % BigInt::from(2u8)) != BigInt::zero()
 }
 
+/// Check whether an integer value satisfies a known-bits constraint.
 fn matches_known_bits(value: &BigInt, known: &KnownBits) -> bool {
     if !known.is_well_formed() {
         return false;
@@ -366,6 +376,7 @@ fn float_compare(a: &FloatConst, b: &FloatConst) -> (bool, bool, bool, bool) {
     (a_f64 < b_f64, a_f64 == b_f64, a_f64 > b_f64, false)
 }
 
+/// Convert a `FloatConst` to `f64` for host-side computations and printing.
 pub fn float_to_f64(fc: &FloatConst) -> f64 {
     match fc.float_type() {
         FloatType::F64 => f64::from_bits(fc.to_bits() as u64),
@@ -393,7 +404,16 @@ pub fn float_to_f64(fc: &FloatConst) -> f64 {
 /// Execute a single instruction.
 ///
 /// `resolve_value` is a closure that looks up a ValueRef in the current environment.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Instruction execution needs the full operand, type, memory, and annotation context."
+)]
+/// Execute a single IR instruction.
+///
+/// # Errors
+///
+/// Returns an error when the instruction immediately triggers undefined
+/// behavior.
 pub fn execute_instruction(
     op: &Op,
     ty: &Type,
@@ -1560,7 +1580,10 @@ pub fn execute_instruction(
         Op::FMinNum(a, b) => {
             let va = res_op(resolve_value, &a.clone().raw());
             let vb = res_op(resolve_value, &b.clone().raw());
-            #[allow(clippy::if_same_then_else)]
+            #[allow(
+                clippy::if_same_then_else,
+                reason = "NaN handling branches intentionally spell out the IEEE minnum semantics."
+            )]
             // NaN handling branches intentionally differ in semantics
             match (va.as_float(), vb.as_float()) {
                 (Some(fa), Some(fb)) => {
@@ -1581,7 +1604,10 @@ pub fn execute_instruction(
         Op::FMaxNum(a, b) => {
             let va = res_op(resolve_value, &a.clone().raw());
             let vb = res_op(resolve_value, &b.clone().raw());
-            #[allow(clippy::if_same_then_else)]
+            #[allow(
+                clippy::if_same_then_else,
+                reason = "NaN handling branches intentionally spell out the IEEE maxnum semantics."
+            )]
             match (va.as_float(), vb.as_float()) {
                 (Some(fa), Some(fb)) => {
                     let result = if float_is_nan(fa) {
@@ -1787,6 +1813,11 @@ pub fn execute_instruction(
 
 // ── Helper functions ──
 
+/// Execute a floating-point binary operation helper.
+///
+/// # Errors
+///
+/// Returns an error if the underlying operation triggers undefined behavior.
 fn exec_float_binop(
     a: &tuffy_ir::typed::FloatOperand,
     b: &tuffy_ir::typed::FloatOperand,
@@ -1814,6 +1845,11 @@ fn exec_float_binop(
     }
 }
 
+/// Execute a saturating integer add/sub helper.
+///
+/// # Errors
+///
+/// Returns an error if operand resolution triggers undefined behavior.
 fn exec_saturating(
     a: &tuffy_ir::typed::IntOperand,
     b: &tuffy_ir::typed::IntOperand,
@@ -1853,7 +1889,15 @@ fn exec_saturating(
     )))
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Overflow helpers need signedness, annotations, and operand resolution context."
+)]
+/// Execute an add/sub overflow helper.
+///
+/// # Errors
+///
+/// Returns an error if operand resolution triggers undefined behavior.
 fn exec_overflow(
     a: &tuffy_ir::typed::IntOperand,
     b: &tuffy_ir::typed::IntOperand,
@@ -1895,6 +1939,11 @@ fn exec_overflow(
     }
 }
 
+/// Execute a multiply-with-overflow helper.
+///
+/// # Errors
+///
+/// Returns an error if operand resolution triggers undefined behavior.
 fn exec_mul_overflow(
     a: &tuffy_ir::typed::IntOperand,
     b: &tuffy_ir::typed::IntOperand,
@@ -1935,7 +1984,15 @@ fn exec_mul_overflow(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Carrying multiply-add needs four operands plus annotation context."
+)]
+/// Execute a carrying multiply-add helper.
+///
+/// # Errors
+///
+/// Returns an error if operand resolution triggers undefined behavior.
 fn exec_carrying_mul_add(
     a: &tuffy_ir::typed::IntOperand,
     b: &tuffy_ir::typed::IntOperand,
@@ -2019,10 +2076,12 @@ fn bytes_to_value(bytes: &[AbstractByte], ty: &Type, n: usize) -> Value {
     bytes_to_value_typed_with_width(bytes, ty, n)
 }
 
+/// Decode bytes into a value using the natural width of `ty`.
 fn bytes_to_value_typed(bytes: &[AbstractByte], ty: &Type) -> Value {
     bytes_to_value_typed_with_width(bytes, ty, bytes.len())
 }
 
+/// Decode bytes into a value using an explicit byte width.
 fn bytes_to_value_typed_with_width(bytes: &[AbstractByte], ty: &Type, n: usize) -> Value {
     // Treat Uninit as 0 — codegen may emit wide loads that span padding bytes.
     // Real hardware reads arbitrary junk; we pick 0 for determinism.
@@ -2106,6 +2165,7 @@ fn value_to_bytes(val: &Value, n: usize) -> Vec<AbstractByte> {
     value_to_bytes_typed(val, &Type::Byte(n as u32), n)
 }
 
+/// Encode a value into bytes using an explicit type and byte width.
 fn value_to_bytes_typed(val: &Value, ty: &Type, n: usize) -> Vec<AbstractByte> {
     let mut bytes = match ty {
         Type::Struct(fields) => match val {
@@ -2140,6 +2200,7 @@ fn value_to_bytes_typed(val: &Value, ty: &Type, n: usize) -> Vec<AbstractByte> {
     bytes
 }
 
+/// Encode a scalar value into little-endian abstract bytes.
 fn value_to_bytes_scalar(val: &Value, n: usize) -> Vec<AbstractByte> {
     match val {
         Value::Int(i) => int_to_le_bytes(i, n),
@@ -2162,6 +2223,7 @@ fn value_to_bytes_scalar(val: &Value, n: usize) -> Vec<AbstractByte> {
     }
 }
 
+/// Slice `size` bytes from `bytes`, padding missing tail bytes with `Uninit`.
 fn slice_with_padding(bytes: &[AbstractByte], start: usize, size: usize) -> Vec<AbstractByte> {
     let mut out = if start >= bytes.len() {
         Vec::new()

@@ -98,6 +98,7 @@ fn preg_to_dwarf(p: PReg) -> u8 {
     }
 }
 
+/// Resolve a selected IR value to a compiled debug location.
 fn debug_location_for_value(
     value: ValueRef,
     isel_result: &IselResult<VInst>,
@@ -117,6 +118,7 @@ fn debug_location_for_value(
     Some(DebugLocation::Register(preg_to_dwarf(preg) as u16))
 }
 
+/// Build compiled debug info for one lowered function when source data exists.
 fn build_compiled_debug_info(
     func: &Function,
     isel_result: &IselResult<VInst>,
