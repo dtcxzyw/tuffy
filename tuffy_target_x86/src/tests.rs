@@ -147,6 +147,80 @@ func @ptradd_const(ptr) -> ptr {
 }
 
 #[test]
+fn isel_ptradd_shl_offset_uses_scaled_lea_without_shift() {
+    let module = parse_module(
+        r#"
+func @ptradd_scaled(ptr, int:u64) -> ptr {
+  bb0(v0: mem):
+    v1: ptr = param 0
+    v2: int:u64 = param 1
+    v3: int:u2 = iconst 3
+    v4: int:u64 = shl v2, v3
+    v5: ptr = ptradd v1, v4
+    ret v5, v0
+}
+"#,
+    )
+    .expect("module should parse");
+    let func = &module.functions[0];
+    let result = isel::isel(func, &module.symbols).expect("isel should succeed");
+
+    assert!(
+        result
+            .insts
+            .iter()
+            .any(|inst| matches!(inst, MInst::LeaIndexed { scale: 8, .. })),
+        "scaled ptradd should use lea with scale 8: {:?}",
+        result.insts
+    );
+    assert!(
+        !result
+            .insts
+            .iter()
+            .any(|inst| matches!(inst, MInst::ShlImm { imm: 3, .. } | MInst::ShlRCL { .. })),
+        "scaled ptradd should not materialize a separate shift: {:?}",
+        result.insts
+    );
+}
+
+#[test]
+fn isel_ptradd_mul_scale_uses_scaled_lea_without_mul() {
+    let module = parse_module(
+        r#"
+func @ptradd_mul_scale(ptr, int:u64) -> ptr {
+  bb0(v0: mem):
+    v1: ptr = param 0
+    v2: int:u64 = param 1
+    v3: int:u4 = iconst 8
+    v4: int:u64 = mul v2, v3
+    v5: ptr = ptradd v1, v4
+    ret v5, v0
+}
+"#,
+    )
+    .expect("module should parse");
+    let func = &module.functions[0];
+    let result = isel::isel(func, &module.symbols).expect("isel should succeed");
+
+    assert!(
+        result
+            .insts
+            .iter()
+            .any(|inst| matches!(inst, MInst::LeaIndexed { scale: 8, .. })),
+        "mul-scaled ptradd should use lea with scale 8: {:?}",
+        result.insts
+    );
+    assert!(
+        !result
+            .insts
+            .iter()
+            .any(|inst| matches!(inst, MInst::ImulRR { .. })),
+        "mul-scaled ptradd should not materialize a separate multiply: {:?}",
+        result.insts
+    );
+}
+
+#[test]
 fn isel_shl_const_uses_imm_shift() {
     let module = parse_module(
         r#"

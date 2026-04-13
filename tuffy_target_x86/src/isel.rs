@@ -44,6 +44,8 @@ struct IselCtx {
     tls_sym_addrs: HashMap<u32, String>,
     /// Deferred small integer constants: value index → immediate.
     int_consts: HashMap<u32, i64>,
+    /// Deferred scaled ptradd offsets: value index → (index value, scale).
+    scaled_ptradd_offsets: HashMap<u32, (ValueRef, u8)>,
     /// Captured RDX vregs from calls with secondary returns.
     /// Maps call instruction index → unconstrained vreg holding the RDX value.
     rdx_captured: HashMap<u32, VReg>,
@@ -1034,6 +1036,7 @@ pub fn isel(func: &Function, symbols: &SymbolTable) -> Result<IselResult<VInst>,
         sym_addrs: HashMap::new(),
         tls_sym_addrs: HashMap::new(),
         int_consts: HashMap::new(),
+        scaled_ptradd_offsets: HashMap::new(),
         rdx_captured: HashMap::new(),
     };
     let mut inst_sources = Vec::new();
@@ -1137,6 +1140,15 @@ fn select_inst(
     }
     match op {
         Op::Shl(lhs, rhs) => {
+            if let Some(imm) = int_const(func, rhs.clone().raw().value)
+                .and_then(|imm| u8::try_from(imm).ok())
+                .filter(|imm| (1..=3).contains(imm))
+                && value_only_used_by_ptradd_offset(func, vref)
+            {
+                ctx.scaled_ptradd_offsets
+                    .insert(vref.index(), (lhs.clone().raw().value, 1u8 << imm));
+                return Some(());
+            }
             let lhs_vreg = ctx.ensure_in_reg(lhs.clone().raw().value)?;
             let size = get_int_annotation(func, vref)
                 .or_else(|| operand_int_annotation(func, &lhs.clone().raw()))
@@ -1208,6 +1220,15 @@ fn select_inst(
             ctx.regs.assign(vref, dst);
             return Some(());
         }
+        Op::Mul(lhs, rhs) => {
+            if let Some((index_value, scale)) = mul_scale_operands(func, lhs, rhs)
+                && value_only_used_by_ptradd_offset(func, vref)
+            {
+                ctx.scaled_ptradd_offsets
+                    .insert(vref.index(), (index_value, scale));
+                return Some(());
+            }
+        }
         Op::PtrAdd(ptr, offset) => {
             let base = ctx.ensure_in_reg(ptr.clone().raw().value)?;
             let dst = ctx.alloc.alloc();
@@ -1218,6 +1239,19 @@ fn select_inst(
                     dst,
                     base,
                     offset: imm,
+                });
+            } else if let Some((index_value, scale)) = ctx
+                .scaled_ptradd_offsets
+                .get(&offset.clone().raw().value.index())
+                .copied()
+            {
+                let index = ctx.ensure_in_reg(index_value)?;
+                ctx.out.push(MInst::LeaIndexed {
+                    dst,
+                    base,
+                    index,
+                    scale,
+                    offset: 0,
                 });
             } else {
                 let index = ctx.ensure_in_reg(offset.clone().raw().value)?;
@@ -4866,6 +4900,43 @@ fn int_const_use_is_immediate_compatible(
         }
         _ => false,
     }
+}
+
+/// Return whether a value is only used as operand 1 of `ptradd`.
+fn value_only_used_by_ptradd_offset(func: &Function, value: ValueRef) -> bool {
+    func.use_count(value) > 0
+        && func.uses_of(value).all(|use_node| {
+            use_node.operand_index == 1
+                && func
+                    .inst_pool
+                    .get(use_node.user)
+                    .is_some_and(|node| matches!(node.inst.op, Op::PtrAdd(_, _)))
+        })
+}
+
+/// Resolve a multiplication into an x86 scaled-index pair when possible.
+fn mul_scale_operands(
+    func: &Function,
+    lhs: &tuffy_ir::typed::IntOperand,
+    rhs: &tuffy_ir::typed::IntOperand,
+) -> Option<(ValueRef, u8)> {
+    let lhs_value = lhs.clone().raw().value;
+    let rhs_value = rhs.clone().raw().value;
+    let lhs_const = int_const(func, lhs_value);
+    let rhs_const = int_const(func, rhs_value);
+    let (index, factor) = match (lhs_const, rhs_const) {
+        (Some(factor), None) => (rhs_value, factor),
+        (None, Some(factor)) => (lhs_value, factor),
+        _ => return None,
+    };
+    let scale = match factor {
+        1 => 1,
+        2 => 2,
+        4 => 4,
+        8 => 8,
+        _ => return None,
+    };
+    Some((index, scale))
 }
 
 /// Resolve a value to a constant boolean when possible.
