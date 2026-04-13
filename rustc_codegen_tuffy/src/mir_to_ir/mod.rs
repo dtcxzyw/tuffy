@@ -437,18 +437,10 @@ pub fn translate_function<'tcx>(
             .param(0, Type::Ptr(0), None, Origin::synthetic());
         ctx.sret_ptr = Some(sret_param);
 
-        // Allocate a local stack slot for constructing the return value.
-        // We deliberately do NOT reuse sret_param here: MIR blocks are
-        // translated in numeric order, so the return block may be
-        // translated before a call that writes to _0 via sret.  Using
-        // a separate local keeps the return memcopy correct regardless
-        // of translation order.
+        // Reuse the incoming SRET buffer as the return local so wrappers
+        // can forward large aggregate results without an extra local copy.
         let ret_local = mir::Local::from_usize(0);
-        let ret_align = type_align(ctx.tcx, ret_mir_ty).unwrap_or(8) as u32;
-        let local_slot = ctx
-            .builder
-            .stack_slot(ret_size as u32, ret_align, Origin::synthetic());
-        ctx.locals.set(ret_local, local_slot);
+        ctx.locals.set(ret_local, sret_param);
         ctx.stack_locals.mark(ret_local);
     }
     ctx.translate_params();

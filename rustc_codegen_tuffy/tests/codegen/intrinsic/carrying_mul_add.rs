@@ -56,20 +56,17 @@
 // CHECK: func @_RINvNtC$HASH_4core10intrinsics16carrying_mul_addnoEC$HASH_16carrying_mul_add(ptr, int:s128, int:s128, int:s128, int:s128) -> ptr {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
-// CHECK:     v2: ptr = stack_slot 32 align 16
-// CHECK:     v3: int:s128 = param 1
-// CHECK:     v4: int:s128 = param 2
-// CHECK:     v5: int:s128 = param 3
-// CHECK:     v6: int:s128 = param 4
-// CHECK:     v7: ptr = symbol_addr @_RNvXs_NtNtC$HASH_4core10intrinsics8fallbacknNtB4_14CarryingMulAdd16carrying_mul_addC$HASH_16carrying_mul_add
-// CHECK:     v8: mem = call v7(v2, v3, v4, v5, v6), v0
-// CHECK:     v9: int:i64 = iconst 0
-// CHECK:     br bb1(v8)
+// CHECK:     v2: int:s128 = param 1
+// CHECK:     v3: int:s128 = param 2
+// CHECK:     v4: int:s128 = param 3
+// CHECK:     v5: int:s128 = param 4
+// CHECK:     v6: ptr = symbol_addr @_RNvXs_NtNtC$HASH_4core10intrinsics8fallbacknNtB4_14CarryingMulAdd16carrying_mul_addC$HASH_16carrying_mul_add
+// CHECK:     v7: mem = call v6(v1, v2, v3, v4, v5), v0
+// CHECK:     v8: int:i64 = iconst 0
+// CHECK:     br bb1(v7)
 // CHECK:
-// CHECK:   bb1(v11: mem):
-// CHECK:     v12: int:i64 = iconst 32
-// CHECK:     v13: mem = memcopy v1:align8, v2:align8, v12, v11
-// CHECK:     ret v1, v13
+// CHECK:   bb1(v10: mem):
+// CHECK:     ret v1, v10
 // CHECK: }
 // CHECK:
 // CHECK: fn core::intrinsics::carrying_mul_add(_1: T, _2: T, _3: T, _4: T) -> (U, T) {
@@ -90,20 +87,17 @@
 // CHECK: func @_RINvNtC$HASH_4core10intrinsics16carrying_mul_addooEC$HASH_16carrying_mul_add(ptr, int:u128, int:u128, int:u128, int:u128) -> ptr {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
-// CHECK:     v2: ptr = stack_slot 32 align 16
-// CHECK:     v3: int:u128 = param 1
-// CHECK:     v4: int:u128 = param 2
-// CHECK:     v5: int:u128 = param 3
-// CHECK:     v6: int:u128 = param 4
-// CHECK:     v7: ptr = symbol_addr @_RNvXNtNtC$HASH_4core10intrinsics8fallbackoNtB2_14CarryingMulAdd16carrying_mul_addC$HASH_16carrying_mul_add
-// CHECK:     v8: mem = call v7(v2, v3, v4, v5, v6), v0
-// CHECK:     v9: int:i64 = iconst 0
-// CHECK:     br bb1(v8)
+// CHECK:     v2: int:u128 = param 1
+// CHECK:     v3: int:u128 = param 2
+// CHECK:     v4: int:u128 = param 3
+// CHECK:     v5: int:u128 = param 4
+// CHECK:     v6: ptr = symbol_addr @_RNvXNtNtC$HASH_4core10intrinsics8fallbackoNtB2_14CarryingMulAdd16carrying_mul_addC$HASH_16carrying_mul_add
+// CHECK:     v7: mem = call v6(v1, v2, v3, v4, v5), v0
+// CHECK:     v8: int:i64 = iconst 0
+// CHECK:     br bb1(v7)
 // CHECK:
-// CHECK:   bb1(v11: mem):
-// CHECK:     v12: int:i64 = iconst 32
-// CHECK:     v13: mem = memcopy v1:align8, v2:align8, v12, v11
-// CHECK:     ret v1, v13
+// CHECK:   bb1(v10: mem):
+// CHECK:     ret v1, v10
 // CHECK: }
 // CHECK:
 // CHECK: fn core::intrinsics::carrying_mul_add(_1: T, _2: T, _3: T, _4: T) -> (U, T) {
@@ -296,84 +290,81 @@
 // CHECK: func @_RNvNtNtC$HASH_4core10intrinsics8fallback13wide_mul_u128C$HASH_16carrying_mul_add(ptr, int:u128, int:u128) -> ptr {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
-// CHECK:     v2: ptr = stack_slot 32 align 16
-// CHECK:     v3: int:u128 = param 1
-// CHECK:     v4: int:u128 = param 2
-// CHECK:     v5: int:i128 = iconst 18446744073709551615
-// CHECK:     v6: int:i128 = and v3, v5:u128
-// CHECK:     v7: int:i32 = iconst 64
-// CHECK:     v8: int:i64 = iconst 127
-// CHECK:     v9: int:i64 = and v7, v8
-// CHECK:     v10: int:u128 = shr v3, v9
-// CHECK:     v11: int:i128 = iconst 18446744073709551615
-// CHECK:     v12: int:i128 = and v4, v11:u128
-// CHECK:     v13: int:i32 = iconst 64
-// CHECK:     v14: int:i64 = iconst 127
-// CHECK:     v15: int:i64 = and v13, v14
-// CHECK:     v16: int:u128 = shr v4, v15
-// CHECK:     v17: int:i128 = mul v12:u128, v6:u128
-// CHECK:     v18: int:i128 = iconst 18446744073709551615
-// CHECK:     v19: int:i128 = and v17:u128, v18:u128
-// CHECK:     v20: int:i32 = iconst 64
-// CHECK:     v21: int:i64 = iconst 127
-// CHECK:     v22: int:i64 = and v20, v21
-// CHECK:     v23: int:u128 = shr v17:u128, v22
-// CHECK:     v24: int:i128 = mul v12:u128, v10
-// CHECK:     v25: int:i128 = add v24:u128, v23
-// CHECK:     v26: int:i128 = iconst 18446744073709551615
-// CHECK:     v27: int:i128 = and v25:u128, v26:u128
-// CHECK:     v28: int:i32 = iconst 64
-// CHECK:     v29: int:i64 = iconst 127
-// CHECK:     v30: int:i64 = and v28, v29
-// CHECK:     v31: int:u128 = shr v25:u128, v30
-// CHECK:     v32: int:i128 = mul v16, v6:u128
-// CHECK:     v33: int:i128 = iconst 18446744073709551615
-// CHECK:     v34: int:i128 = and v32:u128, v33:u128
-// CHECK:     v35: int:i32 = iconst 64
-// CHECK:     v36: int:i64 = iconst 127
-// CHECK:     v37: int:i64 = and v35, v36
-// CHECK:     v38: int:u128 = shr v32:u128, v37
-// CHECK:     v39: int:i128 = mul v16, v10
-// CHECK:     v40: int:i128 = add v39:u128, v38
-// CHECK:     v41: int:i128 = iconst 18446744073709551615
-// CHECK:     v42: int:i128 = and v40:u128, v41:u128
-// CHECK:     v43: int:i32 = iconst 64
-// CHECK:     v44: int:i64 = iconst 127
-// CHECK:     v45: int:i64 = and v43, v44
-// CHECK:     v46: int:u128 = shr v40:u128, v45
-// CHECK:     v47: int:i128 = add v27:u128, v34:u128
-// CHECK:     v48: int:i128 = iconst 18446744073709551615
-// CHECK:     v49: int:i128 = and v47:u128, v48:u128
-// CHECK:     v50: int:i32 = iconst 64
-// CHECK:     v51: int:i64 = iconst 127
-// CHECK:     v52: int:i64 = and v50, v51
-// CHECK:     v53: int:u128 = shr v47:u128, v52
-// CHECK:     v54: int:i128 = add v31, v42:u128
-// CHECK:     v55: int:i128 = add v54:u128, v53
-// CHECK:     v56: int:i128 = iconst 18446744073709551615
-// CHECK:     v57: int:i128 = and v55:u128, v56:u128
-// CHECK:     v58: int:i32 = iconst 64
-// CHECK:     v59: int:i64 = iconst 127
-// CHECK:     v60: int:i64 = and v58, v59
-// CHECK:     v61: int:u128 = shr v55:u128, v60
-// CHECK:     v62: int:i128 = add v46, v61
-// CHECK:     v63: int:i32 = iconst 64
-// CHECK:     v64: int:i64 = iconst 127
-// CHECK:     v65: int:i64 = and v63, v64
-// CHECK:     v66: int:i128 = shl v49:u128, v65
-// CHECK:     v67: int:i128 = or v19:u128, v66:u128
-// CHECK:     v68: int:i32 = iconst 64
-// CHECK:     v69: int:i64 = iconst 127
-// CHECK:     v70: int:i64 = and v68, v69
-// CHECK:     v71: int:i128 = shl v62:u128, v70
-// CHECK:     v72: int:i128 = or v57:u128, v71:u128
-// CHECK:     v73: mem = store.16 v67, v2, v0
-// CHECK:     v74: int:i64 = iconst 16
-// CHECK:     v75: ptr = ptradd v2, v74
-// CHECK:     v76: mem = store.16 v72, v75, v73
-// CHECK:     v77: int:i64 = iconst 32
-// CHECK:     v78: mem = memcopy v1:align8, v2:align8, v77, v76
-// CHECK:     ret v1, v78
+// CHECK:     v2: int:u128 = param 1
+// CHECK:     v3: int:u128 = param 2
+// CHECK:     v4: int:i128 = iconst 18446744073709551615
+// CHECK:     v5: int:i128 = and v2, v4:u128
+// CHECK:     v6: int:i32 = iconst 64
+// CHECK:     v7: int:i64 = iconst 127
+// CHECK:     v8: int:i64 = and v6, v7
+// CHECK:     v9: int:u128 = shr v2, v8
+// CHECK:     v10: int:i128 = iconst 18446744073709551615
+// CHECK:     v11: int:i128 = and v3, v10:u128
+// CHECK:     v12: int:i32 = iconst 64
+// CHECK:     v13: int:i64 = iconst 127
+// CHECK:     v14: int:i64 = and v12, v13
+// CHECK:     v15: int:u128 = shr v3, v14
+// CHECK:     v16: int:i128 = mul v11:u128, v5:u128
+// CHECK:     v17: int:i128 = iconst 18446744073709551615
+// CHECK:     v18: int:i128 = and v16:u128, v17:u128
+// CHECK:     v19: int:i32 = iconst 64
+// CHECK:     v20: int:i64 = iconst 127
+// CHECK:     v21: int:i64 = and v19, v20
+// CHECK:     v22: int:u128 = shr v16:u128, v21
+// CHECK:     v23: int:i128 = mul v11:u128, v9
+// CHECK:     v24: int:i128 = add v23:u128, v22
+// CHECK:     v25: int:i128 = iconst 18446744073709551615
+// CHECK:     v26: int:i128 = and v24:u128, v25:u128
+// CHECK:     v27: int:i32 = iconst 64
+// CHECK:     v28: int:i64 = iconst 127
+// CHECK:     v29: int:i64 = and v27, v28
+// CHECK:     v30: int:u128 = shr v24:u128, v29
+// CHECK:     v31: int:i128 = mul v15, v5:u128
+// CHECK:     v32: int:i128 = iconst 18446744073709551615
+// CHECK:     v33: int:i128 = and v31:u128, v32:u128
+// CHECK:     v34: int:i32 = iconst 64
+// CHECK:     v35: int:i64 = iconst 127
+// CHECK:     v36: int:i64 = and v34, v35
+// CHECK:     v37: int:u128 = shr v31:u128, v36
+// CHECK:     v38: int:i128 = mul v15, v9
+// CHECK:     v39: int:i128 = add v38:u128, v37
+// CHECK:     v40: int:i128 = iconst 18446744073709551615
+// CHECK:     v41: int:i128 = and v39:u128, v40:u128
+// CHECK:     v42: int:i32 = iconst 64
+// CHECK:     v43: int:i64 = iconst 127
+// CHECK:     v44: int:i64 = and v42, v43
+// CHECK:     v45: int:u128 = shr v39:u128, v44
+// CHECK:     v46: int:i128 = add v26:u128, v33:u128
+// CHECK:     v47: int:i128 = iconst 18446744073709551615
+// CHECK:     v48: int:i128 = and v46:u128, v47:u128
+// CHECK:     v49: int:i32 = iconst 64
+// CHECK:     v50: int:i64 = iconst 127
+// CHECK:     v51: int:i64 = and v49, v50
+// CHECK:     v52: int:u128 = shr v46:u128, v51
+// CHECK:     v53: int:i128 = add v30, v41:u128
+// CHECK:     v54: int:i128 = add v53:u128, v52
+// CHECK:     v55: int:i128 = iconst 18446744073709551615
+// CHECK:     v56: int:i128 = and v54:u128, v55:u128
+// CHECK:     v57: int:i32 = iconst 64
+// CHECK:     v58: int:i64 = iconst 127
+// CHECK:     v59: int:i64 = and v57, v58
+// CHECK:     v60: int:u128 = shr v54:u128, v59
+// CHECK:     v61: int:i128 = add v45, v60
+// CHECK:     v62: int:i32 = iconst 64
+// CHECK:     v63: int:i64 = iconst 127
+// CHECK:     v64: int:i64 = and v62, v63
+// CHECK:     v65: int:i128 = shl v48:u128, v64
+// CHECK:     v66: int:i128 = or v18:u128, v65:u128
+// CHECK:     v67: int:i32 = iconst 64
+// CHECK:     v68: int:i64 = iconst 127
+// CHECK:     v69: int:i64 = and v67, v68
+// CHECK:     v70: int:i128 = shl v61:u128, v69
+// CHECK:     v71: int:i128 = or v56:u128, v70:u128
+// CHECK:     v72: mem = store.16 v66, v1, v0
+// CHECK:     v73: int:i64 = iconst 16
+// CHECK:     v74: ptr = ptradd v1, v73
+// CHECK:     v75: mem = store.16 v71, v74, v72
+// CHECK:     ret v1, v75
 // CHECK: }
 // CHECK:
 // CHECK: fn <u128 as core::intrinsics::fallback::CarryingMulAdd>::carrying_mul_add(_1: u128, _2: u128, _3: u128, _4: u128) -> (u128, u128) {
@@ -452,43 +443,40 @@
 // CHECK: func @_RNvXNtNtC$HASH_4core10intrinsics8fallbackoNtB2_14CarryingMulAdd16carrying_mul_addC$HASH_16carrying_mul_add(ptr, int:u128, int:u128, int:u128, int:u128) -> ptr {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
-// CHECK:     v2: ptr = stack_slot 32 align 16
-// CHECK:     v3: int:u128 = param 1
-// CHECK:     v4: int:u128 = param 2
-// CHECK:     v5: int:u128 = param 3
-// CHECK:     v6: int:u128 = param 4
-// CHECK:     v7: ptr = stack_slot 32
-// CHECK:     v8: ptr = symbol_addr @_RNvNtNtC$HASH_4core10intrinsics8fallback13wide_mul_u128C$HASH_16carrying_mul_add
-// CHECK:     v9: mem = call v8(v7, v3, v4), v0
-// CHECK:     v10: int:i64 = iconst 0
-// CHECK:     br bb1(v9)
+// CHECK:     v2: int:u128 = param 1
+// CHECK:     v3: int:u128 = param 2
+// CHECK:     v4: int:u128 = param 3
+// CHECK:     v5: int:u128 = param 4
+// CHECK:     v6: ptr = stack_slot 32
+// CHECK:     v7: ptr = symbol_addr @_RNvNtNtC$HASH_4core10intrinsics8fallback13wide_mul_u128C$HASH_16carrying_mul_add
+// CHECK:     v8: mem = call v7(v6, v2, v3), v0
+// CHECK:     v9: int:i64 = iconst 0
+// CHECK:     br bb1(v8)
 // CHECK:
-// CHECK:   bb1(v12: mem):
-// CHECK:     v13: int:u128 = load.16 v7, v12
-// CHECK:     v14: int:i64 = iconst 16
-// CHECK:     v15: ptr = ptradd v7, v14
-// CHECK:     v16: int:u128 = load.16 v15, v12
-// CHECK:     v17: int:u128, v18: bool = uadd_overflow.128 v13, v5
-// CHECK:     v19: int:u64 = iconst 1
-// CHECK:     v20: int:u64 = iconst 0
-// CHECK:     v21: int:u64 = select v18, v19, v20
-// CHECK:     v22: int:u64 = zext v21:u8, 64
-// CHECK:     v23: int:u128 = zext v22, 128
-// CHECK:     v24: int:i128 = add v16, v23
-// CHECK:     v25: int:u128, v26: bool = uadd_overflow.128 v17, v6
-// CHECK:     v27: int:u64 = iconst 1
-// CHECK:     v28: int:u64 = iconst 0
-// CHECK:     v29: int:u64 = select v26, v27, v28
-// CHECK:     v30: int:u64 = zext v29:u8, 64
-// CHECK:     v31: int:u128 = zext v30, 128
-// CHECK:     v32: int:i128 = add v24:u128, v31
-// CHECK:     v33: mem = store.16 v25, v2, v12
-// CHECK:     v34: int:i64 = iconst 16
-// CHECK:     v35: ptr = ptradd v2, v34
-// CHECK:     v36: mem = store.16 v32, v35, v33
-// CHECK:     v37: int:i64 = iconst 32
-// CHECK:     v38: mem = memcopy v1:align8, v2:align8, v37, v36
-// CHECK:     ret v1, v38
+// CHECK:   bb1(v11: mem):
+// CHECK:     v12: int:u128 = load.16 v6, v11
+// CHECK:     v13: int:i64 = iconst 16
+// CHECK:     v14: ptr = ptradd v6, v13
+// CHECK:     v15: int:u128 = load.16 v14, v11
+// CHECK:     v16: int:u128, v17: bool = uadd_overflow.128 v12, v4
+// CHECK:     v18: int:u64 = iconst 1
+// CHECK:     v19: int:u64 = iconst 0
+// CHECK:     v20: int:u64 = select v17, v18, v19
+// CHECK:     v21: int:u64 = zext v20:u8, 64
+// CHECK:     v22: int:u128 = zext v21, 128
+// CHECK:     v23: int:i128 = add v15, v22
+// CHECK:     v24: int:u128, v25: bool = uadd_overflow.128 v16, v5
+// CHECK:     v26: int:u64 = iconst 1
+// CHECK:     v27: int:u64 = iconst 0
+// CHECK:     v28: int:u64 = select v25, v26, v27
+// CHECK:     v29: int:u64 = zext v28:u8, 64
+// CHECK:     v30: int:u128 = zext v29, 128
+// CHECK:     v31: int:i128 = add v23:u128, v30
+// CHECK:     v32: mem = store.16 v24, v1, v11
+// CHECK:     v33: int:i64 = iconst 16
+// CHECK:     v34: ptr = ptradd v1, v33
+// CHECK:     v35: mem = store.16 v31, v34, v32
+// CHECK:     ret v1, v35
 // CHECK: }
 // CHECK:
 // CHECK: fn <u32 as core::intrinsics::fallback::CarryingMulAdd>::carrying_mul_add(_1: u32, _2: u32, _3: u32, _4: u32) -> (u32, u32) {
@@ -827,65 +815,62 @@
 // CHECK: func @_RNvXs_NtNtC$HASH_4core10intrinsics8fallbacknNtB4_14CarryingMulAdd16carrying_mul_addC$HASH_16carrying_mul_add(ptr, int:s128, int:s128, int:s128, int:s128) -> ptr {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
-// CHECK:     v2: ptr = stack_slot 32 align 16
-// CHECK:     v3: int:s128 = param 1
-// CHECK:     v4: int:s128 = param 2
-// CHECK:     v5: int:s128 = param 3
-// CHECK:     v6: int:s128 = param 4
-// CHECK:     v7: ptr = stack_slot 32
-// CHECK:     v8: ptr = symbol_addr @_RNvNtNtC$HASH_4core10intrinsics8fallback13wide_mul_u128C$HASH_16carrying_mul_add
-// CHECK:     v9: mem = call v8(v7, v3:u128, v4:u128), v0
-// CHECK:     v10: int:i64 = iconst 0
-// CHECK:     br bb1(v9)
+// CHECK:     v2: int:s128 = param 1
+// CHECK:     v3: int:s128 = param 2
+// CHECK:     v4: int:s128 = param 3
+// CHECK:     v5: int:s128 = param 4
+// CHECK:     v6: ptr = stack_slot 32
+// CHECK:     v7: ptr = symbol_addr @_RNvNtNtC$HASH_4core10intrinsics8fallback13wide_mul_u128C$HASH_16carrying_mul_add
+// CHECK:     v8: mem = call v7(v6, v2:u128, v3:u128), v0
+// CHECK:     v9: int:i64 = iconst 0
+// CHECK:     br bb1(v8)
 // CHECK:
-// CHECK:   bb1(v12: mem):
-// CHECK:     v13: int:u128 = load.16 v7, v12
-// CHECK:     v14: int:i64 = iconst 16
-// CHECK:     v15: ptr = ptradd v7, v14
-// CHECK:     v16: int:u128 = load.16 v15, v12
-// CHECK:     v17: int:i32 = iconst 127
-// CHECK:     v18: int:i64 = iconst 127
-// CHECK:     v19: int:i64 = and v17, v18
-// CHECK:     v20: int:s128 = shr v3, v19
-// CHECK:     v21: int:i128 = mul v20, v4
-// CHECK:     v22: int:i128 = add v16:s128, v21:s128
-// CHECK:     v23: int:i32 = iconst 127
-// CHECK:     v24: int:i64 = iconst 127
-// CHECK:     v25: int:i64 = and v23, v24
-// CHECK:     v26: int:s128 = shr v4, v25
-// CHECK:     v27: int:i128 = mul v3, v26
-// CHECK:     v28: int:i128 = add v22:s128, v27:s128
-// CHECK:     v29: int:u128, v30: bool = uadd_overflow.128 v13, v5:u128
-// CHECK:     v31: int:u64 = iconst 1
-// CHECK:     v32: int:u64 = iconst 0
-// CHECK:     v33: int:u64 = select v30, v31, v32
-// CHECK:     v34: int:u64 = zext v33:u8, 64
-// CHECK:     v35: int:u128 = zext v34, 128
-// CHECK:     v36: int:i32 = iconst 127
-// CHECK:     v37: int:i64 = iconst 127
-// CHECK:     v38: int:i64 = and v36, v37
-// CHECK:     v39: int:s128 = shr v5, v38
-// CHECK:     v40: int:i128 = add v35:s128, v39
-// CHECK:     v41: int:i128 = add v28:s128, v40:s128
-// CHECK:     v42: int:u128, v43: bool = uadd_overflow.128 v29, v6:u128
-// CHECK:     v44: int:u64 = iconst 1
-// CHECK:     v45: int:u64 = iconst 0
-// CHECK:     v46: int:u64 = select v43, v44, v45
-// CHECK:     v47: int:u64 = zext v46:u8, 64
-// CHECK:     v48: int:u128 = zext v47, 128
-// CHECK:     v49: int:i32 = iconst 127
-// CHECK:     v50: int:i64 = iconst 127
-// CHECK:     v51: int:i64 = and v49, v50
-// CHECK:     v52: int:s128 = shr v6, v51
-// CHECK:     v53: int:i128 = add v48:s128, v52
-// CHECK:     v54: int:i128 = add v41:s128, v53:s128
-// CHECK:     v55: mem = store.16 v42, v2, v12
-// CHECK:     v56: int:i64 = iconst 16
-// CHECK:     v57: ptr = ptradd v2, v56
-// CHECK:     v58: mem = store.16 v54, v57, v55
-// CHECK:     v59: int:i64 = iconst 32
-// CHECK:     v60: mem = memcopy v1:align8, v2:align8, v59, v58
-// CHECK:     ret v1, v60
+// CHECK:   bb1(v11: mem):
+// CHECK:     v12: int:u128 = load.16 v6, v11
+// CHECK:     v13: int:i64 = iconst 16
+// CHECK:     v14: ptr = ptradd v6, v13
+// CHECK:     v15: int:u128 = load.16 v14, v11
+// CHECK:     v16: int:i32 = iconst 127
+// CHECK:     v17: int:i64 = iconst 127
+// CHECK:     v18: int:i64 = and v16, v17
+// CHECK:     v19: int:s128 = shr v2, v18
+// CHECK:     v20: int:i128 = mul v19, v3
+// CHECK:     v21: int:i128 = add v15:s128, v20:s128
+// CHECK:     v22: int:i32 = iconst 127
+// CHECK:     v23: int:i64 = iconst 127
+// CHECK:     v24: int:i64 = and v22, v23
+// CHECK:     v25: int:s128 = shr v3, v24
+// CHECK:     v26: int:i128 = mul v2, v25
+// CHECK:     v27: int:i128 = add v21:s128, v26:s128
+// CHECK:     v28: int:u128, v29: bool = uadd_overflow.128 v12, v4:u128
+// CHECK:     v30: int:u64 = iconst 1
+// CHECK:     v31: int:u64 = iconst 0
+// CHECK:     v32: int:u64 = select v29, v30, v31
+// CHECK:     v33: int:u64 = zext v32:u8, 64
+// CHECK:     v34: int:u128 = zext v33, 128
+// CHECK:     v35: int:i32 = iconst 127
+// CHECK:     v36: int:i64 = iconst 127
+// CHECK:     v37: int:i64 = and v35, v36
+// CHECK:     v38: int:s128 = shr v4, v37
+// CHECK:     v39: int:i128 = add v34:s128, v38
+// CHECK:     v40: int:i128 = add v27:s128, v39:s128
+// CHECK:     v41: int:u128, v42: bool = uadd_overflow.128 v28, v5:u128
+// CHECK:     v43: int:u64 = iconst 1
+// CHECK:     v44: int:u64 = iconst 0
+// CHECK:     v45: int:u64 = select v42, v43, v44
+// CHECK:     v46: int:u64 = zext v45:u8, 64
+// CHECK:     v47: int:u128 = zext v46, 128
+// CHECK:     v48: int:i32 = iconst 127
+// CHECK:     v49: int:i64 = iconst 127
+// CHECK:     v50: int:i64 = and v48, v49
+// CHECK:     v51: int:s128 = shr v5, v50
+// CHECK:     v52: int:i128 = add v47:s128, v51
+// CHECK:     v53: int:i128 = add v40:s128, v52:s128
+// CHECK:     v54: mem = store.16 v41, v1, v11
+// CHECK:     v55: int:i64 = iconst 16
+// CHECK:     v56: ptr = ptradd v1, v55
+// CHECK:     v57: mem = store.16 v53, v56, v54
+// CHECK:     ret v1, v57
 // CHECK: }
 // CHECK:
 // CHECK: fn carrying_mul_add_i128(_1: i128, _2: i128, _3: i128, _4: i128) -> (u128, i128) {
@@ -906,43 +891,40 @@
 // CHECK: func @carrying_mul_add_i128(ptr, int:s128, int:s128, int:s128, int:s128) -> ptr {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
-// CHECK:     v2: ptr = stack_slot 32 align 16
-// CHECK:     v3: int:s128 = param 1
-// CHECK:     v4: int:s128 = param 2
-// CHECK:     v5: int:s128 = param 3
-// CHECK:     v6: int:s128 = param 4
-// CHECK:     v7: int:s128, v8: int = scarrying_mul_add.128 v3, v4, v5, v6
-// CHECK:     v9: ptr = stack_slot 32
-// CHECK:     v10: mem = store.16 v7, v9, v0
-// CHECK:     v11: int:u64 = iconst 16
-// CHECK:     v12: ptr = ptradd v9, v11
-// CHECK:     v13: mem = store.16 v8, v12, v10
-// CHECK:     v14: int:i64 = load.8 v9, v13
-// CHECK:     v15: mem = store.8 v14, v2, v13
-// CHECK:     v16: int:i64 = iconst 8
-// CHECK:     v17: ptr = ptradd v9, v16
-// CHECK:     v18: int:i64 = load.8 v17, v15
-// CHECK:     v19: int:i64 = iconst 8
-// CHECK:     v20: ptr = ptradd v2, v19
-// CHECK:     v21: mem = store.8 v18, v20, v15
-// CHECK:     v22: int:i64 = iconst 16
-// CHECK:     v23: ptr = ptradd v9, v22
-// CHECK:     v24: int:i64 = load.8 v23, v21
-// CHECK:     v25: int:i64 = iconst 16
-// CHECK:     v26: ptr = ptradd v2, v25
-// CHECK:     v27: mem = store.8 v24, v26, v21
-// CHECK:     v28: int:i64 = iconst 24
-// CHECK:     v29: ptr = ptradd v9, v28
-// CHECK:     v30: int:i64 = load.8 v29, v27
-// CHECK:     v31: int:i64 = iconst 24
-// CHECK:     v32: ptr = ptradd v2, v31
-// CHECK:     v33: mem = store.8 v30, v32, v27
-// CHECK:     br bb1(v33)
+// CHECK:     v2: int:s128 = param 1
+// CHECK:     v3: int:s128 = param 2
+// CHECK:     v4: int:s128 = param 3
+// CHECK:     v5: int:s128 = param 4
+// CHECK:     v6: int:s128, v7: int = scarrying_mul_add.128 v2, v3, v4, v5
+// CHECK:     v8: ptr = stack_slot 32
+// CHECK:     v9: mem = store.16 v6, v8, v0
+// CHECK:     v10: int:u64 = iconst 16
+// CHECK:     v11: ptr = ptradd v8, v10
+// CHECK:     v12: mem = store.16 v7, v11, v9
+// CHECK:     v13: int:i64 = load.8 v8, v12
+// CHECK:     v14: mem = store.8 v13, v1, v12
+// CHECK:     v15: int:i64 = iconst 8
+// CHECK:     v16: ptr = ptradd v8, v15
+// CHECK:     v17: int:i64 = load.8 v16, v14
+// CHECK:     v18: int:i64 = iconst 8
+// CHECK:     v19: ptr = ptradd v1, v18
+// CHECK:     v20: mem = store.8 v17, v19, v14
+// CHECK:     v21: int:i64 = iconst 16
+// CHECK:     v22: ptr = ptradd v8, v21
+// CHECK:     v23: int:i64 = load.8 v22, v20
+// CHECK:     v24: int:i64 = iconst 16
+// CHECK:     v25: ptr = ptradd v1, v24
+// CHECK:     v26: mem = store.8 v23, v25, v20
+// CHECK:     v27: int:i64 = iconst 24
+// CHECK:     v28: ptr = ptradd v8, v27
+// CHECK:     v29: int:i64 = load.8 v28, v26
+// CHECK:     v30: int:i64 = iconst 24
+// CHECK:     v31: ptr = ptradd v1, v30
+// CHECK:     v32: mem = store.8 v29, v31, v26
+// CHECK:     br bb1(v32)
 // CHECK:
-// CHECK:   bb1(v35: mem):
-// CHECK:     v36: int:i64 = iconst 32
-// CHECK:     v37: mem = memcopy v1:align8, v2:align8, v36, v35
-// CHECK:     ret v1, v37
+// CHECK:   bb1(v34: mem):
+// CHECK:     ret v1, v34
 // CHECK: }
 // CHECK:
 // CHECK: fn carrying_mul_add_u128(_1: u128, _2: u128, _3: u128, _4: u128) -> (u128, u128) {
@@ -963,43 +945,40 @@
 // CHECK: func @carrying_mul_add_u128(ptr, int:u128, int:u128, int:u128, int:u128) -> ptr {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
-// CHECK:     v2: ptr = stack_slot 32 align 16
-// CHECK:     v3: int:u128 = param 1
-// CHECK:     v4: int:u128 = param 2
-// CHECK:     v5: int:u128 = param 3
-// CHECK:     v6: int:u128 = param 4
-// CHECK:     v7: int:u128, v8: int = ucarrying_mul_add.128 v3, v4, v5, v6
-// CHECK:     v9: ptr = stack_slot 32
-// CHECK:     v10: mem = store.16 v7, v9, v0
-// CHECK:     v11: int:u64 = iconst 16
-// CHECK:     v12: ptr = ptradd v9, v11
-// CHECK:     v13: mem = store.16 v8, v12, v10
-// CHECK:     v14: int:i64 = load.8 v9, v13
-// CHECK:     v15: mem = store.8 v14, v2, v13
-// CHECK:     v16: int:i64 = iconst 8
-// CHECK:     v17: ptr = ptradd v9, v16
-// CHECK:     v18: int:i64 = load.8 v17, v15
-// CHECK:     v19: int:i64 = iconst 8
-// CHECK:     v20: ptr = ptradd v2, v19
-// CHECK:     v21: mem = store.8 v18, v20, v15
-// CHECK:     v22: int:i64 = iconst 16
-// CHECK:     v23: ptr = ptradd v9, v22
-// CHECK:     v24: int:i64 = load.8 v23, v21
-// CHECK:     v25: int:i64 = iconst 16
-// CHECK:     v26: ptr = ptradd v2, v25
-// CHECK:     v27: mem = store.8 v24, v26, v21
-// CHECK:     v28: int:i64 = iconst 24
-// CHECK:     v29: ptr = ptradd v9, v28
-// CHECK:     v30: int:i64 = load.8 v29, v27
-// CHECK:     v31: int:i64 = iconst 24
-// CHECK:     v32: ptr = ptradd v2, v31
-// CHECK:     v33: mem = store.8 v30, v32, v27
-// CHECK:     br bb1(v33)
+// CHECK:     v2: int:u128 = param 1
+// CHECK:     v3: int:u128 = param 2
+// CHECK:     v4: int:u128 = param 3
+// CHECK:     v5: int:u128 = param 4
+// CHECK:     v6: int:u128, v7: int = ucarrying_mul_add.128 v2, v3, v4, v5
+// CHECK:     v8: ptr = stack_slot 32
+// CHECK:     v9: mem = store.16 v6, v8, v0
+// CHECK:     v10: int:u64 = iconst 16
+// CHECK:     v11: ptr = ptradd v8, v10
+// CHECK:     v12: mem = store.16 v7, v11, v9
+// CHECK:     v13: int:i64 = load.8 v8, v12
+// CHECK:     v14: mem = store.8 v13, v1, v12
+// CHECK:     v15: int:i64 = iconst 8
+// CHECK:     v16: ptr = ptradd v8, v15
+// CHECK:     v17: int:i64 = load.8 v16, v14
+// CHECK:     v18: int:i64 = iconst 8
+// CHECK:     v19: ptr = ptradd v1, v18
+// CHECK:     v20: mem = store.8 v17, v19, v14
+// CHECK:     v21: int:i64 = iconst 16
+// CHECK:     v22: ptr = ptradd v8, v21
+// CHECK:     v23: int:i64 = load.8 v22, v20
+// CHECK:     v24: int:i64 = iconst 16
+// CHECK:     v25: ptr = ptradd v1, v24
+// CHECK:     v26: mem = store.8 v23, v25, v20
+// CHECK:     v27: int:i64 = iconst 24
+// CHECK:     v28: ptr = ptradd v8, v27
+// CHECK:     v29: int:i64 = load.8 v28, v26
+// CHECK:     v30: int:i64 = iconst 24
+// CHECK:     v31: ptr = ptradd v1, v30
+// CHECK:     v32: mem = store.8 v29, v31, v26
+// CHECK:     br bb1(v32)
 // CHECK:
-// CHECK:   bb1(v35: mem):
-// CHECK:     v36: int:i64 = iconst 32
-// CHECK:     v37: mem = memcopy v1:align8, v2:align8, v36, v35
-// CHECK:     ret v1, v37
+// CHECK:   bb1(v34: mem):
+// CHECK:     ret v1, v34
 // CHECK: }
 // CHECK:
 // CHECK: fn carrying_mul_add_u32(_1: u32, _2: u32, _3: u32, _4: u32) -> (u32, u32) {

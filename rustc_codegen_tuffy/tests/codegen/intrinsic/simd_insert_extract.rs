@@ -11,22 +11,19 @@
 // CHECK: func @_RNvMs1K_NtNtC$HASH_4core9core_arch3x86NtB6_7___m128i8as_i32x4C$HASH_19simd_insert_extract(ptr, ptr) -> ptr {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
-// CHECK:     v2: ptr = stack_slot 16 align 16
-// CHECK:     v3: ptr = param 1
-// CHECK:     v4: ptr = stack_slot 16 align 16
-// CHECK:     v5: int:i64 = iconst 16
-// CHECK:     v6: mem = memcopy v4:align8, v3:align8, v5, v0
-// CHECK:     v7: int:i64 = load.8 v4, v6
-// CHECK:     v8: mem = store.8 v7, v2, v6
-// CHECK:     v9: int:i64 = iconst 8
-// CHECK:     v10: ptr = ptradd v4, v9
-// CHECK:     v11: int:i64 = load.8 v10, v8
-// CHECK:     v12: int:i64 = iconst 8
-// CHECK:     v13: ptr = ptradd v2, v12
-// CHECK:     v14: mem = store.8 v11, v13, v8
-// CHECK:     v15: int:i64 = iconst 16
-// CHECK:     v16: mem = memcopy v1:align8, v2:align8, v15, v14
-// CHECK:     ret v1, v16
+// CHECK:     v2: ptr = param 1
+// CHECK:     v3: ptr = stack_slot 16 align 16
+// CHECK:     v4: int:i64 = iconst 16
+// CHECK:     v5: mem = memcopy v3:align8, v2:align8, v4, v0
+// CHECK:     v6: int:i64 = load.8 v3, v5
+// CHECK:     v7: mem = store.8 v6, v1, v5
+// CHECK:     v8: int:i64 = iconst 8
+// CHECK:     v9: ptr = ptradd v3, v8
+// CHECK:     v10: int:i64 = load.8 v9, v7
+// CHECK:     v11: int:i64 = iconst 8
+// CHECK:     v12: ptr = ptradd v1, v11
+// CHECK:     v13: mem = store.8 v10, v12, v7
+// CHECK:     ret v1, v13
 // CHECK: }
 // CHECK:
 // CHECK: fn extract_low_word(_1: core::arch::x86_64::__m128i) -> i32 {
@@ -101,58 +98,55 @@
 // CHECK: func @insert_word(ptr, ptr, int:s32) -> ptr {
 // CHECK:   bb0(v0: mem):
 // CHECK:     v1: ptr = param 0
-// CHECK:     v2: ptr = stack_slot 16 align 16
-// CHECK:     v3: ptr = param 1
-// CHECK:     v4: ptr = stack_slot 16 align 16
-// CHECK:     v5: int:s32 = param 2
-// CHECK:     v6: int:i64 = iconst 16
-// CHECK:     v7: mem = memcopy v4:align8, v3:align8, v6, v0
+// CHECK:     v2: ptr = param 1
+// CHECK:     v3: ptr = stack_slot 16 align 16
+// CHECK:     v4: int:s32 = param 2
+// CHECK:     v5: int:i64 = iconst 16
+// CHECK:     v6: mem = memcopy v3:align8, v2:align8, v5, v0
+// CHECK:     v7: ptr = stack_slot 16 align 16
 // CHECK:     v8: ptr = stack_slot 16 align 16
-// CHECK:     v9: ptr = stack_slot 16 align 16
-// CHECK:     v10: ptr = stack_slot 16
-// CHECK:     v11: int:i64 = iconst 16
-// CHECK:     v12: mem = memcopy v10:align16, v4:align16, v11, v7
-// CHECK:     v13: ptr = symbol_addr @_RNvMs1K_NtNtC$HASH_4core9core_arch3x86NtB6_7___m128i8as_i32x4C$HASH_19simd_insert_extract
-// CHECK:     v14: mem, v15: int:i64 = call v13(v9, v10), v12 -> int:i64
-// CHECK:     br bb1(v14)
+// CHECK:     v9: ptr = stack_slot 16
+// CHECK:     v10: int:i64 = iconst 16
+// CHECK:     v11: mem = memcopy v9:align16, v3:align16, v10, v6
+// CHECK:     v12: ptr = symbol_addr @_RNvMs1K_NtNtC$HASH_4core9core_arch3x86NtB6_7___m128i8as_i32x4C$HASH_19simd_insert_extract
+// CHECK:     v13: mem, v14: int:i64 = call v12(v8, v9), v11 -> int:i64
+// CHECK:     br bb1(v13)
 // CHECK:
-// CHECK:   bb1(v17: mem):
-// CHECK:     v18: int:i32 = iconst 0
-// CHECK:     v19: ptr = stack_slot 16
-// CHECK:     v20: int:i64 = load.8 v9, v17
-// CHECK:     v21: mem = store.8 v20, v19, v17
-// CHECK:     v22: int:u64 = iconst 8
-// CHECK:     v23: ptr = ptradd v9, v22
-// CHECK:     v24: int:u64 = iconst 8
-// CHECK:     v25: ptr = ptradd v19, v24
-// CHECK:     v26: int:i64 = load.8 v23, v21
-// CHECK:     v27: mem = store.8 v26, v25, v21
-// CHECK:     v28: int:u64 = iconst 4
-// CHECK:     v29: int:i64 = mul v18, v28
-// CHECK:     v30: ptr = ptradd v19, v29
-// CHECK:     v31: mem = store.4 v5, v30, v27
-// CHECK:     v32: int:i64 = load.8 v19, v31
-// CHECK:     v33: mem = store.8 v32, v8, v31
-// CHECK:     v34: int:i64 = iconst 8
-// CHECK:     v35: ptr = ptradd v19, v34
-// CHECK:     v36: int:i64 = load.8 v35, v33
-// CHECK:     v37: int:i64 = iconst 8
-// CHECK:     v38: ptr = ptradd v8, v37
-// CHECK:     v39: mem = store.8 v36, v38, v33
-// CHECK:     br bb2(v39)
+// CHECK:   bb1(v16: mem):
+// CHECK:     v17: int:i32 = iconst 0
+// CHECK:     v18: ptr = stack_slot 16
+// CHECK:     v19: int:i64 = load.8 v8, v16
+// CHECK:     v20: mem = store.8 v19, v18, v16
+// CHECK:     v21: int:u64 = iconst 8
+// CHECK:     v22: ptr = ptradd v8, v21
+// CHECK:     v23: int:u64 = iconst 8
+// CHECK:     v24: ptr = ptradd v18, v23
+// CHECK:     v25: int:i64 = load.8 v22, v20
+// CHECK:     v26: mem = store.8 v25, v24, v20
+// CHECK:     v27: int:u64 = iconst 4
+// CHECK:     v28: int:i64 = mul v17, v27
+// CHECK:     v29: ptr = ptradd v18, v28
+// CHECK:     v30: mem = store.4 v4, v29, v26
+// CHECK:     v31: int:i64 = load.8 v18, v30
+// CHECK:     v32: mem = store.8 v31, v7, v30
+// CHECK:     v33: int:i64 = iconst 8
+// CHECK:     v34: ptr = ptradd v18, v33
+// CHECK:     v35: int:i64 = load.8 v34, v32
+// CHECK:     v36: int:i64 = iconst 8
+// CHECK:     v37: ptr = ptradd v7, v36
+// CHECK:     v38: mem = store.8 v35, v37, v32
+// CHECK:     br bb2(v38)
 // CHECK:
-// CHECK:   bb2(v41: mem):
-// CHECK:     v42: int:i64 = load.8 v8, v41
-// CHECK:     v43: mem = store.8 v42, v2, v41
-// CHECK:     v44: int:i64 = iconst 8
-// CHECK:     v45: ptr = ptradd v8, v44
-// CHECK:     v46: int:i64 = load.8 v45, v43
-// CHECK:     v47: int:i64 = iconst 8
-// CHECK:     v48: ptr = ptradd v2, v47
-// CHECK:     v49: mem = store.8 v46, v48, v43
-// CHECK:     v50: int:i64 = iconst 16
-// CHECK:     v51: mem = memcopy v1:align8, v2:align8, v50, v49
-// CHECK:     ret v1, v51
+// CHECK:   bb2(v40: mem):
+// CHECK:     v41: int:i64 = load.8 v7, v40
+// CHECK:     v42: mem = store.8 v41, v1, v40
+// CHECK:     v43: int:i64 = iconst 8
+// CHECK:     v44: ptr = ptradd v7, v43
+// CHECK:     v45: int:i64 = load.8 v44, v42
+// CHECK:     v46: int:i64 = iconst 8
+// CHECK:     v47: ptr = ptradd v1, v46
+// CHECK:     v48: mem = store.8 v45, v47, v42
+// CHECK:     ret v1, v48
 // CHECK: }
 // CHECK:
 
