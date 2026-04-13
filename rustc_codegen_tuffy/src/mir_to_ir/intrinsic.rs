@@ -13,6 +13,7 @@ use super::ctx::TranslationCtx;
 use super::types::int_annotation_for_bytes;
 use super::types::{int_ann_for_bytes, is_signed_int, translate_annotation, type_align, type_size};
 
+/// Shared 64-bit unsigned annotation used by several intrinsic lowering paths.
 const I64: IntAnnotation = IntAnnotation {
     bit_width: 64,
     signedness: IntSignedness::Unsigned,
@@ -1196,6 +1197,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         }
     }
 
+    /// Lowers integer bit-manipulation intrinsics such as `ctpop` and rotates.
     fn translate_bit_intrinsic(
         &mut self,
         name: &str,
@@ -1623,6 +1625,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         })
     }
 
+    /// Lowers integer arithmetic intrinsics such as saturating and overflowing ops.
     fn translate_arithmetic_intrinsic(
         &mut self,
         name: &str,
@@ -2282,6 +2285,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         })
     }
 
+    /// Lowers floating-point arithmetic intrinsics and their libcall fallbacks.
     fn translate_float_intrinsic(
         &mut self,
         name: &str,
@@ -2487,6 +2491,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         })
     }
 
+    /// Resolves the intrinsic name and generic arguments for a call operand.
     pub(super) fn detect_intrinsic(
         &self,
         func_op: &Operand<'tcx>,
@@ -2509,6 +2514,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     }
 }
 
+/// Maps rustc intrinsic names that are lowered as libc calls to their symbol names.
 pub(super) fn intrinsic_to_libc(name: &str) -> Option<&'static str> {
     match name {
         // compare_bytes(left, right, count) -> i32 maps directly to memcmp.

@@ -16,21 +16,26 @@ use super::StaticDataVec;
 use super::constant::extract_alloc_relocs;
 use super::types::*;
 
+/// Stores the current SSA value for each MIR local.
 pub(super) struct LocalMap {
+    /// Slots indexed by `mir::Local::as_usize()`.
     pub(super) values: Vec<Option<ValueRef>>,
 }
 
 impl LocalMap {
+    /// Creates an empty local map sized for the current MIR body.
     pub(super) fn new(count: usize) -> Self {
         Self {
             values: vec![None; count],
         }
     }
 
+    /// Records the current SSA value for `local`.
     pub(super) fn set(&mut self, local: mir::Local, val: ValueRef) {
         self.values[local.as_usize()] = Some(val);
     }
 
+    /// Returns the current SSA value for `local`, if one has been assigned.
     pub(super) fn get(&self, local: mir::Local) -> Option<ValueRef> {
         self.values[local.as_usize()]
     }
@@ -43,16 +48,19 @@ pub(super) struct FatLocalMap {
 }
 
 impl FatLocalMap {
+    /// Creates an empty fat-pointer metadata map.
     pub(super) fn new() -> Self {
         Self {
             values: HashMap::new(),
         }
     }
 
+    /// Records the metadata component for `local`.
     pub(super) fn set(&mut self, local: mir::Local, val: ValueRef) {
         self.values.insert(local.as_usize(), val);
     }
 
+    /// Returns the metadata component cached for `local`.
     pub(super) fn get(&self, local: mir::Local) -> Option<ValueRef> {
         self.values.get(&local.as_usize()).copied()
     }
@@ -62,20 +70,24 @@ impl FatLocalMap {
 /// (the secondary result of the multi-result IR instruction).
 /// Field(1) access on a `(T, bool)` checked-op local consults this map.
 pub(super) struct OverflowLocalMap {
+    /// Maps MIR local indices to overflow flag values.
     values: HashMap<usize, ValueRef>,
 }
 
 impl OverflowLocalMap {
+    /// Creates an empty overflow-flag map.
     pub(super) fn new() -> Self {
         Self {
             values: HashMap::new(),
         }
     }
 
+    /// Records the overflow flag value associated with `local`.
     pub(super) fn set(&mut self, local: mir::Local, overflow: ValueRef) {
         self.values.insert(local.as_usize(), overflow);
     }
 
+    /// Returns the cached overflow flag value for `local`.
     pub(super) fn get(&self, local: mir::Local) -> Option<ValueRef> {
         self.values.get(&local.as_usize()).copied()
     }
@@ -84,20 +96,24 @@ impl OverflowLocalMap {
 /// Tracks which MIR locals hold stack slot addresses (aggregate/spilled values)
 /// rather than scalar values in registers.
 pub(super) struct StackLocalSet {
+    /// Marks whether each MIR local currently lives in a stack slot.
     is_stack: Vec<bool>,
 }
 
 impl StackLocalSet {
+    /// Creates an empty stack-local set sized for the current MIR body.
     pub(super) fn new(count: usize) -> Self {
         Self {
             is_stack: vec![false; count],
         }
     }
 
+    /// Marks `local` as being represented by a stack slot address.
     pub(super) fn mark(&mut self, local: mir::Local) {
         self.is_stack[local.as_usize()] = true;
     }
 
+    /// Returns whether `local` is currently represented by a stack slot.
     pub(super) fn is_stack(&self, local: mir::Local) -> bool {
         self.is_stack[local.as_usize()]
     }
@@ -130,20 +146,24 @@ pub(super) fn extract_param_names(
 
 /// Map from MIR BasicBlock to IR BlockRef.
 pub(super) struct BlockMap {
+    /// Slots indexed by `BasicBlock::as_usize()`.
     blocks: Vec<Option<BlockRef>>,
 }
 
 impl BlockMap {
+    /// Creates an empty block map sized for the current MIR body.
     pub(super) fn new(count: usize) -> Self {
         Self {
             blocks: vec![None; count],
         }
     }
 
+    /// Records the IR block that corresponds to `bb`.
     pub(super) fn set(&mut self, bb: BasicBlock, block: BlockRef) {
         self.blocks[bb.as_usize()] = Some(block);
     }
 
+    /// Returns the IR block previously assigned to `bb`.
     pub(super) fn get(&self, bb: BasicBlock) -> BlockRef {
         self.blocks[bb.as_usize()].expect("block not mapped")
     }
@@ -155,22 +175,34 @@ impl BlockMap {
 /// `clippy::too_many_arguments` warnings and makes it easier to add new
 /// shared state in the future.
 pub(super) struct TranslationCtx<'a, 'tcx> {
+    /// rustc type context for the function being translated.
     pub(super) tcx: TyCtxt<'tcx>,
+    /// MIR body currently being lowered.
     pub(super) mir: &'a mir::Body<'tcx>,
+    /// Tuffy IR builder for the current function.
     pub(super) builder: Builder<'a>,
+    /// Current SSA values for MIR locals.
     pub(super) locals: LocalMap,
+    /// Cached metadata words for fat-pointer locals.
     pub(super) fat_locals: FatLocalMap,
+    /// Tracks which locals currently live in stack slots.
     pub(super) stack_locals: StackLocalSet,
     /// Maps `*WithOverflow` destination locals to the overflow-flag ValueRef
     /// (secondary result of the IR instruction). Used by Field(1) access.
     pub(super) overflow_locals: OverflowLocalMap,
+    /// Per-function symbol table used during lowering.
     pub(super) symbols: SymbolTable,
+    /// Static data emitted while lowering this function.
     pub(super) static_data: StaticDataVec,
+    /// MIR basic-block to IR basic-block mapping.
     pub(super) block_map: BlockMap,
     /// MemSSA block arguments: one `Type::Mem` arg per MIR basic block.
     pub(super) block_mem_args: Vec<Option<ValueRef>>,
+    /// Maximum legal integer width, in bits, for the target backend.
     pub(super) target_max_int_width: u32,
+    /// Maximum number of direct integer ABI parts supported by the target.
     pub(super) target_max_abi_int_parts: u32,
+    /// Resolved rustc instance currently being translated.
     pub(super) instance: Instance<'tcx>,
     /// Current memory token for MemSSA threading.
     pub(super) current_mem: ValueRef,
@@ -216,6 +248,7 @@ pub(super) struct TranslationCtx<'a, 'tcx> {
 }
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
+    /// Converts a rustc span into a Tuffy debug source location.
     fn source_location_from_span(&self, span: rustc_span::Span) -> SourceLocation {
         let loc = self.tcx.sess.source_map().lookup_char_pos(span.lo());
         SourceLocation {
@@ -225,6 +258,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         }
     }
 
+    /// Interns a source location for one MIR source-info record and returns its id.
     pub(super) fn record_source(&mut self, source_info: mir::SourceInfo) -> u32 {
         let key = (
             source_info.span.lo().0,
@@ -243,6 +277,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         id
     }
 
+    /// Attaches `source_info` to instructions emitted after `start_index`.
     pub(super) fn stamp_new_insts_with_source(
         &mut self,
         start_index: u32,
@@ -257,6 +292,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             .set_inst_origins(start_index, end_index, Origin::from_source(source));
     }
 
+    /// Collects debuginfo variable and binding records from the MIR body.
     pub(super) fn collect_debug_variables(&mut self) {
         use rustc_middle::mir::VarDebugInfoContents;
 
@@ -294,18 +330,22 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         }
     }
 
+    /// Returns the target's legal integer-part size in bytes.
     pub(super) fn target_part_bytes(&self) -> u64 {
         (self.target_max_int_width / 8) as u64
     }
 
+    /// Returns the total direct integer ABI capacity in bytes.
     pub(super) fn target_direct_abi_bytes(&self) -> u64 {
         self.target_part_bytes() * self.target_max_abi_int_parts as u64
     }
 
+    /// Returns the total direct integer ABI capacity in bits.
     pub(super) fn target_direct_abi_bits(&self) -> u32 {
         self.target_max_int_width * self.target_max_abi_int_parts
     }
 
+    /// Allocates the next unique static-data id within the current codegen unit.
     pub(super) fn next_data_id(&mut self) -> u64 {
         let id = *self.data_counter;
         *self.data_counter += 1;
@@ -517,6 +557,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             .raw()
     }
 
+    /// Receives ABI parameters and maps them into MIR locals.
     pub(super) fn translate_params(&mut self) {
         // Two-phase param receiving: emit ALL param instructions first,
         // THEN do stores/mem_copy.  mem_copy lowers to a memcpy call that

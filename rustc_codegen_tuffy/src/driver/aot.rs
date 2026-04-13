@@ -26,46 +26,72 @@ use crate::mir_to_ir;
 use crate::rust_try;
 use crate::static_data::collect_alloc_relocs;
 
+/// Opaque payload handed back to rustc between codegen and join.
 struct OngoingCodegen {
+    /// Object modules compiled during the AOT pipeline.
     compiled_modules: CompiledModules,
 }
 
+/// Stateful AOT driver for one rustc codegen invocation.
 struct AotCodegen<'tcx> {
+    /// rustc type context for the crate being compiled.
     tcx: TyCtxt<'tcx>,
+    /// Tuffy machine-code emission session for the target triple.
     session: CodegenSession,
+    /// Backend-local options derived from rustc flags.
     config: BackendOptions,
+    /// Object modules emitted so far.
     modules: Vec<CompiledModule>,
+    /// Symbol names already queued or emitted, used to deduplicate inline shims.
     compiled_symbols: HashSet<String>,
+    /// Additional instances discovered during translation that need on-demand codegen.
     pending_instances: Vec<Instance<'tcx>>,
+    /// Optional buffer for `dump-module=` output.
     module_ir_text: Option<String>,
+    /// Counter used to generate unique static data names.
     data_counter: u64,
 }
 
 #[derive(Default)]
+/// Shared translation caches reused across functions in one codegen batch.
 struct TranslationCaches {
+    /// Deduplicates emitted vtables by rustc allocation id.
     vtable_cache: mir_to_ir::VtableCache,
+    /// Deduplicates emitted const allocations by rustc allocation id.
     alloc_cache: mir_to_ir::AllocCache,
+    /// Deduplicates emitted const allocations by byte content.
     content_cache: mir_to_ir::ContentCache,
 }
 
 #[derive(Default)]
+/// Accumulates target artifacts for one object file.
 struct ObjectArtifacts {
+    /// Compiled functions destined for the object file.
     functions: Vec<CompiledFunction>,
+    /// Static data records destined for the object file.
     static_data: Vec<StaticData>,
 }
 
+/// Per-function metadata that must survive IR batching.
 struct PendingFunction {
+    /// Whether the compiled function should be emitted with weak linkage.
     weak: bool,
 }
 
+/// One batch of IR and static data that is optimized and verified together.
 struct IrModuleBatch {
+    /// Tuffy IR module under construction.
     module: IrModule,
+    /// Per-function metadata kept in module order.
     function_meta: Vec<PendingFunction>,
+    /// Target-facing static data emitted alongside the module.
     target_static_data: Vec<StaticData>,
+    /// Symbols that must remain weak undefined in the final object.
     weak_undefined_symbols: HashSet<String>,
 }
 
 impl IrModuleBatch {
+    /// Creates an empty IR batch with the given module name.
     fn new(name: impl Into<String>) -> Self {
         Self {
             module: IrModule::new(name),
@@ -75,6 +101,7 @@ impl IrModuleBatch {
         }
     }
 
+    /// Returns whether the batch contains no functions or static payloads.
     fn is_empty(&self) -> bool {
         self.module.functions.is_empty()
             && self.target_static_data.is_empty()
@@ -82,6 +109,7 @@ impl IrModuleBatch {
     }
 }
 
+/// Runs the ahead-of-time codegen pipeline for the current crate.
 pub(crate) fn codegen_crate<'tcx>(tcx: TyCtxt<'tcx>, _crate_info: &CrateInfo) -> Box<dyn Any> {
     let config = BackendOptions::from_session(tcx.sess);
     let session = CodegenSession::new(tcx.sess.target.llvm_target.as_ref());
@@ -89,6 +117,11 @@ pub(crate) fn codegen_crate<'tcx>(tcx: TyCtxt<'tcx>, _crate_info: &CrateInfo) ->
     Box::new(OngoingCodegen { compiled_modules })
 }
 
+/// Extracts the compiled module list from rustc's opaque codegen payload.
+///
+/// # Panics
+///
+/// Panics if `ongoing_codegen` was not produced by [`codegen_crate`].
 pub(crate) fn join_codegen(
     ongoing_codegen: Box<dyn Any>,
 ) -> (CompiledModules, FxIndexMap<WorkProductId, WorkProduct>) {
@@ -102,6 +135,7 @@ pub(crate) fn join_codegen(
 }
 
 impl<'tcx> AotCodegen<'tcx> {
+    /// Creates a fresh AOT driver for one rustc session.
     fn new(tcx: TyCtxt<'tcx>, session: CodegenSession, config: BackendOptions) -> Self {
         let module_ir_text = config.dump_module_path.as_ref().map(|_| String::new());
         Self {
@@ -116,6 +150,7 @@ impl<'tcx> AotCodegen<'tcx> {
         }
     }
 
+    /// Lowers every codegen unit in the crate and returns the compiled modules.
     fn run(mut self) -> CompiledModules {
         let cgus = self.tcx.collect_and_partition_mono_items(()).codegen_units;
         for cgu in cgus {
@@ -173,6 +208,7 @@ impl<'tcx> AotCodegen<'tcx> {
         }
     }
 
+    /// Translates one mono-item function into the current IR batch.
     fn codegen_fn_item(
         &mut self,
         instance: Instance<'tcx>,
@@ -192,6 +228,7 @@ impl<'tcx> AotCodegen<'tcx> {
         self.translate_instance_into_batch(instance, weak, true, batch, caches);
     }
 
+    /// Lowers one static item into target static-data records.
     fn codegen_static_item(
         &mut self,
         def_id: rustc_hir::def_id::DefId,
@@ -269,6 +306,7 @@ impl<'tcx> AotCodegen<'tcx> {
         });
     }
 
+    /// Translates one resolved instance and merges its IR into `batch`.
     fn translate_instance_into_batch(
         &mut self,
         instance: Instance<'tcx>,
@@ -314,6 +352,7 @@ impl<'tcx> AotCodegen<'tcx> {
         merge_translation_result(batch, result, weak);
     }
 
+    /// Emits any inline shim instances discovered during earlier translation.
     fn codegen_inline_instances(&mut self) {
         let mut artifacts = ObjectArtifacts::default();
         let mut ir_batch = IrModuleBatch::new("inline_shims");
@@ -357,6 +396,7 @@ impl<'tcx> AotCodegen<'tcx> {
         }
     }
 
+    /// Seeds the dedup set with runtime symbols emitted outside normal MIR lowering.
     fn pre_register_known_symbols(&mut self) {
         for name in [
             "__rust_alloc",
@@ -383,6 +423,11 @@ impl<'tcx> AotCodegen<'tcx> {
         }
     }
 
+    /// Emits one object file from compiled functions and static data.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the backend cannot write the temporary object file.
     fn emit_module(
         &self,
         name: &str,
@@ -410,6 +455,11 @@ impl<'tcx> AotCodegen<'tcx> {
         }
     }
 
+    /// Prints the MIR body for `instance` when `dump-ir` is enabled.
+    ///
+    /// # Panics
+    ///
+    /// Panics if rustc's MIR pretty-printer fails to write into the buffer.
     fn dump_mir(&self, instance: Instance<'tcx>) {
         use rustc_middle::ty::print::with_no_trimmed_paths;
 
@@ -422,6 +472,11 @@ impl<'tcx> AotCodegen<'tcx> {
         });
     }
 
+    /// Appends one translation result to the configured IR dump streams.
+    ///
+    /// # Panics
+    ///
+    /// Panics if formatting into the in-memory dump buffer fails.
     fn append_translation_dump(&mut self, result: &mir_to_ir::TranslationResult<'tcx>) {
         if self.config.dump_ir {
             for (sym_id, data, relocs, _align) in &result.static_data {
@@ -465,12 +520,18 @@ impl<'tcx> AotCodegen<'tcx> {
         }
     }
 
+    /// Appends the post-optimization module snapshot to the module dump buffer.
     fn append_optimized_module_dump(&mut self, batch: &IrModuleBatch) {
         if let Some(buf) = &mut self.module_ir_text {
             buf.push_str(&format_post_opt_module_dump(&batch.module));
         }
     }
 
+    /// Appends one static-data record to the module dump buffer.
+    ///
+    /// # Panics
+    ///
+    /// Panics if formatting into the in-memory dump buffer fails.
     fn append_static_dump(&mut self, name: &str, data: &[u8], relocs: &[Relocation]) {
         let Some(buf) = &mut self.module_ir_text else {
             return;
@@ -492,6 +553,11 @@ impl<'tcx> AotCodegen<'tcx> {
         .unwrap();
     }
 
+    /// Writes the accumulated module dump to disk when `dump-module=` was requested.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the configured dump path cannot be written.
     fn write_module_dump(&self) {
         let Some(path) = &self.config.dump_module_path else {
             return;
@@ -503,6 +569,7 @@ impl<'tcx> AotCodegen<'tcx> {
             .unwrap_or_else(|err| panic!("failed to write module IR to {}: {err}", path.display()));
     }
 
+    /// Returns whether this instance has enough MIR and substitutions for codegen.
     fn should_codegen_instance(&self, instance: Instance<'tcx>) -> bool {
         if instance.args.has_non_region_param() {
             return false;
@@ -524,6 +591,7 @@ impl<'tcx> AotCodegen<'tcx> {
         true
     }
 
+    /// Aborts compilation with an error tied to a specific instance symbol.
     fn fatal_instance(&self, instance: Instance<'tcx>, message: &str) -> ! {
         let symbol = self.tcx.symbol_name(instance).name;
         self.tcx.dcx().fatal(format!(
@@ -531,12 +599,14 @@ impl<'tcx> AotCodegen<'tcx> {
         ));
     }
 
+    /// Aborts compilation with an error tied to an arbitrary symbol name.
     fn fatal_symbol(&self, symbol: &str, message: &str) -> ! {
         self.tcx.dcx().fatal(format!(
             "rustc_codegen_tuffy failed for {symbol}: {message}"
         ));
     }
 
+    /// Optimizes, verifies, and machine-code compiles the current IR batch.
     fn finish_ir_batch(&mut self, batch: &mut IrModuleBatch, artifacts: &mut ObjectArtifacts) {
         if batch.is_empty() {
             return;
@@ -604,6 +674,11 @@ impl<'tcx> AotCodegen<'tcx> {
     }
 }
 
+/// Verifies a freshly translated function before it is merged into a module batch.
+///
+/// # Errors
+///
+/// Returns an error string when the translated function fails Tuffy IR verification.
 fn verify_translation_result(result: &mir_to_ir::TranslationResult<'_>) -> Result<(), String> {
     let verification = tuffy_ir::verifier::verify_function(&result.func, &result.symbols);
     if !verification.is_ok() {
@@ -615,6 +690,11 @@ fn verify_translation_result(result: &mir_to_ir::TranslationResult<'_>) -> Resul
     Ok(())
 }
 
+/// Runs `tuffy_opt` on `batch` when enabled and re-verifies the optimized IR.
+///
+/// # Errors
+///
+/// Returns an error string if optimization leaves the batch in an invalid IR state.
 fn optimize_ir_batch(
     batch: &mut IrModuleBatch,
     enabled: bool,
@@ -628,6 +708,11 @@ fn optimize_ir_batch(
     Ok(Some(stats))
 }
 
+/// Verifies a whole IR batch and annotates failures with the provided context.
+///
+/// # Errors
+///
+/// Returns an error string when module verification fails.
 fn verify_ir_batch(batch: &IrModuleBatch, context: &str) -> Result<(), String> {
     let verification = tuffy_ir::verifier::verify_module(&batch.module);
     if !verification.is_ok() {
@@ -639,6 +724,7 @@ fn verify_ir_batch(batch: &IrModuleBatch, context: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Merges one function-level translation result into the current module batch.
 fn merge_translation_result(
     batch: &mut IrModuleBatch,
     mut result: mir_to_ir::TranslationResult<'_>,
@@ -690,6 +776,7 @@ fn merge_translation_result(
     batch.function_meta.push(PendingFunction { weak });
 }
 
+/// Builds a symbol-id remap from a per-function symbol table into `module`.
 fn build_symbol_remap(
     source: &tuffy_ir::module::SymbolTable,
     module: &mut IrModule,
@@ -699,10 +786,12 @@ fn build_symbol_remap(
         .collect()
 }
 
+/// Remaps a symbol id through the batch-level symbol table mapping.
 fn remap_symbol_id(symbol: SymbolId, remap: &[SymbolId]) -> SymbolId {
     remap[symbol.0 as usize]
 }
 
+/// Rewrites symbol references inside one function to use batch-level symbol ids.
 fn remap_function_symbols(func: &mut tuffy_ir::function::Function, remap: &[SymbolId]) {
     func.name = remap_symbol_id(func.name, remap);
     for symbol in func.param_names.iter_mut().flatten() {
@@ -718,6 +807,7 @@ fn remap_function_symbols(func: &mut tuffy_ir::function::Function, remap: &[Symb
     }
 }
 
+/// Appends weak undefined and translated static data from `batch` into the object payload list.
 fn append_ir_batch_static_data(all_static_data: &mut Vec<StaticData>, batch: &IrModuleBatch) {
     let mut weak_undefined_symbols = batch
         .weak_undefined_symbols
@@ -760,10 +850,12 @@ fn append_ir_batch_static_data(all_static_data: &mut Vec<StaticData>, batch: &Ir
     }
 }
 
+/// Formats the post-optimization snapshot appended to `dump-module=` output.
 fn format_post_opt_module_dump(module: &IrModule) -> String {
     format!("; post-opt module {}\n{}\n\n", module.name, module)
 }
 
+/// Returns whether rustc linkage should be treated as weak by the backend.
 fn is_weak_linkage(linkage: Linkage) -> bool {
     matches!(
         linkage,

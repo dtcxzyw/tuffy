@@ -109,6 +109,7 @@ pub(crate) fn collect_alloc_relocs<'tcx>(
     relocs
 }
 
+/// Allocates a unique symbol name for synthesized static data.
 fn next_static_name(data_counter: &mut u64, prefix: &str) -> String {
     format!("{prefix}.{}", {
         let id = *data_counter;

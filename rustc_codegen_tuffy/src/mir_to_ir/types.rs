@@ -9,8 +9,11 @@ use tuffy_ir::types::{Annotation, FloatType, IntAnnotation, IntSignedness, Type}
 /// Local helper for integer annotations during MIR translation.
 #[derive(Debug, Clone, Copy)]
 pub(super) enum IntAnn {
+    /// Signed integer annotation with the given bit width.
     Signed(u32),
+    /// Unsigned integer annotation with the given bit width.
     Unsigned(u32),
+    /// Integer annotation whose signedness does not matter for the operation.
     DontCare(u32),
 }
 
@@ -112,6 +115,7 @@ pub(super) enum ReprKind {
     Memory,
 }
 
+/// Classifies the ABI representation rustc uses for `ty`.
 pub(super) fn repr_kind<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> ReprKind {
     let Some(layout) = mono_layout_of(tcx, ty) else {
         return ReprKind::Memory;
@@ -126,6 +130,7 @@ pub(super) fn repr_kind<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> ReprKind {
     }
 }
 
+/// Maps a monomorphized Rust type to its direct Tuffy IR type when one exists.
 pub(super) fn translate_ty<'tcx>(_tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> Option<Type> {
     match ty.kind() {
         ty::Bool => Some(Type::Bool),
@@ -157,6 +162,7 @@ pub(super) fn translate_ty<'tcx>(_tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> Option
     }
 }
 
+/// Produces the integer annotation implied by a monomorphized Rust scalar type.
 pub(super) fn translate_annotation(ty: ty::Ty<'_>) -> Option<Annotation> {
     match ty.kind() {
         ty::Int(_) | ty::Uint(_) => int_bitwidth(ty).map(|bw| {
@@ -283,7 +289,10 @@ pub(super) fn scalar_pair_info<'tcx>(
 }
 
 /// Query the alignment of type `ty` in bytes.
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "some translation paths query alignment opportunistically while others only need size"
+)]
 pub(super) fn type_align<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> Option<u64> {
     Some(mono_layout_of(tcx, ty)?.align.abi.bytes())
 }

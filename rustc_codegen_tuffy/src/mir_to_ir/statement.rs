@@ -6,12 +6,14 @@ use tuffy_ir::instruction::Origin;
 use tuffy_ir::types::{Annotation, IntAnnotation, IntSignedness, Type};
 use tuffy_ir::value::ValueRef;
 
+/// Shared 64-bit unsigned annotation used for synthesized integer temporaries.
 const I64: IntAnnotation = IntAnnotation {
     bit_width: 64,
     signedness: IntSignedness::Unsigned,
 };
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
+    /// Returns whether `rvalue` is a scalar constant that can stay in registers.
     fn rvalue_is_scalar_const(&self, rvalue: &Rvalue<'tcx>, dest_ty: ty::Ty<'tcx>) -> bool {
         matches!(
             rvalue,
@@ -19,6 +21,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         ) && matches!(repr_kind(self.tcx, dest_ty), ReprKind::Scalar)
     }
 
+    /// Lowers one MIR statement into Tuffy IR state updates and instructions.
     pub(super) fn translate_statement(&mut self, stmt: &mir::Statement<'tcx>) {
         match &stmt.kind {
             StatementKind::Assign(box (place, rvalue)) => {
@@ -195,6 +198,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         }
     }
 
+    /// Stores a lowered value through a dereferenced place.
     fn assign_through_deref(&mut self, val: ValueRef, place: &Place<'tcx>, rvalue: &Rvalue<'tcx>) {
         if let Some((addr, projected_ty)) = self.translate_place_to_addr(place) {
             let addr = self.coerce_to_ptr(addr);
@@ -366,6 +370,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         }
     }
 
+    /// Writes an assignment into a destination local that already lives on the stack.
     fn assign_to_stack_local(&mut self, val: ValueRef, place: &Place<'tcx>, rvalue: &Rvalue<'tcx>) {
         if let Some(slot) = self.locals.get(place.local) {
             if matches!(self.builder.value_type(slot), Some(Type::Ptr(_))) {
@@ -1127,6 +1132,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         }
     }
 
+    /// Writes an assignment into a destination local that currently lives in registers.
     fn assign_to_register_local(
         &mut self,
         val: ValueRef,
@@ -1286,6 +1292,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         }
     }
 
+    /// Writes an assignment into a projected destination place.
     fn assign_to_projected(&mut self, val: ValueRef, place: &Place<'tcx>, rvalue: &Rvalue<'tcx>) {
         // Projected destination: compute address and emit Store.
         // persist_spill=true: if the base local was a register

@@ -8,6 +8,7 @@ use super::ctx::TranslationCtx;
 use super::types::*;
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
+    /// Computes the address that a MIR place refers to, along with its final type.
     pub(super) fn translate_place_to_addr(
         &mut self,
         place: &Place<'tcx>,

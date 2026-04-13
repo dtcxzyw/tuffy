@@ -11,6 +11,7 @@ use tuffy_ir::typed::IntOperand;
 use tuffy_ir::types::{Annotation, FloatType, IntAnnotation, IntSignedness, Type};
 use tuffy_ir::value::ValueRef;
 
+/// Rewrites an integer-to-integer cast while preserving the source bit width.
 pub(super) fn translate_int_to_int_cast(
     src_ty: ty::Ty<'_>,
     target_ty: ty::Ty<'_>,
@@ -105,7 +106,11 @@ pub(super) fn translate_int_to_int_cast(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "const lowering threads shared caches and output accumulators through one helper"
+)]
+/// Lowers a MIR constant operand into an IR value, emitting static data as needed.
 pub(super) fn translate_const<'tcx>(
     tcx: TyCtxt<'tcx>,
     instance: Instance<'tcx>,
@@ -477,7 +482,10 @@ pub(super) fn translate_const<'tcx>(
 /// Walks the provenance entries in the given byte range and resolves each
 /// pointer target to a symbol name. For `Memory` targets, the target
 /// allocation is recursively emitted as static data.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "relocation extraction needs all shared translation caches and outputs"
+)]
 pub(super) fn extract_alloc_relocs<'tcx>(
     tcx: TyCtxt<'tcx>,
     alloc: &rustc_middle::mir::interpret::Allocation,
@@ -599,6 +607,7 @@ pub(super) fn extract_alloc_relocs<'tcx>(
     relocs
 }
 
+/// Lowers a scalar constant payload into an IR value of the requested MIR type.
 pub(super) fn translate_scalar(
     scalar: mir::interpret::Scalar,
     ty: ty::Ty<'_>,
@@ -703,7 +712,10 @@ pub(super) fn translate_scalar(
 ///
 /// Emits the data bytes to .rodata and returns an IR constant whose index
 /// is recorded in `symbols` so that isel emits a RIP-relative LEA.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "slice lowering shares the same allocation caches as other const lowering paths"
+)]
 pub(super) fn translate_const_slice<'tcx>(
     tcx: TyCtxt<'tcx>,
     alloc_id: rustc_middle::mir::interpret::AllocId,

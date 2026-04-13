@@ -22,6 +22,7 @@ pub(super) enum CallTarget {
 
 /// Result of resolving a call target, including caller-location metadata.
 pub(super) struct ResolvedCall<'tcx> {
+    /// Resolved direct or virtual callee target, if codegen can determine one.
     pub(super) target: Option<CallTarget>,
     /// True if the callee has `#[track_caller]` and expects an implicit
     /// `&Location` as the last ABI argument.
@@ -224,6 +225,7 @@ pub(super) fn resolve_call_target<'tcx>(
 }
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
+    /// Lowers one MIR call terminator into IR control flow and call instructions.
     pub(super) fn translate_call(
         &mut self,
         func: &Operand<'tcx>,

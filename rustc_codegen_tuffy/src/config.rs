@@ -7,15 +7,22 @@ use rustc_span::Symbol;
 use tuffy_ir::debug::FunctionDebugInfo;
 
 #[derive(Clone, Debug)]
+/// Backend options derived from the active rustc session.
 pub(crate) struct BackendOptions {
+    /// Whether to print each translated function as Tuffy IR.
     pub dump_ir: bool,
+    /// Optional output path for the concatenated module dump.
     pub dump_module_path: Option<PathBuf>,
+    /// Whether to run `tuffy_opt` on emitted IR batches.
     pub run_tuffy_opt: bool,
+    /// Whether to print backend timing diagnostics to stderr.
     pub trace_timings: bool,
+    /// Requested rustc debuginfo level.
     pub debuginfo: DebugInfo,
 }
 
 impl BackendOptions {
+    /// Builds backend options from the current rustc session.
     pub(crate) fn from_session(sess: &Session) -> Self {
         let dump_ir = sess.opts.cg.llvm_args.iter().any(|arg| arg == "dump-ir");
         let dump_module_path = sess
@@ -38,14 +45,17 @@ impl BackendOptions {
         }
     }
 
+    /// Returns whether the backend should emit any debug records.
     pub(crate) fn emit_debuginfo(&self) -> bool {
         self.debuginfo != DebugInfo::None
     }
 
+    /// Returns whether variable-level debug bindings should be preserved.
     pub(crate) fn retain_variable_debuginfo(&self) -> bool {
         matches!(self.debuginfo, DebugInfo::Limited | DebugInfo::Full)
     }
 
+    /// Clones `func` and removes debug payloads that the selected mode does not keep.
     pub(crate) fn strip_debug_for_codegen(
         &self,
         func: &tuffy_ir::function::Function,
@@ -64,10 +74,12 @@ impl BackendOptions {
     }
 }
 
+/// Returns whether module-level Tuffy optimization should run at this opt level.
 fn should_run_tuffy_opt(opt_level: OptLevel) -> bool {
     !matches!(opt_level, OptLevel::No)
 }
 
+/// Validates rustc options that this backend supports before codegen starts.
 pub(crate) fn init(sess: &Session) {
     match sess.lto() {
         Lto::No | Lto::ThinLocal => {}
@@ -82,6 +94,7 @@ pub(crate) fn init(sess: &Session) {
     }
 }
 
+/// Builds the rustc target feature view exposed by this backend.
 pub(crate) fn target_config(sess: &Session) -> TargetConfig {
     let features: Vec<Symbol> = sess
         .target

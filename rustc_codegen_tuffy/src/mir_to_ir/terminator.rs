@@ -12,12 +12,14 @@ use tuffy_ir::value::ValueRef;
 use super::ctx::TranslationCtx;
 use super::types::*;
 
+/// Shared 64-bit unsigned annotation used for synthesized integer terminator values.
 const I64: IntAnnotation = IntAnnotation {
     bit_width: 64,
     signedness: IntSignedness::Unsigned,
 };
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
+    /// Lowers one MIR terminator into Tuffy IR control flow.
     pub(super) fn translate_terminator(&mut self, term: &mir::Terminator<'tcx>) {
         match &term.kind {
             TerminatorKind::Return => {
@@ -396,6 +398,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         }
     }
 
+    /// Lowers MIR `Return`, including SRET and fat-pointer return conventions.
     fn translate_return(&mut self) {
         // SRET: copy the constructed return value from local stack slot
         // to the SRET pointer, then return the pointer.
@@ -709,6 +712,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         }
     }
 
+    /// Lowers a drop terminator into a call to the resolved drop glue.
     fn translate_drop(
         &mut self,
         place: &mir::Place<'tcx>,
@@ -935,6 +939,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         );
     }
 
+    /// Lowers a `SwitchInt` terminator into IR branch structure.
     pub(super) fn translate_switch_int(
         &mut self,
         discr: &Operand<'tcx>,

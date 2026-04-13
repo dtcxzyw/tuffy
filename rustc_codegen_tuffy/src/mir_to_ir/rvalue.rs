@@ -83,6 +83,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         }
     }
 
+    /// Lowers one MIR rvalue and returns its primary IR value when one exists.
     pub(super) fn translate_rvalue(
         &mut self,
         rvalue: &Rvalue<'tcx>,
@@ -486,6 +487,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         }
     }
 
+    /// Lowers a MIR binary operation, including checked and wide integer cases.
     fn translate_binary_op(
         &mut self,
         op: &BinOp,
@@ -1303,6 +1305,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         Some(val)
     }
 
+    /// Lowers MIR casts, including pointer coercions and integer reannotations.
     fn translate_cast(
         &mut self,
         kind: &CastKind,
@@ -2133,6 +2136,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         }
     }
 
+    /// Returns whether `operand` is currently represented by a stack slot.
     fn operand_uses_stack_slot(&self, operand: &Operand<'tcx>) -> bool {
         matches!(
             operand,
@@ -2141,10 +2145,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         )
     }
 
+    /// Returns cached or recomputed fat-pointer metadata for `operand`.
     fn fat_metadata_for_operand(&mut self, operand: &Operand<'tcx>) -> Option<ValueRef> {
         self.extract_fat_component(&Rvalue::Use(operand.clone()))
     }
 
+    /// Computes the source address to use when copying `operand` into memory.
     fn copy_source_addr_for_operand(
         &mut self,
         operand: &Operand<'tcx>,
@@ -2164,6 +2170,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         }
     }
 
+    /// Stores `val` into `dst_addr`, using the operand shape to choose the right strategy.
     fn store_operand_value(
         &mut self,
         operand: &Operand<'tcx>,
@@ -2358,6 +2365,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             .raw();
     }
 
+    /// Lowers aggregate construction by assembling the destination in memory or registers.
     fn translate_aggregate(
         &mut self,
         kind: &mir::AggregateKind<'tcx>,

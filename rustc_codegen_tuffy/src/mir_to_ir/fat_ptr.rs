@@ -9,6 +9,7 @@ use super::rvalue::peel_adt_to_pointees;
 use super::types::*;
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
+    /// Extracts the metadata word associated with a fat-pointer-producing rvalue.
     pub(super) fn extract_fat_component(&mut self, rvalue: &Rvalue<'tcx>) -> Option<ValueRef> {
         match rvalue {
             // Constant slice: extract the length metadata.

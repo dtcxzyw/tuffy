@@ -4,16 +4,24 @@
 //! control flow (branches, SwitchInt), and comparison operations.
 
 mod call;
+/// Compile-time constant lowering helpers.
 mod constant;
+/// Shared translation context and per-function state.
 mod ctx;
+/// Enum discriminant read and write helpers.
 mod discriminant;
+/// Fat-pointer metadata extraction helpers.
 mod fat_ptr;
 mod intrinsic;
 mod local_analysis;
+/// Operand lowering helpers.
 mod operand;
+/// Place-to-address and place-to-value lowering helpers.
 mod place;
+/// Rvalue lowering helpers.
 mod rvalue;
 mod simd;
+/// Statement lowering helpers.
 mod statement;
 mod terminator;
 pub(crate) mod types;
@@ -56,6 +64,7 @@ pub type ContentCache = std::collections::HashMap<(Vec<u8>, Vec<(usize, String)>
 
 /// Result of MIR → IR translation.
 pub struct TranslationResult<'tcx> {
+    /// Lowered Tuffy IR function body for the translated instance.
     pub func: Function,
     /// Interned symbol table shared across the codegen unit.
     pub symbols: SymbolTable,

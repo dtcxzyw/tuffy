@@ -13,10 +13,15 @@ use super::intrinsic::intrinsic_to_libc;
 use super::types::{int_ann_for_bytes, int_annotation_for_bytes, translate_annotation, type_size};
 
 #[derive(Clone, Copy)]
+/// Precomputed shape information for a SIMD cast source or destination type.
 struct SimdCastInfo {
+    /// Element width in bytes.
     elem_size: u32,
+    /// Number of lanes in the SIMD vector.
     lanes: u32,
+    /// Integer annotation for integer-lane vectors.
     int_ann: Option<IntAnnotation>,
+    /// Floating-point lane type for float vectors.
     float_ty: Option<FloatType>,
 }
 
@@ -38,6 +43,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         Some(self.translate_simd_intrinsic_inner(name, substs, ir_args, destination_local))
     }
 
+    /// Lowers the body of a recognized `simd_*` intrinsic.
     fn translate_simd_intrinsic_inner(
         &mut self,
         name: &str,
@@ -779,6 +785,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
     // ── SIMD helper methods ──────────────────────────────────────────
 
+    /// Returns the total byte width of the SIMD type named by `substs`.
     fn simd_size_from_substs(&self, substs: &'tcx ty::List<ty::GenericArg<'tcx>>) -> Option<u32> {
         substs
             .first()
@@ -831,6 +838,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         (1, None) // default: byte-sized integer
     }
 
+    /// Returns the integer lane annotation implied by the SIMD type in `substs`.
     fn simd_elem_int_ann_from_substs(
         &self,
         substs: &'tcx ty::List<ty::GenericArg<'tcx>>,
@@ -843,6 +851,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         }
     }
 
+    /// Returns the lane element type for a monomorphized SIMD type.
     fn simd_elem_ty(&self, simd_ty: ty::Ty<'tcx>) -> Option<ty::Ty<'tcx>> {
         if let ty::Adt(def, adt_substs) = simd_ty.kind() {
             if let Some(elem_ty) = adt_substs.first().and_then(|a| a.as_type()) {
@@ -860,6 +869,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         None
     }
 
+    /// Computes lane count and lane type data used by SIMD cast lowering.
     fn simd_cast_info(&self, simd_ty: ty::Ty<'tcx>) -> Option<SimdCastInfo> {
         let elem_ty = self.simd_elem_ty(simd_ty)?;
         let elem_size = type_size(self.tcx, elem_ty)? as u32;
@@ -1368,6 +1378,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         self.locals.set(destination_local, result);
     }
 
+    /// Lowers SIMD lane-wise shift intrinsics.
     fn emit_simd_shift(
         &mut self,
         ir_args: &[ValueRef],
@@ -1462,6 +1473,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         self.locals.set(destination_local, result);
     }
 
+    /// Lowers SIMD cast intrinsics between integer and floating-point lane types.
     fn emit_simd_cast(
         &mut self,
         ir_args: &[ValueRef],
@@ -1655,6 +1667,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         self.locals.set(destination_local, result);
     }
 
+    /// Lowers `simd_extract` by loading the requested lane from the source vector.
     fn emit_simd_extract(
         &mut self,
         ir_args: &[ValueRef],
@@ -1719,6 +1732,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         self.locals.set(destination_local, result);
     }
 
+    /// Lowers `simd_insert` by writing one lane into a copied vector slot.
     fn emit_simd_insert(
         &mut self,
         ir_args: &[ValueRef],
@@ -1817,6 +1831,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         self.locals.set(destination_local, result);
     }
 
+    /// Lowers fused multiply-add SIMD intrinsics lane by lane.
     fn emit_simd_fma(
         &mut self,
         ir_args: &[ValueRef],
@@ -1924,6 +1939,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         self.locals.set(destination_local, result);
     }
 
+    /// Lowers unary float SIMD intrinsics by calling a scalar libcall per lane.
     fn emit_simd_float_unary_libcall(
         &mut self,
         ir_args: &[ValueRef],

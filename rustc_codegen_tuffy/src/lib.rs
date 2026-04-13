@@ -19,12 +19,19 @@ extern crate rustc_session;
 extern crate rustc_span;
 extern crate rustc_symbol_mangling;
 
+/// Allocator shim emission for rustc-required symbols.
 mod allocator;
+/// Backend option parsing and rustc target configuration.
 mod config;
+/// AOT crate codegen orchestration and object emission.
 mod driver;
+/// C-compatible process entry shims for crates with `main`.
 mod main_shim;
+/// MIR-to-Tuffy IR translation.
 mod mir_to_ir;
+/// `__rust_try` helper emission for unwinding support.
 mod rust_try;
+/// Static allocation relocation extraction and lowering.
 mod static_data;
 
 use std::any::Any;
@@ -37,6 +44,7 @@ use rustc_middle::ty::TyCtxt;
 use rustc_session::Session;
 use rustc_session::config::OutputFilenames;
 
+/// `rustc_codegen_ssa` backend implementation backed by Tuffy IR.
 pub struct TuffyCodegenBackend;
 
 impl CodegenBackend for TuffyCodegenBackend {

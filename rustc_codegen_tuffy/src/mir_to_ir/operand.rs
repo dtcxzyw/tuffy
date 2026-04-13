@@ -42,6 +42,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         matches!(resolved, Some(mir::ConstValue::Indirect { .. }))
     }
 
+    /// Lowers a MIR operand into the IR value currently representing it.
     pub(super) fn translate_operand(&mut self, operand: &Operand<'tcx>) -> Option<ValueRef> {
         match operand {
             Operand::Copy(place) | Operand::Move(place) => {

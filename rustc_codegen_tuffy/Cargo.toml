@@ -7,6 +7,15 @@ license = "MIT OR Apache-2.0"
 [lib]
 crate-type = ["dylib"]
 
+[lints.rust]
+missing_docs = "deny"
+
+[lints.clippy]
+missing_docs_in_private_items = "deny"
+allow_attributes_without_reason = "deny"
+missing_panics_doc = "deny"
+missing_errors_doc = "deny"
+
 [dependencies]
 tuffy_ir = { path = "../tuffy_ir" }
 tuffy_opt = { path = "../tuffy_opt" }
