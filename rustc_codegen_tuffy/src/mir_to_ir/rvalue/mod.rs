@@ -107,57 +107,66 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             Rvalue::Ref(_, _, place) | Rvalue::RawPtr(_, place) => {
                 if !place.projection.is_empty() {
                     let result = self.translate_place_to_addr(place).map(|(addr, _ty)| addr);
+                    let dest_ty = if dest_place.projection.is_empty() {
+                        self.monomorphize(self.mir.local_decls[dest_place.local].ty)
+                    } else {
+                        self.monomorphize(dest_place.ty(&self.mir.local_decls, self.tcx).ty)
+                    };
+                    let source_ty = self.monomorphize(self.mir.local_decls[place.local].ty);
+                    if is_fat_ptr(self.tcx, dest_ty)
+                        && is_fat_ptr(self.tcx, source_ty)
+                        && place.projection.len() == 1
+                        && matches!(place.projection.first(), Some(mir::PlaceElem::Deref))
+                        && self.find_fat_metadata_for_place(place).is_some()
+                    {
+                        return result;
+                    }
                     // When taking a Ref/RawPtr of a dereferenced fat pointer
                     // (e.g. `&raw const (*_3)` where `_3: &[u8]`), the result
                     // is itself a fat pointer that must preserve the metadata
                     // (length for slices, vtable for dyn).  translate_place_to_addr
                     // only returns the data pointer; reconstruct the full fat
                     // pointer in a 16-byte stack slot.
-                    if let Some(data_ptr) = result {
-                        let dest_ty = if dest_place.projection.is_empty() {
-                            self.monomorphize(self.mir.local_decls[dest_place.local].ty)
-                        } else {
-                            self.monomorphize(dest_place.ty(&self.mir.local_decls, self.tcx).ty)
-                        };
-                        if is_fat_ptr(self.tcx, dest_ty) {
-                            // Find the metadata from the source fat pointer.
-                            let meta = self.find_fat_metadata_for_place(place);
-                            if let Some(meta_val) = meta {
-                                let slot = self.builder.stack_slot(16, 0, Origin::synthetic());
-                                self.current_mem = self
-                                    .builder
-                                    .store(
-                                        data_ptr.into(),
-                                        slot.into(),
-                                        8,
-                                        self.current_mem.into(),
-                                        Origin::synthetic(),
-                                    )
-                                    .raw();
-                                let off8 = self.builder.iconst(
-                                    8,
-                                    64,
-                                    IntSignedness::DontCare,
-                                    Origin::synthetic(),
-                                );
-                                let meta_addr = self.builder.ptradd(
+                    if let Some(data_ptr) = result
+                        && is_fat_ptr(self.tcx, dest_ty)
+                    {
+                        // Find the metadata from the source fat pointer.
+                        let meta = self.find_fat_metadata_for_place(place);
+                        if let Some(meta_val) = meta {
+                            let slot = self.builder.stack_slot(16, 0, Origin::synthetic());
+                            self.current_mem = self
+                                .builder
+                                .store(
+                                    data_ptr.into(),
                                     slot.into(),
-                                    off8.into(),
-                                    0,
+                                    8,
+                                    self.current_mem.into(),
                                     Origin::synthetic(),
-                                );
-                                self.current_mem = self
-                                    .builder
-                                    .store(
-                                        meta_val.into(),
-                                        meta_addr.into(),
-                                        8,
-                                        self.current_mem.into(),
-                                        Origin::synthetic(),
-                                    )
-                                    .raw();
-                                return Some(slot);
-                            }
+                                )
+                                .raw();
+                            let off8 = self.builder.iconst(
+                                8,
+                                64,
+                                IntSignedness::DontCare,
+                                Origin::synthetic(),
+                            );
+                            let meta_addr = self.builder.ptradd(
+                                slot.into(),
+                                off8.into(),
+                                0,
+                                Origin::synthetic(),
+                            );
+                            self.current_mem = self
+                                .builder
+                                .store(
+                                    meta_val.into(),
+                                    meta_addr.into(),
+                                    8,
+                                    self.current_mem.into(),
+                                    Origin::synthetic(),
+                                )
+                                .raw();
+                            return Some(slot);
                         }
                     }
                     result

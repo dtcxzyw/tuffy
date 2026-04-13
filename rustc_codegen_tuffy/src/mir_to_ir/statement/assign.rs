@@ -1017,9 +1017,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // Ref/RawPtr producing a fat pointer: the
                 // rvalue handler builds a 16-byte stack slot
                 // containing (data_ptr, metadata).
-                Rvalue::Ref(..) | Rvalue::RawPtr(..) => {
+                Rvalue::Ref(_, _, src_place) | Rvalue::RawPtr(_, src_place) => {
                     let dest_ty = self.monomorphize(self.mir.local_decls[place.local].ty);
+                    let src_ty = self.monomorphize(self.mir.local_decls[src_place.local].ty);
                     is_fat_ptr(self.tcx, dest_ty)
+                        && !(is_fat_ptr(self.tcx, src_ty)
+                            && src_place.projection.len() == 1
+                            && matches!(src_place.projection.first(), Some(mir::PlaceElem::Deref)))
                 }
                 _ => false,
             };

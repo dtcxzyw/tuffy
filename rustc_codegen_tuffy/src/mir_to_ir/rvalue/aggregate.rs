@@ -279,6 +279,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         } else {
             8 * operands.len() as u64
         });
+        if dest_place.projection.is_empty()
+            && !self.stack_locals.is_stack(dest_place.local)
+            && is_fat_ptr(self.tcx, agg_ty)
+            && matches!(repr_kind(self.tcx, agg_ty), ReprKind::ScalarPair)
+            && let Some(first) = operands.first()
+        {
+            return self.translate_operand(first);
+        }
         if total_size == 0 {
             return Some(
                 self.builder

@@ -211,7 +211,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 for stmt in &bb_data.statements {
                     if let StatementKind::Assign(box (_, rvalue)) = &stmt.kind {
                         let referenced_local = match rvalue {
-                            Rvalue::Ref(_, _, place) | Rvalue::RawPtr(_, place) => {
+                            Rvalue::Ref(_, _, place) | Rvalue::RawPtr(_, place)
+                                if !matches!(
+                                    place.projection.first(),
+                                    Some(mir::PlaceElem::Deref)
+                                ) =>
+                            {
                                 Some(place.local)
                             }
                             _ => None,
