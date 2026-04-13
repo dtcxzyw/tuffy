@@ -558,6 +558,47 @@ func @call_unrelated(int:s32) -> int:s32 {
 }
 
 #[test]
+fn promotes_pointer_and_length_slot_around_unrelated_call() {
+    let input = r#"
+func @pair_slot(ptr, int:u64) -> int:u64 {
+  bb0(v0: mem):
+    v1: ptr = stack_slot 16 align 8
+    v2: ptr = param 0
+    v3: int:u64 = param 1
+    v4: mem = store.8 v2, v1, v0
+    v5: int:u4 = iconst 8
+    v6: ptr = ptradd v1, v5
+    v7: mem = store.8 v3, v6, v4
+    v8: ptr = symbol_addr @extern_sink
+    v9: mem = call v8(v3), v7
+    v10: ptr = load.8 v1, v9
+    v11: int:u64 = load.8 v6, v9
+    v12: int:u64 = ptrtoaddr v10
+    v13: int:u64 = add v12, v11
+    ret v13, v9
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        !output.contains("stack_slot"),
+        "pair slot should promote:\n{output}"
+    );
+    assert!(
+        !output.contains("store.8"),
+        "pair-slot stores should vanish:\n{output}"
+    );
+    assert!(
+        !output.contains("load.8"),
+        "pair-slot loads should vanish:\n{output}"
+    );
+    assert!(
+        output.contains("call"),
+        "unrelated call should remain:\n{output}"
+    );
+    assert!(stats.promoted_slots >= 1);
+}
+
+#[test]
 fn range_folds_branch_in_refined_successor() {
     let input = r#"
 func @range_refine(int:u64) {
@@ -1387,6 +1428,104 @@ func @caller(int:s32) -> int:s32 {
 }
 
 #[test]
+fn inlines_call_when_callee_return_is_ignored() {
+    let input = r#"
+func @helper(ptr) -> ptr {
+  bb0(v0: mem):
+    v1: ptr = param 0
+    ret v1, v0
+}
+
+func @caller(ptr) {
+  bb0(v0: mem):
+    v1: ptr = param 0
+    v2: ptr = symbol_addr @helper
+    v3: mem = call v2(v1), v0
+    ret v3
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        !output.contains(" = call "),
+        "ignored return should not block inlining:\n{output}"
+    );
+    assert_eq!(stats.inlined_calls, 1);
+}
+
+#[test]
+fn inlines_large_single_caller_when_return_is_ignored() {
+    let input = r#"
+func @ignored_wrapper(ptr, ptr, int:s32) -> ptr {
+  bb0(v0: mem):
+    v1: ptr = param 0
+    v2: ptr = param 1
+    v3: int:s32 = param 2
+    v4: int:s32 = load.4 v1, v0
+    v5: int:s32 = add v4, v3
+    v6: int:s32 = add v5, v3
+    v7: int:s32 = add v6, v3
+    v8: int:s32 = add v7, v3
+    v9: int:s32 = add v8, v3
+    v10: int:s32 = add v9, v3
+    v11: int:s32 = add v10, v3
+    v12: int:s32 = add v11, v3
+    v13: int:s32 = add v12, v3
+    v14: int:s32 = add v13, v3
+    v15: int:s32 = add v14, v3
+    v16: int:s32 = add v15, v3
+    v17: int:s32 = add v16, v3
+    v18: int:s32 = add v17, v3
+    v19: int:s32 = add v18, v3
+    v20: int:s32 = add v19, v3
+    v21: int:s32 = add v20, v3
+    v22: int:s32 = add v21, v3
+    v23: int:s32 = add v22, v3
+    v24: int:s32 = add v23, v3
+    v25: int:s32 = add v24, v3
+    v26: int:s32 = add v25, v3
+    v27: int:s32 = add v26, v3
+    v28: int:s32 = add v27, v3
+    v29: int:s32 = add v28, v3
+    v30: int:s32 = add v29, v3
+    v31: int:s32 = add v30, v3
+    v32: int:s32 = add v31, v3
+    v33: int:s32 = add v32, v3
+    v34: int:s32 = add v33, v3
+    v35: int:s32 = add v34, v3
+    v36: int:s32 = add v35, v3
+    v37: int:s32 = add v36, v3
+    v38: int:s32 = add v37, v3
+    v39: int:s32 = add v38, v3
+    v40: int:s32 = add v39, v3
+    v41: mem = store.4 v40, v2, v0
+    v42: int:s32 = load.4 v2, v41
+    v43: bool = icmp.gt v42, v3
+    brif v43, bb1(v41, v2), bb2(v41, v1)
+  bb1(v44: mem, v45: ptr):
+    ret v45, v44
+  bb2(v46: mem, v47: ptr):
+    ret v47, v46
+}
+
+func @caller(ptr, ptr, int:s32) {
+  bb0(v0: mem):
+    v1: ptr = param 0
+    v2: ptr = param 1
+    v3: int:s32 = param 2
+    v4: ptr = symbol_addr @ignored_wrapper
+    v5: mem = call v4(v1, v2, v3), v0
+    ret v5
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        !output.contains(" = call "),
+        "large ignored-return helpers should inline:\n{output}"
+    );
+    assert_eq!(stats.inlined_calls, 1);
+}
+
+#[test]
 fn inlining_remaps_cleanup_labels_to_cloned_landing_pad_blocks() {
     let input = r#"
 func @sink() {
@@ -1902,6 +2041,35 @@ data @.zero8 = "\0\0\0\0\0\0\0\0"
 }
 
 #[test]
+fn scalar_swap_drops_dead_symbol_prelude_load() {
+    let input = r#"
+func @partition_like_swap(ptr, ptr) {
+  bb0(v0: mem):
+    v1: ptr = param 0
+    v2: ptr = param 1
+    v4: ptr = stack_slot 8 align 8
+    v5: ptr = symbol_addr @.zero8
+    v6: int:i64 = load.8 v5, v0
+    v7: mem = store.8 v6, v4, v0
+    v8: int:u4 = iconst 8
+    v9: ptr = symbol_addr @memcpy
+    v10: mem, v11: int:u64 = call v9(v4, v1:align8, v8), v7 -> int:u64
+    v12: mem = memmove v1:align8, v2:align8, v8, v10
+    v13: ptr = symbol_addr @memcpy
+    v14: mem, v15: int:u64 = call v13(v2, v4, v8), v12 -> int:u64
+    ret v14
+}
+data @.zero8 = "\0\0\0\0\0\0\0\0"
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        !output.contains("symbol_addr @.zero8"),
+        "dead prelude load should disappear with the swap temp init:\n{output}"
+    );
+    assert_eq!(stats.per_rule["form_scalar_swap"], 1);
+}
+
+#[test]
 fn forms_scalar_swap_from_partition_like_dynamic_chain() {
     let input = r#"
 func @partition_like_dynamic_swap(ptr, int:u64, int:u64) {
@@ -1940,6 +2108,46 @@ data @.zero8 = "\0\0\0\0\0\0\0\0"
     assert!(
         output.contains("load.8") && output.contains("store.8"),
         "dynamic partition-like swap chain should become scalar load/store ops:\n{output}"
+    );
+    assert_eq!(stats.per_rule["form_scalar_swap"], 1);
+}
+
+#[test]
+fn forms_scalar_swap_across_single_successor_block() {
+    let input = r#"
+func @swap8_split(ptr, ptr) {
+  bb0(v0: mem):
+    v1: ptr = param 0
+    v2: ptr = param 1
+    v3: ptr = stack_slot 8 align 8
+    v4: ptr = symbol_addr @.zero8
+    v5: int:i64 = load.8 v4, v0
+    v6: mem = store.8 v5, v3, v0
+    v7: int:u4 = iconst 8
+    v8: ptr = symbol_addr @memcpy
+    v9: mem, v10: int:u64 = call v8(v3, v1:align8, v7), v6 -> int:u64
+    v11: mem = memmove v1:align8, v2:align8, v7, v9
+    br bb1(v11)
+
+  bb1(v12: mem):
+    v13: ptr = symbol_addr @memcpy
+    v14: mem, v15: int:u64 = call v13(v2, v3, v7), v12 -> int:u64
+    ret v14
+}
+data @.zero8 = "\0\0\0\0\0\0\0\0"
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        !output.contains("memmove"),
+        "split swap chain should remove memmove:\n{output}"
+    );
+    assert!(
+        !output.contains("symbol_addr @memcpy"),
+        "split swap chain should remove memcpy calls:\n{output}"
+    );
+    assert!(
+        output.contains("load.8") && output.contains("store.8"),
+        "split swap chain should become scalar load/store ops:\n{output}"
     );
     assert_eq!(stats.per_rule["form_scalar_swap"], 1);
 }

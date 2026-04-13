@@ -10,6 +10,8 @@ This crate hosts IR-level optimization passes operating on `tuffy_ir::Module` / 
 - Module optimization now includes a direct same-module inliner for eligible
   `symbol_addr` call sites, followed by a second cleanup round on changed
   callers.
+- Same-module inlining also handles call sites that ignore a callee's primary
+  return value, which matters for out-parameter-heavy helper wrappers.
 - Promotion is block-arg based (matching Tuffy IR CFG joins) rather than PHI-node based.
 - Promotion currently handles local `stack_slot` objects reached through constant-offset `ptradd`.
 - Promotion is intentionally conservative around escaping pointers, atomics, bulk memory ops, and unwind-cleanup calls.
@@ -32,6 +34,9 @@ This crate hosts IR-level optimization passes operating on `tuffy_ir::Module` / 
 - Value-root replacements are not limited to existing bindings; the current generated runtime can also materialize integer constants, derived shift amounts for power-of-two divisors, and simple boolean expressions such as logical negation.
 - Rewrites are modeled around generic value roots and terminator roots; the current terminator subset only includes `brif`, but it is no longer represented as a dedicated rewrite kind.
 - The current cleanup manifest still distinguishes verified/generated families from legacy handwritten families; inlining remains outside that manifest.
+- Scalar-swap formation now follows uniquely forwarded memory tokens through
+  single-predecessor branch edges and drops dead symbol-backed temp preloads
+  that become unused after the rewrite.
 
 `optimize_module` currently runs:
 

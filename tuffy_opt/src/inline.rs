@@ -21,7 +21,6 @@ const INLINE_SINGLE_CALLER_LEAF_THRESHOLD: u32 = 64;
 const INLINE_SINGLE_CALLER_SIMPLE_CFG_THRESHOLD: u32 = 128;
 /// Internal constant `INLINE_MEMORY_WRAPPER_THRESHOLD`.
 const INLINE_MEMORY_WRAPPER_THRESHOLD: u32 = 96;
-
 /// Internal data structure `InlineResult`.
 pub(crate) struct InlineResult {
     /// Stats.
@@ -343,7 +342,7 @@ fn call_signature_matches(
         }
     }
 
-    if call_inst.secondary_ty != callee.ret_ty {
+    if call_inst.secondary_ty.is_some() && call_inst.secondary_ty != callee.ret_ty {
         return false;
     }
 
@@ -358,8 +357,7 @@ fn call_signature_matches(
                 }
             }
             (Some(_), None) => return false,
-            (None, Some(_)) => return false,
-            (None, None) => {}
+            (None, _) => {}
         }
         if let Some(ret2_spec) = ret2 {
             let Some(ret2_value) = ret2_value else {

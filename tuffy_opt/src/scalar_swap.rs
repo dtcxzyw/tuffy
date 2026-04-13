@@ -7,7 +7,7 @@ use tuffy_ir::module::{Module, SymbolId};
 use tuffy_ir::types::{Annotation, IntAnnotation, IntSignedness, Type};
 use tuffy_ir::value::ValueRef;
 
-use crate::cfg::collect_block_refs;
+use crate::cfg::{CfgInfo, collect_block_refs};
 use crate::peephole::PeepholeStats;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -81,6 +81,8 @@ struct SwapCandidate {
     initial_mem: ValueRef,
     /// Final memory token.
     final_mem: ValueRef,
+    /// Memory token produced by the memmove.
+    memmove_mem: ValueRef,
     /// First call index.
     first_call_idx: u32,
     /// Memmove instruction index.
@@ -108,7 +110,7 @@ pub(crate) fn optimize_module(
         if changed_functions.is_some_and(|flags| !flags[idx]) {
             continue;
         }
-        while let Some(candidate) = find_candidate(func, &module.symbols) {
+        while let Some(candidate) = find_candidate(func, &module.symbols, &CfgInfo::compute(func)) {
             apply_candidate(func, candidate);
             stats.record("form_scalar_swap");
         }
@@ -125,6 +127,7 @@ pub(crate) fn optimize_module(
 fn find_candidate(
     func: &Function,
     symbols: &tuffy_ir::module::SymbolTable,
+    cfg: &CfgInfo,
 ) -> Option<SwapCandidate> {
     for block in collect_block_refs(func) {
         let insts = func
@@ -168,13 +171,16 @@ fn find_candidate(
                 continue;
             }
 
-            let Some(second_call_idx) = sole_mem_user(func, memmove.mem_out) else {
+            let Some(second_call_consumer) = sole_mem_consumer(func, cfg, memmove.mem_out) else {
                 continue;
             };
-            let Some(second_call) = parse_memcpy_call(func, second_call_idx, symbols) else {
+            let Some(second_call) = parse_memcpy_call(func, second_call_consumer.inst_idx, symbols)
+            else {
                 continue;
             };
-            if second_call.size != first_call.size || second_call.mem_in != memmove.mem_out {
+            if second_call.size != first_call.size
+                || second_call.mem_in != second_call_consumer.mem_value
+            {
                 continue;
             }
             if second_call.dst.value != memmove.src.value
@@ -201,6 +207,7 @@ fn find_candidate(
             let mut matched = first_call.matched.clone();
             matched.extend(memmove.matched.iter().copied());
             matched.extend(second_call.matched.iter().copied());
+            matched.extend(second_call_consumer.matched.iter().copied());
             if let Some(store) = &prelude_store {
                 matched.extend(store.matched.iter().copied());
             }
@@ -211,6 +218,7 @@ fn find_candidate(
                 right_ptr: memmove.src.clone(),
                 initial_mem: base_mem,
                 final_mem: second_call.mem_out,
+                memmove_mem: memmove.mem_out,
                 first_call_idx: first_call.call_idx,
                 memmove_idx: memmove.inst_idx,
                 second_call_idx: second_call.call_idx,
@@ -293,7 +301,9 @@ fn apply_candidate(func: &mut Function, candidate: SwapCandidate) {
         },
     );
 
-    func.replace_all_uses(candidate.final_mem, ValueRef::inst_result(right_store_idx));
+    let replacement_mem = ValueRef::inst_result(right_store_idx);
+    func.replace_all_uses(candidate.final_mem, replacement_mem);
+    func.replace_all_uses(candidate.memmove_mem, replacement_mem);
 
     let _ = func.remove_inst(candidate.second_call_idx);
     let _ = func.remove_inst(candidate.memmove_idx);
@@ -333,11 +343,43 @@ fn parse_prelude_store(
     if func.use_count(ValueRef::inst_result(store_idx)) != 1 {
         return None;
     }
+    let stored_value = match &node.inst.op {
+        Op::Store(value, _, _, _) => value.value,
+        _ => unreachable!("matched store should remain a store"),
+    };
+    extend_matched_dead_prelude_value(func, stored_value, size, &mut matched);
     Some(PreludeStore {
         store_idx,
         mem_in: mem.clone().raw().value,
         matched,
     })
+}
+
+/// Add dead prelude value producers that can be safely dropped with the temp init.
+fn extend_matched_dead_prelude_value(
+    func: &Function,
+    value: ValueRef,
+    size: u32,
+    matched: &mut BTreeSet<u32>,
+) {
+    if value.is_block_arg() || value.is_secondary_result() || func.use_count(value) != 1 {
+        return;
+    }
+    let Some(node) = func.inst_pool.get(value.index()) else {
+        return;
+    };
+    match &node.inst.op {
+        Op::Const(_) | Op::BConst(_) => {
+            matched.insert(value.index());
+        }
+        Op::Load(ptr, load_size, _mem)
+            if *load_size == size
+                && symbol_addr_ptr_expr(func, &ptr.clone().raw(), matched).is_some() =>
+        {
+            matched.insert(value.index());
+        }
+        _ => {}
+    }
 }
 
 /// Internal helper `parse_memcpy_call`.
@@ -538,6 +580,62 @@ fn sole_mem_user(func: &Function, value: ValueRef) -> Option<u32> {
     users.next().is_none().then_some(first)
 }
 
+#[derive(Clone)]
+/// Forwarded memory consumer reached through unique branch forwarding.
+struct ForwardedMemConsumer {
+    /// Instruction index of the eventual consumer.
+    inst_idx: u32,
+    /// Memory SSA value used by that consumer.
+    mem_value: ValueRef,
+    /// Bridge instructions followed while forwarding the token.
+    matched: BTreeSet<u32>,
+}
+
+/// Follow a unique memory-token consumer through single-predecessor branch forwarding.
+fn sole_mem_consumer(
+    func: &Function,
+    cfg: &CfgInfo,
+    value: ValueRef,
+) -> Option<ForwardedMemConsumer> {
+    let mut current = value;
+    let mut matched = BTreeSet::new();
+    let mut seen = BTreeSet::new();
+
+    loop {
+        if !seen.insert(current.raw()) {
+            return None;
+        }
+        let mut uses = func.uses_of(current).cloned();
+        let use_node = uses.next()?;
+        if uses.next().is_some() {
+            return None;
+        }
+
+        let user_node = func.inst_pool.get(use_node.user)?;
+        match &user_node.inst.op {
+            Op::Br(target, args) => {
+                let arg_index = usize::try_from(use_node.operand_index).ok()?;
+                if arg_index >= args.len() || cfg.preds[target.index() as usize].len() != 1 {
+                    return None;
+                }
+                let source_region = func.block(user_node.parent_block).parent_region;
+                if func.block(*target).parent_region != source_region {
+                    return None;
+                }
+                current = *func.block_arg_values(*target).get(arg_index)?;
+                matched.insert(use_node.user);
+            }
+            _ => {
+                return Some(ForwardedMemConsumer {
+                    inst_idx: use_node.user,
+                    mem_value: current,
+                    matched,
+                });
+            }
+        }
+    }
+}
+
 /// Internal helper `const_u32`.
 ///
 /// # Panics
@@ -604,6 +702,7 @@ fn cleanup_dead_instructions(func: &mut Function, matched_insts: &BTreeSet<u32>)
                 inst.inst.op,
                 Op::Const(_)
                     | Op::BConst(_)
+                    | Op::Load(..)
                     | Op::PtrAdd(_, _)
                     | Op::StackSlot(_, _)
                     | Op::SymbolAddr(_)
@@ -613,6 +712,9 @@ fn cleanup_dead_instructions(func: &mut Function, matched_insts: &BTreeSet<u32>)
             if func.has_uses(ValueRef::inst_result(idx)) {
                 continue;
             }
+            if matches!(inst.inst.op, Op::Load(..)) && !load_from_symbol_addr(func, idx) {
+                continue;
+            }
             let _ = func.remove_inst(idx);
             changed = true;
         }
@@ -620,6 +722,31 @@ fn cleanup_dead_instructions(func: &mut Function, matched_insts: &BTreeSet<u32>)
             break;
         }
     }
+}
+
+/// Parse a pointer expression rooted in a direct symbol address.
+fn symbol_addr_ptr_expr(
+    func: &Function,
+    operand: &Operand,
+    matched: &mut BTreeSet<u32>,
+) -> Option<PtrExpr> {
+    let expr = ptr_expr(func, operand, matched)?;
+    if expr.root.is_block_arg() || expr.root.is_secondary_result() {
+        return None;
+    }
+    matches!(func.inst(expr.root.index()).op, Op::SymbolAddr(_)).then_some(expr)
+}
+
+/// Return whether a matched load reads from a direct symbol-address expression.
+fn load_from_symbol_addr(func: &Function, idx: u32) -> bool {
+    let Some(node) = func.inst_pool.get(idx) else {
+        return false;
+    };
+    let Op::Load(ptr, _, _) = &node.inst.op else {
+        return false;
+    };
+    let mut matched = BTreeSet::new();
+    symbol_addr_ptr_expr(func, &ptr.clone().raw(), &mut matched).is_some()
 }
 
 /// Internal helper `int_annotation`.
