@@ -21,7 +21,7 @@ Top-level backend responsibilities are split across small modules:
 | Module            | Purpose                                                   |
 |-------------------|-----------------------------------------------------------|
 | `lib.rs`          | Thin `CodegenBackend` facade and rustc entry point        |
-| `driver/aot.rs`   | AOT crate codegen pipeline, CGU iteration, inline fixpoint|
+| `driver/aot/`     | AOT pipeline orchestration, IR batching/merging, dumps   |
 | `config.rs`       | Backend option parsing and target feature reporting       |
 | `allocator.rs`    | Allocator shim emission                                   |
 | `main_shim.rs`    | C `main` / `lang_start` shim emission                     |
@@ -42,17 +42,18 @@ The core translation layer, organized into submodules by concern:
 | `operand.rs`       | MIR Operand → IR value translation                   |
 | `fat_ptr.rs`       | Fat pointer metadata extraction and handling         |
 | `discriminant.rs`  | Enum discriminant read/write operations              |
-| `rvalue.rs`        | Rvalue translation (binops, unops, casts, aggregates)|
-| `statement.rs`     | Statement translation (assign, storage, intrinsics)  |
-| `terminator.rs`    | Terminator translation (return, branch, switch, call)|
-| `call.rs`          | Function call ABI handling and argument passing      |
+| `rvalue/`          | Rvalue translation split into binary, cast, and aggregate helpers |
+| `statement/`       | Statement translation split around assignment storage paths        |
+| `terminator/`      | Terminator translation split across return, drop, switch, and panic helpers |
+| `call/`            | Function call lowering split across resolution, emission, and intrinsic handling |
 | `constant.rs`      | Constant evaluation and literal translation          |
 | `intrinsic/`       | Scalar intrinsic lowering dispatch and helper families |
 | `simd/`            | SIMD intrinsic lowering dispatch and helper families |
 
-`intrinsic/` and `simd/` are directory modules with a `mod.rs` dispatcher plus
-family-specific helper submodules used to keep the MIR-to-IR lowering surface
-split by operation family rather than one large file per area.
+`call/`, `rvalue/`, `statement/`, `terminator/`, `intrinsic/`, and `simd/` are
+directory modules with a `mod.rs` dispatcher plus focused helper submodules.
+This keeps the MIR-to-IR lowering surface split by operation family and storage
+path rather than concentrating unrelated logic in a few oversized files.
 
 ### Optimization Hook
 
