@@ -812,13 +812,11 @@ func @fallthrough_jump() {
 fn lower_keeps_non_fallthrough_jump() {
     let module = parse_module(
         r#"
-func @non_fallthrough_jump() {
+func @backedge_jump() {
   bb0(v0: mem):
-    br bb2(v0)
+    br bb1(v0)
   bb1(v1: mem):
-    ret v1
-  bb2(v2: mem):
-    ret v2
+    br bb0(v1)
 }
 "#,
     )
@@ -829,7 +827,7 @@ func @non_fallthrough_jump() {
 
     assert!(
         pinsts.iter().any(|inst| matches!(inst, MInst::Jmp { .. })),
-        "non-fallthrough jump should remain: {:?}",
+        "non-fallthrough backedge jump should remain: {:?}",
         pinsts
     );
 }
@@ -914,6 +912,48 @@ func @brif_else_fallthrough(int:s32, int:s32) {
             .count(),
         0,
         "brif with next else-block should not need an unconditional jump: {:?}",
+        pinsts
+    );
+}
+
+#[test]
+fn lower_reorders_dead_forwarder_blocks_out_of_hot_path() {
+    let module = parse_module(
+        r#"
+func @entry_dead_forwarder(bool) {
+  bb0(v0: mem):
+    v1: bool = param 0
+    brif v1, bb3(v0), bb2(v0)
+  bb1(v4: mem):
+    br bb3(v4)
+  bb2(v5: mem):
+    ret v5
+  bb3(v6: mem):
+    ret v6
+}
+"#,
+    )
+    .expect("module should parse");
+    let func = &module.functions[0];
+    let result = isel::isel(func, &module.symbols).expect("isel should succeed");
+    let pinsts = lower_isel_result(&result);
+
+    assert_eq!(
+        pinsts
+            .iter()
+            .filter(|inst| matches!(inst, MInst::Jcc { .. }))
+            .count(),
+        1,
+        "entry branch should stay conditional: {:?}",
+        pinsts
+    );
+    assert_eq!(
+        pinsts
+            .iter()
+            .filter(|inst| matches!(inst, MInst::Jmp { .. }))
+            .count(),
+        1,
+        "only the dead forwarder itself should keep a jump: {:?}",
         pinsts
     );
 }

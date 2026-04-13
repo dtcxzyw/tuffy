@@ -30,7 +30,8 @@ For branch lowering, `isel.rs` also does simple layout-aware control-flow shapin
 when a `brif` successor is already the next emitted block and the edge needs no
 machine block-argument copies, it emits a single conditional jump and lets the
 other successor fall through instead of materializing an extra unconditional
-jump.
+jump. It also emits normal CFG-reachable blocks before unreachable ones so dead
+forwarders and cleanup-only blocks do not fragment hot control-flow layout.
 
 ### `isel_gen.rs` — Generated Instruction Selection
 

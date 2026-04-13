@@ -1044,7 +1044,8 @@ pub fn isel(func: &Function, symbols: &SymbolTable) -> Result<IselResult<VInst>,
     };
     let mut inst_sources = Vec::new();
 
-    let block_order = collect_block_order(func, func.root_region);
+    let block_order =
+        reorder_blocks_by_reachability(func, collect_block_order(func, func.root_region));
     for pair in block_order.windows(2) {
         let [current, next] = pair else {
             continue;
@@ -1127,6 +1128,34 @@ fn collect_block_order_into(
             CfgNode::Region(region) => collect_block_order_into(func, *region, out),
         }
     }
+}
+
+/// Reorder blocks so normal CFG-reachable blocks are emitted before unreachable ones.
+fn reorder_blocks_by_reachability(func: &Function, block_order: Vec<BlockRef>) -> Vec<BlockRef> {
+    let mut reachable = vec![false; func.blocks.len()];
+    let mut stack = vec![func.entry_block()];
+    while let Some(block) = stack.pop() {
+        if std::mem::replace(&mut reachable[block.index() as usize], true) {
+            continue;
+        }
+        let Some(last_idx) = func.block(block).last_inst else {
+            continue;
+        };
+        match &func.inst(last_idx).op {
+            Op::Br(target, _) => stack.push(*target),
+            Op::BrIf(_, then_block, _, else_block, _) => {
+                stack.push(*else_block);
+                stack.push(*then_block);
+            }
+            _ => {}
+        }
+    }
+
+    let (mut live, dead): (Vec<_>, Vec<_>) = block_order
+        .into_iter()
+        .partition(|block| reachable[block.index() as usize]);
+    live.extend(dead);
+    live
 }
 
 #[allow(
