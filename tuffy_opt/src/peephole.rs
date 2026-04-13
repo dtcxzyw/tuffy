@@ -5,7 +5,7 @@ use num_bigint::{BigInt, BigUint, Sign};
 use tuffy_ir::function::Function;
 use tuffy_ir::instruction::{ICmpOp, Instruction, Op, Operand, Origin};
 use tuffy_ir::module::Module;
-use tuffy_ir::typed::{BoolOperand, BoolValue};
+use tuffy_ir::typed::{BoolOperand, BoolValue, IntOperand, IntValue};
 use tuffy_ir::types::{Annotation, IntAnnotation, IntSignedness, KnownBits, Type};
 use tuffy_ir::value::BlockRef;
 use tuffy_ir::value::ValueRef;
@@ -771,6 +771,15 @@ impl IntFacts {
 
         best
     }
+
+    /// Internal helper `value_non_negative`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
+    fn value_non_negative(&self) -> bool {
+        !self.is_bottom && self.unsigned_width_upper_bound.is_some()
+    }
 }
 
 #[derive(Default)]
@@ -921,12 +930,22 @@ enum ValueRewrite {
     Expr(ReplacementExpr),
 }
 
+#[allow(
+    dead_code,
+    reason = "Generated replacement expression surface is wider than the current Lean rule set."
+)]
 /// Internal enum `ReplacementExpr`.
 enum ReplacementExpr {
     /// Variant `Value`.
     Value(ValueRef),
+    /// Variant `ConstInt`.
+    ConstInt(BigInt),
     /// Variant `ConstBool`.
     ConstBool(bool),
+    /// Variant `Pow2ShiftAmount`.
+    Pow2ShiftAmount(ValueRef),
+    /// Variant `IntShr`.
+    IntShr(Box<ReplacementExpr>, Box<ReplacementExpr>),
     /// Variant `BoolNot`.
     BoolNot(Box<ReplacementExpr>),
 }
@@ -1017,6 +1036,15 @@ fn known_one(func: &Function, fact_cache: &mut IntFactCache, value: ValueRef, bi
     int_facts(func, fact_cache, value).is_some_and(|facts| facts.bit_known_one(bit as usize))
 }
 
+/// Internal helper `value_non_negative`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
+fn value_non_negative(func: &Function, fact_cache: &mut IntFactCache, value: ValueRef) -> bool {
+    int_facts(func, fact_cache, value).is_some_and(|facts| facts.value_non_negative())
+}
+
 /// Internal helper `exact_bit_is_one`.
 ///
 /// # Panics
@@ -1027,6 +1055,19 @@ fn exact_bit_is_one(value: &BigInt, bit: u32) -> bool {
     let truncated = ((value % &modulus) + &modulus) % &modulus;
     let shifted = truncated >> bit as usize;
     (&shifted % BigInt::from(2u8)) != BigInt::from(0u8)
+}
+
+/// Internal helper `bigint_is_positive_power_of_two`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
+fn bigint_is_positive_power_of_two(value: &BigInt) -> bool {
+    if value <= &BigInt::from(0u8) {
+        return false;
+    }
+    let value_minus_one = value - BigInt::from(1u8);
+    (value & value_minus_one) == BigInt::from(0u8)
 }
 
 /// Internal helper `int_facts`.
@@ -1951,7 +1992,9 @@ fn apply_value_root_rewrite(
             let new_idx = func.insert_inst_before(root_idx, new_inst);
             ValueRef::inst_result(new_idx)
         }
-        ValueRewrite::Expr(expr) => build_replacement_expr(func, root_idx, matched_insts, &expr),
+        ValueRewrite::Expr(expr) => {
+            build_replacement_expr(func, root_idx, matched_insts, &expr, true)
+        }
     };
     func.replace_all_uses(root_value, replacement);
     func.remove_inst(root_idx);
@@ -1970,15 +2013,53 @@ fn build_const_rewrite_instruction(
     op: Op,
     ty: Type,
 ) -> Instruction {
+    build_rewrite_instruction(func, root_idx, matched_insts, op, ty, true)
+}
+
+/// Internal helper `build_rewrite_instruction`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
+fn build_rewrite_instruction(
+    func: &Function,
+    root_idx: u32,
+    matched_insts: &BTreeSet<u32>,
+    op: Op,
+    ty: Type,
+    inherit_root_annotation: bool,
+) -> Instruction {
     let root_inst = func.inst(root_idx).clone();
     Instruction {
         op,
         ty,
         secondary_ty: None,
         origin: merged_origin(func, root_idx, matched_insts),
-        result_annotation: root_inst.result_annotation.clone(),
+        result_annotation: inherit_root_annotation
+            .then_some(root_inst.result_annotation)
+            .flatten(),
         secondary_result_annotation: None,
     }
+}
+
+/// Internal helper `const_int_annotation`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
+fn const_int_annotation(value: &BigInt) -> Annotation {
+    let int_annotation = if value.sign() == Sign::Minus {
+        IntAnnotation {
+            bit_width: exact_signed_width(value),
+            signedness: IntSignedness::Signed,
+        }
+    } else {
+        IntAnnotation {
+            bit_width: exact_unsigned_width(value).unwrap_or(1),
+            signedness: IntSignedness::Unsigned,
+        }
+    };
+    Annotation::Int(int_annotation)
 }
 
 /// Internal helper `build_replacement_expr`.
@@ -1991,43 +2072,118 @@ fn build_replacement_expr(
     root_idx: u32,
     matched_insts: &BTreeSet<u32>,
     expr: &ReplacementExpr,
+    inherit_root_annotation: bool,
 ) -> ValueRef {
     match expr {
         ReplacementExpr::Value(value) => *value,
+        ReplacementExpr::ConstInt(value) => {
+            let mut new_inst = build_rewrite_instruction(
+                func,
+                root_idx,
+                matched_insts,
+                Op::Const(value.clone()),
+                Type::Int,
+                inherit_root_annotation,
+            );
+            if !inherit_root_annotation {
+                new_inst.result_annotation = Some(const_int_annotation(value));
+            }
+            let new_idx = func.insert_inst_before(root_idx, new_inst);
+            ValueRef::inst_result(new_idx)
+        }
         ReplacementExpr::ConstBool(value) => {
-            let new_inst = build_const_rewrite_instruction(
+            let new_inst = build_rewrite_instruction(
                 func,
                 root_idx,
                 matched_insts,
                 Op::BConst(*value),
                 Type::Bool,
+                inherit_root_annotation,
+            );
+            let new_idx = func.insert_inst_before(root_idx, new_inst);
+            ValueRef::inst_result(new_idx)
+        }
+        ReplacementExpr::Pow2ShiftAmount(value) => {
+            let shift = pow2_shift_amount(bound_int_constant(func, *value).unwrap_or_else(|| {
+                panic!("pow2 shift replacement requires a matched integer constant")
+            }))
+            .unwrap_or_else(|| panic!("pow2 shift replacement requires a positive power-of-two"));
+            let mut new_inst = build_rewrite_instruction(
+                func,
+                root_idx,
+                matched_insts,
+                Op::Const(shift),
+                Type::Int,
+                inherit_root_annotation,
+            );
+            if !inherit_root_annotation {
+                let Op::Const(value) = &new_inst.op else {
+                    unreachable!("pow2 shift replacement always materializes an int constant");
+                };
+                new_inst.result_annotation = Some(const_int_annotation(value));
+            }
+            let new_idx = func.insert_inst_before(root_idx, new_inst);
+            ValueRef::inst_result(new_idx)
+        }
+        ReplacementExpr::IntShr(lhs, rhs) => {
+            let lhs = build_replacement_expr(func, root_idx, matched_insts, lhs, false);
+            let rhs = build_replacement_expr(func, root_idx, matched_insts, rhs, false);
+            let new_inst = build_rewrite_instruction(
+                func,
+                root_idx,
+                matched_insts,
+                Op::Shr(
+                    IntOperand::from_value(IntValue::new(lhs, func)),
+                    IntOperand::from_value(IntValue::new(rhs, func)),
+                ),
+                Type::Int,
+                inherit_root_annotation,
             );
             let new_idx = func.insert_inst_before(root_idx, new_inst);
             ValueRef::inst_result(new_idx)
         }
         ReplacementExpr::BoolNot(value) => {
-            let operand = build_replacement_expr(func, root_idx, matched_insts, value);
+            let operand = build_replacement_expr(func, root_idx, matched_insts, value, false);
             let true_value = build_replacement_expr(
                 func,
                 root_idx,
                 matched_insts,
                 &ReplacementExpr::ConstBool(true),
+                false,
             );
-            let new_inst = Instruction {
-                op: Op::BXor(
+            let new_inst = build_rewrite_instruction(
+                func,
+                root_idx,
+                matched_insts,
+                Op::BXor(
                     BoolOperand::from_value(BoolValue::new(operand, func)),
                     BoolOperand::from_value(BoolValue::new(true_value, func)),
                 ),
-                ty: Type::Bool,
-                secondary_ty: None,
-                origin: merged_origin(func, root_idx, matched_insts),
-                result_annotation: None,
-                secondary_result_annotation: None,
-            };
+                Type::Bool,
+                inherit_root_annotation,
+            );
             let new_idx = func.insert_inst_before(root_idx, new_inst);
             ValueRef::inst_result(new_idx)
         }
     }
+}
+
+/// Internal helper `pow2_shift_amount`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
+fn pow2_shift_amount(value: &BigInt) -> Option<BigInt> {
+    if !bigint_is_positive_power_of_two(value) {
+        return None;
+    }
+    let mut shift = 0u32;
+    let mut current = value.clone();
+    while current > BigInt::from(1u8) {
+        current >>= 1u32;
+        shift = shift.saturating_add(1);
+    }
+    Some(BigInt::from(shift))
 }
 
 /// Internal helper `try_fold_constant_root`.

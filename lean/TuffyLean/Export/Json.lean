@@ -30,6 +30,8 @@ private def valueTypeToJson : ValueType → String
 private def patternOpcodeToJson : PatternOpcode → String
   | .select => quote "select"
   | .and => quote "and"
+  | .div => quote "div"
+  | .rem => quote "rem"
   | .xor => quote "xor"
   | .icmp => quote "icmp"
 
@@ -101,6 +103,7 @@ private def intPredicateToJson : IntPredicate → String
   | .isZero => quote "is_zero"
   | .isOne => quote "is_one"
   | .isOdd => quote "is_odd"
+  | .isPositivePowerOfTwo => quote "is_positive_power_of_two"
 
 private def knownBitsToJson (known : KnownBits) : String :=
   jsonObj [
@@ -151,6 +154,11 @@ private def sideConditionToJson : SideCondition → String
       ("kind", quote "known_one"),
       ("binding", quote binding),
       ("bit", toString bit)
+    ]
+  | .valueNonNegative binding =>
+    jsonObj [
+      ("kind", quote "value_non_negative"),
+      ("binding", quote binding)
     ]
   | .allOf conditions =>
     jsonObj [
@@ -209,10 +217,29 @@ private def replacementToJson : Replacement → String
       ("kind", quote "binding"),
       ("name", quote name)
     ]
+  | .intConst value =>
+    jsonObj [
+      ("kind", quote "int_const"),
+      ("value", quote (toString value))
+    ]
   | .boolConst value =>
     jsonObj [
       ("kind", quote "bool_const"),
       ("value", toString value)
+    ]
+  | .pow2ShiftAmount name =>
+    jsonObj [
+      ("kind", quote "pow2_shift_amount"),
+      ("name", quote name)
+    ]
+  | .inst opcode args =>
+    let op :=
+      match opcode with
+      | .shr => quote "shr"
+    jsonObj [
+      ("kind", quote "inst"),
+      ("op", op),
+      ("args", jsonArr (args.map replacementToJson))
     ]
   | .boolNot value =>
     jsonObj [

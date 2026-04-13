@@ -437,7 +437,11 @@ fn emit_terminator_replacement(
 fn replacement_expr(replacement: &Replacement) -> String {
     match replacement {
         Replacement::Binding { name } => format!("bind_{name}?"),
-        Replacement::BoolConst { .. } | Replacement::BoolNot { .. } => {
+        Replacement::IntConst { .. }
+        | Replacement::BoolConst { .. }
+        | Replacement::Pow2ShiftAmount { .. }
+        | Replacement::Inst { .. }
+        | Replacement::BoolNot { .. } => {
             unreachable!("terminator replacements only support direct bindings")
         }
     }
@@ -485,6 +489,11 @@ fn side_condition_expr(condition: &SideCondition) -> Result<String, GenerateErro
                         "matches!(bound_int_constant(func, bind_{binding}?), Some(value) if bigint_is_odd(value))"
                     )
                 }
+                IntPredicate::PositivePowerOfTwo => {
+                    format!(
+                        "matches!(bound_int_constant(func, bind_{binding}?), Some(value) if bigint_is_positive_power_of_two(value))"
+                    )
+                }
             };
             Ok(expr)
         }
@@ -497,6 +506,9 @@ fn side_condition_expr(condition: &SideCondition) -> Result<String, GenerateErro
         )),
         SideCondition::KnownOne { binding, bit } => Ok(format!(
             "known_one(func, fact_cache, bind_{binding}?, {bit})"
+        )),
+        SideCondition::ValueNonNegative { binding } => Ok(format!(
+            "value_non_negative(func, fact_cache, bind_{binding}?)"
         )),
         SideCondition::AllOf { conditions } => combine_side_conditions(conditions, "&&"),
         SideCondition::AnyOf { conditions } => combine_side_conditions(conditions, "||"),
@@ -692,6 +704,8 @@ impl PatternGen {
         let arm = match op_kind {
             PatternInstKind::Select => "Op::Select(cond, t, e)",
             PatternInstKind::And => "Op::And(a, b)",
+            PatternInstKind::Div => "Op::Div(a, b)",
+            PatternInstKind::Rem => "Op::Rem(a, b)",
             PatternInstKind::Xor => "Op::Xor(a, b)",
             PatternInstKind::ICmpEq => "Op::ICmp(ICmpOp::Eq, a, b)",
         };
@@ -706,7 +720,11 @@ impl PatternGen {
                 "t.value".to_string(),
                 "e.value".to_string(),
             ],
-            PatternInstKind::And | PatternInstKind::Xor | PatternInstKind::ICmpEq => vec![
+            PatternInstKind::And
+            | PatternInstKind::Div
+            | PatternInstKind::Rem
+            | PatternInstKind::Xor
+            | PatternInstKind::ICmpEq => vec![
                 "a.clone().raw().value".to_string(),
                 "b.clone().raw().value".to_string(),
             ],
@@ -834,6 +852,10 @@ enum PatternInstKind {
     Select,
     /// A bitwise `and` instruction.
     And,
+    /// An integer `div` instruction.
+    Div,
+    /// An integer `rem` instruction.
+    Rem,
     /// A bitwise `xor` instruction.
     Xor,
     /// An equality `icmp`.
@@ -886,6 +908,8 @@ fn classify_pattern_inst(
     match op {
         "select" => Ok(PatternInstKind::Select),
         "and" => Ok(PatternInstKind::And),
+        "div" => Ok(PatternInstKind::Div),
+        "rem" => Ok(PatternInstKind::Rem),
         "xor" => Ok(PatternInstKind::Xor),
         "icmp" => match attrs {
             [PatternAttr::IcmpPred { value }] if value == "eq" => Ok(PatternInstKind::ICmpEq),
@@ -1117,7 +1141,17 @@ fn bigint_expr(value: &str) -> Result<String, GenerateError> {
 fn value_rewrite_expr(replacement: &Replacement) -> Result<String, GenerateError> {
     match replacement {
         Replacement::Binding { name } => Ok(format!("ValueRewrite::Existing(bind_{name}?)")),
+        Replacement::IntConst { value } => {
+            Ok(format!("ValueRewrite::ConstInt({})", bigint_expr(value)?))
+        }
         Replacement::BoolConst { value } => Ok(format!("ValueRewrite::ConstBool({value})")),
+        Replacement::Pow2ShiftAmount { name } => Ok(format!(
+            "ValueRewrite::Expr(ReplacementExpr::Pow2ShiftAmount(bind_{name}?))"
+        )),
+        Replacement::Inst { .. } => Ok(format!(
+            "ValueRewrite::Expr({})",
+            replacement_expr_tree(replacement)?
+        )),
         Replacement::BoolNot { value } => Ok(format!(
             "ValueRewrite::Expr(ReplacementExpr::BoolNot(Box::new({})))",
             replacement_expr_tree(value)?
@@ -1133,7 +1167,29 @@ fn value_rewrite_expr(replacement: &Replacement) -> Result<String, GenerateError
 fn replacement_expr_tree(replacement: &Replacement) -> Result<String, GenerateError> {
     match replacement {
         Replacement::Binding { name } => Ok(format!("ReplacementExpr::Value(bind_{name}?)")),
+        Replacement::IntConst { value } => Ok(format!(
+            "ReplacementExpr::ConstInt({})",
+            bigint_expr(value)?
+        )),
         Replacement::BoolConst { value } => Ok(format!("ReplacementExpr::ConstBool({value})")),
+        Replacement::Pow2ShiftAmount { name } => {
+            Ok(format!("ReplacementExpr::Pow2ShiftAmount(bind_{name}?)"))
+        }
+        Replacement::Inst { op, args } => match (op.as_str(), args.as_slice()) {
+            ("shr", [lhs, rhs]) => Ok(format!(
+                "ReplacementExpr::IntShr(Box::new({}), Box::new({}))",
+                replacement_expr_tree(lhs)?,
+                replacement_expr_tree(rhs)?
+            )),
+            ("shr", _) => Err(GenerateError::IllTypedReplacement {
+                rule: "<generated>".to_string(),
+                message: "replacement inst `shr` expects exactly 2 operands".to_string(),
+            }),
+            (other, _) => Err(GenerateError::UnsupportedRootRewrite {
+                rule: "<generated>".to_string(),
+                message: format!("unsupported replacement inst op `{other}`"),
+            }),
+        },
         Replacement::BoolNot { value } => Ok(format!(
             "ReplacementExpr::BoolNot(Box::new({}))",
             replacement_expr_tree(value)?

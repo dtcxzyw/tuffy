@@ -200,10 +200,27 @@ pub enum Replacement {
         /// Binding name to reuse.
         name: String,
     },
+    /// Materialize an integer constant.
+    IntConst {
+        /// Decimal string form of the constant.
+        value: String,
+    },
     /// Materialize a boolean constant.
     BoolConst {
         /// Boolean literal to materialize.
         value: bool,
+    },
+    /// Materialize the shift amount `log2(binding)` for a matched positive power-of-two constant.
+    Pow2ShiftAmount {
+        /// Binding name assigned to the matched integer constant.
+        name: String,
+    },
+    /// Materialize an instruction tree inside the replacement expression.
+    Inst {
+        /// Lowercase opcode name.
+        op: String,
+        /// Nested replacement operands.
+        args: Vec<Replacement>,
     },
     /// Materialize the logical negation of another replacement expression.
     BoolNot {
@@ -221,7 +238,17 @@ impl Replacement {
                     out.push(name);
                 }
             }
-            Replacement::BoolConst { .. } => {}
+            Replacement::IntConst { .. } | Replacement::BoolConst { .. } => {}
+            Replacement::Pow2ShiftAmount { name } => {
+                if !out.contains(&name.as_str()) {
+                    out.push(name);
+                }
+            }
+            Replacement::Inst { args, .. } => {
+                for arg in args {
+                    arg.collect_bindings(out);
+                }
+            }
             Replacement::BoolNot { value } => value.collect_bindings(out),
         }
     }
@@ -230,7 +257,11 @@ impl Replacement {
     pub fn binding_name(&self) -> Option<&str> {
         match self {
             Replacement::Binding { name } => Some(name),
-            Replacement::BoolConst { .. } | Replacement::BoolNot { .. } => None,
+            Replacement::IntConst { .. }
+            | Replacement::BoolConst { .. }
+            | Replacement::Pow2ShiftAmount { .. }
+            | Replacement::Inst { .. }
+            | Replacement::BoolNot { .. } => None,
         }
     }
 }
@@ -306,7 +337,7 @@ impl Pattern {
             Pattern::Bind { pattern, .. } => pattern.inferred_value_type(),
             Pattern::IntConst { .. } | Pattern::IntConstBinding { .. } => Some(ValueType::Int),
             Pattern::Inst { op, args, .. } => match op.as_str() {
-                "and" | "xor" => Some(ValueType::Int),
+                "and" | "div" | "rem" | "xor" => Some(ValueType::Int),
                 "icmp" => Some(ValueType::Bool),
                 "select" => {
                     if args.len() != 3 {
@@ -398,6 +429,11 @@ pub enum SideCondition {
         /// Bit index that must be known one.
         bit: u32,
     },
+    /// Require a bound integer value to be known non-negative.
+    ValueNonNegative {
+        /// Binding to inspect.
+        binding: String,
+    },
     /// Require every nested condition to hold.
     AllOf {
         /// Nested conditions combined with logical `and`.
@@ -428,6 +464,9 @@ pub enum IntPredicate {
     #[serde(rename = "is_odd")]
     /// Match an odd integer literal.
     Odd,
+    #[serde(rename = "is_positive_power_of_two")]
+    /// Match a positive power-of-two integer literal.
+    PositivePowerOfTwo,
 }
 
 /// Integer annotation constraint used by side conditions.
@@ -765,7 +804,68 @@ fn replacement_value_type(
         Replacement::Binding { name } => {
             Ok(binding_kinds.get(name).and_then(|kind| kind.value_type()))
         }
+        Replacement::IntConst { value } => {
+            let _: BigInt = value
+                .parse()
+                .map_err(|_| GenerateError::InvalidIntConstant(value.clone()))?;
+            Ok(Some(ValueType::Int))
+        }
         Replacement::BoolConst { .. } => Ok(Some(ValueType::Bool)),
+        Replacement::Pow2ShiftAmount { name } => match binding_kinds.get(name) {
+            Some(BindingKind::IntConst) => Ok(Some(ValueType::Int)),
+            Some(BindingKind::IntValue)
+            | Some(BindingKind::BoolValue)
+            | Some(BindingKind::UnknownValue) => Err(GenerateError::IllTypedReplacement {
+                rule: rule.to_string(),
+                message: format!(
+                    "pow2_shift_amount expects `{name}` to come from `int_const_binding`"
+                ),
+            }),
+            None => Err(GenerateError::MissingReplacementBinding {
+                rule: rule.to_string(),
+                binding: name.clone(),
+            }),
+        },
+        Replacement::Inst { op, args } => {
+            let expected_arity = match op.as_str() {
+                "shr" => 2,
+                other => {
+                    return Err(GenerateError::UnsupportedRootRewrite {
+                        rule: rule.to_string(),
+                        message: format!("unsupported replacement inst op `{other}`"),
+                    });
+                }
+            };
+            if args.len() != expected_arity {
+                return Err(GenerateError::IllTypedReplacement {
+                    rule: rule.to_string(),
+                    message: format!(
+                        "replacement inst `{op}` expects {expected_arity} operands, got {}",
+                        args.len()
+                    ),
+                });
+            }
+            for arg in args {
+                match replacement_value_type(arg, binding_kinds, rule)? {
+                    Some(ValueType::Int) => {}
+                    Some(ValueType::Bool) => {
+                        return Err(GenerateError::IllTypedReplacement {
+                            rule: rule.to_string(),
+                            message: format!("replacement inst `{op}` expects Int operands"),
+                        });
+                    }
+                    None => {
+                        return Err(GenerateError::IllTypedReplacement {
+                            rule: rule.to_string(),
+                            message: format!(
+                                "replacement inst `{op}` operand type could not be inferred"
+                            ),
+                        });
+                    }
+                }
+            }
+            Ok(Some(ValueType::Int))
+        }
         Replacement::BoolNot { value } => {
             let value_ty = replacement_value_type(value, binding_kinds, rule)?;
             match value_ty {
@@ -840,6 +940,19 @@ fn validate_side_condition(
             }
         }
         SideCondition::KnownOne { binding, bit: _ } => match binding_kinds.get(binding) {
+            Some(BindingKind::IntValue) | Some(BindingKind::IntConst) => Ok(()),
+            Some(BindingKind::BoolValue) | Some(BindingKind::UnknownValue) => {
+                Err(GenerateError::IllTypedSideCondition {
+                    rule: rule.to_string(),
+                    message: format!("side condition binding `{binding}` must be an Int value"),
+                })
+            }
+            None => Err(GenerateError::MissingSideConditionBinding {
+                rule: rule.to_string(),
+                binding: binding.clone(),
+            }),
+        },
+        SideCondition::ValueNonNegative { binding } => match binding_kinds.get(binding) {
             Some(BindingKind::IntValue) | Some(BindingKind::IntConst) => Ok(()),
             Some(BindingKind::BoolValue) | Some(BindingKind::UnknownValue) => {
                 Err(GenerateError::IllTypedSideCondition {

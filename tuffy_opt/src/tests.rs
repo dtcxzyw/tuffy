@@ -30,7 +30,7 @@ fn normalize_ir(ir: &str) -> String {
 
 #[test]
 fn loads_default_rule_set() {
-    assert_eq!(generated_rule_count(), 35);
+    assert_eq!(generated_rule_count(), 38);
 }
 
 #[test]
@@ -1905,6 +1905,79 @@ func @skip_div_zero() {
         stats.per_rule.get("const_fold_div").copied().unwrap_or(0),
         0
     );
+}
+
+#[test]
+fn rewrites_div_by_one_identity() {
+    let input = r#"
+func @div_by_one_identity(int:u64) -> int:u64 {
+  bb0(v10: mem):
+    v0: int:u64 = param 0
+    v1: int:u64 = iconst 1
+    v2: int:u64 = div v0, v1
+    ret v2, v10
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        !output.contains(" = div "),
+        "division by one should be eliminated:\n{output}"
+    );
+    assert!(
+        output.contains("ret v"),
+        "optimized function should still return the parameter:\n{output}"
+    );
+    assert_eq!(stats.per_rule["div_by_one_identity"], 1);
+}
+
+#[test]
+fn rewrites_rem_by_one_to_zero() {
+    let input = r#"
+func @rem_by_one_zero(int:u64) -> int:u64 {
+  bb0(v10: mem):
+    v0: int:u64 = param 0
+    v1: int:u64 = iconst 1
+    v2: int:u64 = rem v0, v1
+    ret v2, v10
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        !output.contains(" = rem "),
+        "remainder by one should be eliminated:\n{output}"
+    );
+    assert!(
+        output.contains("iconst 0"),
+        "replacement should materialize zero:\n{output}"
+    );
+    assert_eq!(stats.per_rule["rem_by_one_zero"], 1);
+}
+
+#[test]
+fn rewrites_nonnegative_power_of_two_div_to_shr() {
+    let input = r#"
+func @div_pow2_to_shr(int:u64) -> int:u64 {
+  bb0(v10: mem):
+    v0: int:u64 = param 0
+    v1: int:u64 = iconst 8
+    v2: int:u64 = div v0, v1
+    ret v2, v10
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        !output.contains(" = div "),
+        "power-of-two division should be eliminated:\n{output}"
+    );
+    assert!(
+        output.contains(" = shr "),
+        "replacement should materialize a shift:\n{output}"
+    );
+    assert!(
+        output.contains("iconst 3"),
+        "replacement should materialize the shift amount:\n{output}"
+    );
+    assert_eq!(stats.per_rule["div_nonnegative_power_of_two_to_shr"], 1);
 }
 
 #[test]

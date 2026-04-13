@@ -10,6 +10,7 @@ The generated matcher supports:
 - structural value / terminator roots
 - fact-based side conditions over integer bindings
 - simple value-root replacement expressions in addition to direct binding reuse
+- integer constants plus small integer expression trees (for example Lean-owned shift rewrites)
 
 ## Usage
 

@@ -20,12 +20,13 @@ This crate hosts IR-level optimization passes operating on `tuffy_ir::Module` / 
 - The legacy handwritten `range` cleanup family has been folded into the Lean-owned/generated `peephole` family.
 - Cleanup pass ordering for non-inline `tuffy_opt` families is exported from Lean and code-generated into the Rust dispatcher.
 - The `brif` canonicalization path is no longer a Rust-only manual rule; it is matched through the generated peephole pipeline.
+- Lean-owned strength-reduction rules now cover `div x, 1 -> x`, `rem x, 1 -> 0`, and non-negative division by power-of-two constants to `shr`.
 - `build.rs` runs the Lean exporter, then invokes `tuffy_opt_gen` as a build-dependency library to generate Rust matcher code into `OUT_DIR`.
 - The optimizer runtime executes generated rule-specific match/apply functions rather than interpreting generic JSON at runtime.
 - The optimizer runtime executes one generated peephole family that covers both local root rewrites and context-sensitive branch folding / annotation strengthening.
 - Value-root constant folds reuse `tuffy_ir_interp` semantics for evaluation so poison-sensitive cases stay aligned with the interpreter.
-- Peephole side conditions can query optimizer-local integer facts such as synthesized best-width annotations and known low bits.
-- Value-root replacements are not limited to existing bindings; the current generated runtime can also materialize simple boolean expressions such as logical negation.
+- Peephole side conditions can query optimizer-local integer facts such as synthesized best-width annotations, known low bits, and proven non-negativity.
+- Value-root replacements are not limited to existing bindings; the current generated runtime can also materialize integer constants, derived shift amounts for power-of-two divisors, and simple boolean expressions such as logical negation.
 - Rewrites are modeled around generic value roots and terminator roots; the current terminator subset only includes `brif`, but it is no longer represented as a dedicated rewrite kind.
 - The current cleanup manifest still distinguishes verified/generated families from legacy handwritten families; inlining remains outside that manifest.
 

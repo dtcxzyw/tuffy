@@ -2,6 +2,7 @@
 -- Production peephole rewrite rules with correctness proofs.
 
 import TuffyLean.IR.Semantics
+import Mathlib.Data.Int.Bitwise
 import Mathlib.Algebra.Ring.Int.Parity
 
 namespace TuffyLean.Rewrites
@@ -18,6 +19,8 @@ inductive ValueType where
 inductive PatternOpcode where
   | select
   | and
+  | div
+  | rem
   | xor
   | icmp
   deriving DecidableEq, Repr
@@ -62,11 +65,19 @@ inductive Pattern where
   deriving Repr
 
 /-- Replacement references an already-matched binding. -/
+inductive ReplacementOpcode where
+  | shr
+  deriving DecidableEq, Repr
+
+/-- Replacement references an already-matched binding. -/
 inductive Replacement where
   | binding (name : String)
+  | intConst (value : Int)
   | boolConst (value : Bool)
+  | pow2ShiftAmount (binding : String)
+  | inst (opcode : ReplacementOpcode) (args : List Replacement)
   | boolNot (value : Replacement)
-  deriving DecidableEq, Repr
+  deriving Repr
 
 /-- v1 only exports equivalence-preserving local rewrites. -/
 inductive TransformKind where
@@ -78,6 +89,7 @@ inductive IntPredicate where
   | isZero
   | isOne
   | isOdd
+  | isPositivePowerOfTwo
   deriving DecidableEq, Repr
 
 /-- Structured side conditions attached to exported peephole rules. -/
@@ -85,6 +97,7 @@ inductive SideCondition where
   | intPredicate (binding : String) (predicate : IntPredicate)
   | bestIntAnnotation (binding : String) (annotation : Annotation)
   | knownOne (binding : String) (bit : Nat)
+  | valueNonNegative (binding : String)
   | allOf (conditions : List SideCondition)
   | anyOf (conditions : List SideCondition)
   | not (condition : SideCondition)
@@ -203,6 +216,40 @@ theorem canonicalize_brif_bool_xor_const_sound (b c : Bool) :
 theorem canonicalize_brif_intified_bool_compare_sound : True := by
   trivial
 
+/-- Dividing by `1` is an identity. -/
+theorem evalDiv_by_one (a : Int) :
+    evalDiv a 1 = .int a := by
+  simp [evalDiv]
+
+/-- The remainder modulo `1` is always zero. -/
+theorem evalRem_by_one (a : Int) :
+    evalRem a 1 = .int 0 := by
+  simp [evalRem]
+
+/-- Dividing a non-negative integer by `2^shift` is equivalent to right-shifting by `shift`. -/
+theorem evalDiv_nonnegative_power_of_two_to_shr (a : Int) (shift : Nat) (ha : 0 ≤ a) :
+    evalDiv a ((2 : Int) ^ shift) = evalShr a shift := by
+  have hpow_ne_zero : ((2 : Int) ^ shift) ≠ 0 := by
+    simpa using (pow_ne_zero shift (by decide : (2 : Int) ≠ 0))
+  have ha_cast : ((a.toNat : Nat) : Int) = a := by
+    exact Int.toNat_of_nonneg ha
+  have hdiv :
+      (((a.toNat / 2 ^ shift : Nat) : Int)) =
+        (((a.toNat : Nat) : Int) >>> shift) := by
+    calc
+      (((a.toNat / 2 ^ shift : Nat) : Int))
+          = (((a.toNat >>> shift : Nat) : Int)) := by
+            rw [← Nat.shiftRight_eq_div_pow]
+      _ = (((a.toNat : Nat) : Int) >>> (shift : Int)) := by
+            rw [Int.shiftRight_natCast]
+      _ = (((a.toNat : Nat) : Int) >>> shift) := by
+            rw [Int.shiftRight_natCast_right]
+  rw [evalDiv, evalShr]
+  have hshift_nonneg : ¬ ((shift : Int) < 0) := by simp
+  simp [hpow_ne_zero, hshift_nonneg]
+  rw [← ha_cast]
+  exact hdiv
+
 private def selectBoolToInt (boolName : String) : Pattern :=
   .inst .select [] [
     .capture boolName (.some .bool),
@@ -222,11 +269,17 @@ private def isOne (binding : String) : SideCondition :=
 private def isOdd (binding : String) : SideCondition :=
   .intPredicate binding .isOdd
 
+private def isPositivePowerOfTwo (binding : String) : SideCondition :=
+  .intPredicate binding .isPositivePowerOfTwo
+
 private def bestIntAnnotation (binding : String) (annotation : Annotation) : SideCondition :=
   .bestIntAnnotation binding annotation
 
 private def knownOne (binding : String) (bit : Nat) : SideCondition :=
   .knownOne binding bit
+
+private def valueNonNegative (binding : String) : SideCondition :=
+  .valueNonNegative binding
 
 private def constFoldRule (name : String) (opcode : ConstFoldOpcode) : PeepholeRule :=
   {
@@ -318,6 +371,46 @@ def canonicalizeBrIfIntifiedBoolCompareRule : PeepholeRule :=
     }
   }
 
+/-- `div %x, 1 -> %x`. -/
+def divByOneIdentityRule : PeepholeRule :=
+  {
+    name := "div_by_one_identity"
+    proofRef := "TuffyLean.Rewrites.evalDiv_by_one"
+    sideConditions := [isOne "divisor"]
+    body := {
+      matchRoot := .value
+        (.inst .div [] [.capture "x" (.some .int), .intConstBinding "divisor"])
+      replacement := .value (.binding "x")
+    }
+  }
+
+/-- `rem %x, 1 -> 0`. -/
+def remByOneZeroRule : PeepholeRule :=
+  {
+    name := "rem_by_one_zero"
+    proofRef := "TuffyLean.Rewrites.evalRem_by_one"
+    sideConditions := [isOne "divisor"]
+    body := {
+      matchRoot := .value
+        (.inst .rem [] [.capture "x" (.some .int), .intConstBinding "divisor"])
+      replacement := .value (.intConst 0)
+    }
+  }
+
+/-- `div %x, 2^k -> shr %x, k` when `%x` is known non-negative. -/
+def divNonnegativePowerOfTwoToShrRule : PeepholeRule :=
+  {
+    name := "div_nonnegative_power_of_two_to_shr"
+    proofRef := "TuffyLean.Rewrites.evalDiv_nonnegative_power_of_two_to_shr"
+    sideConditions := [valueNonNegative "x", isPositivePowerOfTwo "divisor"]
+    body := {
+      matchRoot := .value
+        (.inst .div [] [.capture "x" (.some .int), .intConstBinding "divisor"])
+      replacement := .value
+        (.inst .shr [.binding "x", .pow2ShiftAmount "divisor"])
+    }
+  }
+
 private def allConstFoldRules : List PeepholeRule :=
   [
     constFoldRule "const_fold_add" .add,
@@ -357,6 +450,9 @@ def allPeepholeRules : List PeepholeRule :=
     canonicalizeBrIfBoolXorConstRule,
     canonicalizeBrIfIntifiedBoolCompareRule,
     andActiveBitsAtMostOneLowBitOneRule,
+    divByOneIdentityRule,
+    remByOneZeroRule,
+    divNonnegativePowerOfTwoToShrRule,
     icmpEqSelectBoolToIntIsOneRule,
     icmpEqSelectBoolToIntIsZeroRule,
     icmpEqXorSelectBoolToIntIsOneIsOneRule
