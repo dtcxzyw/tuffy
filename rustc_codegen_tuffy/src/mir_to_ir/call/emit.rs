@@ -1,6 +1,285 @@
 use super::*;
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
+    /// Emit a panic-bounds-check call with already-lowered integer values.
+    fn emit_bounds_check_panic_values(
+        &mut self,
+        index: ValueRef,
+        len: ValueRef,
+        source_info: mir::SourceInfo,
+    ) {
+        let location = self.make_caller_location(source_info);
+        let def_id = self
+            .tcx
+            .require_lang_item(rustc_hir::LangItem::PanicBoundsCheck, source_info.span);
+        if let Some(instance) = Instance::try_resolve(
+            self.tcx,
+            ty::TypingEnv::fully_monomorphized(),
+            def_id,
+            ty::List::empty(),
+        )
+        .ok()
+        .flatten()
+        {
+            let sym_name = self.tcx.symbol_name(instance).name.to_string();
+            let sym_id = self.symbols.intern(&sym_name);
+            let callee = self.builder.symbol_addr(sym_id, Origin::synthetic()).raw();
+            let index = self.coerce_to_int(index);
+            let len = self.coerce_to_int(len);
+            let (call_mem, _) = self.builder.call(
+                callee.into(),
+                vec![index.into(), len.into(), location.into()],
+                Type::Unit,
+                self.current_mem.into(),
+                None,
+                None,
+                Origin::synthetic(),
+            );
+            self.current_mem = call_mem.raw();
+        }
+        self.builder.trap(Origin::synthetic());
+    }
+
+    /// Return whether the resolved callee is one of the core slice split helpers.
+    fn split_at_mut_kind(
+        &self,
+        func: &Operand<'tcx>,
+        args: &[Spanned<Operand<'tcx>>],
+        destination: &Place<'tcx>,
+    ) -> Option<bool> {
+        if args.len() != 2 || !destination.projection.is_empty() {
+            return None;
+        }
+        let Operand::Constant(c) = func else {
+            return None;
+        };
+        let fn_ty = self.tcx.instantiate_and_normalize_erasing_regions(
+            self.instance.args,
+            ty::TypingEnv::fully_monomorphized(),
+            ty::EarlyBinder::bind(c.ty()),
+        );
+        let ty::FnDef(def_id, _) = fn_ty.kind() else {
+            return None;
+        };
+        let unchecked = match self.tcx.opt_item_name(*def_id)?.as_str() {
+            "split_at_mut" => false,
+            "split_at_mut_unchecked" => true,
+            _ => return None,
+        };
+        let arg0_ty = self.monomorphize(operand_ty_projected(&args[0].node, self.mir, self.tcx)?);
+        let ty::Ref(_, inner, rustc_hir::Mutability::Mut) = arg0_ty.kind() else {
+            return None;
+        };
+        if !matches!(inner.kind(), ty::Slice(_)) {
+            return None;
+        }
+        let dest_ty = self.monomorphize(self.mir.local_decls[destination.local].ty);
+        let ty::Tuple(fields) = dest_ty.kind() else {
+            return None;
+        };
+        if fields.len() != 2 || fields[0] != arg0_ty || fields[1] != arg0_ty {
+            return None;
+        }
+        Some(unchecked)
+    }
+
+    /// Try to lower `core::slice::split_at_mut{,_unchecked}` directly.
+    fn try_handle_split_at_mut_call(
+        &mut self,
+        func: &Operand<'tcx>,
+        args: &[Spanned<Operand<'tcx>>],
+        destination: &Place<'tcx>,
+        target: BasicBlock,
+        source_info: mir::SourceInfo,
+    ) -> bool {
+        let Some(unchecked) = self.split_at_mut_kind(func, args, destination) else {
+            return false;
+        };
+
+        let Some(raw_slice) = self.translate_operand(&args[0].node) else {
+            return false;
+        };
+        let data_ptr = self.load_fat_data_for_operand(&args[0].node, raw_slice);
+        let Some(len_value) = self.find_fat_metadata_for_operand(&args[0].node) else {
+            return false;
+        };
+        let Some(mid_value) = self.translate_operand(&args[1].node) else {
+            return false;
+        };
+        let mid_value = self.coerce_to_int(mid_value);
+        let len_value = self.coerce_to_int(len_value);
+
+        let arg0_ty = self.monomorphize(
+            operand_ty_projected(&args[0].node, self.mir, self.tcx)
+                .expect("split_at_mut arg should have a type"),
+        );
+        let elem_ty = match arg0_ty.kind() {
+            ty::Ref(_, inner, _) => match inner.kind() {
+                ty::Slice(elem) => *elem,
+                _ => return false,
+            },
+            _ => return false,
+        };
+        let elem_size = type_size(self.tcx, elem_ty).unwrap_or(1);
+        let offset = if elem_size == 1 {
+            mid_value
+        } else {
+            let size_const = self.builder.iconst(
+                elem_size as i64,
+                64,
+                IntSignedness::Unsigned,
+                Origin::synthetic(),
+            );
+            self.builder
+                .mul(
+                    mid_value.into(),
+                    size_const.into(),
+                    IntAnnotation {
+                        bit_width: 64,
+                        signedness: IntSignedness::Unsigned,
+                    },
+                    Origin::synthetic(),
+                )
+                .raw()
+        };
+        let right_ptr = self
+            .builder
+            .ptradd(data_ptr.into(), offset.into(), 0, Origin::synthetic())
+            .raw();
+        let right_len = self
+            .builder
+            .sub(
+                len_value.into(),
+                mid_value.into(),
+                IntAnnotation {
+                    bit_width: 64,
+                    signedness: IntSignedness::Unsigned,
+                },
+                Origin::synthetic(),
+            )
+            .raw();
+
+        let dest_ty = self.monomorphize(self.mir.local_decls[destination.local].ty);
+        let dest_size = type_size(self.tcx, dest_ty).unwrap_or(32) as u32;
+        let dest_align = type_align(self.tcx, dest_ty).unwrap_or(8) as u32;
+        let dest_slot = match self.locals.get(destination.local) {
+            Some(existing) if matches!(self.builder.value_type(existing), Some(Type::Ptr(_))) => {
+                existing
+            }
+            _ => {
+                let slot = self
+                    .builder
+                    .stack_slot(dest_size, dest_align, Origin::synthetic());
+                self.locals.set(destination.local, slot);
+                self.stack_locals.mark(destination.local);
+                slot
+            }
+        };
+
+        let target_block = self.block_map.get(target);
+        let store_result = |this: &mut Self, mem: ValueRef| {
+            this.current_mem = mem;
+            this.current_mem = this
+                .builder
+                .store(
+                    data_ptr.into(),
+                    dest_slot.into(),
+                    8,
+                    this.current_mem.into(),
+                    Origin::synthetic(),
+                )
+                .raw();
+            let off8 = this
+                .builder
+                .iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
+            let left_len_addr = this
+                .builder
+                .ptradd(dest_slot.into(), off8.into(), 0, Origin::synthetic())
+                .raw();
+            this.current_mem = this
+                .builder
+                .store(
+                    mid_value.into(),
+                    left_len_addr.into(),
+                    8,
+                    this.current_mem.into(),
+                    Origin::synthetic(),
+                )
+                .raw();
+            let off16 = this
+                .builder
+                .iconst(16, 64, IntSignedness::DontCare, Origin::synthetic());
+            let right_ptr_addr = this
+                .builder
+                .ptradd(dest_slot.into(), off16.into(), 0, Origin::synthetic())
+                .raw();
+            this.current_mem = this
+                .builder
+                .store(
+                    right_ptr.into(),
+                    right_ptr_addr.into(),
+                    8,
+                    this.current_mem.into(),
+                    Origin::synthetic(),
+                )
+                .raw();
+            let off24 = this
+                .builder
+                .iconst(24, 64, IntSignedness::DontCare, Origin::synthetic());
+            let right_len_addr = this
+                .builder
+                .ptradd(dest_slot.into(), off24.into(), 0, Origin::synthetic())
+                .raw();
+            this.current_mem = this
+                .builder
+                .store(
+                    right_len.into(),
+                    right_len_addr.into(),
+                    8,
+                    this.current_mem.into(),
+                    Origin::synthetic(),
+                )
+                .raw();
+            this.builder.br(
+                target_block,
+                vec![this.current_mem.into()],
+                Origin::synthetic(),
+            );
+        };
+
+        if unchecked {
+            store_result(self, self.current_mem);
+            return true;
+        }
+
+        let ok = self.builder.icmp(
+            tuffy_ir::instruction::ICmpOp::Le,
+            mid_value.into(),
+            len_value.into(),
+            Origin::synthetic(),
+        );
+        let success_block = self.builder.create_block();
+        let success_mem = self.builder.add_block_arg(success_block, Type::Mem, None);
+        let panic_block = self.builder.create_block();
+        let panic_mem = self.builder.add_block_arg(panic_block, Type::Mem, None);
+        self.builder.brif(
+            ok.into(),
+            success_block,
+            vec![self.current_mem.into()],
+            panic_block,
+            vec![self.current_mem.into()],
+            Origin::synthetic(),
+        );
+
+        self.builder.switch_to_block(success_block);
+        store_result(self, success_mem);
+
+        self.builder.switch_to_block(panic_block);
+        self.current_mem = panic_mem;
+        self.emit_bounds_check_panic_values(mid_value, len_value, source_info);
+        true
+    }
+
     /// Lowers one MIR call terminator into IR control flow and call instructions.
     pub(in crate::mir_to_ir) fn translate_call(
         &mut self,
@@ -61,6 +340,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         let needs_caller_location = resolved.requires_caller_location;
         let needs_self_deref = resolved.needs_self_deref;
         let needs_tuple_spread = resolved.needs_tuple_spread;
+        if cleanup_bb.is_none()
+            && let Some(target_bb) = *target
+            && self.try_handle_split_at_mut_call(func, args, destination, target_bb, source_info)
+        {
+            return;
+        }
         if let Some(inst) = resolved.resolved_instance {
             self.referenced_instances.push(inst);
         }
