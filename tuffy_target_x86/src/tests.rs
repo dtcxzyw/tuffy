@@ -136,6 +136,14 @@ func @ptradd_const(ptr) -> ptr {
         "constant ptradd should lower to lea with displacement: {:?}",
         result.insts
     );
+    assert!(
+        !result.insts.iter().any(|inst| matches!(
+            inst,
+            MInst::MovRI { imm: 8, .. } | MInst::MovRI64 { imm: 8, .. }
+        )),
+        "constant ptradd displacement should not materialize a separate constant register: {:?}",
+        result.insts
+    );
 }
 
 #[test]
@@ -163,6 +171,14 @@ func @shl_const(int:u64) -> int:u64 {
         "constant shl should lower to shl imm: {:?}",
         result.insts
     );
+    assert!(
+        !result.insts.iter().any(|inst| matches!(
+            inst,
+            MInst::MovRI { imm: 3, .. } | MInst::MovRI64 { imm: 3, .. }
+        )),
+        "constant shift amount should not materialize a separate register: {:?}",
+        result.insts
+    );
 }
 
 #[test]
@@ -188,6 +204,14 @@ func @shr_const(int:u64) -> int:u64 {
             .iter()
             .any(|inst| matches!(inst, MInst::ShrImm { imm: 3, .. })),
         "constant shr should lower to shr imm: {:?}",
+        result.insts
+    );
+    assert!(
+        !result.insts.iter().any(|inst| matches!(
+            inst,
+            MInst::MovRI { imm: 3, .. } | MInst::MovRI64 { imm: 3, .. }
+        )),
+        "constant shift amount should not materialize a separate register: {:?}",
         result.insts
     );
 }

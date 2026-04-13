@@ -42,6 +42,8 @@ struct IselCtx {
     sym_addrs: HashMap<u32, String>,
     /// Deferred TLS symbol addresses: value index → symbol name.
     tls_sym_addrs: HashMap<u32, String>,
+    /// Deferred small integer constants: value index → immediate.
+    int_consts: HashMap<u32, i64>,
     /// Captured RDX vregs from calls with secondary returns.
     /// Maps call instruction index → unconstrained vreg holding the RDX value.
     rdx_captured: HashMap<u32, VReg>,
@@ -90,6 +92,20 @@ impl IselCtx {
         if let Some(symbol) = self.tls_sym_addrs.get(&val.index()).cloned() {
             let dst = self.alloc.alloc();
             self.out.push(MInst::TlsLeaSymbol { dst, symbol });
+            return Some(dst);
+        }
+        if let Some(imm) = self.int_consts.get(&val.index()).copied() {
+            let dst = self.alloc.alloc();
+            if imm >= 0 && imm <= u32::MAX as i64 {
+                self.out.push(MInst::MovRI {
+                    size: OpSize::S32,
+                    dst,
+                    imm,
+                });
+            } else {
+                self.out.push(MInst::MovRI64 { dst, imm });
+            }
+            self.regs.assign(val, dst);
             return Some(dst);
         }
         // Materialize a deferred icmp result into a register via SetCC + MovzxB.
@@ -1017,6 +1033,7 @@ pub fn isel(func: &Function, symbols: &SymbolTable) -> Result<IselResult<VInst>,
         out: Vec::new(),
         sym_addrs: HashMap::new(),
         tls_sym_addrs: HashMap::new(),
+        int_consts: HashMap::new(),
         rdx_captured: HashMap::new(),
     };
     let mut inst_sources = Vec::new();
@@ -1437,6 +1454,10 @@ fn select_inst(
         Op::Const(imm) => {
             // Try to fit in i64
             if let Some(imm_i64) = imm.to_i64().or_else(|| imm.to_u64().map(|v| v as i64)) {
+                if int_const_can_stay_deferred(func, vref, imm_i64) {
+                    ctx.int_consts.insert(vref.index(), imm_i64);
+                    return Some(());
+                }
                 let dst = ctx.alloc.alloc();
                 if imm_i64 >= 0 && imm_i64 <= u32::MAX as i64 {
                     ctx.out.push(MInst::MovRI {
@@ -4815,6 +4836,36 @@ fn int_const(func: &Function, value: ValueRef) -> Option<i64> {
         return None;
     };
     constant.to_i64()
+}
+
+/// Return whether a small integer constant can stay deferred until a non-immediate use appears.
+fn int_const_can_stay_deferred(func: &Function, value: ValueRef, imm: i64) -> bool {
+    if func.use_count(value) == 0 {
+        return true;
+    }
+    func.uses_of(value).all(|use_node| {
+        int_const_use_is_immediate_compatible(func, use_node.user, use_node.operand_index, imm)
+    })
+}
+
+/// Return whether one use site can consume an integer constant without materializing a register.
+fn int_const_use_is_immediate_compatible(
+    func: &Function,
+    user: u32,
+    operand_index: u32,
+    imm: i64,
+) -> bool {
+    let Some(node) = func.inst_pool.get(user) else {
+        return false;
+    };
+    match &node.inst.op {
+        Op::Shl(_, _) | Op::Shr(_, _) => operand_index == 1 && (0..=63).contains(&imm),
+        Op::PtrAdd(_, _) => operand_index == 1 && i32::try_from(imm).is_ok(),
+        Op::MemCopy(..) | Op::MemMove(..) | Op::MemSet(..) => {
+            operand_index == 2 && u32::try_from(imm).is_ok()
+        }
+        _ => false,
+    }
 }
 
 /// Resolve a value to a constant boolean when possible.
