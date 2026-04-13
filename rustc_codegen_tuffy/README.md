@@ -47,8 +47,12 @@ The core translation layer, organized into submodules by concern:
 | `terminator.rs`    | Terminator translation (return, branch, switch, call)|
 | `call.rs`          | Function call ABI handling and argument passing      |
 | `constant.rs`      | Constant evaluation and literal translation          |
-| `intrinsic.rs`     | Scalar intrinsic function lowering                   |
-| `simd.rs`          | SIMD intrinsic lowering                              |
+| `intrinsic/`       | Scalar intrinsic lowering dispatch and helper families |
+| `simd/`            | SIMD intrinsic lowering dispatch and helper families |
+
+`intrinsic/` and `simd/` are directory modules with a `mod.rs` dispatcher plus
+family-specific helper submodules used to keep the MIR-to-IR lowering surface
+split by operation family rather than one large file per area.
 
 ### Optimization Hook
 
@@ -190,7 +194,7 @@ Extracts code blocks from doc comments, wraps them in `fn main()` if needed, and
 
 When modifying MIR-to-IR translation modules in `mir_to_ir/`, add corresponding regression tests to `tests/codegen/`:
 
-- Organize tests by module: changes to `intrinsic.rs` → tests in `tests/codegen/intrinsic/`
+- Organize tests by module: changes to `intrinsic/` → tests in `tests/codegen/intrinsic/`
 - Keep test cases minimal and focused on the specific behavior being tested
 - Use meaningful names for all identifiers (functions, variables, types)
 - Each test must include CHECK annotations verifying the expected IR output
