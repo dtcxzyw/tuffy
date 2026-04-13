@@ -834,6 +834,90 @@ func @non_fallthrough_jump() {
     );
 }
 
+#[test]
+fn lower_brif_falls_through_next_then_block() {
+    let module = parse_module(
+        r#"
+func @brif_then_fallthrough(int:s32, int:s32) {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    v2: int:s32 = param 1
+    v3: bool = icmp.lt v1, v2
+    brif v3, bb1(v0), bb2(v0)
+  bb1(v4: mem):
+    ret v4
+  bb2(v5: mem):
+    ret v5
+}
+"#,
+    )
+    .expect("module should parse");
+    let func = &module.functions[0];
+    let result = isel::isel(func, &module.symbols).expect("isel should succeed");
+    let pinsts = lower_isel_result(&result);
+
+    assert_eq!(
+        pinsts
+            .iter()
+            .filter(|inst| matches!(inst, MInst::Jcc { .. }))
+            .count(),
+        1,
+        "brif should keep one conditional jump: {:?}",
+        pinsts
+    );
+    assert_eq!(
+        pinsts
+            .iter()
+            .filter(|inst| matches!(inst, MInst::Jmp { .. }))
+            .count(),
+        0,
+        "brif with next then-block should not need an unconditional jump: {:?}",
+        pinsts
+    );
+}
+
+#[test]
+fn lower_brif_falls_through_next_else_block() {
+    let module = parse_module(
+        r#"
+func @brif_else_fallthrough(int:s32, int:s32) {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    v2: int:s32 = param 1
+    v3: bool = icmp.lt v1, v2
+    brif v3, bb2(v0), bb1(v0)
+  bb1(v4: mem):
+    ret v4
+  bb2(v5: mem):
+    ret v5
+}
+"#,
+    )
+    .expect("module should parse");
+    let func = &module.functions[0];
+    let result = isel::isel(func, &module.symbols).expect("isel should succeed");
+    let pinsts = lower_isel_result(&result);
+
+    assert_eq!(
+        pinsts
+            .iter()
+            .filter(|inst| matches!(inst, MInst::Jcc { .. }))
+            .count(),
+        1,
+        "brif should keep one conditional jump: {:?}",
+        pinsts
+    );
+    assert_eq!(
+        pinsts
+            .iter()
+            .filter(|inst| matches!(inst, MInst::Jmp { .. }))
+            .count(),
+        0,
+        "brif with next else-block should not need an unconditional jump: {:?}",
+        pinsts
+    );
+}
+
 /// Build: fn max(a: i32, b: i32) -> i32 { if a > b { a } else { b } }
 ///
 /// entry:

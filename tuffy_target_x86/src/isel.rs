@@ -16,7 +16,7 @@ use tuffy_ir::function::{CfgNode, Function};
 use tuffy_ir::instruction::{ICmpOp, Op, Operand};
 use tuffy_ir::module::SymbolTable;
 use tuffy_ir::types::{Annotation, FloatType, IntAnnotation, IntSignedness, Type};
-use tuffy_ir::value::ValueRef;
+use tuffy_ir::value::{BlockRef, ValueRef};
 use tuffy_regalloc::{PReg, VReg};
 use tuffy_target::isel::{
     CmpMap, IselResult, SelectedValueLocations, StackMap, VRegAlloc, VRegMap,
@@ -34,6 +34,8 @@ struct IselCtx {
     alloc: VRegAlloc,
     /// Next synthetic label id.
     next_label: u32,
+    /// Next block in emitted order for each block id.
+    next_block_in_order: Vec<Option<BlockRef>>,
     /// Output machine instructions collected so far.
     out: Vec<VInst>,
     /// Deferred symbol addresses: value index → symbol name.
@@ -1032,6 +1034,7 @@ pub fn isel(func: &Function, symbols: &SymbolTable) -> Result<IselResult<VInst>,
         stack: StackMap::new(pool_cap, ba_cap),
         alloc: VRegAlloc::new(),
         next_label: func.blocks.len() as u32,
+        next_block_in_order: vec![None; func.blocks.len()],
         out: Vec::new(),
         sym_addrs: HashMap::new(),
         tls_sym_addrs: HashMap::new(),
@@ -1041,7 +1044,15 @@ pub fn isel(func: &Function, symbols: &SymbolTable) -> Result<IselResult<VInst>,
     };
     let mut inst_sources = Vec::new();
 
-    for block_ref in collect_block_order(func, func.root_region) {
+    let block_order = collect_block_order(func, func.root_region);
+    for pair in block_order.windows(2) {
+        let [current, next] = pair else {
+            continue;
+        };
+        ctx.next_block_in_order[current.index() as usize] = Some(*next);
+    }
+
+    for block_ref in block_order {
         // Emit all blocks, including unwind-entry cleanup blocks that are
         // intentionally unreachable from normal control flow.
         ctx.out.push(MInst::Label {
@@ -1649,6 +1660,7 @@ fn select_inst(
             select_brif(
                 ctx,
                 &cond.clone().raw(),
+                func.inst_node(vref.index()).parent_block,
                 then_block,
                 then_args,
                 else_block,
@@ -3770,24 +3782,30 @@ fn select_inst(
 
 // --- Helper functions ---
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Branch lowering needs the current block plus both successor edges and payloads together."
+)]
 /// Lower a `brif` terminator.
 fn select_brif(
     ctx: &mut IselCtx,
     cond: &Operand,
+    current_block: BlockRef,
     then_block: &tuffy_ir::value::BlockRef,
     then_args: &[Operand],
     else_block: &tuffy_ir::value::BlockRef,
     else_args: &[Operand],
     func: &Function,
 ) -> Option<()> {
-    let has_args = !then_args.is_empty() || !else_args.is_empty();
+    let has_args = edge_needs_machine_copies(*then_block, then_args, func)
+        || edge_needs_machine_copies(*else_block, else_args, func);
     let branch_test = decode_branch_test(ctx, func, cond.value);
 
     if has_args {
         let intermediate = ctx.next_label;
         ctx.next_label += 1;
 
-        emit_branch_jump(ctx, branch_test, cond.value, intermediate, func)?;
+        emit_branch_jump(ctx, branch_test, cond.value, intermediate, func, true)?;
 
         // Else path.
         emit_block_arg_copies(ctx, *else_block, else_args, func)?;
@@ -3802,12 +3820,34 @@ fn select_brif(
             target: then_block.index(),
         });
     } else {
-        emit_branch_jump(ctx, branch_test, cond.value, then_block.index(), func)?;
-        ctx.out.push(MInst::Jmp {
-            target: else_block.index(),
-        });
+        let next_block = ctx.next_block_in_order[current_block.index() as usize];
+        if next_block == Some(*then_block) {
+            emit_branch_jump(
+                ctx,
+                branch_test,
+                cond.value,
+                else_block.index(),
+                func,
+                false,
+            )?;
+        } else if next_block == Some(*else_block) {
+            emit_branch_jump(ctx, branch_test, cond.value, then_block.index(), func, true)?;
+        } else {
+            emit_branch_jump(ctx, branch_test, cond.value, then_block.index(), func, true)?;
+            ctx.out.push(MInst::Jmp {
+                target: else_block.index(),
+            });
+        }
     }
     Some(())
+}
+
+/// Return whether a branch edge needs machine block-argument copies.
+fn edge_needs_machine_copies(target: BlockRef, args: &[Operand], func: &Function) -> bool {
+    func.block_arg_values(target)
+        .into_iter()
+        .zip(args.iter())
+        .any(|(block_arg, _)| func.value_type(block_arg) != Some(&Type::Mem))
 }
 
 #[allow(
@@ -4568,6 +4608,8 @@ enum BranchTest {
         reg: VReg,
         /// Operand size used by the emitted test instruction.
         size: OpSize,
+        /// Whether the branch is taken when the value is nonzero.
+        branch_on_nonzero: bool,
     },
 }
 
@@ -4578,23 +4620,35 @@ fn emit_branch_jump(
     cond_value: ValueRef,
     target: u32,
     func: &Function,
+    branch_on_true: bool,
 ) -> Option<()> {
     match branch_test.or_else(|| fallback_branch_test(ctx, cond_value, func))? {
-        BranchTest::Always(true) => {
+        BranchTest::Always(value) if value == branch_on_true => {
             ctx.out.push(MInst::Jmp { target });
         }
-        BranchTest::Always(false) => {}
+        BranchTest::Always(_) => {}
         BranchTest::Flags(cc) => {
-            ctx.out.push(MInst::Jcc { cc, target });
+            ctx.out.push(MInst::Jcc {
+                cc: if branch_on_true { cc } else { invert_cc(cc) },
+                target,
+            });
         }
-        BranchTest::Value { reg, size } => {
+        BranchTest::Value {
+            reg,
+            size,
+            branch_on_nonzero,
+        } => {
             ctx.out.push(MInst::TestRR {
                 size,
                 src1: reg,
                 src2: reg,
             });
             ctx.out.push(MInst::Jcc {
-                cc: CondCode::Ne,
+                cc: if branch_on_nonzero == branch_on_true {
+                    CondCode::Ne
+                } else {
+                    CondCode::E
+                },
                 target,
             });
         }
@@ -4619,6 +4673,7 @@ fn fallback_branch_test(
     Some(BranchTest::Value {
         reg: ctx.ensure_in_reg(cond_value)?,
         size,
+        branch_on_nonzero: true,
     })
 }
 
@@ -4750,7 +4805,15 @@ fn invert_branch_test(branch_test: BranchTest) -> BranchTest {
     match branch_test {
         BranchTest::Always(value) => BranchTest::Always(!value),
         BranchTest::Flags(cc) => BranchTest::Flags(invert_cc(cc)),
-        BranchTest::Value { reg, size } => BranchTest::Value { reg, size },
+        BranchTest::Value {
+            reg,
+            size,
+            branch_on_nonzero,
+        } => BranchTest::Value {
+            reg,
+            size,
+            branch_on_nonzero: !branch_on_nonzero,
+        },
     }
 }
 
