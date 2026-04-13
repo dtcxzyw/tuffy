@@ -14,9 +14,13 @@ inductive SummaryForwardKind where
   | unknown
   | const
   | select
+  | add
+  | sub
   | bitAnd
   | bitOr
   | bitXor
+  | shr
+  | zext
   deriving DecidableEq, Repr
 
 /-- Forward integer-fact transfer owned by Lean and consumed by `tuffy_opt`. -/
@@ -82,6 +86,16 @@ def forwardRules : List ForwardRule :=
       proofRef := "TuffyLean.Rewrites.Facts.resultFact_select_optimal"
     },
     {
+      op := "add"
+      summaryForward := .add
+      proofRef := "TuffyLean.Rewrites.Facts.atUseForward_add_sound"
+    },
+    {
+      op := "sub"
+      summaryForward := .sub
+      proofRef := "TuffyLean.Rewrites.Facts.atUseForward_sub_sound"
+    },
+    {
       op := "and"
       knownBitsForward := .bitAnd
       summaryForward := .bitAnd
@@ -98,6 +112,16 @@ def forwardRules : List ForwardRule :=
       knownBitsForward := .bitXor
       summaryForward := .bitXor
       proofRef := "TuffyLean.Rewrites.Facts.resultFact_bitXor_optimal"
+    },
+    {
+      op := "shr"
+      summaryForward := .shr
+      proofRef := "TuffyLean.Rewrites.Facts.atUseForward_shr_sound"
+    },
+    {
+      op := "zext"
+      summaryForward := .zext
+      proofRef := "TuffyLean.Rewrites.Facts.atUseForward_zext_sound"
     }
   ]
 

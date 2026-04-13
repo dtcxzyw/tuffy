@@ -17,6 +17,8 @@ This crate hosts IR-level optimization passes operating on `tuffy_ir::Module` / 
 - Default peephole rules are exported from `lean/TuffyLean/Rewrites/Basic.lean`.
 - Constant folding is modeled as peephole rules and exported through the same Lean JSON pipeline.
 - Context-sensitive at-use integer analysis metadata is exported alongside the peephole rule set from `lean/TuffyLean/Rewrites/AtUse.lean`.
+- The generated at-use pass now runs in pointer-heavy functions too, but it still tracks only integer SSA values and integer operands; pointer values remain outside the fact domain.
+- Lean-owned at-use forward rules now cover `add`, `sub`, `shr`, and `zext` in addition to the earlier const/select/bitwise cases.
 - The legacy handwritten `range` cleanup family has been folded into the Lean-owned/generated `peephole` family.
 - Cleanup pass ordering for non-inline `tuffy_opt` families is exported from Lean and code-generated into the Rust dispatcher.
 - The `brif` canonicalization path is no longer a Rust-only manual rule; it is matched through the generated peephole pipeline.

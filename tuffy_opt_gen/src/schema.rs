@@ -92,12 +92,20 @@ pub enum AtUseSummaryForwardKind {
     Const,
     /// Merge summary facts from a `select`.
     Select,
+    /// Derive summary facts from an integer `add`.
+    Add,
+    /// Derive summary facts from an integer `sub`.
+    Sub,
     /// Derive summary facts from a bitwise `and`.
     BitAnd,
     /// Derive summary facts from a bitwise `or`.
     BitOr,
     /// Derive summary facts from a bitwise `xor`.
     BitXor,
+    /// Derive summary facts from an integer `shr`.
+    Shr,
+    /// Derive summary facts from an integer `zext`.
+    Zext,
 }
 
 /// Runtime transform kind selected by an at-use descriptor.

@@ -84,6 +84,14 @@ fn emit_forward_arm(out: &mut String, rule: &AtUseForwardRule) -> Result<(), Gen
             "        // {}\n        Op::Select(_, true_value, false_value) => {helper}(func, current, true_value, false_value),",
             rule.proof_ref
         ),
+        "add" => format!(
+            "        // {}\n        Op::Add(lhs, rhs) => {helper}(func, current, &lhs.clone().raw(), &rhs.clone().raw()),",
+            rule.proof_ref
+        ),
+        "sub" => format!(
+            "        // {}\n        Op::Sub(lhs, rhs) => {helper}(func, current, &lhs.clone().raw(), &rhs.clone().raw()),",
+            rule.proof_ref
+        ),
         "and" => format!(
             "        // {}\n        Op::And(lhs, rhs) => {helper}(func, current, &lhs.clone().raw(), &rhs.clone().raw()),",
             rule.proof_ref
@@ -94,6 +102,14 @@ fn emit_forward_arm(out: &mut String, rule: &AtUseForwardRule) -> Result<(), Gen
         ),
         "xor" => format!(
             "        // {}\n        Op::Xor(lhs, rhs) => {helper}(func, current, &lhs.clone().raw(), &rhs.clone().raw()),",
+            rule.proof_ref
+        ),
+        "shr" => format!(
+            "        // {}\n        Op::Shr(lhs, rhs) => {helper}(func, current, &lhs.clone().raw(), &rhs.clone().raw()),",
+            rule.proof_ref
+        ),
+        "zext" => format!(
+            "        // {}\n        Op::Zext(src, bits) => {helper}(func, current, &src.clone().raw(), *bits),",
             rule.proof_ref
         ),
         other => {
@@ -121,6 +137,8 @@ fn forward_helper_name(rule: &AtUseForwardRule) -> Result<&'static str, Generate
         (AtUseKnownBitsForwardKind::Select, AtUseSummaryForwardKind::Select) => {
             Ok("forward_select")
         }
+        (AtUseKnownBitsForwardKind::Unknown, AtUseSummaryForwardKind::Add) => Ok("forward_add"),
+        (AtUseKnownBitsForwardKind::Unknown, AtUseSummaryForwardKind::Sub) => Ok("forward_sub"),
         (AtUseKnownBitsForwardKind::BitAnd, AtUseSummaryForwardKind::BitAnd) => {
             Ok("forward_bitand")
         }
@@ -128,6 +146,8 @@ fn forward_helper_name(rule: &AtUseForwardRule) -> Result<&'static str, Generate
         (AtUseKnownBitsForwardKind::BitXor, AtUseSummaryForwardKind::BitXor) => {
             Ok("forward_bitxor")
         }
+        (AtUseKnownBitsForwardKind::Unknown, AtUseSummaryForwardKind::Shr) => Ok("forward_shr"),
+        (AtUseKnownBitsForwardKind::Unknown, AtUseSummaryForwardKind::Zext) => Ok("forward_zext"),
         other => Err(GenerateError::UnsupportedFactsRule(format!(
             "unsupported at-use forward kind combination: {other:?}"
         ))),

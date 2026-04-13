@@ -1025,6 +1025,22 @@ theorem intAnnotationForward_bitXor_sound (a b : Int) (n : Nat) :
     applyAnnotation (evalXor a b) (.dontCare n) = .int (evalXor a b % (2 ^ n)) := by
   rfl
 
+theorem atUseForward_add_sound (a b : Int) :
+    evalAdd a b = a + b := by
+  rfl
+
+theorem atUseForward_sub_sound (a b : Int) :
+    evalSub a b = a - b := by
+  rfl
+
+theorem atUseForward_shr_sound (a b : Int) (h : 0 ≤ b) :
+    evalShr a b = .int (a >>> b.toNat) := by
+  simp [evalShr, h]
+
+theorem atUseForward_zext_sound (v : Int) (n : Nat) :
+    applyAnnotation v (.dontCare n) = .int (v % (2 ^ n)) := by
+  rfl
+
 theorem intAnnotationForward_splitLo_sound (a : Int) (width : Nat) (h : width ≠ 0) :
     evalSplitLo a width = .int ((a % ((2 : Int) ^ width)).toNat) := by
   simp [evalSplitLo, h]

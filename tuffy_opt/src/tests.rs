@@ -225,7 +225,7 @@ func @branch_and_mask_three(bool) {
     v1: int:u1 = iconst 1
     v2: int:u1 = iconst 0
     v3: int:u1 = select v0, v1, v2
-    v4: int:s32 = add v3, v1
+    v4: int:u2 = add v3, v1
     unreachable
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
@@ -256,7 +256,7 @@ func @branch_and_mask_two(bool) {
     v3: int:u1 = select v0, v1, v2
     v4: int:u2 = iconst 2
     v5: int:u2 = and v3, v4
-    v6: int:s32 = add v5, v1
+    v6: int:u2 = add v5, v1
     unreachable
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
@@ -325,7 +325,7 @@ func @mask_value(bool) {
     v1: int:u1 = iconst 1
     v2: int:u1 = iconst 0
     v3: int:u1 = select v0, v1, v2
-    v4: int:s32 = add v3, v1
+    v4: int:u2 = add v3, v1
     unreachable
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
@@ -597,6 +597,146 @@ func @range_refine(int:u64) {
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
     assert!(stats.rewrites > 0);
+}
+
+#[test]
+fn range_folds_branch_in_pointer_heavy_function() {
+    let input = r#"
+func @ptr_heavy_range_refine(ptr, int:u64) {
+  bb0(v0: mem):
+    v1: ptr = param 0
+    v2: int:u64 = param 1
+    v3: int:u64 = ptrtoaddr v1
+    v4: int:u64 = iconst 10
+    v5: bool = icmp.lt v2, v4
+    brif v5, bb1(v0), bb2(v0)
+  bb1(v6: mem):
+    v7: int:u64 = iconst 12
+    v8: bool = icmp.lt v2, v7
+    brif v8, bb3(v6), bb4(v6)
+  bb2(v9: mem):
+    ret v9
+  bb3(v10: mem):
+    ret v10
+  bb4(v11: mem):
+    trap
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        stats.rewrites > 0,
+        "pointer-heavy branch should fold:\n{output}"
+    );
+    assert!(
+        output.contains("ptrtoaddr"),
+        "pointer op should remain unrelated:\n{output}"
+    );
+    assert!(
+        output.contains("br bb3"),
+        "refined integer branch should fold in pointer-heavy function:\n{output}"
+    );
+}
+
+#[test]
+fn range_folds_add_bound() {
+    let input = r#"
+func @range_add_u4(int:u4) {
+  bb0(v0: mem):
+    v1: int:u4 = param 0
+    v2: int:u1 = iconst 1
+    v3: int:u64 = add v1, v2
+    v4: int:u5 = iconst 16
+    v5: bool = icmp.le v3, v4
+    brif v5, bb1(v0), bb2(v0)
+  bb1(v6: mem):
+    ret v6
+  bb2(v7: mem):
+    trap
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(stats.rewrites > 0, "add-based range should fold:\n{output}");
+    assert!(
+        !output.contains("brif"),
+        "branch should fold away:\n{output}"
+    );
+}
+
+#[test]
+fn range_folds_sub_bound() {
+    let input = r#"
+func @range_sub_u4(int:u4) {
+  bb0(v0: mem):
+    v1: int:u4 = param 0
+    v2: int:u1 = iconst 1
+    v3: int:s64 = sub v1, v2
+    v4: int:s5 = iconst 14
+    v5: bool = icmp.le v3, v4
+    brif v5, bb1(v0), bb2(v0)
+  bb1(v6: mem):
+    ret v6
+  bb2(v7: mem):
+    trap
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(stats.rewrites > 0, "sub-based range should fold:\n{output}");
+    assert!(
+        !output.contains("brif"),
+        "branch should fold away:\n{output}"
+    );
+}
+
+#[test]
+fn range_folds_shr_bound() {
+    let input = r#"
+func @range_shr_u4(int:u4) {
+  bb0(v0: mem):
+    v1: int:u4 = param 0
+    v2: int:u1 = iconst 1
+    v3: int:u64 = shr v1, v2
+    v4: int:u4 = iconst 8
+    v5: bool = icmp.lt v3, v4
+    brif v5, bb1(v0), bb2(v0)
+  bb1(v6: mem):
+    ret v6
+  bb2(v7: mem):
+    trap
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(stats.rewrites > 0, "shr-based range should fold:\n{output}");
+    assert!(
+        !output.contains("brif"),
+        "branch should fold away:\n{output}"
+    );
+}
+
+#[test]
+fn range_folds_zext_bound() {
+    let input = r#"
+func @range_zext_u8(int:u8) {
+  bb0(v0: mem):
+    v1: int:u8 = param 0
+    v2: int:u64 = zext v1, 8
+    v3: int:u9 = iconst 256
+    v4: bool = icmp.lt v2, v3
+    brif v4, bb1(v0), bb2(v0)
+  bb1(v5: mem):
+    ret v5
+  bb2(v6: mem):
+    trap
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        stats.rewrites > 0,
+        "zext-based range should fold:\n{output}"
+    );
+    assert!(
+        !output.contains("brif"),
+        "branch should fold away:\n{output}"
+    );
 }
 
 #[test]

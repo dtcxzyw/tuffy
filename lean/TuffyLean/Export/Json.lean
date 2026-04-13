@@ -353,9 +353,13 @@ private def summaryForwardKindToJson : TuffyLean.Rewrites.AtUse.SummaryForwardKi
   | .unknown => quote "unknown"
   | .const => quote "const"
   | .select => quote "select"
+  | .add => quote "add"
+  | .sub => quote "sub"
   | .bitAnd => quote "bit_and"
   | .bitOr => quote "bit_or"
   | .bitXor => quote "bit_xor"
+  | .shr => quote "shr"
+  | .zext => quote "zext"
 
 private def atUseForwardRuleToJson (rule : TuffyLean.Rewrites.AtUse.ForwardRule) : String :=
   jsonObj [

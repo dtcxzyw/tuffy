@@ -78,53 +78,7 @@ struct AtUseAnalysis {
 ///
 /// May panic if internal IR invariants are violated.
 pub(crate) fn optimize_function(func: &mut Function) -> PeepholeStats {
-    if function_is_pointer_sensitive(func) {
-        return PeepholeStats::default();
-    }
     optimize_with_generated_transforms(func, GENERATED_AT_USE_TRANSFORMS)
-}
-
-/// Internal helper `function_is_pointer_sensitive`.
-///
-/// # Panics
-///
-/// May panic if internal IR invariants are violated.
-fn function_is_pointer_sensitive(func: &Function) -> bool {
-    func.params.iter().any(|ty| matches!(ty, Type::Ptr(_)))
-        || func
-            .block_args
-            .iter()
-            .any(|arg| matches!(arg.ty, Type::Ptr(_)))
-        || func.inst_pool.iter_insts().any(|(_, inst)| {
-            matches!(inst.ty, Type::Ptr(_))
-                || inst
-                    .secondary_ty
-                    .as_ref()
-                    .is_some_and(|ty| matches!(ty, Type::Ptr(_)))
-                || matches!(
-                    inst.op,
-                    Op::Call(..)
-                        | Op::CallRet2(..)
-                        | Op::StackSlot(..)
-                        | Op::Load(..)
-                        | Op::Store(..)
-                        | Op::MemCopy(..)
-                        | Op::MemMove(..)
-                        | Op::MemSet(..)
-                        | Op::LoadAtomic(..)
-                        | Op::StoreAtomic(..)
-                        | Op::AtomicRmw(..)
-                        | Op::AtomicCmpXchg(..)
-                        | Op::Fence(..)
-                        | Op::SymbolAddr(..)
-                        | Op::PtrAdd(..)
-                        | Op::PtrDiff(..)
-                        | Op::PtrToInt(..)
-                        | Op::PtrToAddr(..)
-                        | Op::IntToPtr(..)
-                        | Op::LandingPad
-                )
-        })
 }
 
 /// Internal helper `optimize_with_generated_transforms`.
@@ -209,7 +163,7 @@ fn optimize_with_generated_transforms(
     reason = "Required by the current implementation shape."
 )]
 mod tests {
-    use super::{function_is_pointer_sensitive, optimize_function};
+    use super::optimize_function;
     use tuffy_ir::parser::parse_module;
 
     /// Internal helper `parse_single_function`.
@@ -227,41 +181,57 @@ mod tests {
     }
 
     #[test]
-    /// Internal helper `detects_pointer_sensitive_functions`.
+    /// Internal helper `optimizes_pointer_heavy_integer_conditions`.
     ///
     /// # Panics
     ///
     /// May panic if internal IR invariants are violated.
-    fn detects_pointer_sensitive_functions() {
-        let func = parse_single_function(
+    fn optimizes_pointer_heavy_integer_conditions() {
+        let mut func = parse_single_function(
             r#"
-func @ptr_sensitive(ptr) {
+func @ptr_sensitive(ptr, int:u64) {
   bb0(v0: mem):
     v1: ptr = param 0
-    v2: int = ptrtoaddr v1
-    v3: int = iconst 0
-    v4: bool = icmp.eq v2, v3
-    brif v4, bb1(v0), bb2(v0)
-  bb1(v5: mem):
-    ret v5
-  bb2(v6: mem):
-    ret v6
+    v2: int:u64 = param 1
+    v3: int = ptrtoaddr v1
+    v4: int:u64 = iconst 10
+    v5: bool = icmp.lt v2, v4
+    brif v5, bb1(v0), bb2(v0)
+  bb1(v6: mem):
+    v7: int:u64 = iconst 12
+    v8: bool = icmp.lt v2, v7
+    brif v8, bb3(v6), bb4(v6)
+  bb2(v9: mem):
+    ret v9
+  bb3(v10: mem):
+    ret v10
+  bb4(v11: mem):
+    trap
 }
 "#,
         );
-        assert!(function_is_pointer_sensitive(&func));
+        let stats = optimize_function(&mut func);
+        assert!(
+            stats.rewrites > 0,
+            "pointer-heavy functions should still run integer at-use transforms"
+        );
+        let rendered = format!("{func}");
+        assert!(
+            rendered.contains("br bb3"),
+            "refined successor branch should fold in pointer-heavy function:\n{rendered}"
+        );
     }
 
     #[test]
-    /// Internal helper `skips_pointer_sensitive_at_use_optimization`.
+    /// Internal helper `does_not_fold_pointer_derived_integer_comparisons`.
     ///
     /// # Panics
     ///
     /// May panic if internal IR invariants are violated.
-    fn skips_pointer_sensitive_at_use_optimization() {
+    fn does_not_fold_pointer_derived_integer_comparisons() {
         let mut func = parse_single_function(
             r#"
-func @ptr_sensitive(ptr) {
+func @ptr_compare_unknown(ptr) {
   bb0(v0: mem):
     v1: ptr = param 0
     v2: int = ptrtoaddr v1
@@ -276,7 +246,15 @@ func @ptr_sensitive(ptr) {
 "#,
         );
         let stats = optimize_function(&mut func);
-        assert_eq!(stats.rewrites, 0);
+        let rendered = format!("{func}");
+        assert!(
+            rendered.contains("brif"),
+            "pointer-derived integer comparisons should remain unfused:\n{rendered}"
+        );
+        assert!(
+            stats.rewrites <= 1,
+            "pointer-derived comparison test should not trigger broad rewrites:\n{rendered}"
+        );
     }
 }
 
@@ -990,6 +968,82 @@ fn forward_select(
     lhs.join(&rhs)
 }
 
+/// Internal helper `forward_add`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
+fn forward_add(func: &Function, current: &FactMap, lhs: &Operand, rhs: &Operand) -> AtUseFacts {
+    let lhs_facts = operand_facts(func, current, lhs).unwrap_or_else(AtUseFacts::unknown);
+    let rhs_facts = operand_facts(func, current, rhs).unwrap_or_else(AtUseFacts::unknown);
+
+    if let (Some(lhs), Some(rhs)) = (lhs_facts.exact_value(), rhs_facts.exact_value()) {
+        return AtUseFacts::exact(lhs + rhs);
+    }
+
+    let mut facts = AtUseFacts::unknown();
+    facts.signed_min = lhs_facts
+        .signed_min
+        .as_ref()
+        .zip(rhs_facts.signed_min.as_ref())
+        .map(|(lhs, rhs)| lhs + rhs);
+    facts.signed_max = lhs_facts
+        .signed_max
+        .as_ref()
+        .zip(rhs_facts.signed_max.as_ref())
+        .map(|(lhs, rhs)| lhs + rhs);
+    facts.unsigned_min = lhs_facts
+        .unsigned_min
+        .as_ref()
+        .zip(rhs_facts.unsigned_min.as_ref())
+        .map(|(lhs, rhs)| lhs + rhs);
+    facts.unsigned_max = lhs_facts
+        .unsigned_max
+        .as_ref()
+        .zip(rhs_facts.unsigned_max.as_ref())
+        .map(|(lhs, rhs)| lhs + rhs);
+    facts.normalize();
+    facts
+}
+
+/// Internal helper `forward_sub`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
+fn forward_sub(func: &Function, current: &FactMap, lhs: &Operand, rhs: &Operand) -> AtUseFacts {
+    let lhs_facts = operand_facts(func, current, lhs).unwrap_or_else(AtUseFacts::unknown);
+    let rhs_facts = operand_facts(func, current, rhs).unwrap_or_else(AtUseFacts::unknown);
+
+    if let (Some(lhs), Some(rhs)) = (lhs_facts.exact_value(), rhs_facts.exact_value()) {
+        return AtUseFacts::exact(lhs - rhs);
+    }
+
+    let mut facts = AtUseFacts::unknown();
+    facts.signed_min = lhs_facts
+        .signed_min
+        .as_ref()
+        .zip(rhs_facts.signed_max.as_ref())
+        .map(|(lhs, rhs)| lhs - rhs);
+    facts.signed_max = lhs_facts
+        .signed_max
+        .as_ref()
+        .zip(rhs_facts.signed_min.as_ref())
+        .map(|(lhs, rhs)| lhs - rhs);
+    if let (Some(lhs_min), Some(lhs_max), Some(rhs_min), Some(rhs_max)) = (
+        lhs_facts.unsigned_min.as_ref(),
+        lhs_facts.unsigned_max.as_ref(),
+        rhs_facts.unsigned_min.as_ref(),
+        rhs_facts.unsigned_max.as_ref(),
+    ) && lhs_min >= rhs_max
+    {
+        facts.unsigned_min = Some(lhs_min - rhs_max);
+        facts.unsigned_max = Some(lhs_max - rhs_min);
+    }
+    facts.normalize();
+    facts
+}
+
 /// Internal helper `forward_bitand`.
 ///
 /// # Panics
@@ -1050,6 +1104,77 @@ fn forward_bitxor(func: &Function, current: &FactMap, lhs: &Operand, rhs: &Opera
     if let (Some(lhs), Some(rhs)) = (lhs_facts.exact_value(), rhs_facts.exact_value()) {
         let _ = facts.meet_with(&AtUseFacts::exact(lhs ^ rhs));
     }
+    facts
+}
+
+/// Internal helper `forward_shr`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
+fn forward_shr(func: &Function, current: &FactMap, lhs: &Operand, rhs: &Operand) -> AtUseFacts {
+    let lhs_facts = operand_facts(func, current, lhs).unwrap_or_else(AtUseFacts::unknown);
+    let rhs_facts = operand_facts(func, current, rhs).unwrap_or_else(AtUseFacts::unknown);
+    let Some(shift) = rhs_facts
+        .exact_value()
+        .and_then(nonnegative_bigint_to_usize)
+    else {
+        return AtUseFacts::unknown();
+    };
+
+    if let Some(lhs) = lhs_facts.exact_value() {
+        return AtUseFacts::exact(lhs >> shift);
+    }
+
+    let mut facts = AtUseFacts::unknown();
+    if let Some(min) = lhs_facts.unsigned_min.as_ref() {
+        facts.unsigned_min = Some(min >> shift);
+    }
+    if let Some(max) = lhs_facts.unsigned_max.as_ref() {
+        facts.unsigned_max = Some(max >> shift);
+    }
+    if facts.unsigned_min.is_some() || facts.unsigned_max.is_some() {
+        facts.signed_min = facts.unsigned_min.clone();
+        facts.signed_max = facts.unsigned_max.clone();
+    } else if lhs_facts
+        .signed_min
+        .as_ref()
+        .is_some_and(|min| min >= &BigInt::from(0u8))
+        && lhs_facts
+            .signed_max
+            .as_ref()
+            .is_some_and(|max| max >= &BigInt::from(0u8))
+    {
+        facts.signed_min = lhs_facts.signed_min.as_ref().map(|min| min >> shift);
+        facts.signed_max = lhs_facts.signed_max.as_ref().map(|max| max >> shift);
+        facts.unsigned_min = facts.signed_min.clone();
+        facts.unsigned_max = facts.signed_max.clone();
+    }
+    facts.normalize();
+    facts
+}
+
+/// Internal helper `forward_zext`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
+fn forward_zext(func: &Function, current: &FactMap, src: &Operand, _bits: u32) -> AtUseFacts {
+    let src_facts = operand_facts(func, current, src).unwrap_or_else(AtUseFacts::unknown);
+    let Some(src_bits) = operand_bit_width(func, src) else {
+        return AtUseFacts::unknown();
+    };
+
+    if let Some(value) = src_facts.exact_value() {
+        return AtUseFacts::exact(truncate_to_bits(&value, src_bits));
+    }
+
+    let mut facts = AtUseFacts::unknown();
+    facts.signed_min = Some(BigInt::from(0u8));
+    facts.unsigned_min = Some(BigInt::from(0u8));
+    facts.signed_max = Some(((BigInt::from(1u8) << src_bits) - BigInt::from(1u8)).clone());
+    facts.unsigned_max = facts.signed_max.clone();
+    facts.normalize();
     facts
 }
 
@@ -1518,14 +1643,22 @@ fn is_cleanup_pure_op(op: &Op) -> bool {
         op,
         Op::Const(_)
             | Op::BConst(_)
+            | Op::Add(_, _)
+            | Op::Sub(_, _)
             | Op::And(_, _)
             | Op::Or(_, _)
             | Op::Xor(_, _)
             | Op::BAnd(_, _)
             | Op::BOr(_, _)
             | Op::BXor(_, _)
+            | Op::Shl(_, _)
+            | Op::Shr(_, _)
             | Op::Select(_, _, _)
             | Op::ICmp(_, _, _)
+            | Op::Sext(_, _)
+            | Op::Zext(_, _)
+            | Op::PtrToInt(_)
+            | Op::PtrToAddr(_)
     )
 }
 
@@ -1987,6 +2120,88 @@ fn exact_bit_is_one(value: &BigInt, bit: u32) -> bool {
     let truncated = ((value % &modulus) + &modulus) % &modulus;
     let shifted = truncated >> bit as usize;
     (&shifted % BigInt::from(2u8)) != BigInt::from(0u8)
+}
+
+/// Internal helper `truncate_to_bits`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
+fn truncate_to_bits(value: &BigInt, bits: usize) -> BigInt {
+    if bits == 0 {
+        return BigInt::default();
+    }
+    let modulus = BigInt::from(1u8) << bits;
+    ((value % &modulus) + &modulus) % modulus
+}
+
+/// Internal helper `operand_bit_width`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
+fn operand_bit_width(func: &Function, operand: &Operand) -> Option<usize> {
+    operand
+        .annotation
+        .as_ref()
+        .and_then(|annotation| match annotation {
+            Annotation::Int(int_annotation) => Some(int_annotation.bit_width as usize),
+            _ => None,
+        })
+        .or_else(|| {
+            if operand.value.is_block_arg() {
+                return func
+                    .block_args
+                    .get(operand.value.index() as usize)
+                    .and_then(|block_arg| block_arg.annotation.as_ref())
+                    .and_then(|annotation| match annotation {
+                        Annotation::Int(int_annotation) => Some(int_annotation.bit_width as usize),
+                        _ => None,
+                    });
+            }
+            if operand.value.is_secondary_result() {
+                return func
+                    .inst_pool
+                    .get(operand.value.inst_index())
+                    .and_then(|node| node.inst.secondary_result_annotation.as_ref())
+                    .and_then(|annotation| match annotation {
+                        Annotation::Int(int_annotation) => Some(int_annotation.bit_width as usize),
+                        _ => None,
+                    });
+            }
+            let node = func.inst_pool.get(operand.value.index())?;
+            if let Op::Param(index) = &node.inst.op {
+                return func
+                    .param_annotations
+                    .get(*index as usize)
+                    .and_then(|annotation| annotation.as_ref())
+                    .or(node.inst.result_annotation.as_ref())
+                    .and_then(|annotation| match annotation {
+                        Annotation::Int(int_annotation) => Some(int_annotation.bit_width as usize),
+                        _ => None,
+                    });
+            }
+            node.inst
+                .result_annotation
+                .as_ref()
+                .and_then(|annotation| match annotation {
+                    Annotation::Int(int_annotation) => Some(int_annotation.bit_width as usize),
+                    _ => None,
+                })
+        })
+}
+
+/// Internal helper `nonnegative_bigint_to_usize`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
+fn nonnegative_bigint_to_usize(value: BigInt) -> Option<usize> {
+    if value.sign() == Sign::Minus {
+        None
+    } else {
+        value.try_into().ok()
+    }
 }
 
 /// Internal helper `exact_unsigned_width`.
