@@ -784,6 +784,56 @@ fn encode_branch_labels_resolved() {
     assert!(enc.relocations.is_empty());
 }
 
+#[test]
+fn lower_removes_fallthrough_jump() {
+    let module = parse_module(
+        r#"
+func @fallthrough_jump() {
+  bb0(v0: mem):
+    br bb1(v0)
+  bb1(v1: mem):
+    ret v1
+}
+"#,
+    )
+    .expect("module should parse");
+    let func = &module.functions[0];
+    let result = isel::isel(func, &module.symbols).expect("isel should succeed");
+    let pinsts = lower_isel_result(&result);
+
+    assert!(
+        !pinsts.iter().any(|inst| matches!(inst, MInst::Jmp { .. })),
+        "fallthrough jump should be removed: {:?}",
+        pinsts
+    );
+}
+
+#[test]
+fn lower_keeps_non_fallthrough_jump() {
+    let module = parse_module(
+        r#"
+func @non_fallthrough_jump() {
+  bb0(v0: mem):
+    br bb2(v0)
+  bb1(v1: mem):
+    ret v1
+  bb2(v2: mem):
+    ret v2
+}
+"#,
+    )
+    .expect("module should parse");
+    let func = &module.functions[0];
+    let result = isel::isel(func, &module.symbols).expect("isel should succeed");
+    let pinsts = lower_isel_result(&result);
+
+    assert!(
+        pinsts.iter().any(|inst| matches!(inst, MInst::Jmp { .. })),
+        "non-fallthrough jump should remain: {:?}",
+        pinsts
+    );
+}
+
 /// Build: fn max(a: i32, b: i32) -> i32 { if a > b { a } else { b } }
 ///
 /// entry:

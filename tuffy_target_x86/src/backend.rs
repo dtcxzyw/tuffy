@@ -754,15 +754,15 @@ pub fn lower_isel_result(isel_result: &IselResult<VInst>) -> Vec<PInst> {
         &alloc_result,
         isel_result.isel_frame_size,
     );
-    insert_prologue_epilogue(
+    let (pinsts, pinst_sources) = insert_prologue_epilogue(
         pinsts,
         pinst_sources,
         isel_result.isel_frame_size,
         alloc_result.spill_slots,
         isel_result.has_calls,
         &alloc_result.used_callee_saved,
-    )
-    .0
+    );
+    remove_fallthrough_jumps(pinsts, pinst_sources).0
 }
 
 /// X86-64 code generation backend.
@@ -806,6 +806,7 @@ impl Backend for X86Backend {
             isel_result.has_calls,
             &alloc_result.used_callee_saved,
         );
+        let (final_insts, final_sources) = remove_fallthrough_jumps(final_insts, final_sources);
 
         // 5. Encode to machine code
         let enc = encode_function(&final_insts, &final_sources);
@@ -954,4 +955,36 @@ impl Backend for X86Backend {
             },
         ]
     }
+}
+
+/// Remove unconditional jumps whose target label is already the next emitted block.
+fn remove_fallthrough_jumps(
+    insts: Vec<PInst>,
+    inst_sources: Vec<Option<u32>>,
+) -> (Vec<PInst>, Vec<Option<u32>>) {
+    let original_insts = insts;
+    let mut out = Vec::with_capacity(original_insts.len());
+    let mut out_sources = Vec::with_capacity(inst_sources.len());
+
+    for (idx, (inst, source)) in original_insts.iter().cloned().zip(inst_sources).enumerate() {
+        let keep = match &inst {
+            MInst::Jmp { target } => !jump_falls_through(&original_insts, idx, *target),
+            _ => true,
+        };
+        if keep {
+            out.push(inst);
+            out_sources.push(source);
+        }
+    }
+
+    (out, out_sources)
+}
+
+/// Return whether a jump target is already reached by falling through to following labels.
+fn jump_falls_through(insts: &[PInst], idx: usize, target: u32) -> bool {
+    insts
+        .iter()
+        .skip(idx + 1)
+        .take_while(|inst| matches!(inst, MInst::Label { .. }))
+        .any(|inst| matches!(inst, MInst::Label { id } if *id == target))
 }
