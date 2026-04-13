@@ -1,6 +1,56 @@
 use super::*;
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
+    /// Returns whether an enum aggregate needs zero-initialization before
+    /// storing its payload fields.
+    fn aggregate_needs_zero_init(
+        &self,
+        agg_ty: ty::Ty<'tcx>,
+        enum_variant_idx: Option<rustc_abi::VariantIdx>,
+        operands: &[Operand<'tcx>],
+        total_size: u64,
+        is_coroutine: bool,
+    ) -> bool {
+        if is_coroutine || operands.is_empty() {
+            return true;
+        }
+        let Some(variant_idx) = enum_variant_idx else {
+            return false;
+        };
+        if operands.len() != 1 {
+            return true;
+        }
+        let src_ty = match operand_ty_projected(&operands[0], self.mir, self.tcx) {
+            Some(ty) => self.monomorphize(ty),
+            None => return true,
+        };
+        let Some(src_size) = type_size(self.tcx, src_ty) else {
+            return true;
+        };
+        if src_size != total_size {
+            return true;
+        }
+        if variant_field_offset(self.tcx, agg_ty, variant_idx, 0).unwrap_or(1) != 0 {
+            return true;
+        }
+
+        let typing_env = ty::TypingEnv::fully_monomorphized();
+        let Ok(layout) = self.tcx.layout_of(typing_env.as_query_input(agg_ty)) else {
+            return true;
+        };
+        !matches!(
+            layout.variants,
+            rustc_abi::Variants::Multiple {
+                tag_encoding:
+                    rustc_abi::TagEncoding::Niche {
+                        untagged_variant,
+                        ..
+                    },
+                ..
+            } if variant_idx == untagged_variant
+        )
+    }
+
     /// Returns whether `operand` is currently represented by a stack slot.
     fn operand_uses_stack_slot(&self, operand: &Operand<'tcx>) -> bool {
         matches!(
@@ -319,7 +369,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         // coroutines (whose initial state discriminant must be 0),
         // or non-enum aggregates with no operands.
         let is_coroutine = matches!(kind, mir::AggregateKind::Coroutine(..));
-        if (enum_variant_idx.is_some() || operands.is_empty() || is_coroutine) && total_size > 0 {
+        if total_size > 0
+            && self.aggregate_needs_zero_init(
+                agg_ty,
+                enum_variant_idx,
+                operands,
+                total_size,
+                is_coroutine,
+            )
+        {
             let zero = self
                 .builder
                 .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
