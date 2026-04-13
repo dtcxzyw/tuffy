@@ -30,6 +30,7 @@ private def valueTypeToJson : ValueType → String
 private def patternOpcodeToJson : PatternOpcode → String
   | .select => quote "select"
   | .and => quote "and"
+  | .mul => quote "mul"
   | .div => quote "div"
   | .rem => quote "rem"
   | .xor => quote "xor"
@@ -235,6 +236,7 @@ private def replacementToJson : Replacement → String
   | .inst opcode args =>
     let op :=
       match opcode with
+      | .shl => quote "shl"
       | .shr => quote "shr"
     jsonObj [
       ("kind", quote "inst"),

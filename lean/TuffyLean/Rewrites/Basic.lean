@@ -19,6 +19,7 @@ inductive ValueType where
 inductive PatternOpcode where
   | select
   | and
+  | mul
   | div
   | rem
   | xor
@@ -66,6 +67,7 @@ inductive Pattern where
 
 /-- Replacement references an already-matched binding. -/
 inductive ReplacementOpcode where
+  | shl
   | shr
   deriving DecidableEq, Repr
 
@@ -226,6 +228,14 @@ theorem evalRem_by_one (a : Int) :
     evalRem a 1 = .int 0 := by
   simp [evalRem]
 
+/-- Multiplication by `2^shift` is equivalent to left-shifting by `shift`. -/
+theorem evalMul_power_of_two_to_shl (a : Int) (shift : Nat) :
+    .int (evalMul a ((2 : Int) ^ shift)) = evalShl a shift := by
+  rw [evalMul, evalShl]
+  have hshift_nonneg : ¬ ((shift : Int) < 0) := by simp
+  simp [hshift_nonneg]
+  simpa [Int.shiftLeft_natCast_right] using congrArg Value.int (Int.shiftLeft_eq_mul_pow a shift).symm
+
 /-- Dividing a non-negative integer by `2^shift` is equivalent to right-shifting by `shift`. -/
 theorem evalDiv_nonnegative_power_of_two_to_shr (a : Int) (shift : Nat) (ha : 0 ≤ a) :
     evalDiv a ((2 : Int) ^ shift) = evalShr a shift := by
@@ -384,6 +394,34 @@ def divByOneIdentityRule : PeepholeRule :=
     }
   }
 
+/-- `mul %x, 2^k -> shl %x, k`. -/
+def mulPowerOfTwoToShlRightRule : PeepholeRule :=
+  {
+    name := "mul_power_of_two_to_shl_right"
+    proofRef := "TuffyLean.Rewrites.evalMul_power_of_two_to_shl"
+    sideConditions := [isPositivePowerOfTwo "factor"]
+    body := {
+      matchRoot := .value
+        (.inst .mul [] [.capture "x" (.some .int), .intConstBinding "factor"])
+      replacement := .value
+        (.inst .shl [.binding "x", .pow2ShiftAmount "factor"])
+    }
+  }
+
+/-- `mul 2^k, %x -> shl %x, k`. -/
+def mulPowerOfTwoToShlLeftRule : PeepholeRule :=
+  {
+    name := "mul_power_of_two_to_shl_left"
+    proofRef := "TuffyLean.Rewrites.evalMul_power_of_two_to_shl"
+    sideConditions := [isPositivePowerOfTwo "factor"]
+    body := {
+      matchRoot := .value
+        (.inst .mul [] [.intConstBinding "factor", .capture "x" (.some .int)])
+      replacement := .value
+        (.inst .shl [.binding "x", .pow2ShiftAmount "factor"])
+    }
+  }
+
 /-- `rem %x, 1 -> 0`. -/
 def remByOneZeroRule : PeepholeRule :=
   {
@@ -450,6 +488,8 @@ def allPeepholeRules : List PeepholeRule :=
     canonicalizeBrIfBoolXorConstRule,
     canonicalizeBrIfIntifiedBoolCompareRule,
     andActiveBitsAtMostOneLowBitOneRule,
+    mulPowerOfTwoToShlRightRule,
+    mulPowerOfTwoToShlLeftRule,
     divByOneIdentityRule,
     remByOneZeroRule,
     divNonnegativePowerOfTwoToShrRule,

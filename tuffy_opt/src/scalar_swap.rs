@@ -434,10 +434,16 @@ fn ptr_expr(func: &Function, operand: &Operand, matched: &mut BTreeSet<u32>) -> 
             if !offset_value.is_block_arg() && !offset_value.is_secondary_result() {
                 matched.insert(offset_value.index());
             }
-            let delta = const_i64(func, offset_value)?;
-            let mut base_expr = ptr_expr(func, &base.clone().raw(), matched)?;
-            base_expr.offset += delta;
-            Some(base_expr)
+            if let Some(delta) = const_i64(func, offset_value) {
+                let mut base_expr = ptr_expr(func, &base.clone().raw(), matched)?;
+                base_expr.offset += delta;
+                Some(base_expr)
+            } else {
+                Some(PtrExpr {
+                    root: value,
+                    offset: 0,
+                })
+            }
         }
         Op::StackSlot(_, _) | Op::SymbolAddr(_) => {
             matched.insert(value.index());

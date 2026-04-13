@@ -345,7 +345,7 @@ impl Pattern {
             Pattern::Bind { pattern, .. } => pattern.inferred_value_type(),
             Pattern::IntConst { .. } | Pattern::IntConstBinding { .. } => Some(ValueType::Int),
             Pattern::Inst { op, args, .. } => match op.as_str() {
-                "and" | "div" | "rem" | "xor" => Some(ValueType::Int),
+                "and" | "div" | "mul" | "rem" | "xor" => Some(ValueType::Int),
                 "icmp" => Some(ValueType::Bool),
                 "select" => {
                     if args.len() != 3 {
@@ -836,6 +836,7 @@ fn replacement_value_type(
         },
         Replacement::Inst { op, args } => {
             let expected_arity = match op.as_str() {
+                "shl" => 2,
                 "shr" => 2,
                 other => {
                     return Err(GenerateError::UnsupportedRootRewrite {

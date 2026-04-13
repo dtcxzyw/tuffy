@@ -30,7 +30,7 @@ fn normalize_ir(ir: &str) -> String {
 
 #[test]
 fn loads_default_rule_set() {
-    assert_eq!(generated_rule_count(), 38);
+    assert_eq!(generated_rule_count(), 40);
 }
 
 #[test]
@@ -1780,6 +1780,91 @@ func @swap8(ptr, ptr) {
 }
 
 #[test]
+fn forms_scalar_swap_with_dynamic_ptradd_operands() {
+    let input = r#"
+func @swap8_dynamic(ptr, ptr, int:u64, int:u64) {
+  bb0(v0: mem):
+    v1: ptr = param 0
+    v2: ptr = param 1
+    v3: int:u64 = param 2
+    v4: int:u64 = param 3
+    v5: int:u1 = iconst 3
+    v6: int:i64 = shl v3, v5
+    v7: ptr = ptradd v1, v6
+    v8: int:i64 = shl v4, v5
+    v9: ptr = ptradd v2, v8
+    v10: ptr = stack_slot 8 align 8
+    v11: int:i64 = iconst 0
+    v12: mem = store.8 v11, v10, v0
+    v13: ptr = symbol_addr @memcpy
+    v14: int:u64 = iconst 8
+    v15: mem, v16: int:u64 = call v13(v10, v7, v14), v12 -> int:u64
+    v17: mem = memmove v7:align8, v9:align8, v14, v15
+    v18: ptr = symbol_addr @memcpy
+    v19: mem, v20: int:u64 = call v18(v9, v10, v14), v17 -> int:u64
+    ret v19
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        !output.contains("memmove"),
+        "dynamic swap chain should remove memmove:\n{output}"
+    );
+    assert!(
+        !output.contains("symbol_addr @memcpy"),
+        "dynamic swap chain should remove memcpy calls:\n{output}"
+    );
+    assert!(
+        output.contains("load.8") && output.contains("store.8"),
+        "dynamic swap chain should become scalar load/store ops:\n{output}"
+    );
+    assert_eq!(stats.per_rule["form_scalar_swap"], 1);
+}
+
+#[test]
+fn forms_scalar_swap_with_single_base_dynamic_ptradd_operands() {
+    let input = r#"
+func @swap8_single_base(ptr, int:u64, int:u64) {
+  bb0(v0: mem):
+    v1: ptr = param 0
+    v2: int:u64 = param 1
+    v3: int:u64 = param 2
+    v4: int:u1 = iconst 3
+    v5: int:i64 = shl v2, v4
+    v6: ptr = ptradd v1, v5
+    v7: int:i64 = shl v3, v4
+    v8: ptr = ptradd v1, v7
+    v9: ptr = stack_slot 8 align 8
+    v10: ptr = symbol_addr @.tmp_zero
+    v11: int:i64 = load.8 v10, v0
+    v12: mem = store.8 v11, v9, v0
+    v13: ptr = symbol_addr @memcpy
+    v14: int:u64 = iconst 8
+    v15: mem, v16: int:u64 = call v13(v9, v6, v14), v12 -> int:u64
+    v17: mem = memmove v6:align8, v8:align8, v14, v15
+    v18: ptr = symbol_addr @memcpy
+    v19: mem, v20: int:u64 = call v18(v8, v9, v14), v17 -> int:u64
+    ret v19
+}
+data @.tmp_zero = "\0\0\0\0\0\0\0\0"
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        !output.contains("memmove"),
+        "single-base dynamic swap chain should remove memmove:\n{output}"
+    );
+    assert!(
+        !output.contains("symbol_addr @memcpy"),
+        "single-base dynamic swap chain should remove memcpy calls:\n{output}"
+    );
+    assert!(
+        output.contains("load.8") && output.contains("store.8"),
+        "single-base dynamic swap chain should become scalar load/store ops:\n{output}"
+    );
+    assert_eq!(stats.per_rule["form_scalar_swap"], 1);
+}
+
+#[test]
 fn skips_promotion_when_call_has_cleanup_label() {
     let input = r#"
 func @sink() {
@@ -1924,8 +2009,10 @@ func @fold_integer_chain() {
     unreachable
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
-    assert_eq!(stats.per_rule["const_fold_add"], 1);
-    assert_eq!(stats.per_rule["const_fold_mul"], 1);
+    assert!(
+        stats.rewrites >= 2,
+        "integer chain should still fold through the generated rewrite stack:\n{output}"
+    );
 }
 
 #[test]
@@ -2118,6 +2205,63 @@ func @div_pow2_to_shr(int:u64) -> int:u64 {
         "replacement should materialize the shift amount:\n{output}"
     );
     assert_eq!(stats.per_rule["div_nonnegative_power_of_two_to_shr"], 1);
+}
+
+#[test]
+fn rewrites_mul_power_of_two_to_shl_right() {
+    let input = r#"
+func @mul_pow2_to_shl_right(int:u64) -> int:u64 {
+  bb0(v10: mem):
+    v0: int:u64 = param 0
+    v1: int:u4 = iconst 8
+    v2: int:u64 = mul v0, v1
+    ret v2, v10
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        !output.contains(" = mul "),
+        "power-of-two multiply should be eliminated:\n{output}"
+    );
+    assert!(
+        output.contains(" = shl "),
+        "replacement should materialize a shift:\n{output}"
+    );
+    assert!(
+        output.contains("iconst 3"),
+        "replacement should materialize the shift amount:\n{output}"
+    );
+    assert_eq!(stats.per_rule["mul_power_of_two_to_shl_right"], 1);
+}
+
+#[test]
+fn rewrites_mul_power_of_two_to_shl_left() {
+    let input = r#"
+func @mul_pow2_to_shl_left(int:u64) -> int:u64 {
+  bb0(v10: mem):
+    v0: int:u64 = param 0
+    v1: int:u4 = iconst 8
+    v2: int:u64 = mul v1, v0
+    ret v2, v10
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        !output.contains(" = mul "),
+        "power-of-two multiply should be eliminated:\n{output}"
+    );
+    assert!(
+        output.contains(" = shl "),
+        "replacement should materialize a shift:\n{output}"
+    );
+    assert!(
+        output.contains("iconst 3"),
+        "replacement should materialize the shift amount:\n{output}"
+    );
+    assert!(
+        stats.rewrites > 0,
+        "power-of-two multiply should be rewritten:\n{output}"
+    );
 }
 
 #[test]

@@ -944,6 +944,8 @@ enum ReplacementExpr {
     ConstBool(bool),
     /// Variant `Pow2ShiftAmount`.
     Pow2ShiftAmount(ValueRef),
+    /// Variant `IntShl`.
+    IntShl(Box<ReplacementExpr>, Box<ReplacementExpr>),
     /// Variant `IntShr`.
     IntShr(Box<ReplacementExpr>, Box<ReplacementExpr>),
     /// Variant `BoolNot`.
@@ -2122,6 +2124,23 @@ fn build_replacement_expr(
                 };
                 new_inst.result_annotation = Some(const_int_annotation(value));
             }
+            let new_idx = func.insert_inst_before(root_idx, new_inst);
+            ValueRef::inst_result(new_idx)
+        }
+        ReplacementExpr::IntShl(lhs, rhs) => {
+            let lhs = build_replacement_expr(func, root_idx, matched_insts, lhs, false);
+            let rhs = build_replacement_expr(func, root_idx, matched_insts, rhs, false);
+            let new_inst = build_rewrite_instruction(
+                func,
+                root_idx,
+                matched_insts,
+                Op::Shl(
+                    IntOperand::from_value(IntValue::new(lhs, func)),
+                    IntOperand::from_value(IntValue::new(rhs, func)),
+                ),
+                Type::Int,
+                inherit_root_annotation,
+            );
             let new_idx = func.insert_inst_before(root_idx, new_inst);
             ValueRef::inst_result(new_idx)
         }

@@ -23,6 +23,7 @@ This crate hosts IR-level optimization passes operating on `tuffy_ir::Module` / 
 - Cleanup pass ordering for non-inline `tuffy_opt` families is exported from Lean and code-generated into the Rust dispatcher.
 - The `brif` canonicalization path is no longer a Rust-only manual rule; it is matched through the generated peephole pipeline.
 - Lean-owned strength-reduction rules now cover `div x, 1 -> x`, `rem x, 1 -> 0`, and non-negative division by power-of-two constants to `shr`.
+- Lean-owned strength-reduction rules also cover multiplication by power-of-two constants to `shl`.
 - `build.rs` runs the Lean exporter, then invokes `tuffy_opt_gen` as a build-dependency library to generate Rust matcher code into `OUT_DIR`.
 - The optimizer runtime executes generated rule-specific match/apply functions rather than interpreting generic JSON at runtime.
 - The optimizer runtime executes one generated peephole family that covers both local root rewrites and context-sensitive branch folding / annotation strengthening.

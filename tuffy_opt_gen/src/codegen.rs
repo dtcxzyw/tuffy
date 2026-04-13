@@ -704,6 +704,7 @@ impl PatternGen {
         let arm = match op_kind {
             PatternInstKind::Select => "Op::Select(cond, t, e)",
             PatternInstKind::And => "Op::And(a, b)",
+            PatternInstKind::Mul => "Op::Mul(a, b)",
             PatternInstKind::Div => "Op::Div(a, b)",
             PatternInstKind::Rem => "Op::Rem(a, b)",
             PatternInstKind::Xor => "Op::Xor(a, b)",
@@ -721,6 +722,7 @@ impl PatternGen {
                 "e.value".to_string(),
             ],
             PatternInstKind::And
+            | PatternInstKind::Mul
             | PatternInstKind::Div
             | PatternInstKind::Rem
             | PatternInstKind::Xor
@@ -852,6 +854,8 @@ enum PatternInstKind {
     Select,
     /// A bitwise `and` instruction.
     And,
+    /// An integer `mul` instruction.
+    Mul,
     /// An integer `div` instruction.
     Div,
     /// An integer `rem` instruction.
@@ -865,7 +869,7 @@ enum PatternInstKind {
 impl PatternInstKind {
     /// Return whether operand order may be swapped during matching.
     fn is_commutative(self) -> bool {
-        matches!(self, Self::And | Self::Xor | Self::ICmpEq)
+        matches!(self, Self::And | Self::Mul | Self::Xor | Self::ICmpEq)
     }
 }
 
@@ -908,6 +912,7 @@ fn classify_pattern_inst(
     match op {
         "select" => Ok(PatternInstKind::Select),
         "and" => Ok(PatternInstKind::And),
+        "mul" => Ok(PatternInstKind::Mul),
         "div" => Ok(PatternInstKind::Div),
         "rem" => Ok(PatternInstKind::Rem),
         "xor" => Ok(PatternInstKind::Xor),
@@ -1176,11 +1181,20 @@ fn replacement_expr_tree(replacement: &Replacement) -> Result<String, GenerateEr
             Ok(format!("ReplacementExpr::Pow2ShiftAmount(bind_{name}?)"))
         }
         Replacement::Inst { op, args } => match (op.as_str(), args.as_slice()) {
+            ("shl", [lhs, rhs]) => Ok(format!(
+                "ReplacementExpr::IntShl(Box::new({}), Box::new({}))",
+                replacement_expr_tree(lhs)?,
+                replacement_expr_tree(rhs)?
+            )),
             ("shr", [lhs, rhs]) => Ok(format!(
                 "ReplacementExpr::IntShr(Box::new({}), Box::new({}))",
                 replacement_expr_tree(lhs)?,
                 replacement_expr_tree(rhs)?
             )),
+            ("shl", _) => Err(GenerateError::IllTypedReplacement {
+                rule: "<generated>".to_string(),
+                message: "replacement inst `shl` expects exactly 2 operands".to_string(),
+            }),
             ("shr", _) => Err(GenerateError::IllTypedReplacement {
                 rule: "<generated>".to_string(),
                 message: "replacement inst `shr` expects exactly 2 operands".to_string(),
