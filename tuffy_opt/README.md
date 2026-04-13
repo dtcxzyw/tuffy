@@ -14,6 +14,9 @@ This crate hosts IR-level optimization passes operating on `tuffy_ir::Module` / 
   return value, which matters for out-parameter-heavy helper wrappers.
 - Promotion is block-arg based (matching Tuffy IR CFG joins) rather than PHI-node based.
 - Promotion currently handles local `stack_slot` objects reached through constant-offset `ptradd`.
+- Promotion can also fold same-size integer slots when some stores write
+  narrower integer constants, by widening those constants to the slot slice
+  shape during SSA reconstruction.
 - Promotion is intentionally conservative around escaping pointers, atomics, bulk memory ops, and unwind-cleanup calls.
 - Lean-owned peephole framework is implemented.
 - Default peephole rules are exported from `lean/TuffyLean/Rewrites/Basic.lean`.

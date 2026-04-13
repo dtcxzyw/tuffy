@@ -1,8 +1,9 @@
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
+use num_bigint::BigInt;
 use tuffy_ir::builder::Builder;
 use tuffy_ir::function::Function;
-use tuffy_ir::instruction::{Op, Operand};
+use tuffy_ir::instruction::{Instruction, Op, Operand};
 use tuffy_ir::pool::UseNode;
 use tuffy_ir::types::{Annotation, Type};
 use tuffy_ir::value::{BlockRef, RegionRef, ValueRef};
@@ -158,6 +159,22 @@ fn const_i64(func: &Function, value: ValueRef) -> Option<i64> {
     int.to_string().parse().ok()
 }
 
+/// Internal helper `const_bigint`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
+fn const_bigint(func: &Function, value: ValueRef) -> Option<&BigInt> {
+    if value.is_block_arg() || value.is_secondary_result() {
+        return None;
+    }
+    let node = func.inst_pool.get(value.index())?;
+    let Op::Const(int) = &node.inst.op else {
+        return None;
+    };
+    Some(int)
+}
+
 /// Internal helper `address_root_slot`.
 ///
 /// # Panics
@@ -248,20 +265,27 @@ fn collect_slot_plan(func: &Function, cfg: &CfgInfo, slot: ValueRef) -> Option<S
         }
         previous_end = Some(key.offset + i64::from(key.size));
 
-        let mut iter = group.iter();
-        let first = iter.next().expect("slice group should be non-empty");
-        let canonical_ty = first.ty.clone();
-        let canonical_ann = first.annotation.clone();
+        let canonical = group
+            .iter()
+            .find(|access| matches!(access.kind, AccessKind::Load))
+            .unwrap_or_else(|| group.first().expect("slice group should be non-empty"));
+        let canonical_ty = canonical.ty.clone();
+        let canonical_ann = canonical.annotation.clone();
         let has_store = group
             .iter()
             .any(|access| matches!(access.kind, AccessKind::Store));
         if !has_store {
             return None;
         }
-        if group
-            .iter()
-            .any(|access| access.ty != canonical_ty || access.annotation != canonical_ann)
-        {
+        if group.iter().any(|access| {
+            !access_matches_slice_canonical(
+                func,
+                access,
+                &canonical_ty,
+                canonical_ann.as_ref(),
+                key.size,
+            )
+        }) {
             return None;
         }
 
@@ -288,6 +312,45 @@ fn collect_slot_plan(func: &Function, cfg: &CfgInfo, slot: ValueRef) -> Option<S
     }
 
     Some(SlotPlan { slot, slices })
+}
+
+/// Return whether one slice access is compatible with the chosen canonical slice shape.
+fn access_matches_slice_canonical(
+    func: &Function,
+    access: &AccessInfo,
+    canonical_ty: &Type,
+    canonical_ann: Option<&Annotation>,
+    slice_size: u32,
+) -> bool {
+    if access.ty == *canonical_ty && access.annotation.as_ref() == canonical_ann {
+        return true;
+    }
+    matches!(access.kind, AccessKind::Store)
+        && *canonical_ty == Type::Int
+        && matches!(access.ty, Type::Int)
+        && store_constant_can_widen_to_slice(func, access.inst_idx, canonical_ann, slice_size)
+}
+
+/// Return whether a store writes a constant integer that can be widened to the canonical slice.
+fn store_constant_can_widen_to_slice(
+    func: &Function,
+    inst_idx: u32,
+    canonical_ann: Option<&Annotation>,
+    slice_size: u32,
+) -> bool {
+    let Some(Annotation::Int(canonical_int)) = canonical_ann else {
+        return false;
+    };
+    if canonical_int.bit_width != slice_size * 8 {
+        return false;
+    }
+    let Op::Store(value, _, store_size, _) = &func.inst(inst_idx).op else {
+        return false;
+    };
+    if *store_size != slice_size {
+        return false;
+    }
+    const_bigint(func, value.value).is_some()
 }
 
 /// Internal helper `classify_pointer_use`.
@@ -727,12 +790,20 @@ fn build_transformed_function(
                 return Some(());
             }
             if let Some(&slice_id) = plan.store_to_slice.get(&inst_idx) {
-                let Op::Store(value, _, _, mem) = &inst.op else {
+                let Op::Store(_, _, _, mem) = &inst.op else {
                     return None;
                 };
                 let replacement_mem = remap_value(value_map, mem.clone().raw().value);
                 value_map.insert(primary_value_ref(inst_idx).raw(), replacement_mem);
-                let stored_value = remap_value(value_map, value.value);
+                let stored_value = remap_promoted_store_value(
+                    func,
+                    inst,
+                    &plan.slices[slice_id],
+                    value_map,
+                    block_map,
+                    new_func,
+                    inst_idx,
+                )?;
                 current_slice_values[slice_id] = Some(stored_value);
                 return Some(());
             }
@@ -844,6 +915,50 @@ fn build_transformed_function(
             );
         }
         Some(())
+    }
+
+    /// Internal helper `remap_promoted_store_value`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
+    fn remap_promoted_store_value(
+        func: &Function,
+        inst: &tuffy_ir::instruction::Instruction,
+        slice: &FlattenedSlice,
+        value_map: &HashMap<u32, ValueRef>,
+        block_map: &[BlockRef],
+        new_func: &mut Function,
+        inst_idx: u32,
+    ) -> Option<ValueRef> {
+        let Op::Store(value, _, store_size, _) = &inst.op else {
+            return None;
+        };
+        let remapped = remap_value(value_map, value.value);
+        if matches!(slice.ty, Type::Int)
+            && store_constant_can_widen_to_slice(
+                func,
+                inst_idx,
+                slice.annotation.as_ref(),
+                *store_size,
+            )
+            && let Some(constant) = const_bigint(func, value.value)
+        {
+            let block = func.inst_node(inst_idx).parent_block;
+            let widened_idx = new_func.append_inst(
+                block_map[block.index() as usize],
+                Instruction {
+                    op: Op::Const(constant.clone()),
+                    ty: slice.ty.clone(),
+                    secondary_ty: None,
+                    origin: inst.origin.clone(),
+                    result_annotation: slice.annotation.clone(),
+                    secondary_result_annotation: None,
+                },
+            );
+            return Some(ValueRef::inst_result(widened_idx));
+        }
+        Some(remapped)
     }
 
     #[allow(

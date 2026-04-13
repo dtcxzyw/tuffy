@@ -558,6 +558,93 @@ func @call_unrelated(int:s32) -> int:s32 {
 }
 
 #[test]
+fn promotes_loop_counter_slot_with_inner_branch() {
+    let input = r#"
+func @loop_counter_slot(int:u64, int:u64) -> int:u64 {
+  bb0(v0: mem):
+    v1: ptr = stack_slot 8
+    v2: int:u64 = param 0
+    v3: int:u64 = param 1
+    v4: int:u64 = iconst 0
+    v5: mem = store.8 v4, v1, v0
+    br bb1(v5)
+
+  bb1(v6: mem):
+    v7: int:u64 = load.8 v1, v6
+    v8: bool = icmp.lt v7, v2
+    brif v8, bb2(v6), bb3(v6)
+
+  bb2(v9: mem):
+    v10: int:u64 = load.8 v1, v9
+    v11: bool = icmp.lt v10, v3
+    brif v11, bb4(v9), bb5(v9)
+
+  bb3(v12: mem):
+    v13: int:u64 = load.8 v1, v12
+    ret v13, v12
+
+  bb4(v14: mem):
+    v15: int:u64 = iconst 1
+    v16: int:u64 = add v10, v15
+    v17: mem = store.8 v16, v1, v14
+    br bb1(v17)
+
+  bb5(v18: mem):
+    ret v10, v18
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        !output.contains("stack_slot"),
+        "loop counter slot should promote:\n{output}"
+    );
+    assert!(
+        !output.contains("store.8"),
+        "promoted loop counter stores should vanish:\n{output}"
+    );
+    assert!(
+        !output.contains("load.8"),
+        "promoted loop counter loads should vanish:\n{output}"
+    );
+    assert_eq!(stats.promoted_slots, 1);
+}
+
+#[test]
+fn promotes_wide_slot_storing_narrow_constants() {
+    let input = r#"
+func @wide_slot_with_narrow_constants(int:u64) -> int:u64 {
+  bb0(v0: mem):
+    v1: ptr = stack_slot 16
+    v2: int:u64 = param 0
+    v3: int:u1 = iconst 0
+    v4: mem = store.8 v3, v1, v0
+    v5: int:u4 = iconst 8
+    v6: ptr = ptradd v1, v5
+    v7: mem = store.8 v3, v6, v4
+    v8: mem = store.8 v2, v6, v7
+    v9: int:u1 = iconst 1
+    v10: mem = store.8 v9, v1, v8
+    v11: int:u64 = load.8 v6, v10
+    ret v11, v10
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        !output.contains("stack_slot"),
+        "wide slot with narrow constants should promote:\n{output}"
+    );
+    assert!(
+        !output.contains("store.8"),
+        "promoted wide slot stores should vanish:\n{output}"
+    );
+    assert!(
+        !output.contains("load.8"),
+        "promoted wide slot loads should vanish:\n{output}"
+    );
+    assert_eq!(stats.promoted_slots, 1);
+}
+
+#[test]
 fn promotes_pointer_and_length_slot_around_unrelated_call() {
     let input = r#"
 func @pair_slot(ptr, int:u64) -> int:u64 {
