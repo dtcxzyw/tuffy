@@ -309,6 +309,19 @@ fn rewrite_inst(inst: &VInst, assignments: &[PReg]) -> PInst {
             base: r(base),
             offset: *offset,
         },
+        MInst::LeaIndexed {
+            dst,
+            base,
+            index,
+            scale,
+            offset,
+        } => MInst::LeaIndexed {
+            dst: r(dst),
+            base: r(base),
+            index: r(index),
+            scale: *scale,
+            offset: *offset,
+        },
         MInst::MovRI64 { dst, imm } => MInst::MovRI64 {
             dst: r(dst),
             imm: *imm,

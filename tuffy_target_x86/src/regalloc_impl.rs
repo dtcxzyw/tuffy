@@ -111,6 +111,14 @@ impl RegAllocInst for VInst {
                 ops.push(def_op(*dst));
                 ops.push(use_op(*base));
             }
+            // lea dst, [base+index*scale+offset]
+            MInst::LeaIndexed {
+                dst, base, index, ..
+            } => {
+                ops.push(def_op(*dst));
+                ops.push(use_op(*base));
+                ops.push(use_op(*index));
+            }
             // lea dst, [rip+symbol]
             MInst::LeaSymbol { dst, .. } | MInst::TlsLeaSymbol { dst, .. } => {
                 ops.push(def_op(*dst));

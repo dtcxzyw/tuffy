@@ -137,6 +137,17 @@ fn mem(base: Gpr, offset: i32) -> MemoryOperand {
     MemoryOperand::with_base_displ(gpr64(base), offset as i64)
 }
 
+/// Construct an indexed memory operand `[base + index * scale + offset]`.
+fn mem_indexed(base: Gpr, index: Gpr, scale: u8, offset: i32) -> MemoryOperand {
+    MemoryOperand::with_base_index_scale_displ_size(
+        gpr64(base),
+        gpr64(index),
+        u32::from(scale),
+        offset as i64,
+        1,
+    )
+}
+
 // ---------------------------------------------------------------------------
 // Code selection helpers
 // ---------------------------------------------------------------------------
@@ -970,6 +981,22 @@ fn encode_inst(inst: &PInst, ctx: &mut EncodeContext) {
         MInst::Lea { dst, base, offset } => {
             ctx.emit(
                 Instruction::with2(Code::Lea_r64_m, gpr64(*dst), mem(*base, *offset)).unwrap(),
+            );
+        }
+        MInst::LeaIndexed {
+            dst,
+            base,
+            index,
+            scale,
+            offset,
+        } => {
+            ctx.emit(
+                Instruction::with2(
+                    Code::Lea_r64_m,
+                    gpr64(*dst),
+                    mem_indexed(*base, *index, *scale, *offset),
+                )
+                .unwrap(),
             );
         }
         MInst::LeaSymbol { dst, symbol } => {

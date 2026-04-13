@@ -77,6 +77,122 @@ fn isel_add_function() {
 }
 
 #[test]
+fn isel_ptradd_uses_lea_indexed() {
+    let module = parse_module(
+        r#"
+func @ptradd_indexed(ptr, int:u64) -> ptr {
+  bb0(v0: mem):
+    v1: ptr = param 0
+    v2: int:u64 = param 1
+    v3: ptr = ptradd v1, v2
+    ret v3, v0
+}
+"#,
+    )
+    .expect("module should parse");
+    let func = &module.functions[0];
+    let result = isel::isel(func, &module.symbols).expect("isel should succeed for ptradd");
+
+    assert!(
+        result
+            .insts
+            .iter()
+            .any(|inst| matches!(inst, MInst::LeaIndexed { scale: 1, .. })),
+        "ptradd should lower to indexed lea: {:?}",
+        result.insts
+    );
+    assert!(
+        !result
+            .insts
+            .iter()
+            .any(|inst| matches!(inst, MInst::AddRR { .. })),
+        "ptradd should no longer lower as mov+add: {:?}",
+        result.insts
+    );
+}
+
+#[test]
+fn isel_ptradd_const_uses_lea_offset() {
+    let module = parse_module(
+        r#"
+func @ptradd_const(ptr) -> ptr {
+  bb0(v0: mem):
+    v1: ptr = param 0
+    v2: int:u4 = iconst 8
+    v3: ptr = ptradd v1, v2
+    ret v3, v0
+}
+"#,
+    )
+    .expect("module should parse");
+    let func = &module.functions[0];
+    let result = isel::isel(func, &module.symbols).expect("isel should succeed for ptradd");
+
+    assert!(
+        result
+            .insts
+            .iter()
+            .any(|inst| matches!(inst, MInst::Lea { offset: 8, .. })),
+        "constant ptradd should lower to lea with displacement: {:?}",
+        result.insts
+    );
+}
+
+#[test]
+fn isel_shl_const_uses_imm_shift() {
+    let module = parse_module(
+        r#"
+func @shl_const(int:u64) -> int:u64 {
+  bb0(v0: mem):
+    v1: int:u64 = param 0
+    v2: int:u2 = iconst 3
+    v3: int:u64 = shl v1, v2
+    ret v3, v0
+}
+"#,
+    )
+    .expect("module should parse");
+    let func = &module.functions[0];
+    let result = isel::isel(func, &module.symbols).expect("isel should succeed");
+
+    assert!(
+        result
+            .insts
+            .iter()
+            .any(|inst| matches!(inst, MInst::ShlImm { imm: 3, .. })),
+        "constant shl should lower to shl imm: {:?}",
+        result.insts
+    );
+}
+
+#[test]
+fn isel_shr_const_uses_imm_shift() {
+    let module = parse_module(
+        r#"
+func @shr_const(int:u64) -> int:u64 {
+  bb0(v0: mem):
+    v1: int:u64 = param 0
+    v2: int:u2 = iconst 3
+    v3: int:u64 = shr v1, v2
+    ret v3, v0
+}
+"#,
+    )
+    .expect("module should parse");
+    let func = &module.functions[0];
+    let result = isel::isel(func, &module.symbols).expect("isel should succeed");
+
+    assert!(
+        result
+            .insts
+            .iter()
+            .any(|inst| matches!(inst, MInst::ShrImm { imm: 3, .. })),
+        "constant shr should lower to shr imm: {:?}",
+        result.insts
+    );
+}
+
+#[test]
 fn encode_add_function() {
     let (func, symbols) = build_add_func();
     let result = isel::isel(&func, &symbols).expect("isel should succeed for add");

@@ -270,6 +270,19 @@ pub enum MInst<R: RegType> {
         /// Displacement from the base register.
         offset: i32,
     },
+    /// lea reg, [base+index*scale+offset] (indexed effective address)
+    LeaIndexed {
+        /// Destination register.
+        dst: R,
+        /// Base register.
+        base: R,
+        /// Index register.
+        index: R,
+        /// Scale factor. Must be 1, 2, 4, or 8.
+        scale: u8,
+        /// Displacement from the computed address.
+        offset: i32,
+    },
     /// mov reg, imm64 (64-bit immediate, REX.W + B8+rd io)
     MovRI64 {
         /// Destination register.

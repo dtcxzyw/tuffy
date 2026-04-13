@@ -529,15 +529,12 @@ fn gen_icmp(
 /// Emit the machine instructions for the `ptr_add` rule.
 fn gen_ptr_add(ctx: &mut super::IselCtx, vref: ValueRef, ptr: VReg, offset: VReg) -> Option<()> {
     let v0 = ctx.alloc.alloc();
-    ctx.out.push(MInst::MovRR {
-        size: OpSize::S64,
+    ctx.out.push(MInst::LeaIndexed {
         dst: v0,
-        src: ptr,
-    });
-    ctx.out.push(MInst::AddRR {
-        size: OpSize::S64,
-        dst: v0,
-        src: offset,
+        base: ptr,
+        index: offset,
+        scale: 1,
+        offset: 0,
     });
     ctx.regs.assign(vref, v0);
     Some(())

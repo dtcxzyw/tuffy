@@ -1121,7 +1121,6 @@ fn select_inst(
     match op {
         Op::Shl(lhs, rhs) => {
             let lhs_vreg = ctx.ensure_in_reg(lhs.clone().raw().value)?;
-            let rhs_vreg = ctx.ensure_in_reg(rhs.clone().raw().value)?;
             let size = get_int_annotation(func, vref)
                 .or_else(|| operand_int_annotation(func, &lhs.clone().raw()))
                 .map(int_ann_to_opsize)
@@ -1132,13 +1131,87 @@ fn select_inst(
                 dst,
                 src: lhs_vreg,
             });
-            let cl = ctx.alloc.alloc_fixed(Gpr::Rcx.to_preg());
+            if let Some(imm) = int_const(func, rhs.clone().raw().value)
+                .and_then(|imm| u8::try_from(imm).ok())
+                .filter(|imm| *imm <= 63)
+            {
+                ctx.out.push(MInst::ShlImm { size, dst, imm });
+            } else {
+                let rhs_vreg = ctx.ensure_in_reg(rhs.clone().raw().value)?;
+                let cl = ctx.alloc.alloc_fixed(Gpr::Rcx.to_preg());
+                ctx.out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst: cl,
+                    src: rhs_vreg,
+                });
+                ctx.out.push(MInst::ShlRCL { size, dst });
+            }
+            ctx.regs.assign(vref, dst);
+            return Some(());
+        }
+        Op::Shr(lhs, rhs) => {
+            let lhs_vreg = ctx.ensure_in_reg(lhs.clone().raw().value)?;
+            let lhs_ann = operand_int_annotation(func, &lhs.clone().raw());
+            let size = lhs_ann.map(int_ann_to_opsize).unwrap_or(OpSize::S64);
+            let dst = ctx.alloc.alloc();
             ctx.out.push(MInst::MovRR {
                 size: OpSize::S64,
-                dst: cl,
-                src: rhs_vreg,
+                dst,
+                src: lhs_vreg,
             });
-            ctx.out.push(MInst::ShlRCL { size, dst });
+            if let Some(imm) = int_const(func, rhs.clone().raw().value)
+                .and_then(|imm| u8::try_from(imm).ok())
+                .filter(|imm| *imm <= 63)
+            {
+                match lhs_ann {
+                    Some(ann) if ann.signedness == IntSignedness::Signed => {
+                        ctx.out.push(MInst::SarImm { size, dst, imm });
+                    }
+                    _ => {
+                        ctx.out.push(MInst::ShrImm { size, dst, imm });
+                    }
+                }
+            } else {
+                let rhs_vreg = ctx.ensure_in_reg(rhs.clone().raw().value)?;
+                let cl = ctx.alloc.alloc_fixed(Gpr::Rcx.to_preg());
+                ctx.out.push(MInst::MovRR {
+                    size: OpSize::S64,
+                    dst: cl,
+                    src: rhs_vreg,
+                });
+                match lhs_ann {
+                    Some(ann) if ann.signedness == IntSignedness::Signed => {
+                        ctx.out.push(MInst::SarRCL { size, dst });
+                    }
+                    _ => {
+                        ctx.out.push(MInst::ShrRCL { size, dst });
+                    }
+                }
+            }
+            ctx.regs.assign(vref, dst);
+            return Some(());
+        }
+        Op::PtrAdd(ptr, offset) => {
+            let base = ctx.ensure_in_reg(ptr.clone().raw().value)?;
+            let dst = ctx.alloc.alloc();
+            if let Some(imm) =
+                int_const(func, offset.clone().raw().value).and_then(|imm| i32::try_from(imm).ok())
+            {
+                ctx.out.push(MInst::Lea {
+                    dst,
+                    base,
+                    offset: imm,
+                });
+            } else {
+                let index = ctx.ensure_in_reg(offset.clone().raw().value)?;
+                ctx.out.push(MInst::LeaIndexed {
+                    dst,
+                    base,
+                    index,
+                    scale: 1,
+                    offset: 0,
+                });
+            }
             ctx.regs.assign(vref, dst);
             return Some(());
         }
