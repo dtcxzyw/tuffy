@@ -1,6 +1,6 @@
 //! Tests for x86-64 target definitions, instruction selection, encoding, and ELF emission.
 
-use crate::inst::MInst;
+use crate::inst::{MInst, OpSize};
 use crate::reg::Gpr;
 use tuffy_ir::types::Annotation;
 
@@ -326,6 +326,78 @@ func @cmp_value_reuse(int:u64, int:u64, int:u64, int:u64) -> int:u64 {
             .iter()
             .any(|inst| matches!(inst, MInst::SetCC { .. })),
         "first compare result must be materialized before the next compare clobbers flags: {:?}",
+        result.insts
+    );
+}
+
+#[test]
+fn isel_icmp_uses_narrow_integer_width() {
+    let module = parse_module(
+        r#"
+func @cmp_i32(int:s32, int:s32) -> bool {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    v2: int:s32 = param 1
+    v3: bool = icmp.lt v1, v2
+    ret v3, v0
+}
+"#,
+    )
+    .expect("module should parse");
+    let func = &module.functions[0];
+    let result = isel::isel(func, &module.symbols).expect("isel should succeed");
+
+    assert!(
+        result.insts.iter().any(|inst| matches!(
+            inst,
+            MInst::CmpRR {
+                size: OpSize::S32,
+                ..
+            }
+        )),
+        "narrow icmp should emit a 32-bit compare: {:?}",
+        result.insts
+    );
+}
+
+#[test]
+fn isel_count_zero_ops_use_narrow_integer_width() {
+    let module = parse_module(
+        r#"
+func @count_zeroes_i32(int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    v2: int:s32 = count_leading_zeros.32 v1
+    v3: int:s32 = count_trailing_zeros v1
+    v4: int:s32 = add v2, v3
+    ret v4, v0
+}
+"#,
+    )
+    .expect("module should parse");
+    let func = &module.functions[0];
+    let result = isel::isel(func, &module.symbols).expect("isel should succeed");
+
+    assert!(
+        result.insts.iter().any(|inst| matches!(
+            inst,
+            MInst::Lzcnt {
+                size: OpSize::S32,
+                ..
+            }
+        )),
+        "count_leading_zeros on i32 should emit a 32-bit lzcnt: {:?}",
+        result.insts
+    );
+    assert!(
+        result.insts.iter().any(|inst| matches!(
+            inst,
+            MInst::Tzcnt {
+                size: OpSize::S32,
+                ..
+            }
+        )),
+        "count_trailing_zeros on i32 should emit a 32-bit tzcnt: {:?}",
         result.insts
     );
 }

@@ -92,7 +92,7 @@ def shlRule : IselRule := {
   pattern := .binop "Shl" ⟨"lhs", .any⟩ ⟨"rhs", .any⟩
   emit := [movRR .s64 (.fresh "dst") (.named "lhs"),
            movRR .s64 (.freshFixed "rcx" .rcx) (.named "rhs"),
-           shlRCL .s64 (.fresh "dst")]
+           shlRCL (.fromAnnotation "lhs") (.fresh "dst")]
   result := .reg "dst"
 }
 
@@ -121,7 +121,7 @@ def minSignedRule : IselRule := {
   name := "min_signed"
   pattern := .binop "Min" ⟨"lhs", .signed⟩ ⟨"rhs", .any⟩
   emit := [movRR .s64 (.fresh "dst") (.named "rhs"),
-           cmpRR .s64 (.named "lhs") (.named "rhs"),
+           cmpRR (.fromAnnotation "lhs") (.named "lhs") (.named "rhs"),
            cmovCC .s64 .l (.fresh "dst") (.named "lhs")]
   result := .reg "dst"
 }
@@ -130,7 +130,7 @@ def minUnsignedRule : IselRule := {
   name := "min_unsigned"
   pattern := .binop "Min" ⟨"lhs", .unsigned⟩ ⟨"rhs", .any⟩
   emit := [movRR .s64 (.fresh "dst") (.named "rhs"),
-           cmpRR .s64 (.named "lhs") (.named "rhs"),
+           cmpRR (.fromAnnotation "lhs") (.named "lhs") (.named "rhs"),
            cmovCC .s64 .b (.fresh "dst") (.named "lhs")]
   result := .reg "dst"
 }
@@ -139,7 +139,7 @@ def maxSignedRule : IselRule := {
   name := "max_signed"
   pattern := .binop "Max" ⟨"lhs", .signed⟩ ⟨"rhs", .any⟩
   emit := [movRR .s64 (.fresh "dst") (.named "rhs"),
-           cmpRR .s64 (.named "lhs") (.named "rhs"),
+           cmpRR (.fromAnnotation "lhs") (.named "lhs") (.named "rhs"),
            cmovCC .s64 .g (.fresh "dst") (.named "lhs")]
   result := .reg "dst"
 }
@@ -148,7 +148,7 @@ def maxUnsignedRule : IselRule := {
   name := "max_unsigned"
   pattern := .binop "Max" ⟨"lhs", .unsigned⟩ ⟨"rhs", .any⟩
   emit := [movRR .s64 (.fresh "dst") (.named "rhs"),
-           cmpRR .s64 (.named "lhs") (.named "rhs"),
+           cmpRR (.fromAnnotation "lhs") (.named "lhs") (.named "rhs"),
            cmovCC .s64 .a (.fresh "dst") (.named "lhs")]
   result := .reg "dst"
 }
@@ -165,14 +165,14 @@ def countOnesRule : IselRule := {
 def countLeadingZerosRule : IselRule := {
   name := "count_leading_zeros"
   pattern := .unop "CountLeadingZeros" ⟨"src", .any⟩
-  emit := [lzcnt .s64 (.fresh "dst") (.named "src")]
+  emit := [lzcnt (.fromAnnotation "src") (.fresh "dst") (.named "src")]
   result := .reg "dst"
 }
 
 def countTrailingZerosRule : IselRule := {
   name := "count_trailing_zeros"
   pattern := .unop "CountTrailingZeros" ⟨"src", .any⟩
-  emit := [tzcnt .s64 (.fresh "dst") (.named "src")]
+  emit := [tzcnt (.fromAnnotation "src") (.fresh "dst") (.named "src")]
   result := .reg "dst"
 }
 
@@ -181,7 +181,7 @@ def countTrailingZerosRule : IselRule := {
 def icmpRule : IselRule := {
   name := "icmp"
   pattern := .icmp ⟨"lhs", .any⟩ ⟨"rhs", .any⟩
-  emit := [cmpRR .s64 (.named "lhs") (.named "rhs")]
+  emit := [cmpRR (.fromAnnotation "lhs") (.named "lhs") (.named "rhs")]
   result := .cmpFlags
   icmpCcFromOp := true
 }

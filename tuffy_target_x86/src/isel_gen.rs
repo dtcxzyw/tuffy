@@ -272,15 +272,30 @@ fn gen_shr_unsigned(
 }
 
 /// Emit the machine instructions for the `min_signed` rule.
-fn gen_min_signed(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Option<()> {
+fn gen_min_signed(
+    ctx: &mut super::IselCtx,
+    vref: ValueRef,
+    lhs: VReg,
+    rhs: VReg,
+    lhs_ann: Option<Annotation>,
+) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::MovRR {
         size: OpSize::S64,
         dst: v0,
         src: rhs,
     });
+    let size_1 = match lhs_ann {
+        Some(Annotation::Int(int_ann)) => match int_ann.bit_width {
+            8 => OpSize::S8,
+            16 => OpSize::S16,
+            32 => OpSize::S32,
+            _ => OpSize::S64,
+        },
+        _ => OpSize::S64,
+    };
     ctx.out.push(MInst::CmpRR {
-        size: OpSize::S64,
+        size: size_1,
         src1: lhs,
         src2: rhs,
     });
@@ -295,15 +310,30 @@ fn gen_min_signed(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg
 }
 
 /// Emit the machine instructions for the `min_unsigned` rule.
-fn gen_min_unsigned(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Option<()> {
+fn gen_min_unsigned(
+    ctx: &mut super::IselCtx,
+    vref: ValueRef,
+    lhs: VReg,
+    rhs: VReg,
+    lhs_ann: Option<Annotation>,
+) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::MovRR {
         size: OpSize::S64,
         dst: v0,
         src: rhs,
     });
+    let size_1 = match lhs_ann {
+        Some(Annotation::Int(int_ann)) => match int_ann.bit_width {
+            8 => OpSize::S8,
+            16 => OpSize::S16,
+            32 => OpSize::S32,
+            _ => OpSize::S64,
+        },
+        _ => OpSize::S64,
+    };
     ctx.out.push(MInst::CmpRR {
-        size: OpSize::S64,
+        size: size_1,
         src1: lhs,
         src2: rhs,
     });
@@ -318,15 +348,30 @@ fn gen_min_unsigned(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VR
 }
 
 /// Emit the machine instructions for the `max_signed` rule.
-fn gen_max_signed(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Option<()> {
+fn gen_max_signed(
+    ctx: &mut super::IselCtx,
+    vref: ValueRef,
+    lhs: VReg,
+    rhs: VReg,
+    lhs_ann: Option<Annotation>,
+) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::MovRR {
         size: OpSize::S64,
         dst: v0,
         src: rhs,
     });
+    let size_1 = match lhs_ann {
+        Some(Annotation::Int(int_ann)) => match int_ann.bit_width {
+            8 => OpSize::S8,
+            16 => OpSize::S16,
+            32 => OpSize::S32,
+            _ => OpSize::S64,
+        },
+        _ => OpSize::S64,
+    };
     ctx.out.push(MInst::CmpRR {
-        size: OpSize::S64,
+        size: size_1,
         src1: lhs,
         src2: rhs,
     });
@@ -341,15 +386,30 @@ fn gen_max_signed(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg
 }
 
 /// Emit the machine instructions for the `max_unsigned` rule.
-fn gen_max_unsigned(ctx: &mut super::IselCtx, vref: ValueRef, lhs: VReg, rhs: VReg) -> Option<()> {
+fn gen_max_unsigned(
+    ctx: &mut super::IselCtx,
+    vref: ValueRef,
+    lhs: VReg,
+    rhs: VReg,
+    lhs_ann: Option<Annotation>,
+) -> Option<()> {
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::MovRR {
         size: OpSize::S64,
         dst: v0,
         src: rhs,
     });
+    let size_1 = match lhs_ann {
+        Some(Annotation::Int(int_ann)) => match int_ann.bit_width {
+            8 => OpSize::S8,
+            16 => OpSize::S16,
+            32 => OpSize::S32,
+            _ => OpSize::S64,
+        },
+        _ => OpSize::S64,
+    };
     ctx.out.push(MInst::CmpRR {
-        size: OpSize::S64,
+        size: size_1,
         src1: lhs,
         src2: rhs,
     });
@@ -376,10 +436,24 @@ fn gen_count_ones(ctx: &mut super::IselCtx, vref: ValueRef, src: VReg) -> Option
 }
 
 /// Emit the machine instructions for the `count_leading_zeros` rule.
-fn gen_count_leading_zeros(ctx: &mut super::IselCtx, vref: ValueRef, src: VReg) -> Option<()> {
+fn gen_count_leading_zeros(
+    ctx: &mut super::IselCtx,
+    vref: ValueRef,
+    src: VReg,
+    src_ann: Option<Annotation>,
+) -> Option<()> {
+    let size_0 = match src_ann {
+        Some(Annotation::Int(int_ann)) => match int_ann.bit_width {
+            8 => OpSize::S8,
+            16 => OpSize::S16,
+            32 => OpSize::S32,
+            _ => OpSize::S64,
+        },
+        _ => OpSize::S64,
+    };
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::Lzcnt {
-        size: OpSize::S64,
+        size: size_0,
         dst: v0,
         src,
     });
@@ -388,10 +462,24 @@ fn gen_count_leading_zeros(ctx: &mut super::IselCtx, vref: ValueRef, src: VReg) 
 }
 
 /// Emit the machine instructions for the `count_trailing_zeros` rule.
-fn gen_count_trailing_zeros(ctx: &mut super::IselCtx, vref: ValueRef, src: VReg) -> Option<()> {
+fn gen_count_trailing_zeros(
+    ctx: &mut super::IselCtx,
+    vref: ValueRef,
+    src: VReg,
+    src_ann: Option<Annotation>,
+) -> Option<()> {
+    let size_0 = match src_ann {
+        Some(Annotation::Int(int_ann)) => match int_ann.bit_width {
+            8 => OpSize::S8,
+            16 => OpSize::S16,
+            32 => OpSize::S32,
+            _ => OpSize::S64,
+        },
+        _ => OpSize::S64,
+    };
     let v0 = ctx.alloc.alloc();
     ctx.out.push(MInst::Tzcnt {
-        size: OpSize::S64,
+        size: size_0,
         dst: v0,
         src,
     });
@@ -408,8 +496,17 @@ fn gen_icmp(
     cmp_op: ICmpOp,
     lhs_ann: Option<Annotation>,
 ) -> Option<()> {
+    let size_0 = match lhs_ann {
+        Some(Annotation::Int(int_ann)) => match int_ann.bit_width {
+            8 => OpSize::S8,
+            16 => OpSize::S16,
+            32 => OpSize::S32,
+            _ => OpSize::S64,
+        },
+        _ => OpSize::S64,
+    };
     ctx.out.push(MInst::CmpRR {
-        size: OpSize::S64,
+        size: size_0,
         src1: lhs,
         src2: rhs,
     });
@@ -472,6 +569,7 @@ pub(super) fn try_select_generated(
     ctx: &mut super::IselCtx,
     vref: ValueRef,
     op: &Op,
+    func: &super::Function,
 ) -> Option<()> {
     match op {
         Op::Add(lhs, rhs) => {
@@ -522,7 +620,15 @@ pub(super) fn try_select_generated(
         Op::Shl(lhs, rhs) => {
             let l = ctx.ensure_in_reg(lhs.clone().raw().value)?;
             let r = ctx.ensure_in_reg(rhs.clone().raw().value)?;
-            gen_shl(ctx, vref, l, r, lhs.clone().raw().annotation)
+            gen_shl(
+                ctx,
+                vref,
+                l,
+                r,
+                lhs.clone().raw().annotation.or_else(|| {
+                    super::get_int_annotation(func, lhs.clone().raw().value).map(Annotation::Int)
+                }),
+            )
         }
         Op::Shr(lhs, rhs) => {
             let l = ctx.ensure_in_reg(lhs.clone().raw().value)?;
@@ -531,12 +637,39 @@ pub(super) fn try_select_generated(
                 Some(Annotation::Int(IntAnnotation {
                     signedness: IntSignedness::Signed,
                     ..
-                })) => gen_shr_signed(ctx, vref, l, r, lhs.clone().raw().annotation),
+                })) => gen_shr_signed(
+                    ctx,
+                    vref,
+                    l,
+                    r,
+                    lhs.clone().raw().annotation.or_else(|| {
+                        super::get_int_annotation(func, lhs.clone().raw().value)
+                            .map(Annotation::Int)
+                    }),
+                ),
                 Some(Annotation::Int(IntAnnotation {
                     signedness: IntSignedness::Unsigned,
                     ..
-                })) => gen_shr_unsigned(ctx, vref, l, r, lhs.clone().raw().annotation),
-                _ => gen_shr_unsigned(ctx, vref, l, r, lhs.clone().raw().annotation),
+                })) => gen_shr_unsigned(
+                    ctx,
+                    vref,
+                    l,
+                    r,
+                    lhs.clone().raw().annotation.or_else(|| {
+                        super::get_int_annotation(func, lhs.clone().raw().value)
+                            .map(Annotation::Int)
+                    }),
+                ),
+                _ => gen_shr_unsigned(
+                    ctx,
+                    vref,
+                    l,
+                    r,
+                    lhs.clone().raw().annotation.or_else(|| {
+                        super::get_int_annotation(func, lhs.clone().raw().value)
+                            .map(Annotation::Int)
+                    }),
+                ),
             }
         }
         Op::Min(lhs, rhs) => {
@@ -546,12 +679,39 @@ pub(super) fn try_select_generated(
                 Some(Annotation::Int(IntAnnotation {
                     signedness: IntSignedness::Signed,
                     ..
-                })) => gen_min_signed(ctx, vref, l, r),
+                })) => gen_min_signed(
+                    ctx,
+                    vref,
+                    l,
+                    r,
+                    lhs.clone().raw().annotation.or_else(|| {
+                        super::get_int_annotation(func, lhs.clone().raw().value)
+                            .map(Annotation::Int)
+                    }),
+                ),
                 Some(Annotation::Int(IntAnnotation {
                     signedness: IntSignedness::Unsigned,
                     ..
-                })) => gen_min_unsigned(ctx, vref, l, r),
-                _ => gen_min_unsigned(ctx, vref, l, r),
+                })) => gen_min_unsigned(
+                    ctx,
+                    vref,
+                    l,
+                    r,
+                    lhs.clone().raw().annotation.or_else(|| {
+                        super::get_int_annotation(func, lhs.clone().raw().value)
+                            .map(Annotation::Int)
+                    }),
+                ),
+                _ => gen_min_unsigned(
+                    ctx,
+                    vref,
+                    l,
+                    r,
+                    lhs.clone().raw().annotation.or_else(|| {
+                        super::get_int_annotation(func, lhs.clone().raw().value)
+                            .map(Annotation::Int)
+                    }),
+                ),
             }
         }
         Op::Max(lhs, rhs) => {
@@ -561,12 +721,39 @@ pub(super) fn try_select_generated(
                 Some(Annotation::Int(IntAnnotation {
                     signedness: IntSignedness::Signed,
                     ..
-                })) => gen_max_signed(ctx, vref, l, r),
+                })) => gen_max_signed(
+                    ctx,
+                    vref,
+                    l,
+                    r,
+                    lhs.clone().raw().annotation.or_else(|| {
+                        super::get_int_annotation(func, lhs.clone().raw().value)
+                            .map(Annotation::Int)
+                    }),
+                ),
                 Some(Annotation::Int(IntAnnotation {
                     signedness: IntSignedness::Unsigned,
                     ..
-                })) => gen_max_unsigned(ctx, vref, l, r),
-                _ => gen_max_unsigned(ctx, vref, l, r),
+                })) => gen_max_unsigned(
+                    ctx,
+                    vref,
+                    l,
+                    r,
+                    lhs.clone().raw().annotation.or_else(|| {
+                        super::get_int_annotation(func, lhs.clone().raw().value)
+                            .map(Annotation::Int)
+                    }),
+                ),
+                _ => gen_max_unsigned(
+                    ctx,
+                    vref,
+                    l,
+                    r,
+                    lhs.clone().raw().annotation.or_else(|| {
+                        super::get_int_annotation(func, lhs.clone().raw().value)
+                            .map(Annotation::Int)
+                    }),
+                ),
             }
         }
         Op::CountOnes(val) => {
@@ -575,11 +762,25 @@ pub(super) fn try_select_generated(
         }
         Op::CountLeadingZeros(val, _) => {
             let s = ctx.ensure_in_reg(val.clone().raw().value)?;
-            gen_count_leading_zeros(ctx, vref, s)
+            gen_count_leading_zeros(
+                ctx,
+                vref,
+                s,
+                val.clone().raw().annotation.or_else(|| {
+                    super::get_int_annotation(func, val.clone().raw().value).map(Annotation::Int)
+                }),
+            )
         }
         Op::CountTrailingZeros(val) => {
             let s = ctx.ensure_in_reg(val.clone().raw().value)?;
-            gen_count_trailing_zeros(ctx, vref, s)
+            gen_count_trailing_zeros(
+                ctx,
+                vref,
+                s,
+                val.clone().raw().annotation.or_else(|| {
+                    super::get_int_annotation(func, val.clone().raw().value).map(Annotation::Int)
+                }),
+            )
         }
         Op::PtrAdd(ptr, offset) => {
             let p = ctx.ensure_in_reg(ptr.clone().raw().value)?;
@@ -594,7 +795,16 @@ pub(super) fn try_select_generated(
         Op::ICmp(cmp_op, lhs, rhs) => {
             let l = ctx.ensure_in_reg(lhs.clone().raw().value)?;
             let r = ctx.ensure_in_reg(rhs.clone().raw().value)?;
-            gen_icmp(ctx, vref, l, r, *cmp_op, lhs.clone().raw().annotation)
+            gen_icmp(
+                ctx,
+                vref,
+                l,
+                r,
+                *cmp_op,
+                lhs.clone().raw().annotation.or_else(|| {
+                    super::get_int_annotation(func, lhs.clone().raw().value).map(Annotation::Int)
+                }),
+            )
         }
         _ => None,
     }

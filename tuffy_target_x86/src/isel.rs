@@ -128,6 +128,16 @@ fn bytes_to_opsize(bytes: u32) -> OpSize {
     }
 }
 
+/// Convert an integer annotation bit-width to an x86 operand size.
+fn int_ann_to_opsize(annotation: IntAnnotation) -> OpSize {
+    match annotation.bit_width {
+        8 => OpSize::S8,
+        16 => OpSize::S16,
+        32 => OpSize::S32,
+        _ => OpSize::S64,
+    }
+}
+
 /// Emit parallel copies into the target block-argument registers.
 fn emit_block_arg_copies(
     ctx: &mut IselCtx,
@@ -485,7 +495,7 @@ fn direct_call_symbol(func: &Function, value: ValueRef) -> Option<tuffy_ir::modu
 }
 
 /// Extract IntAnnotation from a ValueRef's result_annotation.
-fn get_int_annotation(func: &Function, val: ValueRef) -> Option<IntAnnotation> {
+pub(super) fn get_int_annotation(func: &Function, val: ValueRef) -> Option<IntAnnotation> {
     if val.is_block_arg() {
         None
     } else {
@@ -1109,6 +1119,29 @@ fn select_inst(
         return Some(());
     }
     match op {
+        Op::Shl(lhs, rhs) => {
+            let lhs_vreg = ctx.ensure_in_reg(lhs.clone().raw().value)?;
+            let rhs_vreg = ctx.ensure_in_reg(rhs.clone().raw().value)?;
+            let size = get_int_annotation(func, vref)
+                .or_else(|| operand_int_annotation(func, &lhs.clone().raw()))
+                .map(int_ann_to_opsize)
+                .unwrap_or(OpSize::S64);
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst,
+                src: lhs_vreg,
+            });
+            let cl = ctx.alloc.alloc_fixed(Gpr::Rcx.to_preg());
+            ctx.out.push(MInst::MovRR {
+                size: OpSize::S64,
+                dst: cl,
+                src: rhs_vreg,
+            });
+            ctx.out.push(MInst::ShlRCL { size, dst });
+            ctx.regs.assign(vref, dst);
+            return Some(());
+        }
         Op::CountLeadingZeros(a, bits)
             if *bits == 128
                 && get_int_annotation(func, a.clone().raw().value)
@@ -1243,7 +1276,7 @@ fn select_inst(
     // Try generated rules first (covers Add, Sub, Mul, Or, And, Xor,
     // Shl, Shr, Min, Max, CountOnes, CountLeadingZeros, CountTrailingZeros,
     // ICmp, PtrAdd, PtrDiff).
-    if isel_gen::try_select_generated(ctx, vref, op).is_some() {
+    if isel_gen::try_select_generated(ctx, vref, op, func).is_some() {
         return Some(());
     }
     match op {

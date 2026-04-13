@@ -142,6 +142,43 @@ fn needs_annotation_params(rule: &IselRule) -> Vec<String> {
     regs
 }
 
+/// Map a rule-local operand name to the matched IR operand whose annotation
+/// should be forwarded into the generated helper.
+fn annotation_arg_expr(pattern: &IrPattern, reg_name: &str) -> String {
+    let expr_for = |operand_name: &str| {
+        format!(
+            "{operand_name}.clone().raw().annotation.or_else(|| super::get_int_annotation(func, {operand_name}.clone().raw().value).map(Annotation::Int))"
+        )
+    };
+    match pattern {
+        IrPattern::Binop { lhs, rhs, .. } => {
+            if lhs.reg == reg_name {
+                expr_for("lhs")
+            } else if rhs.reg == reg_name {
+                expr_for("rhs")
+            } else {
+                panic!("unknown binop annotation source: {reg_name}");
+            }
+        }
+        IrPattern::Unop { val, .. } => {
+            if val.reg == reg_name {
+                expr_for("val")
+            } else {
+                panic!("unknown unop annotation source: {reg_name}");
+            }
+        }
+        IrPattern::Icmp { lhs, rhs } => {
+            if lhs.reg == reg_name {
+                expr_for("lhs")
+            } else if rhs.reg == reg_name {
+                expr_for("rhs")
+            } else {
+                panic!("unknown icmp annotation source: {reg_name}");
+            }
+        }
+    }
+}
+
 /// Generate a per-rule function like `fn gen_add(...)`.
 ///
 /// # Panics
@@ -415,6 +452,7 @@ fn generate_dispatch(out: &mut String, rules: &[IselRule]) {
     writeln!(out, "    ctx: &mut super::IselCtx,").unwrap();
     writeln!(out, "    vref: ValueRef,").unwrap();
     writeln!(out, "    op: &Op,").unwrap();
+    writeln!(out, "    func: &super::Function,").unwrap();
     writeln!(out, ") -> Option<()> {{").unwrap();
     writeln!(out, "    match op {{").unwrap();
 
@@ -474,7 +512,7 @@ fn generate_dispatch(out: &mut String, rules: &[IselRule]) {
             let ann_regs = needs_annotation_params(rule);
             let ann_args: String = ann_regs
                 .iter()
-                .map(|r| format!(", {r}.clone().raw().annotation"))
+                .map(|r| format!(", {}", annotation_arg_expr(&rule.pattern, r)))
                 .collect::<Vec<_>>()
                 .join("");
             writeln!(
@@ -503,7 +541,7 @@ fn generate_dispatch(out: &mut String, rules: &[IselRule]) {
                 let ann_regs = needs_annotation_params(rule);
                 let ann_args: String = ann_regs
                     .iter()
-                    .map(|r| format!(", {r}.clone().raw().annotation"))
+                    .map(|r| format!(", {}", annotation_arg_expr(&rule.pattern, r)))
                     .collect::<Vec<_>>()
                     .join("");
                 match guard {
@@ -552,7 +590,7 @@ fn generate_dispatch(out: &mut String, rules: &[IselRule]) {
                 let ann_regs = needs_annotation_params(default_rule);
                 let ann_args: String = ann_regs
                     .iter()
-                    .map(|r| format!(", {r}.clone().raw().annotation"))
+                    .map(|r| format!(", {}", annotation_arg_expr(&default_rule.pattern, r)))
                     .collect::<Vec<_>>()
                     .join("");
                 writeln!(
@@ -571,6 +609,10 @@ fn generate_dispatch(out: &mut String, rules: &[IselRule]) {
 
     // ICmp arm.
     if let Some(rule) = icmp_rule {
+        let lhs_ann = match &rule.pattern {
+            IrPattern::Icmp { lhs, .. } => annotation_arg_expr(&rule.pattern, &lhs.reg),
+            _ => unreachable!("icmp_rule must use an icmp pattern"),
+        };
         writeln!(out, "        Op::ICmp(cmp_op, lhs, rhs) => {{").unwrap();
         writeln!(
             out,
@@ -584,8 +626,9 @@ fn generate_dispatch(out: &mut String, rules: &[IselRule]) {
         .unwrap();
         writeln!(
             out,
-            "            gen_{name}(ctx, vref, l, r, *cmp_op, lhs.clone().raw().annotation)",
-            name = rule.name
+            "            gen_{name}(ctx, vref, l, r, *cmp_op, {lhs_ann})",
+            name = rule.name,
+            lhs_ann = lhs_ann
         )
         .unwrap();
         writeln!(out, "        }}").unwrap();
