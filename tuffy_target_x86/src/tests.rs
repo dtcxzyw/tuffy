@@ -498,6 +498,53 @@ func @branch_ladder(int:s32, int:s32) {
 }
 
 #[test]
+fn isel_branch_only_direct_icmp_stays_in_flags() {
+    let module = parse_module(
+        r#"
+func @branch_direct_icmp(int:u64, int:u64) {
+  bb0(v0: mem):
+    v1: int:u64 = param 0
+    v2: int:u64 = param 1
+    v3: bool = icmp.lt v1, v2
+    brif v3, bb1(v0), bb2(v0)
+  bb1(v4: mem):
+    ret v4
+  bb2(v5: mem):
+    ret v5
+}
+"#,
+    )
+    .expect("module should parse");
+    let func = &module.functions[0];
+    let result = isel::isel(func, &module.symbols).expect("isel should succeed");
+
+    assert!(
+        result
+            .insts
+            .iter()
+            .any(|inst| matches!(inst, MInst::CmpRR { .. })),
+        "branch-only direct icmp should emit a compare: {:?}",
+        result.insts
+    );
+    assert!(
+        result
+            .insts
+            .iter()
+            .any(|inst| matches!(inst, MInst::Jcc { .. })),
+        "branch-only direct icmp should emit a conditional jump: {:?}",
+        result.insts
+    );
+    assert!(
+        !result
+            .insts
+            .iter()
+            .any(|inst| matches!(inst, MInst::SetCC { .. })),
+        "branch-only direct icmp should not materialize a boolean register: {:?}",
+        result.insts
+    );
+}
+
+#[test]
 fn isel_materializes_cmp_values_before_later_compares_clobber_flags() {
     let module = parse_module(
         r#"

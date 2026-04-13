@@ -1865,6 +1865,86 @@ data @.tmp_zero = "\0\0\0\0\0\0\0\0"
 }
 
 #[test]
+fn forms_scalar_swap_from_partition_like_chain() {
+    let input = r#"
+func @partition_like_swap(ptr, ptr) {
+  bb0(v0: mem):
+    v1: ptr = param 0
+    v2: ptr = param 1
+    v4: ptr = stack_slot 8 align 8
+    v5: ptr = symbol_addr @.zero8
+    v6: int:i64 = load.8 v5, v0
+    v7: mem = store.8 v6, v4, v0
+    v8: int:u4 = iconst 8
+    v9: ptr = symbol_addr @memcpy
+    v10: mem, v11: int:u64 = call v9(v4, v1:align8, v8), v7 -> int:u64
+    v12: mem = memmove v1:align8, v2:align8, v8, v10
+    v13: ptr = symbol_addr @memcpy
+    v14: mem, v15: int:u64 = call v13(v2, v4, v8), v12 -> int:u64
+    ret v14
+}
+data @.zero8 = "\0\0\0\0\0\0\0\0"
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        !output.contains("memmove"),
+        "partition-like swap chain should remove memmove:\n{output}"
+    );
+    assert!(
+        !output.contains("symbol_addr @memcpy"),
+        "partition-like swap chain should remove memcpy calls:\n{output}"
+    );
+    assert!(
+        output.contains("load.8") && output.contains("store.8"),
+        "partition-like swap chain should become scalar load/store ops:\n{output}"
+    );
+    assert_eq!(stats.per_rule["form_scalar_swap"], 1);
+}
+
+#[test]
+fn forms_scalar_swap_from_partition_like_dynamic_chain() {
+    let input = r#"
+func @partition_like_dynamic_swap(ptr, int:u64, int:u64) {
+  bb0(v0: mem):
+    v1: ptr = param 0
+    v2: int:u64 = param 1
+    v3: int:u64 = param 2
+    v4: int:u2 = iconst 3
+    v5: int:i64 = shl v2, v4
+    v6: ptr = ptradd v1, v5
+    v7: int:i64 = shl v3, v4
+    v8: ptr = ptradd v1, v7
+    v9: ptr = stack_slot 8 align 8
+    v10: ptr = symbol_addr @.zero8
+    v11: int:i64 = load.8 v10, v0
+    v12: mem = store.8 v11, v9, v0
+    v13: int:u4 = iconst 8
+    v14: ptr = symbol_addr @memcpy
+    v15: mem, v16: int:u64 = call v14(v9, v6:align8, v13), v12 -> int:u64
+    v17: mem = memmove v6:align8, v8:align8, v13, v15
+    v18: ptr = symbol_addr @memcpy
+    v19: mem, v20: int:u64 = call v18(v8, v9, v13), v17 -> int:u64
+    ret v19
+}
+data @.zero8 = "\0\0\0\0\0\0\0\0"
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        !output.contains("memmove"),
+        "dynamic partition-like swap chain should remove memmove:\n{output}"
+    );
+    assert!(
+        !output.contains("symbol_addr @memcpy"),
+        "dynamic partition-like swap chain should remove memcpy calls:\n{output}"
+    );
+    assert!(
+        output.contains("load.8") && output.contains("store.8"),
+        "dynamic partition-like swap chain should become scalar load/store ops:\n{output}"
+    );
+    assert_eq!(stats.per_rule["form_scalar_swap"], 1);
+}
+
+#[test]
 fn skips_promotion_when_call_has_cleanup_label() {
     let input = r#"
 func @sink() {

@@ -1139,6 +1139,9 @@ fn select_inst(
         return Some(());
     }
     match op {
+        Op::ICmp(_, _, _) if value_only_used_by_brif(func, vref) => {
+            return Some(());
+        }
         Op::Shl(lhs, rhs) => {
             if let Some(imm) = int_const(func, rhs.clone().raw().value)
                 .and_then(|imm| u8::try_from(imm).ok())
@@ -4911,6 +4914,18 @@ fn value_only_used_by_ptradd_offset(func: &Function, value: ValueRef) -> bool {
                     .inst_pool
                     .get(use_node.user)
                     .is_some_and(|node| matches!(node.inst.op, Op::PtrAdd(_, _)))
+        })
+}
+
+/// Return whether a value is only used as the condition operand of `brif`.
+fn value_only_used_by_brif(func: &Function, value: ValueRef) -> bool {
+    func.use_count(value) > 0
+        && func.uses_of(value).all(|use_node| {
+            use_node.operand_index == 0
+                && func
+                    .inst_pool
+                    .get(use_node.user)
+                    .is_some_and(|node| matches!(node.inst.op, Op::BrIf(_, _, _, _, _)))
         })
 }
 
