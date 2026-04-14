@@ -12,6 +12,9 @@ This crate hosts IR-level optimization passes operating on `tuffy_ir::Module` / 
   callers.
 - Same-module inlining also handles call sites that ignore a callee's primary
   return value, which matters for out-parameter-heavy helper wrappers.
+- Same-module inline scoring now treats panic-only call-and-trap exit blocks as
+  cold, so single-caller helpers with hot arithmetic bodies are not penalized
+  by their cold bounds-check exits.
 - Promotion is block-arg based (matching Tuffy IR CFG joins) rather than PHI-node based.
 - Promotion currently handles local `stack_slot` objects reached through constant-offset `ptradd`.
 - Promotion can also fold same-size integer slots when some stores write

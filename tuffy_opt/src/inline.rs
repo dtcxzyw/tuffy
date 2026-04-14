@@ -238,16 +238,60 @@ fn find_inline_site(module: &Module, analysis: &ModuleAnalysis) -> Option<Inline
     None
 }
 
+/// Internal helper `block_is_cold_exit`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
+fn block_is_cold_exit(func: &Function, block: BlockRef) -> bool {
+    let mut saw_call = false;
+    let mut saw_terminal = false;
+    for (_, inst) in func.block_insts_with_values(block) {
+        match inst.op {
+            Op::Call(_, _, _, Some(_)) => return false,
+            Op::Call(..) => {
+                if saw_call || saw_terminal {
+                    return false;
+                }
+                saw_call = true;
+            }
+            Op::Trap | Op::Unreachable => {
+                if saw_terminal {
+                    return false;
+                }
+                saw_terminal = true;
+            }
+            Op::SymbolAddr(_) | Op::Const(_) => {}
+            _ => return false,
+        }
+    }
+    saw_call && saw_terminal
+}
+
+/// Internal helper `cold_exit_block_mask`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
+fn cold_exit_block_mask(func: &Function) -> Vec<bool> {
+    let mut mask = vec![false; func.blocks.len()];
+    for block in collect_block_refs(func) {
+        mask[block.index() as usize] = block_is_cold_exit(func, block);
+    }
+    mask
+}
+
 /// Internal helper `callee_is_leaf`.
 ///
 /// # Panics
 ///
 /// May panic if internal IR invariants are violated.
 fn callee_is_leaf(func: &Function) -> bool {
-    !func
-        .inst_pool
-        .iter_insts()
-        .any(|(_, inst)| matches!(inst.op, Op::Call(..)))
+    let cold_exit_blocks = cold_exit_block_mask(func);
+    !func.inst_pool.iter_insts().any(|(inst_idx, inst)| {
+        matches!(inst.op, Op::Call(..))
+            && !cold_exit_blocks[func.inst_node(inst_idx).parent_block.index() as usize]
+    })
 }
 
 /// Internal helper `callee_is_scalar_simple_cfg`.
@@ -413,7 +457,11 @@ fn collect_ret2_spec(func: &Function, call_idx: u32) -> Option<Option<Ret2Spec>>
 /// May panic if internal IR invariants are violated.
 fn inline_score(func: &Function) -> Option<u32> {
     let mut score = 0u32;
-    for (_, inst) in func.inst_pool.iter_insts() {
+    let cold_exit_blocks = cold_exit_block_mask(func);
+    for (inst_idx, inst) in func.inst_pool.iter_insts() {
+        if cold_exit_blocks[func.inst_node(inst_idx).parent_block.index() as usize] {
+            continue;
+        }
         score = score.saturating_add(match &inst.op {
             Op::Call(_, _, _, Some(_)) => return None,
             Op::Call(..) => 3,
