@@ -1382,6 +1382,110 @@ func @caller_b(ptr, ptr, int:s32) -> int:s32 {
 }
 
 #[test]
+fn loopifies_direct_tail_self_recursion() {
+    let input = r#"
+func @countdown(int:s32) {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    v2: int:s32 = iconst 0
+    v3: bool = icmp.gt v1, v2
+    brif v3, bb1(v0), bb2(v0)
+  bb1(v4: mem):
+    v5: ptr = symbol_addr @countdown
+    v6: int:s32 = iconst 1
+    v7: int:s32 = sub v1, v6
+    v8: mem = call v5(v7), v4
+    br bb2(v8)
+  bb2(v9: mem):
+    ret v9
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        output.contains("region loop"),
+        "tail recursion should create a loop region:\n{output}"
+    );
+    assert!(
+        output.matches("br bb").count() >= 2,
+        "tail recursion should become a loop backedge branch:\n{output}"
+    );
+    assert!(
+        !output.contains("call v"),
+        "direct tail-recursive self call should disappear:\n{output}"
+    );
+    assert_eq!(stats.per_rule["tailrec_loopify"], 1);
+}
+
+#[test]
+fn loopifies_tail_side_of_mixed_self_recursion() {
+    let input = r#"
+func @mixed_rec(int:s32) {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    v2: int:s32 = iconst 1
+    v3: bool = icmp.gt v1, v2
+    brif v3, bb1(v0), bb3(v0)
+  bb1(v4: mem):
+    v5: ptr = symbol_addr @mixed_rec
+    v6: int:s32 = iconst 1
+    v7: int:s32 = sub v1, v6
+    v8: mem = call v5(v7), v4
+    br bb2(v8)
+  bb2(v9: mem):
+    v10: ptr = symbol_addr @mixed_rec
+    v11: int:s32 = iconst 2
+    v12: int:s32 = sub v1, v11
+    v13: mem = call v10(v12), v9
+    br bb3(v13)
+  bb3(v14: mem):
+    ret v14
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        output.matches("br bb").count() >= 2,
+        "tail-position recursive side should loopify:\n{output}"
+    );
+    assert_eq!(
+        output.matches("call v").count(),
+        1,
+        "only the non-tail recursive call should remain:\n{output}"
+    );
+    assert_eq!(stats.per_rule["tailrec_loopify"], 1);
+}
+
+#[test]
+fn does_not_loopify_nonunit_tail_self_recursion() {
+    let input = r#"
+func @sumdown(int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    v2: int:s32 = iconst 0
+    v3: bool = icmp.gt v1, v2
+    brif v3, bb1(v0), bb2(v0, v1)
+  bb1(v4: mem):
+    v5: ptr = symbol_addr @sumdown
+    v6: int:s32 = iconst 1
+    v7: int:s32 = sub v1, v6
+    v8: mem, v9: int:s32 = call v5(v7), v4 -> int:s32
+    br bb2(v8, v9)
+  bb2(v10: mem, v11: int:s32):
+    ret v11, v10
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        !output.contains("continue"),
+        "non-unit self recursion should stay as-is for now:\n{output}"
+    );
+    assert!(
+        output.contains("call v"),
+        "self call should remain:\n{output}"
+    );
+    assert_eq!(stats.per_rule.get("tailrec_loopify"), None);
+}
+
+#[test]
 fn does_not_inline_recursive_cycle() {
     let input = r#"
 func @a(int:s32) -> int:s32 {

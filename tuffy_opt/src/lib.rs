@@ -14,6 +14,8 @@ mod peephole;
 mod promote;
 /// Optimization module `scalar_swap`.
 mod scalar_swap;
+/// Optimization module `tailrec`.
+mod tailrec;
 
 use std::time::Instant;
 use tuffy_ir::function::Function;
@@ -116,12 +118,15 @@ fn run_local_cleanup(func: &mut Function) -> PeepholeStats {
     let mut total = PeepholeStats::default();
     for _ in 0..MAX_LOCAL_CLEANUP_ROUNDS {
         let round = run_generated_local_cleanup_passes(func);
+        let tailrec = tailrec::optimize_function(func);
         let changed = round.rewrites > 0
+            || tailrec.rewrites > 0
             || round.promoted_slots > 0
             || round.promoted_slices > 0
             || round.promoted_loads > 0
             || round.eliminated_stores > 0;
         total.merge(round);
+        total.merge(tailrec);
         if !changed {
             break;
         }

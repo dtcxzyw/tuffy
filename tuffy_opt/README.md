@@ -40,11 +40,14 @@ This crate hosts IR-level optimization passes operating on `tuffy_ir::Module` / 
 - Scalar-swap formation now follows uniquely forwarded memory tokens through
   single-predecessor branch edges and drops dead symbol-backed temp preloads
   that become unused after the rewrite.
+- Local cleanup now also loopifies eligible direct self-tail recursion in
+  root-only unit-returning functions by rebuilding them with a loop header and
+  a backedge branch instead of the recursive tail call.
 
 `optimize_module` currently runs:
 
 1. function-local cleanup for every function:
-   promotion, peepholes, CFG cleanup
+   promotion, peepholes, CFG cleanup, tail recursion loopification
 2. module-level bulk memory and scalar-swap idiom formation
 3. direct same-module inlining across the module
 4. function-local cleanup again for callers changed by inlining
