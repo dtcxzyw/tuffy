@@ -1723,45 +1723,33 @@
 // CHECK:     unreachable
 // CHECK:
 // CHECK:   bb3(v28: mem):
-// CHECK:     v29: int:i64 = iconst 0
-// CHECK:     v30: mem = store.8 v29, v6, v28
-// CHECK:     v31: int:i64 = iconst 8
-// CHECK:     v32: ptr = ptradd v6, v31
-// CHECK:     v33: mem = store.8 v29, v32, v30
-// CHECK:     v34: int:i64 = iconst 8
-// CHECK:     v35: ptr = ptradd v6, v34
-// CHECK:     v36: mem = store.8 v9, v35, v33
-// CHECK:     v37: int:i64 = iconst 1
-// CHECK:     v38: mem = store.8 v37, v6, v36
-// CHECK:     v39: int:i64 = iconst 8
-// CHECK:     v40: ptr = ptradd v6, v39
-// CHECK:     v41: int:i64 = load.8 v40, v38
-// CHECK:     v42: bool = icmp.lt v7, v8
-// CHECK:     v43: int:u64 = iconst 1
-// CHECK:     v44: int:u64 = iconst 0
-// CHECK:     v45: int:u64 = select v42, v43, v44
-// CHECK:     v46: int:i64 = iconst 255
-// CHECK:     v47: int:u64 = and v45, v46
-// CHECK:     v48: int:i8 = iconst 0
-// CHECK:     v49: bool = icmp.eq v47, v48
-// CHECK:     brif v49, bb5(v38), bb4(v38)
+// CHECK:     v29: bool = bconst true
+// CHECK:     v30: bool = icmp.lt v7, v8
+// CHECK:     v31: int:u64 = iconst 1
+// CHECK:     v32: int:u64 = iconst 0
+// CHECK:     v33: int:u64 = select v30, v31, v32
+// CHECK:     v34: int:i64 = iconst 255
+// CHECK:     v35: int:u64 = and v33, v34
+// CHECK:     v36: int:i8 = iconst 0
+// CHECK:     v37: bool = icmp.eq v35, v36
+// CHECK:     brif v37, bb5(v28), bb4(v28)
 // CHECK:
-// CHECK:   bb4(v51: mem):
-// CHECK:     v52: int:i64 = sub v8, v7
-// CHECK:     v53: int:u64 = zext v52, 64
-// CHECK:     v54: mem = store.8 v53, v5, v51
-// CHECK:     br bb6(v54)
+// CHECK:   bb4(v39: mem):
+// CHECK:     v40: int:i64 = sub v8, v7
+// CHECK:     v41: int:u64 = zext v40, 64
+// CHECK:     v42: mem = store.8 v41, v5, v39
+// CHECK:     br bb6(v42)
 // CHECK:
-// CHECK:   bb5(v56: mem):
-// CHECK:     v57: int:i64 = sub v7, v8
-// CHECK:     v58: int:u64 = zext v57, 64
-// CHECK:     v59: mem = store.8 v58, v5, v56
-// CHECK:     br bb6(v59)
+// CHECK:   bb5(v44: mem):
+// CHECK:     v45: int:i64 = sub v7, v8
+// CHECK:     v46: int:u64 = zext v45, 64
+// CHECK:     v47: mem = store.8 v46, v5, v44
+// CHECK:     br bb6(v47)
 // CHECK:
-// CHECK:   bb6(v61: mem):
-// CHECK:     v62: int:u64 = load.8 v5, v61
-// CHECK:     v63: bool = icmp.ge v62, v41:u64
-// CHECK:     ret v63, v61
+// CHECK:   bb6(v49: mem):
+// CHECK:     v50: int:u64 = load.8 v5, v49
+// CHECK:     v51: bool = icmp.ge v50, v9
+// CHECK:     ret v51, v49
 // CHECK: }
 // CHECK:
 // CHECK: fn test_copy(_1: *mut u8, _2: *const u8) -> () {

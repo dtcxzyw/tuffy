@@ -1,4 +1,4 @@
-use super::ctx::TranslationCtx;
+use super::ctx::{OptionScalarLocal, TranslationCtx};
 use super::types::*;
 use rustc_middle::mir::{self, BinOp, CastKind, Operand, Place, Rvalue, StatementKind};
 use rustc_middle::ty;
@@ -16,6 +16,69 @@ const I64: IntAnnotation = IntAnnotation {
 mod assign;
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
+    /// Try to keep a simple scalar `Option<T>` assignment in SSA.
+    fn try_assign_simple_option_scalar(
+        &mut self,
+        place: &Place<'tcx>,
+        rvalue: &Rvalue<'tcx>,
+    ) -> bool {
+        let dest_ty = self.monomorphize(self.mir.local_decls[place.local].ty);
+        if !place.projection.is_empty()
+            || !self.local_only_used_as_option_discriminant_and_payload(place.local)
+        {
+            return false;
+        }
+        let Some(payload_ty) = self.simple_option_scalar_payload_ty(dest_ty) else {
+            return false;
+        };
+
+        let (is_some, payload) = match rvalue {
+            Rvalue::Aggregate(
+                box mir::AggregateKind::Adt(def_id, variant_idx, args, _, _),
+                operands,
+            ) => {
+                let adt_def = self.tcx.adt_def(*def_id);
+                if !adt_def.is_enum() || operands.len() > 1 {
+                    return false;
+                }
+                let variant = adt_def.variant(*variant_idx);
+                if variant.fields.len() == 1 && operands.len() == 1 {
+                    let Some(field) = variant.fields.iter().next() else {
+                        return false;
+                    };
+                    let field_ty = self.monomorphize(field.ty(self.tcx, args));
+                    if field_ty != payload_ty {
+                        return false;
+                    }
+                    let Some(operand) = operands.iter().next() else {
+                        return false;
+                    };
+                    let Some(payload) = self.translate_operand(operand) else {
+                        return false;
+                    };
+                    (
+                        self.builder.bconst(true, Origin::synthetic()).raw(),
+                        payload,
+                    )
+                } else if variant.fields.is_empty() && operands.is_empty() {
+                    let zero = self
+                        .builder
+                        .iconst(0, 64, IntSignedness::Unsigned, Origin::synthetic())
+                        .raw();
+                    (self.builder.bconst(false, Origin::synthetic()).raw(), zero)
+                } else {
+                    return false;
+                }
+            }
+            _ => return false,
+        };
+
+        self.option_scalar_locals.clear(place.local);
+        self.option_scalar_locals
+            .set(place.local, OptionScalarLocal { is_some, payload });
+        true
+    }
+
     /// Returns whether `rvalue` is a scalar constant that can stay in registers.
     fn rvalue_is_scalar_const(&self, rvalue: &Rvalue<'tcx>, dest_ty: ty::Ty<'tcx>) -> bool {
         matches!(
@@ -28,6 +91,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     pub(super) fn translate_statement(&mut self, stmt: &mir::Statement<'tcx>) {
         match &stmt.kind {
             StatementKind::Assign(box (place, rvalue)) => {
+                if self.try_assign_simple_option_scalar(place, rvalue) {
+                    return;
+                }
                 let rval_result = self.translate_rvalue(rvalue, place);
                 if let Some(val) = rval_result {
                     // Handle stores through pointer dereference (e.g. *ptr = val).
@@ -53,6 +119,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 }
                 if place.projection.is_empty() {
                     self.split_pair_locals.clear(place.local);
+                    self.option_scalar_locals.clear(place.local);
                 }
                 // Check if the rvalue produces a fat pointer (e.g., &str from ConstValue::Slice).
                 // Only propagate fat metadata for direct local assignments (no

@@ -59,6 +59,9 @@ Direct lowering for a few hot slice helpers now also keeps simple caller-side
 fat-pointer tuples in SSA until some later use actually needs an address. This
 avoids eagerly spilling destructured `split_at_mut` results through transient
 stack slots in optimized builds.
+Small `Option<T>` locals with scalar payloads can also stay in SSA when MIR only
+reads their discriminant and/or `Some` payload field, which avoids transient
+stack enum materialization in iterator-heavy code.
 
 ### Optimization Hook
 

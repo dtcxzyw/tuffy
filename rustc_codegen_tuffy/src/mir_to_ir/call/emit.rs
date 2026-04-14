@@ -1,4 +1,5 @@
 use super::*;
+use crate::mir_to_ir::ctx::OptionScalarLocal;
 use crate::mir_to_ir::ctx::SplitPairLocal;
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
@@ -82,6 +83,270 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             return None;
         }
         Some(unchecked)
+    }
+
+    /// Returns whether `local` is only consumed via `discriminant(_local)` and
+    /// `((_local as Some).0)` payload reads.
+    pub(in crate::mir_to_ir) fn local_only_used_as_option_discriminant_and_payload(
+        &self,
+        local: mir::Local,
+    ) -> bool {
+        let mut saw_discriminant = false;
+        let mut saw_payload = false;
+
+        let payload_projection = |place: &Place<'tcx>| {
+            place.local == local
+                && place.projection.len() == 2
+                && matches!(
+                    place.projection[0],
+                    rustc_middle::mir::PlaceElem::Downcast(_, _)
+                )
+                && matches!(place.projection[1], rustc_middle::mir::PlaceElem::Field(idx, _) if idx.as_usize() == 0)
+        };
+
+        for bb_data in self.mir.basic_blocks.iter() {
+            for stmt in &bb_data.statements {
+                if let mir::StatementKind::Assign(box (_, rvalue)) = &stmt.kind {
+                    match rvalue {
+                        mir::Rvalue::Discriminant(place)
+                            if place.local == local && place.projection.is_empty() =>
+                        {
+                            saw_discriminant = true;
+                        }
+                        mir::Rvalue::Use(Operand::Copy(place) | Operand::Move(place))
+                            if payload_projection(place) =>
+                        {
+                            saw_payload = true;
+                        }
+                        mir::Rvalue::Use(Operand::Copy(place) | Operand::Move(place))
+                            if place.local == local =>
+                        {
+                            return false;
+                        }
+                        mir::Rvalue::UnaryOp(_, operand) | mir::Rvalue::Cast(_, operand, _)
+                            if matches!(operand, Operand::Copy(place) | Operand::Move(place) if place.local == local) =>
+                        {
+                            return false;
+                        }
+                        mir::Rvalue::BinaryOp(_, box (lhs, rhs))
+                            if matches!(lhs, Operand::Copy(place) | Operand::Move(place) if place.local == local)
+                                || matches!(rhs, Operand::Copy(place) | Operand::Move(place) if place.local == local) =>
+                        {
+                            return false;
+                        }
+                        mir::Rvalue::Ref(_, _, place)
+                        | mir::Rvalue::RawPtr(_, place)
+                        | mir::Rvalue::CopyForDeref(place)
+                            if place.local == local =>
+                        {
+                            return false;
+                        }
+                        mir::Rvalue::Aggregate(_, operands)
+                            if operands.iter().any(|operand| {
+                                matches!(operand, Operand::Copy(place) | Operand::Move(place) if place.local == local)
+                            }) =>
+                        {
+                            return false;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            if let Some(terminator) = &bb_data.terminator {
+                match &terminator.kind {
+                    mir::TerminatorKind::SwitchInt {
+                        discr: Operand::Copy(place) | Operand::Move(place),
+                        ..
+                    } if place.local == local => return false,
+                    mir::TerminatorKind::Call { func, args, .. }
+                        if matches!(func, Operand::Copy(place) | Operand::Move(place) if place.local == local)
+                            || args.iter().any(|arg| {
+                                matches!(&arg.node, Operand::Copy(place) | Operand::Move(place) if place.local == local)
+                            }) =>
+                    {
+                        return false;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        saw_discriminant || saw_payload
+    }
+
+    /// Try to lower `Range<usize>::next` directly into SSA state.
+    fn try_handle_range_usize_next_call(
+        &mut self,
+        func: &Operand<'tcx>,
+        args: &[Spanned<Operand<'tcx>>],
+        destination: &Place<'tcx>,
+        target: BasicBlock,
+    ) -> bool {
+        if args.len() != 1
+            || !destination.projection.is_empty()
+            || !self.local_only_used_as_option_discriminant_and_payload(destination.local)
+        {
+            return false;
+        }
+        let Operand::Constant(c) = func else {
+            return false;
+        };
+        let fn_ty = self.tcx.instantiate_and_normalize_erasing_regions(
+            self.instance.args,
+            ty::TypingEnv::fully_monomorphized(),
+            ty::EarlyBinder::bind(c.ty()),
+        );
+        let ty::FnDef(def_id, _) = fn_ty.kind() else {
+            return false;
+        };
+        if self
+            .tcx
+            .opt_item_name(*def_id)
+            .is_none_or(|name| name.as_str() != "next")
+        {
+            return false;
+        }
+
+        let Some(arg_ty) = operand_ty_projected(&args[0].node, self.mir, self.tcx) else {
+            return false;
+        };
+        let arg_ty = self.monomorphize(arg_ty);
+        let ty::Ref(_, range_ty, rustc_hir::Mutability::Mut) = arg_ty.kind() else {
+            return false;
+        };
+        let ty::Adt(range_def, range_args) = range_ty.kind() else {
+            return false;
+        };
+        if self
+            .tcx
+            .opt_item_name(range_def.did())
+            .is_none_or(|name| name.as_str() != "Range")
+            || range_args.types().next().is_none_or(|ty| !ty.is_usize())
+        {
+            return false;
+        }
+
+        let dest_ty = self.monomorphize(self.mir.local_decls[destination.local].ty);
+        let Some(payload_ty) = self.simple_option_scalar_payload_ty(dest_ty) else {
+            return false;
+        };
+        if !payload_ty.is_usize() {
+            return false;
+        }
+
+        let Some(range_ptr) = self.translate_operand(&args[0].node) else {
+            return false;
+        };
+        let range_ptr = self.coerce_to_ptr(range_ptr);
+        let start = self.builder.load(
+            range_ptr.into(),
+            8,
+            Type::Int,
+            self.current_mem.into(),
+            int_annotation_for_bytes(8),
+            Origin::synthetic(),
+        );
+        let end_off = field_offset(self.tcx, *range_ty, 1).unwrap_or(8);
+        let end_ptr = if end_off == 0 {
+            range_ptr
+        } else {
+            let off = self.builder.iconst(
+                end_off as i64,
+                64,
+                IntSignedness::DontCare,
+                Origin::synthetic(),
+            );
+            self.builder
+                .ptradd(range_ptr.into(), off.into(), 0, Origin::synthetic())
+                .raw()
+        };
+        let end = self.builder.load(
+            end_ptr.into(),
+            8,
+            Type::Int,
+            self.current_mem.into(),
+            int_annotation_for_bytes(8),
+            Origin::synthetic(),
+        );
+        let has_value = self.builder.icmp(
+            tuffy_ir::instruction::ICmpOp::Lt,
+            start.into(),
+            end.into(),
+            Origin::synthetic(),
+        );
+        let target_block = self.block_map.get(target);
+        let some_block = self.builder.create_block();
+        let some_mem = self.builder.add_block_arg(some_block, Type::Mem, None);
+        let none_block = self.builder.create_block();
+        let none_mem = self.builder.add_block_arg(none_block, Type::Mem, None);
+        self.builder.brif(
+            has_value.into(),
+            some_block,
+            vec![self.current_mem.into()],
+            none_block,
+            vec![self.current_mem.into()],
+            Origin::synthetic(),
+        );
+
+        self.builder.switch_to_block(some_block);
+        self.current_mem = some_mem;
+        let one = self
+            .builder
+            .iconst(1, 64, IntSignedness::Unsigned, Origin::synthetic());
+        let next_start = self.builder.add(
+            start.into(),
+            one.into(),
+            IntAnnotation {
+                bit_width: 64,
+                signedness: IntSignedness::Unsigned,
+            },
+            Origin::synthetic(),
+        );
+        self.current_mem = self
+            .builder
+            .store(
+                next_start.into(),
+                range_ptr.into(),
+                8,
+                self.current_mem.into(),
+                Origin::synthetic(),
+            )
+            .raw();
+        let some = self.builder.bconst(true, Origin::synthetic()).raw();
+        self.option_scalar_locals.set(
+            destination.local,
+            OptionScalarLocal {
+                is_some: some,
+                payload: start,
+            },
+        );
+        self.builder.br(
+            target_block,
+            vec![self.current_mem.into()],
+            Origin::synthetic(),
+        );
+
+        self.builder.switch_to_block(none_block);
+        self.current_mem = none_mem;
+        let none = self.builder.bconst(false, Origin::synthetic()).raw();
+        let zero = self
+            .builder
+            .iconst(0, 64, IntSignedness::Unsigned, Origin::synthetic())
+            .raw();
+        self.option_scalar_locals.set(
+            destination.local,
+            OptionScalarLocal {
+                is_some: none,
+                payload: zero,
+            },
+        );
+        self.builder.br(
+            target_block,
+            vec![self.current_mem.into()],
+            Origin::synthetic(),
+        );
+        true
     }
 
     /// Try to lower `core::slice::split_at_mut{,_unchecked}` directly.
@@ -362,8 +627,15 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         {
             return;
         }
+        if cleanup_bb.is_none()
+            && let Some(target_bb) = *target
+            && self.try_handle_range_usize_next_call(func, args, destination, target_bb)
+        {
+            return;
+        }
         if destination.projection.is_empty() {
             self.split_pair_locals.clear(destination.local);
+            self.option_scalar_locals.clear(destination.local);
         }
         if let Some(inst) = resolved.resolved_instance {
             self.referenced_instances.push(inst);

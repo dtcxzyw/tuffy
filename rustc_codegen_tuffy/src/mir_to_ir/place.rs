@@ -8,6 +8,42 @@ use super::ctx::TranslationCtx;
 use super::types::*;
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
+    /// Returns the payload type for a simple scalar `Option<T>`.
+    pub(super) fn simple_option_scalar_payload_ty(&self, ty: ty::Ty<'tcx>) -> Option<ty::Ty<'tcx>> {
+        let ty = self.monomorphize(ty);
+        let ty::Adt(adt_def, args) = ty.kind() else {
+            return None;
+        };
+        if !adt_def.is_enum() || adt_def.variants().len() != 2 {
+            return None;
+        }
+        let some_variant = adt_def
+            .variants()
+            .iter_enumerated()
+            .find(|(_, variant)| variant.fields.len() == 1)
+            .map(|(idx, _)| idx)?;
+        let payload_field = adt_def.variant(some_variant).fields.iter().next()?;
+        let payload_ty = payload_field.ty(self.tcx, args);
+        let payload_ty = self.monomorphize(payload_ty);
+        matches!(
+            translate_ty(self.tcx, payload_ty),
+            Some(Type::Int | Type::Bool | Type::Ptr(_))
+        )
+        .then_some(payload_ty)
+    }
+
+    /// Returns the cached payload for a simple scalar `Option<T>` projection.
+    fn simple_option_scalar_payload(&mut self, place: &Place<'tcx>) -> Option<ValueRef> {
+        if place.projection.len() != 2
+            || !matches!(place.projection[0], PlaceElem::Downcast(_, _))
+            || !matches!(place.projection[1], PlaceElem::Field(idx, _) if idx.as_usize() == 0)
+        {
+            return None;
+        }
+        self.simple_option_scalar_payload_ty(self.mir.local_decls[place.local].ty)?;
+        Some(self.option_scalar_locals.get(place.local)?.payload)
+    }
+
     /// Returns cached `(data_ptr, len)` for one field of a split-pair local.
     pub(super) fn split_pair_field(&mut self, place: &Place<'tcx>) -> Option<(ValueRef, ValueRef)> {
         if place.projection.len() != 1 {
@@ -478,6 +514,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 .locals
                 .get(place.local)
                 .or_else(|| self.materialize_split_pair_local(place.local));
+        }
+        if let Some(payload) = self.simple_option_scalar_payload(place) {
+            return Some(payload);
         }
         if let Some((data_ptr, _)) = self.split_pair_field(place) {
             return Some(data_ptr);

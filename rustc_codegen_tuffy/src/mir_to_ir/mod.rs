@@ -27,8 +27,8 @@ mod terminator;
 pub(crate) mod types;
 
 use ctx::{
-    BlockMap, FatLocalMap, LocalMap, OverflowLocalMap, SplitPairLocalMap, StackLocalSet,
-    TranslationCtx, extract_param_names,
+    BlockMap, FatLocalMap, LocalMap, OptionScalarLocalMap, OverflowLocalMap, SplitPairLocalMap,
+    StackLocalSet, TranslationCtx, extract_param_names,
 };
 use types::*;
 
@@ -397,6 +397,7 @@ pub fn translate_function<'tcx>(
         split_pair_locals: SplitPairLocalMap::new(mir.local_decls.len()),
         stack_locals: StackLocalSet::new(mir.local_decls.len()),
         overflow_locals: OverflowLocalMap::new(),
+        option_scalar_locals: OptionScalarLocalMap::new(mir.local_decls.len()),
         symbols,
         static_data: Vec::new(),
         block_map,

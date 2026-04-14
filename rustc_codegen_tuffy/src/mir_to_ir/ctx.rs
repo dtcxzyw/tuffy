@@ -157,6 +157,45 @@ impl OverflowLocalMap {
     }
 }
 
+/// Cached `Option<T>` state for simple scalar payload locals.
+#[derive(Clone, Copy)]
+pub(super) struct OptionScalarLocal {
+    /// Whether the option is currently `Some`.
+    pub(super) is_some: ValueRef,
+    /// Payload value when the option is `Some`.
+    pub(super) payload: ValueRef,
+}
+
+/// Tracks simple scalar `Option<T>` locals kept in SSA.
+pub(super) struct OptionScalarLocalMap {
+    /// Slots indexed by `mir::Local::as_usize()`.
+    values: Vec<Option<OptionScalarLocal>>,
+}
+
+impl OptionScalarLocalMap {
+    /// Creates an empty option-scalar map sized for the current MIR body.
+    pub(super) fn new(count: usize) -> Self {
+        Self {
+            values: vec![None; count],
+        }
+    }
+
+    /// Records the current `Option<T>` state for `local`.
+    pub(super) fn set(&mut self, local: mir::Local, value: OptionScalarLocal) {
+        self.values[local.as_usize()] = Some(value);
+    }
+
+    /// Returns the current `Option<T>` state for `local`, if present.
+    pub(super) fn get(&self, local: mir::Local) -> Option<OptionScalarLocal> {
+        self.values[local.as_usize()]
+    }
+
+    /// Clears any cached `Option<T>` state for `local`.
+    pub(super) fn clear(&mut self, local: mir::Local) {
+        self.values[local.as_usize()] = None;
+    }
+}
+
 /// Tracks which MIR locals hold stack slot addresses (aggregate/spilled values)
 /// rather than scalar values in registers.
 pub(super) struct StackLocalSet {
@@ -256,6 +295,8 @@ pub(super) struct TranslationCtx<'a, 'tcx> {
     /// Maps `*WithOverflow` destination locals to the overflow-flag ValueRef
     /// (secondary result of the IR instruction). Used by Field(1) access.
     pub(super) overflow_locals: OverflowLocalMap,
+    /// Cached simple scalar `Option<T>` locals.
+    pub(super) option_scalar_locals: OptionScalarLocalMap,
     /// Per-function symbol table used during lowering.
     pub(super) symbols: SymbolTable,
     /// Static data emitted while lowering this function.
