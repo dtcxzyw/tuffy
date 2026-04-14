@@ -1,4 +1,5 @@
 use super::*;
+use crate::mir_to_ir::ctx::SplitPairLocal;
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     /// Emit a panic-bounds-check call with already-lowered integer values.
@@ -159,87 +160,102 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             )
             .raw();
 
-        let dest_ty = self.monomorphize(self.mir.local_decls[destination.local].ty);
-        let dest_size = type_size(self.tcx, dest_ty).unwrap_or(32) as u32;
-        let dest_align = type_align(self.tcx, dest_ty).unwrap_or(8) as u32;
-        let dest_slot = match self.locals.get(destination.local) {
-            Some(existing) if matches!(self.builder.value_type(existing), Some(Type::Ptr(_))) => {
-                existing
-            }
-            _ => {
-                let slot = self
-                    .builder
-                    .stack_slot(dest_size, dest_align, Origin::synthetic());
-                self.locals.set(destination.local, slot);
-                self.stack_locals.mark(destination.local);
-                slot
-            }
-        };
-
         let target_block = self.block_map.get(target);
         let store_result = |this: &mut Self, mem: ValueRef| {
             this.current_mem = mem;
-            this.current_mem = this
-                .builder
-                .store(
-                    data_ptr.into(),
-                    dest_slot.into(),
-                    8,
-                    this.current_mem.into(),
-                    Origin::synthetic(),
-                )
-                .raw();
-            let off8 = this
-                .builder
-                .iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
-            let left_len_addr = this
-                .builder
-                .ptradd(dest_slot.into(), off8.into(), 0, Origin::synthetic())
-                .raw();
-            this.current_mem = this
-                .builder
-                .store(
-                    mid_value.into(),
-                    left_len_addr.into(),
-                    8,
-                    this.current_mem.into(),
-                    Origin::synthetic(),
-                )
-                .raw();
-            let off16 = this
-                .builder
-                .iconst(16, 64, IntSignedness::DontCare, Origin::synthetic());
-            let right_ptr_addr = this
-                .builder
-                .ptradd(dest_slot.into(), off16.into(), 0, Origin::synthetic())
-                .raw();
-            this.current_mem = this
-                .builder
-                .store(
-                    right_ptr.into(),
-                    right_ptr_addr.into(),
-                    8,
-                    this.current_mem.into(),
-                    Origin::synthetic(),
-                )
-                .raw();
-            let off24 = this
-                .builder
-                .iconst(24, 64, IntSignedness::DontCare, Origin::synthetic());
-            let right_len_addr = this
-                .builder
-                .ptradd(dest_slot.into(), off24.into(), 0, Origin::synthetic())
-                .raw();
-            this.current_mem = this
-                .builder
-                .store(
-                    right_len.into(),
-                    right_len_addr.into(),
-                    8,
-                    this.current_mem.into(),
-                    Origin::synthetic(),
-                )
-                .raw();
+            if !this.stack_locals.is_stack(destination.local) {
+                this.locals.clear(destination.local);
+                this.fat_locals.clear(destination.local);
+                this.split_pair_locals.set(
+                    destination.local,
+                    SplitPairLocal {
+                        left_ptr: data_ptr,
+                        left_len: mid_value,
+                        right_ptr,
+                        right_len,
+                    },
+                );
+            } else {
+                let dest_ty = this.monomorphize(this.mir.local_decls[destination.local].ty);
+                let dest_size = type_size(this.tcx, dest_ty).unwrap_or(32) as u32;
+                let dest_align = type_align(this.tcx, dest_ty).unwrap_or(8) as u32;
+                let dest_slot = match this.locals.get(destination.local) {
+                    Some(existing)
+                        if matches!(this.builder.value_type(existing), Some(Type::Ptr(_))) =>
+                    {
+                        existing
+                    }
+                    _ => {
+                        let slot =
+                            this.builder
+                                .stack_slot(dest_size, dest_align, Origin::synthetic());
+                        this.locals.set(destination.local, slot);
+                        this.stack_locals.mark(destination.local);
+                        slot
+                    }
+                };
+                this.current_mem = this
+                    .builder
+                    .store(
+                        data_ptr.into(),
+                        dest_slot.into(),
+                        8,
+                        this.current_mem.into(),
+                        Origin::synthetic(),
+                    )
+                    .raw();
+                let off8 = this
+                    .builder
+                    .iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
+                let left_len_addr = this
+                    .builder
+                    .ptradd(dest_slot.into(), off8.into(), 0, Origin::synthetic())
+                    .raw();
+                this.current_mem = this
+                    .builder
+                    .store(
+                        mid_value.into(),
+                        left_len_addr.into(),
+                        8,
+                        this.current_mem.into(),
+                        Origin::synthetic(),
+                    )
+                    .raw();
+                let off16 =
+                    this.builder
+                        .iconst(16, 64, IntSignedness::DontCare, Origin::synthetic());
+                let right_ptr_addr = this
+                    .builder
+                    .ptradd(dest_slot.into(), off16.into(), 0, Origin::synthetic())
+                    .raw();
+                this.current_mem = this
+                    .builder
+                    .store(
+                        right_ptr.into(),
+                        right_ptr_addr.into(),
+                        8,
+                        this.current_mem.into(),
+                        Origin::synthetic(),
+                    )
+                    .raw();
+                let off24 =
+                    this.builder
+                        .iconst(24, 64, IntSignedness::DontCare, Origin::synthetic());
+                let right_len_addr = this
+                    .builder
+                    .ptradd(dest_slot.into(), off24.into(), 0, Origin::synthetic())
+                    .raw();
+                this.current_mem = this
+                    .builder
+                    .store(
+                        right_len.into(),
+                        right_len_addr.into(),
+                        8,
+                        this.current_mem.into(),
+                        Origin::synthetic(),
+                    )
+                    .raw();
+            }
             this.builder.br(
                 target_block,
                 vec![this.current_mem.into()],
@@ -345,6 +361,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             && self.try_handle_split_at_mut_call(func, args, destination, target_bb, source_info)
         {
             return;
+        }
+        if destination.projection.is_empty() {
+            self.split_pair_locals.clear(destination.local);
         }
         if let Some(inst) = resolved.resolved_instance {
             self.referenced_instances.push(inst);

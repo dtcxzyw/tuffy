@@ -39,6 +39,11 @@ impl LocalMap {
     pub(super) fn get(&self, local: mir::Local) -> Option<ValueRef> {
         self.values[local.as_usize()]
     }
+
+    /// Clears any tracked value for `local`.
+    pub(super) fn clear(&mut self, local: mir::Local) {
+        self.values[local.as_usize()] = None;
+    }
 }
 
 /// Tracks the "high" component of fat pointer locals (e.g., length for &str).
@@ -63,6 +68,65 @@ impl FatLocalMap {
     /// Returns the metadata component cached for `local`.
     pub(super) fn get(&self, local: mir::Local) -> Option<ValueRef> {
         self.values.get(&local.as_usize()).copied()
+    }
+
+    /// Clears any cached metadata for `local`.
+    pub(super) fn clear(&mut self, local: mir::Local) {
+        self.values.remove(&local.as_usize());
+    }
+}
+
+/// Cached components of a direct `split_at_mut{,_unchecked}` result.
+#[derive(Clone, Copy)]
+pub(super) struct SplitPairLocal {
+    /// Left slice data pointer.
+    pub(super) left_ptr: ValueRef,
+    /// Left slice length.
+    pub(super) left_len: ValueRef,
+    /// Right slice data pointer.
+    pub(super) right_ptr: ValueRef,
+    /// Right slice length.
+    pub(super) right_len: ValueRef,
+}
+
+impl SplitPairLocal {
+    /// Returns the `(data_ptr, len)` pair for one tuple field.
+    pub(super) fn field(self, idx: usize) -> Option<(ValueRef, ValueRef)> {
+        match idx {
+            0 => Some((self.left_ptr, self.left_len)),
+            1 => Some((self.right_ptr, self.right_len)),
+            _ => None,
+        }
+    }
+}
+
+/// Tracks tuple locals caching two fat-pointer fields in SSA.
+pub(super) struct SplitPairLocalMap {
+    /// Slots indexed by `mir::Local::as_usize()`.
+    values: Vec<Option<SplitPairLocal>>,
+}
+
+impl SplitPairLocalMap {
+    /// Creates an empty split-pair map sized for the current MIR body.
+    pub(super) fn new(count: usize) -> Self {
+        Self {
+            values: vec![None; count],
+        }
+    }
+
+    /// Records the cached split result for `local`.
+    pub(super) fn set(&mut self, local: mir::Local, val: SplitPairLocal) {
+        self.values[local.as_usize()] = Some(val);
+    }
+
+    /// Returns the cached split result for `local`, if present.
+    pub(super) fn get(&self, local: mir::Local) -> Option<SplitPairLocal> {
+        self.values[local.as_usize()]
+    }
+
+    /// Clears any cached split result for `local`.
+    pub(super) fn clear(&mut self, local: mir::Local) {
+        self.values[local.as_usize()] = None;
     }
 }
 
@@ -185,6 +249,8 @@ pub(super) struct TranslationCtx<'a, 'tcx> {
     pub(super) locals: LocalMap,
     /// Cached metadata words for fat-pointer locals.
     pub(super) fat_locals: FatLocalMap,
+    /// Cached tuple locals holding two fat-pointer fields.
+    pub(super) split_pair_locals: SplitPairLocalMap,
     /// Tracks which locals currently live in stack slots.
     pub(super) stack_locals: StackLocalSet,
     /// Maps `*WithOverflow` destination locals to the overflow-flag ValueRef

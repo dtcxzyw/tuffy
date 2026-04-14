@@ -51,6 +51,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         self.assign_to_projected(val, place, rvalue);
                     }
                 }
+                if place.projection.is_empty() {
+                    self.split_pair_locals.clear(place.local);
+                }
                 // Check if the rvalue produces a fat pointer (e.g., &str from ConstValue::Slice).
                 // Only propagate fat metadata for direct local assignments (no
                 // projection).  For deref / field stores we are writing THROUGH

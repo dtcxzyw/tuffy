@@ -47,7 +47,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         match operand {
             Operand::Copy(place) | Operand::Move(place) => {
                 if place.projection.is_empty() {
-                    let val = self.locals.get(place.local);
+                    let val = self
+                        .locals
+                        .get(place.local)
+                        .or_else(|| self.materialize_split_pair_local(place.local));
                     // For scalar locals promoted to stack slots (multi-BB
                     // mutation), load the current value from the slot.
                     if self.stack_locals.is_stack(place.local)

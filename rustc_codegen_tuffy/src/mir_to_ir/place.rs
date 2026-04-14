@@ -8,6 +8,102 @@ use super::ctx::TranslationCtx;
 use super::types::*;
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
+    /// Returns cached `(data_ptr, len)` for one field of a split-pair local.
+    pub(super) fn split_pair_field(&mut self, place: &Place<'tcx>) -> Option<(ValueRef, ValueRef)> {
+        if place.projection.len() != 1 {
+            return None;
+        }
+        let pair = self.split_pair_locals.get(place.local)?;
+        let PlaceElem::Field(field_idx, field_ty) = place.projection[0] else {
+            return None;
+        };
+        let field_ty = self.monomorphize(field_ty);
+        if !is_fat_ptr(self.tcx, field_ty) {
+            return None;
+        }
+        pair.field(field_idx.as_usize())
+    }
+
+    /// Materializes a cached split-pair local into a stack slot on demand.
+    pub(super) fn materialize_split_pair_local(
+        &mut self,
+        local: rustc_middle::mir::Local,
+    ) -> Option<ValueRef> {
+        if let Some(existing) = self.locals.get(local)
+            && self.builder.stack_slot_size(existing).is_some()
+        {
+            return Some(existing);
+        }
+        let pair = self.split_pair_locals.get(local)?;
+        let ty = self.monomorphize(self.mir.local_decls[local].ty);
+        let size = type_size(self.tcx, ty).unwrap_or(32).max(1) as u32;
+        let align = type_align(self.tcx, ty).unwrap_or(8) as u32;
+        let slot = self.builder.stack_slot(size, align, Origin::synthetic());
+        self.current_mem = self
+            .builder
+            .store(
+                pair.left_ptr.into(),
+                slot.into(),
+                8,
+                self.current_mem.into(),
+                Origin::synthetic(),
+            )
+            .raw();
+        let off8 = self
+            .builder
+            .iconst(8, 64, IntSignedness::DontCare, Origin::synthetic());
+        let left_len_addr = self
+            .builder
+            .ptradd(slot.into(), off8.into(), 0, Origin::synthetic())
+            .raw();
+        self.current_mem = self
+            .builder
+            .store(
+                pair.left_len.into(),
+                left_len_addr.into(),
+                8,
+                self.current_mem.into(),
+                Origin::synthetic(),
+            )
+            .raw();
+        let off16 = self
+            .builder
+            .iconst(16, 64, IntSignedness::DontCare, Origin::synthetic());
+        let right_ptr_addr = self
+            .builder
+            .ptradd(slot.into(), off16.into(), 0, Origin::synthetic())
+            .raw();
+        self.current_mem = self
+            .builder
+            .store(
+                pair.right_ptr.into(),
+                right_ptr_addr.into(),
+                8,
+                self.current_mem.into(),
+                Origin::synthetic(),
+            )
+            .raw();
+        let off24 = self
+            .builder
+            .iconst(24, 64, IntSignedness::DontCare, Origin::synthetic());
+        let right_len_addr = self
+            .builder
+            .ptradd(slot.into(), off24.into(), 0, Origin::synthetic())
+            .raw();
+        self.current_mem = self
+            .builder
+            .store(
+                pair.right_len.into(),
+                right_len_addr.into(),
+                8,
+                self.current_mem.into(),
+                Origin::synthetic(),
+            )
+            .raw();
+        self.locals.set(local, slot);
+        Some(slot)
+    }
+
     /// Computes the address that a MIR place refers to, along with its final type.
     pub(super) fn translate_place_to_addr(
         &mut self,
@@ -24,13 +120,22 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         place: &Place<'tcx>,
         persist_spill: bool,
     ) -> Option<(ValueRef, ty::Ty<'tcx>)> {
-        let mut addr = self.locals.get(place.local)?;
+        let mut addr = if let Some(value) = self.locals.get(place.local) {
+            value
+        } else if self.split_pair_locals.get(place.local).is_some() {
+            self.materialize_split_pair_local(place.local)?
+        } else {
+            return None;
+        };
         let mut cur_ty = self.monomorphize(self.mir.local_decls[place.local].ty);
+        let pair_materialized = self.split_pair_locals.get(place.local).is_some()
+            && self.builder.stack_slot_size(addr).is_some();
 
         // If the base local is not stack-allocated and the first projection
         // needs an address (Field, Index, etc.), spill the scalar value to a
         // temporary stack slot so we can compute sub-field addresses.
-        if !self.stack_locals.is_stack(place.local)
+        if !pair_materialized
+            && !self.stack_locals.is_stack(place.local)
             && !place.projection.is_empty()
             && !matches!(place.projection[0], PlaceElem::Deref)
         {
@@ -369,7 +474,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     /// If the place has no projections, returns the local's value directly.
     pub(super) fn translate_place_to_value(&mut self, place: &Place<'tcx>) -> Option<ValueRef> {
         if place.projection.is_empty() {
-            return self.locals.get(place.local);
+            return self
+                .locals
+                .get(place.local)
+                .or_else(|| self.materialize_split_pair_local(place.local));
+        }
+        if let Some((data_ptr, _)) = self.split_pair_field(place) {
+            return Some(data_ptr);
         }
         // Non-stack scalar with Field projection for CheckedOp tuples only:
         // AddWithOverflow/SubWithOverflow/MulWithOverflow return (result, bool) but

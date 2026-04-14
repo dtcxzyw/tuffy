@@ -55,6 +55,11 @@ directory modules with a `mod.rs` dispatcher plus focused helper submodules.
 This keeps the MIR-to-IR lowering surface split by operation family and storage
 path rather than concentrating unrelated logic in a few oversized files.
 
+Direct lowering for a few hot slice helpers now also keeps simple caller-side
+fat-pointer tuples in SSA until some later use actually needs an address. This
+avoids eagerly spilling destructured `split_at_mut` results through transient
+stack slots in optimized builds.
+
 ### Optimization Hook
 
 After MIR-to-IR translation succeeds, the backend batches all translated functions for one emitted

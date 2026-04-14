@@ -136,6 +136,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         return Some(fat);
                     }
                 }
+                if let Some((_, meta)) = self.split_pair_field(place) {
+                    return Some(meta);
+                }
                 // Check if the place resolves to a fat pointer type via projections.
                 if !place.projection.is_empty() {
                     let projected_ty = place.ty(&self.mir.local_decls, self.tcx).ty;
@@ -654,6 +657,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     /// When the place has a Subslice projection, adjusts the metadata
     /// by subtracting the `from` and `to` indices.
     pub(super) fn find_fat_metadata_for_place(&mut self, place: &Place<'tcx>) -> Option<ValueRef> {
+        if let Some((_, meta)) = self.split_pair_field(place) {
+            return Some(meta);
+        }
         let base_local = place.local;
         let base_ty = self.monomorphize(self.mir.local_decls[base_local].ty);
         if !is_fat_ptr(self.tcx, base_ty) {
