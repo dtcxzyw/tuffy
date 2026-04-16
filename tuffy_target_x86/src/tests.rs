@@ -326,6 +326,35 @@ fn encode_f16_const_return_function() {
 }
 
 #[test]
+fn encode_count_ops_support_16bit_operands() {
+    for inst in [
+        MInst::Popcnt {
+            size: OpSize::S16,
+            dst: Gpr::Rax,
+            src: Gpr::Rcx,
+        },
+        MInst::Lzcnt {
+            size: OpSize::S16,
+            dst: Gpr::Rax,
+            src: Gpr::Rcx,
+        },
+        MInst::Tzcnt {
+            size: OpSize::S16,
+            dst: Gpr::Rax,
+            src: Gpr::Rcx,
+        },
+    ] {
+        let insts = vec![inst, MInst::Ret];
+        let enc = encode::encode_function(&insts, &vec![None; insts.len()]);
+        assert!(
+            !enc.code.is_empty(),
+            "narrow count op should encode without panicking"
+        );
+        assert!(enc.code.contains(&0xc3), "expected ret in encoded output");
+    }
+}
+
+#[test]
 fn emit_elf_valid() {
     let (func, symbols) = build_add_func();
     let result = isel::isel(&func, &symbols).expect("isel should succeed for add");
@@ -660,6 +689,62 @@ func @count_zeroes_i32(int:s32) -> int:s32 {
         )),
         "count_trailing_zeros on i32 should emit a 32-bit tzcnt: {:?}",
         result.insts
+    );
+}
+
+#[test]
+fn count_ops_on_u8_widen_before_encoding() {
+    let module = parse_module(
+        r#"
+func @count_u8(int:u8) -> int:u8 {
+  bb0(v0: mem):
+    v1: int:u8 = param 0
+    v2: int:u8 = count_ones v1
+    v3: int:u8 = count_leading_zeros.8 v1
+    v4: int:u8 = count_trailing_zeros v1
+    v5: int:u8 = add v2, v3
+    v6: int:u8 = add v5, v4
+    ret v6, v0
+}
+"#,
+    )
+    .expect("module should parse");
+    let func = &module.functions[0];
+    let result = isel::isel(func, &module.symbols).expect("isel should succeed");
+
+    assert!(
+        !result.insts.iter().any(|inst| matches!(
+            inst,
+            MInst::Popcnt {
+                size: OpSize::S8,
+                ..
+            } | MInst::Lzcnt {
+                size: OpSize::S8,
+                ..
+            } | MInst::Tzcnt {
+                size: OpSize::S8,
+                ..
+            }
+        )),
+        "8-bit count ops must be widened before encoding: {:?}",
+        result.insts
+    );
+    assert!(
+        result
+            .insts
+            .iter()
+            .filter(|inst| matches!(inst, MInst::MovzxB { .. }))
+            .count()
+            >= 3,
+        "8-bit count ops should materialize zero-extended inputs: {:?}",
+        result.insts
+    );
+
+    let pinsts = lower_isel_result(&result);
+    let enc = encode::encode_function(&pinsts, &vec![None; pinsts.len()]);
+    assert!(
+        !enc.code.is_empty(),
+        "widened 8-bit count ops should encode successfully"
     );
 }
 
@@ -1121,6 +1206,55 @@ fn isel_call_uses_rdx_for_double_width_annotation() {
         saw_call_with_ret2,
         "exact-double-width-annotated call should reserve both RAX and RDX"
     );
+}
+
+#[test]
+fn isel_cleanup_call_materializes_stack_slot_args_defined_in_later_blocks() {
+    let mut symbols = SymbolTable::new();
+    let caller = symbols.intern("late_stack_slot_call");
+    let callee = symbols.intern("callee");
+    let mut func = Function::new(caller, vec![], vec![], vec![], None, None);
+    let mut builder = Builder::new(&mut func);
+
+    let root = builder.create_region(RegionKind::Function);
+    builder.enter_region(root);
+    let entry = builder.create_block();
+    let call_block = builder.create_block();
+    let slot_block = builder.create_block();
+    let cleanup = builder.create_block();
+
+    builder.switch_to_block(slot_block);
+    let slot_mem = builder.add_block_arg(slot_block, Type::Mem, None);
+    let late_slot = builder.stack_slot(8, 8, Origin::synthetic());
+    let _ = builder.br(call_block, vec![slot_mem.into()], Origin::synthetic());
+
+    builder.switch_to_block(entry);
+    let mem0 = builder.add_block_arg(entry, Type::Mem, None);
+    let callee_addr = builder.symbol_addr(callee, Origin::synthetic());
+    let _ = builder.br(call_block, vec![mem0.into()], Origin::synthetic());
+
+    builder.switch_to_block(call_block);
+    let call_mem = builder.add_block_arg(call_block, Type::Mem, None);
+    let (call_mem, None) = builder.call(
+        callee_addr.into(),
+        vec![late_slot.into()],
+        Type::Unit,
+        call_mem.into(),
+        Some(cleanup.index()),
+        None,
+        Origin::synthetic(),
+    ) else {
+        panic!("expected void cleanup call");
+    };
+    builder.ret(None, None, call_mem.into(), Origin::synthetic());
+
+    builder.switch_to_block(cleanup);
+    let cleanup_mem = builder.add_block_arg(cleanup, Type::Mem, None);
+    let _ = builder.landing_pad(Origin::synthetic());
+    builder.ret(None, None, cleanup_mem.into(), Origin::synthetic());
+    builder.exit_region();
+
+    isel::isel(&func, &symbols).expect("cleanup call should materialize late-defined stack slots");
 }
 
 fn build_annotated_wide_call_func() -> (Function, SymbolTable) {

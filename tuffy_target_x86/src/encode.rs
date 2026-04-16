@@ -530,7 +530,12 @@ impl EncodeContext {
         let len = self
             .encoder
             .encode(&instr, self.pos as u64)
-            .expect("iced-x86 encoding failed");
+            .unwrap_or_else(|err| {
+                panic!(
+                    "iced-x86 encoding failed at byte {} for instruction {instr:?}: {err}",
+                    self.pos
+                )
+            });
         self.pos += len;
     }
 
@@ -1113,8 +1118,10 @@ fn encode_inst(inst: &PInst, ctx: &mut EncodeContext) {
         // --- Bit manipulation ---
         MInst::Popcnt { size, dst, src } => {
             let code = match size {
+                OpSize::S16 => Code::Popcnt_r16_rm16,
                 OpSize::S32 => Code::Popcnt_r32_rm32,
-                _ => Code::Popcnt_r64_rm64,
+                OpSize::S64 => Code::Popcnt_r64_rm64,
+                OpSize::S8 => unreachable!("popcnt is not selected for 8-bit operands"),
             };
             ctx.emit(
                 Instruction::with2(code, gpr_to_iced(*dst, *size), gpr_to_iced(*src, *size))
@@ -1123,8 +1130,10 @@ fn encode_inst(inst: &PInst, ctx: &mut EncodeContext) {
         }
         MInst::Lzcnt { size, dst, src } => {
             let code = match size {
+                OpSize::S16 => Code::Lzcnt_r16_rm16,
                 OpSize::S32 => Code::Lzcnt_r32_rm32,
-                _ => Code::Lzcnt_r64_rm64,
+                OpSize::S64 => Code::Lzcnt_r64_rm64,
+                OpSize::S8 => unreachable!("lzcnt is not selected for 8-bit operands"),
             };
             ctx.emit(
                 Instruction::with2(code, gpr_to_iced(*dst, *size), gpr_to_iced(*src, *size))
@@ -1133,8 +1142,10 @@ fn encode_inst(inst: &PInst, ctx: &mut EncodeContext) {
         }
         MInst::Tzcnt { size, dst, src } => {
             let code = match size {
+                OpSize::S16 => Code::Tzcnt_r16_rm16,
                 OpSize::S32 => Code::Tzcnt_r32_rm32,
-                _ => Code::Tzcnt_r64_rm64,
+                OpSize::S64 => Code::Tzcnt_r64_rm64,
+                OpSize::S8 => unreachable!("tzcnt is not selected for 8-bit operands"),
             };
             ctx.emit(
                 Instruction::with2(code, gpr_to_iced(*dst, *size), gpr_to_iced(*src, *size))

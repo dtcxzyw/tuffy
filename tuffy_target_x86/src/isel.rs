@@ -46,6 +46,8 @@ struct IselCtx {
     tls_sym_addrs: HashMap<u32, String>,
     /// Deferred small integer constants: value index → immediate.
     int_consts: HashMap<u32, i64>,
+    /// Deferred stack-slot declarations: value index → (bytes, align).
+    stack_slot_defs: HashMap<u32, (u32, u32)>,
     /// Deferred scaled ptradd offsets: value index → (index value, scale).
     scaled_ptradd_offsets: HashMap<u32, (ValueRef, u8)>,
     /// Captured RDX vregs from calls with secondary returns.
@@ -54,6 +56,34 @@ struct IselCtx {
 }
 
 impl IselCtx {
+    /// Materialize the address of a stack slot into a fresh vreg.
+    fn materialize_stack_slot_addr(&mut self, val: ValueRef, bytes: u32, align: u32) -> VReg {
+        let (offset, align) = match self.stack.get_with_align(val) {
+            Some(slot) => slot,
+            None => {
+                let _ = self.stack.alloc(val, bytes, align);
+                self.stack
+                    .get_with_align(val)
+                    .expect("stack slot should exist immediately after allocation")
+            }
+        };
+        let rbp = self.alloc.alloc_fixed(Gpr::Rbp.to_preg());
+        let dst = self.alloc.alloc();
+        self.out.push(MInst::Lea {
+            dst,
+            base: rbp,
+            offset,
+        });
+        if align > 16 {
+            self.out.push(MInst::AndRI {
+                size: OpSize::S64,
+                dst,
+                imm: -(align as i64),
+            });
+        }
+        dst
+    }
+
     /// Materialize a value into a virtual register.
     ///
     /// If the value is already in VRegMap, returns its vreg.
@@ -63,25 +93,8 @@ impl IselCtx {
         if let Some(vreg) = self.regs.get(val) {
             return Some(vreg);
         }
-        if let Some((offset, align)) = self.stack.get_with_align(val) {
-            let rbp = self.alloc.alloc_fixed(Gpr::Rbp.to_preg());
-            let dst = self.alloc.alloc();
-            self.out.push(MInst::Lea {
-                dst,
-                base: rbp,
-                offset,
-            });
-            // For alignment > 16 (exceeding ABI stack alignment), the
-            // RBP-relative address is not guaranteed to be aligned because
-            // RBP is only 16-aligned. Emit AND to dynamically align.
-            if align > 16 {
-                self.out.push(MInst::AndRI {
-                    size: OpSize::S64,
-                    dst,
-                    imm: -(align as i64),
-                });
-            }
-            return Some(dst);
+        if let Some((bytes, align)) = self.stack_slot_defs.get(&val.index()).copied() {
+            return Some(self.materialize_stack_slot_addr(val, bytes, align));
         }
         if let Some(symbol) = self.sym_addrs.get(&val.index()).cloned() {
             let dst = self.alloc.alloc();
@@ -1039,6 +1052,14 @@ pub fn isel(func: &Function, symbols: &SymbolTable) -> Result<IselResult<VInst>,
         sym_addrs: HashMap::new(),
         tls_sym_addrs: HashMap::new(),
         int_consts: HashMap::new(),
+        stack_slot_defs: func
+            .inst_pool
+            .iter_insts()
+            .filter_map(|(idx, inst)| match inst.op {
+                Op::StackSlot(bytes, align) => Some((idx, (bytes, align))),
+                _ => None,
+            })
+            .collect(),
         scaled_ptradd_offsets: HashMap::new(),
         rdx_captured: HashMap::new(),
     };
@@ -1438,6 +1459,85 @@ fn select_inst(
             ctx.regs.assign(vref, result);
             return Some(());
         }
+        Op::CountOnes(a)
+            if get_int_annotation(func, a.clone().raw().value)
+                .is_some_and(|ann| ann.bit_width == 8) =>
+        {
+            let src = ctx.ensure_in_reg(a.clone().raw().value)?;
+            let widened = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovzxB { dst: widened, src });
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::Popcnt {
+                size: OpSize::S16,
+                dst,
+                src: widened,
+            });
+            ctx.regs.assign(vref, dst);
+            return Some(());
+        }
+        Op::CountLeadingZeros(a, bits) if *bits == 8 => {
+            let src = ctx.ensure_in_reg(a.clone().raw().value)?;
+            let widened = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovzxB { dst: widened, src });
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::Lzcnt {
+                size: OpSize::S16,
+                dst,
+                src: widened,
+            });
+            let eight = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRI {
+                size: OpSize::S32,
+                dst: eight,
+                imm: 8,
+            });
+            ctx.out.push(MInst::SubRR {
+                size: OpSize::S64,
+                dst,
+                src: eight,
+            });
+            ctx.regs.assign(vref, dst);
+            return Some(());
+        }
+        Op::CountTrailingZeros(a)
+            if get_int_annotation(func, a.clone().raw().value)
+                .is_some_and(|ann| ann.bit_width == 8) =>
+        {
+            let src = ctx.ensure_in_reg(a.clone().raw().value)?;
+            let widened = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovzxB { dst: widened, src });
+            let dst = ctx.alloc.alloc();
+            ctx.out.push(MInst::Tzcnt {
+                size: OpSize::S16,
+                dst,
+                src: widened,
+            });
+            let zero = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRI {
+                size: OpSize::S32,
+                dst: zero,
+                imm: 0,
+            });
+            let eight = ctx.alloc.alloc();
+            ctx.out.push(MInst::MovRI {
+                size: OpSize::S32,
+                dst: eight,
+                imm: 8,
+            });
+            ctx.out.push(MInst::CmpRR {
+                size: OpSize::S64,
+                src1: widened,
+                src2: zero,
+            });
+            ctx.out.push(MInst::CMOVcc {
+                size: OpSize::S64,
+                cc: CondCode::E,
+                dst,
+                src: eight,
+            });
+            ctx.regs.assign(vref, dst);
+            return Some(());
+        }
         _ => {}
     }
     // Try generated rules first (covers Add, Sub, Mul, Or, And, Xor,
@@ -1785,7 +1885,9 @@ fn select_inst(
         }
 
         Op::StackSlot(bytes, align) => {
-            let _offset = ctx.stack.alloc(vref, *bytes, *align);
+            if ctx.stack.get_with_align(vref).is_none() {
+                let _ = ctx.stack.alloc(vref, *bytes, *align);
+            }
         }
 
         Op::Load(ptr, bytes, _mem) => {
