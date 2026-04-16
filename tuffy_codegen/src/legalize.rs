@@ -537,6 +537,8 @@ struct State {
     vmap: VMap,
     /// Bmap.
     bmap: HashMap<u32, BlockRef>,
+    /// Old region index to the precreated legalized region.
+    rmap: HashMap<u32, tuffy_ir::value::RegionRef>,
     /// Old param index → (new_lo_index, Option<new_hi_index>).
     param_map: Vec<(u32, Option<u32>)>,
     /// Set of old ValueRef raw values that are wider than one legal integer part.
@@ -626,6 +628,7 @@ fn build_new_func(old: &Function, legality: &impl LegalityInfo) -> (Function, St
     let state = State {
         vmap: VMap::new(),
         bmap: HashMap::new(),
+        rmap: HashMap::new(),
         param_map,
         wide,
         current_old_mem: None,
@@ -816,8 +819,10 @@ fn run_legalize(
         let mut b = Builder::new(&mut out);
         let old_root = old.root_region;
         let new_root = b.create_region(old.region(old_root).kind);
+        s.rmap.insert(old_root.index(), new_root);
         b.enter_region(new_root);
-        walk_region(old, &mut s, &mut b, old_root, symbols);
+        precreate_region_tree(old, &mut s, &mut b, old_root);
+        walk_region_insts(old, &mut s, &mut b, old_root, symbols);
         b.exit_region();
     }
     remap_debug_bindings(&mut out, &s.vmap);
@@ -836,66 +841,73 @@ fn remap_debug_bindings(func: &mut Function, vmap: &VMap) {
     }
 }
 
-/// Internal helper `walk_region`.
+/// Internal helper `precreate_region_tree`.
 ///
 /// # Panics
 ///
 /// May panic if internal IR invariants are violated.
-fn walk_region(
+fn precreate_region_tree(
     old: &Function,
     s: &mut State,
     b: &mut Builder,
     old_region: tuffy_ir::value::RegionRef,
-    symbols: &mut SymbolTable,
 ) {
-    precreate_blocks(old, s, b, old_region);
-
     for child in &old.region(old_region).children {
         match child {
             CfgNode::Block(old_blk) => {
-                walk_block_insts(old, s, b, *old_blk, symbols);
+                let new_blk = b.create_block();
+                s.bmap.insert(old_blk.index(), new_blk);
+
+                let old_bb = old.block(*old_blk);
+                for i in 0..old_bb.arg_count {
+                    let old_ba_idx = old_bb.arg_start + i;
+                    let old_ba_ref = ValueRef::block_arg(old_ba_idx);
+                    let ba_ty = old.block_args[old_ba_idx as usize].ty.clone();
+                    let ba_ann = old.block_args[old_ba_idx as usize].annotation.clone();
+
+                    if s.wide.contains(&old_ba_ref.raw()) {
+                        let lo = b.add_block_arg(new_blk, I64_TYPE, Some(Annotation::Int(I64)));
+                        let hi = b.add_block_arg(new_blk, I64_TYPE, Some(Annotation::Int(I64)));
+                        s.vmap.set(old_ba_ref, Mapped::Pair(lo, hi));
+                    } else {
+                        let v = b.add_block_arg(new_blk, ba_ty, ba_ann);
+                        s.vmap.set(old_ba_ref, Mapped::One(v));
+                    }
+                }
             }
             CfgNode::Region(old_sub) => {
                 let new_sub = b.create_region(old.region(*old_sub).kind);
+                s.rmap.insert(old_sub.index(), new_sub);
                 b.enter_region(new_sub);
-                walk_region(old, s, b, *old_sub, symbols);
+                precreate_region_tree(old, s, b, *old_sub);
                 b.exit_region();
             }
         }
     }
 }
 
-/// Internal helper `precreate_blocks`.
+/// Internal helper `walk_region_insts`.
 ///
 /// # Panics
 ///
 /// May panic if internal IR invariants are violated.
-fn precreate_blocks(
+fn walk_region_insts(
     old: &Function,
     s: &mut State,
     b: &mut Builder,
     old_region: tuffy_ir::value::RegionRef,
+    symbols: &mut SymbolTable,
 ) {
     for child in &old.region(old_region).children {
-        if let CfgNode::Block(old_blk) = child {
-            let new_blk = b.create_block();
-            s.bmap.insert(old_blk.index(), new_blk);
-
-            let old_bb = old.block(*old_blk);
-            for i in 0..old_bb.arg_count {
-                let old_ba_idx = old_bb.arg_start + i;
-                let old_ba_ref = ValueRef::block_arg(old_ba_idx);
-                let ba_ty = old.block_args[old_ba_idx as usize].ty.clone();
-                let ba_ann = old.block_args[old_ba_idx as usize].annotation.clone();
-
-                if s.wide.contains(&old_ba_ref.raw()) {
-                    let lo = b.add_block_arg(new_blk, I64_TYPE, Some(Annotation::Int(I64)));
-                    let hi = b.add_block_arg(new_blk, I64_TYPE, Some(Annotation::Int(I64)));
-                    s.vmap.set(old_ba_ref, Mapped::Pair(lo, hi));
-                } else {
-                    let v = b.add_block_arg(new_blk, ba_ty, ba_ann);
-                    s.vmap.set(old_ba_ref, Mapped::One(v));
-                }
+        match child {
+            CfgNode::Block(old_blk) => {
+                walk_block_insts(old, s, b, *old_blk, symbols);
+            }
+            CfgNode::Region(old_sub) => {
+                let new_sub = s.rmap[&old_sub.index()];
+                b.enter_region(new_sub);
+                walk_region_insts(old, s, b, *old_sub, symbols);
+                b.exit_region();
             }
         }
     }
@@ -8903,7 +8915,7 @@ mod tests {
     /// May panic if internal IR invariants are violated.
     fn legalize_remaps_cleanup_labels_to_landing_pad_blocks() {
         let (func, mut symbols) = build_cleanup_call_legalize_func();
-        let old_cleanup_label = func
+        let _old_cleanup_label = func
             .inst_pool
             .iter_insts()
             .find_map(|(_, inst)| match &inst.op {
@@ -8920,16 +8932,87 @@ mod tests {
                 _ => None,
             })
             .expect("legalized function should retain the cleanup-labeled call");
-        assert_ne!(
-            new_cleanup_label, old_cleanup_label,
-            "nested regions should force cleanup block renumbering during legalization"
-        );
         let first_inst = legalized.blocks[new_cleanup_label as usize]
             .first_inst
             .expect("cleanup block should contain landing_pad");
         assert!(
             matches!(legalized.inst(first_inst).op, Op::LandingPad),
             "cleanup label must target a landing-pad wrapper block"
+        );
+        assert!(
+            (new_cleanup_label as usize) < legalized.blocks.len(),
+            "cleanup label should name an existing block"
+        );
+    }
+
+    /// Internal helper `build_nested_region_branch_legalize_func`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
+    fn build_nested_region_branch_legalize_func() -> (Function, SymbolTable) {
+        let mut symbols = SymbolTable::new();
+        let name = symbols.intern("nested_region_branch_legalize");
+        let wide_ann = IntAnnotation {
+            bit_width: 128,
+            signedness: IntSignedness::Unsigned,
+        };
+        let mut func = Function::new(name, vec![], vec![], vec![], None, None);
+        let mut b = Builder::new(&mut func);
+        let root = b.create_region(RegionKind::Function);
+        b.enter_region(root);
+        let entry = b.create_block();
+        let plain = b.create_region(RegionKind::Plain);
+        b.enter_region(plain);
+        let nested = b.create_block();
+        b.exit_region();
+
+        b.switch_to_block(entry);
+        let mem0 = b.add_block_arg(entry, Type::Mem, None);
+        let lhs = b.iconst(BigInt::from(1u8) << 96, 128, IntSignedness::Unsigned, o());
+        let rhs = b.iconst(7i64, 128, IntSignedness::Unsigned, o());
+        let _ = b.add(
+            Operand::annotated(lhs.raw(), Annotation::Int(wide_ann)).into(),
+            Operand::annotated(rhs.raw(), Annotation::Int(wide_ann)).into(),
+            wide_ann,
+            o(),
+        );
+        let _ = b.br(nested, vec![mem0.into()], o());
+
+        b.switch_to_block(nested);
+        let mem1 = b.add_block_arg(nested, Type::Mem, None);
+        b.ret(None, None, mem1.into(), o());
+        b.exit_region();
+        (func, symbols)
+    }
+
+    #[test]
+    /// Internal helper `legalize_remaps_branch_targets_into_nested_regions`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
+    fn legalize_remaps_branch_targets_into_nested_regions() {
+        let (func, mut symbols) = build_nested_region_branch_legalize_func();
+        let legalized = legalize(&func, &X86LegalityInfo, &mut symbols).expect("legalized");
+        let entry = legalized.entry_block();
+        let terminator = legalized
+            .block(entry)
+            .last_inst
+            .expect("entry block should contain a terminator");
+        let Op::Br(target, args) = &legalized.inst(terminator).op else {
+            panic!("expected legalize to preserve the nested-region branch");
+        };
+        assert_eq!(
+            args.len(),
+            1,
+            "mem edge should remain threaded across the branch"
+        );
+        let target_block = legalized.block(*target);
+        assert_eq!(
+            legalized.region(target_block.parent_region).kind,
+            RegionKind::Plain,
+            "branch target should remain the entry block of the nested plain region"
         );
     }
 
