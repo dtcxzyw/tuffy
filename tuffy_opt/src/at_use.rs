@@ -256,6 +256,113 @@ func @ptr_compare_unknown(ptr) {
             "pointer-derived comparison test should not trigger broad rewrites:\n{rendered}"
         );
     }
+
+    #[test]
+    /// Internal helper `does_not_assume_facts_from_one_predecessor_cover_unknown_predecessors`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
+    fn does_not_assume_facts_from_one_predecessor_cover_unknown_predecessors() {
+        let mut func = parse_single_function(
+            r#"
+func @join_unknown_and_const(int, bool) {
+  bb0(v0: mem):
+    v1: int = param 0
+    v2: bool = param 1
+    brif v2, bb1(v0, v1), bb2(v0)
+  bb1(v3: mem, v4: int):
+    v5: int = iconst 1
+    v6: bool = icmp.eq v4, v5
+    brif v6, bb3(v3), bb4(v3)
+  bb2(v7: mem):
+    v8: int = iconst 1
+    br bb1(v7, v8)
+  bb3(v9: mem):
+    ret v9
+  bb4(v10: mem):
+    ret v10
+}
+"#,
+        );
+        let _stats = optimize_function(&mut func);
+        let rendered = format!("{func}");
+        assert!(
+            rendered.contains("icmp.eq"),
+            "join with an unknown predecessor must not fold the comparison:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("bb3(") && rendered.contains("bb4(") && rendered.contains("brif"),
+            "join with an unknown predecessor must not fold the branch:\n{rendered}"
+        );
+    }
+
+    #[test]
+    /// Internal helper `does_not_merge_known_bits_only_facts_as_exact_ranges`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
+    fn does_not_merge_known_bits_only_facts_as_exact_ranges() {
+        let mut func = parse_single_function(
+            r#"
+func @join_known_bits_and_const(int:known(?), bool) {
+  bb0(v0: mem):
+    v1: int:known(?) = param 0
+    v2: bool = param 1
+    brif v2, bb1(v0, v1:known(?)), bb2(v0)
+  bb1(v3: mem, v4: int):
+    v5: int = iconst 1
+    v6: bool = icmp.eq v4, v5
+    brif v6, bb3(v3), bb4(v3)
+  bb2(v7: mem):
+    v8: int = iconst 1
+    br bb1(v7, v8)
+  bb3(v9: mem):
+    ret v9
+  bb4(v10: mem):
+    ret v10
+}
+"#,
+        );
+        let _stats = optimize_function(&mut func);
+        let rendered = format!("{func}");
+        assert!(
+            rendered.contains("icmp.eq"),
+            "known-bits-only predecessor facts must not fold the comparison:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("bb3(") && rendered.contains("bb4(") && rendered.contains("brif"),
+            "known-bits-only predecessor facts must not fold the branch:\n{rendered}"
+        );
+    }
+
+    #[test]
+    /// Internal helper `does_not_strengthen_results_reinterpreted_as_pointers`.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
+    fn does_not_strengthen_results_reinterpreted_as_pointers() {
+        let mut func = parse_single_function(
+            r#"
+func @masked_ptr_bits(int:u64) {
+  bb0(v0: mem):
+    v1: int:u64 = param 0
+    v2: int:u8 = iconst 128
+    v3: int:u64 = and v1, v2:u64
+    v4: ptr = inttoptr v3
+    ret v0
+}
+"#,
+        );
+        let _stats = optimize_function(&mut func);
+        let rendered = format!("{func}");
+        assert!(
+            rendered.contains("v3: int:u64 = and"),
+            "pointer-reinterpreted integer results must keep their full-width annotation:\n{rendered}"
+        );
+    }
 }
 
 impl AtUseAnalysis {
@@ -433,11 +540,6 @@ fn successor_env(
 /// May panic if internal IR invariants are violated.
 fn merge_env(existing: &mut FactMap, incoming: &FactMap) -> bool {
     let original = existing.clone();
-    if original.is_empty() {
-        *existing = incoming.clone();
-        return *existing != original;
-    }
-
     let keys = original
         .keys()
         .chain(incoming.keys())
@@ -542,6 +644,9 @@ fn try_strengthen_result(
     if !matches!(inst.ty, Type::Int) {
         return false;
     }
+    if !result_annotation_safe_to_strengthen(func, value) {
+        return false;
+    }
     let Some(facts) = transfer_inst(func, env, value, inst) else {
         return false;
     };
@@ -556,6 +661,56 @@ fn try_strengthen_result(
     *slot = Some(candidate);
     stats.record(transform.name);
     true
+}
+
+/// Internal helper `result_annotation_safe_to_strengthen`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
+fn result_annotation_safe_to_strengthen(func: &Function, value: ValueRef) -> bool {
+    fn flows_to_pointer_sensitive_use(
+        func: &Function,
+        value: ValueRef,
+        visited: &mut std::collections::HashSet<u32>,
+    ) -> bool {
+        for use_node in func.uses_of(value) {
+            let Some(user) = func.inst_pool.get(use_node.user) else {
+                continue;
+            };
+            match user.inst.op {
+                Op::Add(_, _)
+                | Op::Sub(_, _)
+                | Op::And(_, _)
+                | Op::Or(_, _)
+                | Op::Xor(_, _)
+                | Op::Shl(_, _)
+                | Op::Shr(_, _)
+                | Op::Select(_, _, _)
+                | Op::Sext(_, _)
+                | Op::Zext(_, _)
+                | Op::CountOnes(_)
+                | Op::CountLeadingZeros(_, _)
+                | Op::CountTrailingZeros(_) => {
+                    if visited.insert(use_node.user)
+                        && flows_to_pointer_sensitive_use(
+                            func,
+                            ValueRef::inst_result(use_node.user),
+                            visited,
+                        )
+                    {
+                        return true;
+                    }
+                }
+                Op::ICmp(_, _, _) | Op::Ret(_, _, _) => {}
+                Op::IntToPtr(_) | Op::Call(_, _, _, _) | Op::CallRet2(_) => return true,
+                _ => return true,
+            }
+        }
+        false
+    }
+
+    !flows_to_pointer_sensitive_use(func, value, &mut std::collections::HashSet::new())
 }
 
 /// Internal helper `try_strengthen_operands`.
@@ -1838,10 +1993,10 @@ impl AtUseFacts {
             known_zero: &self.known_zero & &other.known_zero,
             known_one: &self.known_one & &other.known_one,
             demanded: &self.demanded & &other.demanded,
-            signed_min: min_bound(&self.signed_min, &other.signed_min),
-            signed_max: max_bound(&self.signed_max, &other.signed_max),
-            unsigned_min: min_bound(&self.unsigned_min, &other.unsigned_min),
-            unsigned_max: max_bound(&self.unsigned_max, &other.unsigned_max),
+            signed_min: join_lower_bound(&self.signed_min, &other.signed_min),
+            signed_max: join_upper_bound(&self.signed_max, &other.signed_max),
+            unsigned_min: join_lower_bound(&self.unsigned_min, &other.unsigned_min),
+            unsigned_max: join_upper_bound(&self.unsigned_max, &other.unsigned_max),
             dontcare_width_upper_bound: max_bound_u32(
                 self.dontcare_width_upper_bound,
                 other.dontcare_width_upper_bound,
@@ -2086,6 +2241,28 @@ fn max_bound_u32(lhs: Option<u32>, rhs: Option<u32>) -> Option<u32> {
         (Some(lhs), Some(rhs)) => Some(lhs.max(rhs)),
         _ => None,
     }
+}
+
+/// Internal helper `join_lower_bound`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
+fn join_lower_bound(lhs: &Option<BigInt>, rhs: &Option<BigInt>) -> Option<BigInt> {
+    lhs.as_ref()
+        .zip(rhs.as_ref())
+        .map(|(lhs, rhs)| lhs.min(rhs).clone())
+}
+
+/// Internal helper `join_upper_bound`.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
+fn join_upper_bound(lhs: &Option<BigInt>, rhs: &Option<BigInt>) -> Option<BigInt> {
+    lhs.as_ref()
+        .zip(rhs.as_ref())
+        .map(|(lhs, rhs)| lhs.max(rhs).clone())
 }
 
 /// Internal helper `bit_mask`.

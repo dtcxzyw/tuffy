@@ -2684,8 +2684,8 @@ func @skip_div_zero() {
     let (output, stats) = optimize(input);
     let expected = r#"func @skip_div_zero() {
   bb0:
-    v0: int:u1 = iconst 1
-    v1: int:u1 = iconst 0
+    v0: int:s32 = iconst 1
+    v1: int:s32 = iconst 0
     v2: int:s32 = div v0, v1
     unreachable
 }"#;
