@@ -185,6 +185,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     ) -> bool {
         if args.len() != 1
             || !destination.projection.is_empty()
+            || self.stack_locals.is_stack(destination.local)
             || !self.local_only_used_as_option_discriminant_and_payload(destination.local)
         {
             return false;
@@ -228,12 +229,20 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         }
 
         let dest_ty = self.monomorphize(self.mir.local_decls[destination.local].ty);
-        let Some(payload_ty) = self.simple_option_scalar_payload_ty(dest_ty) else {
+        let Some((payload_ty, payload_variant, empty_variant)) =
+            self.simple_option_scalar_info(dest_ty)
+        else {
             return false;
         };
         if !payload_ty.is_usize() {
             return false;
         }
+        let Some(some_discr) = self.enum_variant_discriminant(dest_ty, payload_variant) else {
+            return false;
+        };
+        let Some(none_discr) = self.enum_variant_discriminant(dest_ty, empty_variant) else {
+            return false;
+        };
 
         let Some(range_ptr) = self.translate_operand(&args[0].node) else {
             return false;
@@ -313,11 +322,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 Origin::synthetic(),
             )
             .raw();
-        let some = self.builder.bconst(true, Origin::synthetic()).raw();
+        let some =
+            self.builder
+                .iconst(some_discr, 64, IntSignedness::Unsigned, Origin::synthetic());
         self.option_scalar_locals.set(
             destination.local,
             OptionScalarLocal {
-                is_some: some,
+                discriminant: some.raw(),
+                payload_variant,
                 payload: start,
             },
         );
@@ -329,7 +341,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
         self.builder.switch_to_block(none_block);
         self.current_mem = none_mem;
-        let none = self.builder.bconst(false, Origin::synthetic()).raw();
+        let none =
+            self.builder
+                .iconst(none_discr, 64, IntSignedness::Unsigned, Origin::synthetic());
         let zero = self
             .builder
             .iconst(0, 64, IntSignedness::Unsigned, Origin::synthetic())
@@ -337,7 +351,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         self.option_scalar_locals.set(
             destination.local,
             OptionScalarLocal {
-                is_some: none,
+                discriminant: none.raw(),
+                payload_variant,
                 payload: zero,
             },
         );
@@ -1571,6 +1586,83 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         }
                     }
                 }
+            }
+        }
+
+        // ZST closure environments are not uniform at the Rust ABI level:
+        // some monomorphized closure bodies still expect an explicit env
+        // pointer, others do not. Compare the resolved callee's runtime ABI
+        // arity to the arguments we just lowered and only inject the env
+        // pointer when the body actually expects one extra runtime argument.
+        if let Some(instance) = resolved.resolved_instance
+            && self.tcx.is_closure_like(instance.def_id())
+        {
+            let runtime_parts_for_ty = |ty: ty::Ty<'tcx>| -> usize {
+                let sz = type_size(self.tcx, ty).unwrap_or(0);
+                let ir_ty = translate_ty(self.tcx, ty);
+                if matches!(ir_ty, Some(Type::Unit)) || sz == 0 {
+                    return 0;
+                }
+                if ir_ty.is_none() {
+                    let repr = repr_kind(self.tcx, ty);
+                    if matches!(repr, ReprKind::ScalarPair | ReprKind::Scalar)
+                        && sz > part_bytes
+                        && sz <= direct_abi_bytes
+                    {
+                        return 2;
+                    }
+                    return 1;
+                }
+
+                let mut parts = 1;
+                if is_fat_ptr(self.tcx, ty) {
+                    parts += 1;
+                }
+                parts
+            };
+
+            let callee_mir = self.tcx.instance_mir(instance.def);
+            let expected_runtime_args = callee_mir
+                .args_iter()
+                .map(|local| {
+                    self.tcx.instantiate_and_normalize_erasing_regions(
+                        instance.args,
+                        ty::TypingEnv::fully_monomorphized(),
+                        ty::EarlyBinder::bind(callee_mir.local_decls[local].ty),
+                    )
+                })
+                .map(runtime_parts_for_ty)
+                .sum::<usize>();
+            let provided_runtime_args = ir_args.len().saturating_sub(pre_args_count);
+
+            if expected_runtime_args == provided_runtime_args + 1 {
+                let closure_env = args
+                    .first()
+                    .and_then(|arg| {
+                        operand_ty_projected(&arg.node, self.mir, self.tcx)
+                            .map(|ty| self.monomorphize(ty))
+                            .filter(|ty| {
+                                matches!(ty.kind(), ty::Closure(..) | ty::CoroutineClosure(..))
+                            })
+                            .and(Some(&arg.node))
+                    })
+                    .unwrap_or(func);
+                let align = operand_ty_projected(closure_env, self.mir, self.tcx)
+                    .map(|ty| self.monomorphize(ty))
+                    .and_then(|ty| type_align(self.tcx, ty))
+                    .unwrap_or(1)
+                    .max(1) as u32;
+                let env = match closure_env {
+                    Operand::Copy(place) | Operand::Move(place) => self
+                        .translate_place_to_addr(place)
+                        .map(|(addr, _)| self.coerce_to_ptr(addr)),
+                    Operand::Constant(_) => self.translate_operand(closure_env).filter(|value| {
+                        matches!(self.builder.value_type(*value), Some(Type::Ptr(_)))
+                    }),
+                    _ => None,
+                }
+                .unwrap_or_else(|| self.builder.stack_slot(1, align, Origin::synthetic()));
+                ir_args.insert(pre_args_count, env.into());
             }
         }
 

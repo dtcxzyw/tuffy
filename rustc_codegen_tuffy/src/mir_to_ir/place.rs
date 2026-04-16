@@ -8,8 +8,24 @@ use super::ctx::TranslationCtx;
 use super::types::*;
 
 impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
-    /// Returns the payload type for a simple scalar `Option<T>`.
-    pub(super) fn simple_option_scalar_payload_ty(&self, ty: ty::Ty<'tcx>) -> Option<ty::Ty<'tcx>> {
+    /// Returns the discriminant value for one enum variant.
+    pub(super) fn enum_variant_discriminant(
+        &self,
+        ty: ty::Ty<'tcx>,
+        variant_idx: rustc_abi::VariantIdx,
+    ) -> Option<i64> {
+        let ty = self.monomorphize(ty);
+        let ty::Adt(adt_def, _) = ty.kind() else {
+            return None;
+        };
+        Some(adt_def.discriminant_for_variant(self.tcx, variant_idx).val as i64)
+    }
+
+    /// Returns payload/empty variant info for enums cached in `option_scalar_locals`.
+    pub(super) fn simple_option_scalar_info(
+        &self,
+        ty: ty::Ty<'tcx>,
+    ) -> Option<(ty::Ty<'tcx>, rustc_abi::VariantIdx, rustc_abi::VariantIdx)> {
         let ty = self.monomorphize(ty);
         let ty::Adt(adt_def, args) = ty.kind() else {
             return None;
@@ -17,31 +33,67 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         if !adt_def.is_enum() || adt_def.variants().len() != 2 {
             return None;
         }
-        let some_variant = adt_def
+
+        let payload_variants = adt_def
             .variants()
             .iter_enumerated()
-            .find(|(_, variant)| variant.fields.len() == 1)
-            .map(|(idx, _)| idx)?;
-        let payload_field = adt_def.variant(some_variant).fields.iter().next()?;
-        let payload_ty = payload_field.ty(self.tcx, args);
-        let payload_ty = self.monomorphize(payload_ty);
-        matches!(
-            translate_ty(self.tcx, payload_ty),
-            Some(Type::Int | Type::Bool | Type::Ptr(_))
-        )
-        .then_some(payload_ty)
+            .filter_map(|(variant_idx, variant)| {
+                let [field] = variant.fields.raw.as_slice() else {
+                    return None;
+                };
+                let field_ty = self.monomorphize(field.ty(self.tcx, args));
+                let field_size = type_size(self.tcx, field_ty).unwrap_or(0);
+                (field_size > 0
+                    && matches!(
+                        translate_ty(self.tcx, field_ty),
+                        Some(Type::Int | Type::Bool | Type::Ptr(_))
+                    ))
+                .then_some((variant_idx, field_ty))
+            })
+            .collect::<Vec<_>>();
+        let [(payload_variant, payload_ty)] = payload_variants.as_slice() else {
+            return None;
+        };
+
+        let empty_variant = adt_def
+            .variants()
+            .iter_enumerated()
+            .find(|(variant_idx, variant)| {
+                if variant_idx == payload_variant {
+                    return false;
+                }
+                variant.fields.iter().all(|field| {
+                    let field_ty = self.monomorphize(field.ty(self.tcx, args));
+                    type_size(self.tcx, field_ty).unwrap_or(0) == 0
+                })
+            })
+            .map(|(variant_idx, _)| variant_idx)?;
+
+        Some((*payload_ty, *payload_variant, empty_variant))
+    }
+
+    /// Returns the payload type for a simple scalar `Option<T>`.
+    pub(super) fn simple_option_scalar_payload_ty(&self, ty: ty::Ty<'tcx>) -> Option<ty::Ty<'tcx>> {
+        self.simple_option_scalar_info(ty)
+            .map(|(payload_ty, _, _)| payload_ty)
     }
 
     /// Returns the cached payload for a simple scalar `Option<T>` projection.
     fn simple_option_scalar_payload(&mut self, place: &Place<'tcx>) -> Option<ValueRef> {
         if place.projection.len() != 2
-            || !matches!(place.projection[0], PlaceElem::Downcast(_, _))
+            || self.stack_locals.is_stack(place.local)
             || !matches!(place.projection[1], PlaceElem::Field(idx, _) if idx.as_usize() == 0)
         {
             return None;
         }
-        self.simple_option_scalar_payload_ty(self.mir.local_decls[place.local].ty)?;
-        Some(self.option_scalar_locals.get(place.local)?.payload)
+        let PlaceElem::Downcast(_, payload_variant) = place.projection[0] else {
+            return None;
+        };
+        let (_, expected_variant, _) =
+            self.simple_option_scalar_info(self.mir.local_decls[place.local].ty)?;
+        let cached = self.option_scalar_locals.get(place.local)?;
+        (payload_variant == expected_variant && cached.payload_variant == expected_variant)
+            .then_some(cached.payload)
     }
 
     /// Returns cached `(data_ptr, len)` for one field of a split-pair local.

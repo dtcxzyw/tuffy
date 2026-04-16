@@ -160,8 +160,10 @@ impl OverflowLocalMap {
 /// Cached `Option<T>` state for simple scalar payload locals.
 #[derive(Clone, Copy)]
 pub(super) struct OptionScalarLocal {
-    /// Whether the option is currently `Some`.
-    pub(super) is_some: ValueRef,
+    /// Cached discriminant for the enum value.
+    pub(super) discriminant: ValueRef,
+    /// Variant whose field-0 projection maps to `payload`.
+    pub(super) payload_variant: rustc_abi::VariantIdx,
     /// Payload value when the option is `Some`.
     pub(super) payload: ValueRef,
 }

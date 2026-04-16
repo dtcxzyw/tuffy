@@ -17,23 +17,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     pub(super) fn translate_discriminant(&mut self, place: &Place<'tcx>) -> Option<ValueRef> {
         let place_ty = self.monomorphize(place.ty(&self.mir.local_decls, self.tcx).ty);
         if place.projection.is_empty()
+            && !self.stack_locals.is_stack(place.local)
             && self.simple_option_scalar_payload_ty(place_ty).is_some()
             && let Some(option) = self.option_scalar_locals.get(place.local)
         {
-            let one = self
-                .builder
-                .iconst(1, 64, IntSignedness::DontCare, Origin::synthetic());
-            let zero = self
-                .builder
-                .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic());
-            return Some(self.builder.select(
-                option.is_some.into(),
-                one.into(),
-                zero.into(),
-                Type::Int,
-                default_int_annotation(),
-                Origin::synthetic(),
-            ));
+            return Some(option.discriminant);
         }
         let typing_env = ty::TypingEnv::fully_monomorphized();
         let layout = self

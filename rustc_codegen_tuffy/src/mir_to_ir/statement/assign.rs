@@ -23,7 +23,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 // pointer, metadata lives in fat_locals / extract_fat_component.
                 // Store both halves directly.
                 let data_ptr = if self.builder.is_local_memory_address(val)
-                    && self.builder.stack_slot_size(val).is_some()
+                    && self
+                        .builder
+                        .stack_slot_size(val)
+                        .is_some_and(|size| u64::from(size) >= u64::from(bytes))
                 {
                     self.builder.load(
                         val.into(),
@@ -638,7 +641,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         // pointer), load the data pointer from
                         // it instead of storing the raw slot
                         // address.
-                        let data_ptr = if self.builder.is_local_memory_address(val) {
+                        let data_ptr = if self.builder.is_local_memory_address(val)
+                            && self
+                                .builder
+                                .stack_slot_size(val)
+                                .is_some_and(|size| u64::from(size) >= u64::from(bytes))
+                        {
                             self.builder.load(
                                 val.into(),
                                 8,
@@ -778,12 +786,67 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                                 }
                                 _ => None,
                             };
+                            if checked_rvalue.is_none()
+                                && is_fat_ptr(self.tcx, ty)
+                                && let Some(fat_val) = self.extract_fat_component(rvalue)
+                            {
+                                let data_ptr = if self.builder.is_local_memory_address(val)
+                                    && self
+                                        .builder
+                                        .stack_slot_size(val)
+                                        .is_some_and(|size| u64::from(size) >= u64::from(bytes))
+                                {
+                                    self.builder.load(
+                                        val.into(),
+                                        8,
+                                        Type::Ptr(0),
+                                        self.current_mem.into(),
+                                        None,
+                                        Origin::synthetic(),
+                                    )
+                                } else {
+                                    val
+                                };
+                                self.current_mem = self
+                                    .builder
+                                    .store(
+                                        data_ptr.into(),
+                                        slot.into(),
+                                        8,
+                                        self.current_mem.into(),
+                                        Origin::synthetic(),
+                                    )
+                                    .raw();
+                                let off8 = self.builder.iconst(
+                                    8,
+                                    64,
+                                    IntSignedness::DontCare,
+                                    Origin::synthetic(),
+                                );
+                                let meta_addr = self.builder.ptradd(
+                                    slot.into(),
+                                    off8.into(),
+                                    0,
+                                    Origin::synthetic(),
+                                );
+                                self.current_mem = self
+                                    .builder
+                                    .store(
+                                        fat_val.into(),
+                                        meta_addr.into(),
+                                        8,
+                                        self.current_mem.into(),
+                                        Origin::synthetic(),
+                                    )
+                                    .raw();
                             // When val is a memory address (stack slot from
                             // Ref/RawPtr handler) and not a CheckedBinaryOp,
                             // do a word-by-word copy instead of a direct
                             // store (which would store the address, not the
                             // contents).
-                            if checked_rvalue.is_none() && self.builder.is_memory_address(val) {
+                            } else if checked_rvalue.is_none()
+                                && self.builder.is_memory_address(val)
+                            {
                                 let num_words = (bytes as u64).div_ceil(8);
                                 for i in 0..num_words {
                                     let byte_off = i * 8;
@@ -1140,7 +1203,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     && let Some(fat_val) = self.extract_fat_component(rvalue)
                 {
                     let data_ptr = if self.builder.is_local_memory_address(val)
-                        && self.builder.stack_slot_size(val).is_some()
+                        && self
+                            .builder
+                            .stack_slot_size(val)
+                            .is_some_and(|size| u64::from(size) >= u64::from(bytes))
                     {
                         self.builder.load(
                             val.into(),

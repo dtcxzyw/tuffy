@@ -320,11 +320,46 @@ pub(super) fn int_bitwidth(ty: ty::Ty<'_>) -> Option<u32> {
 
 /// Check if a type is a fat pointer (e.g., &str, &[T], &dyn Trait) that uses two registers at ABI level.
 pub(super) fn is_fat_ptr<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> bool {
-    match ty.kind() {
-        ty::Ref(_, inner, _) | ty::RawPtr(inner, _) => {
-            let tail = tcx.struct_tail_for_codegen(*inner, ty::TypingEnv::fully_monomorphized());
-            matches!(tail.kind(), ty::Str | ty::Slice(..) | ty::Dynamic(..))
+    fn is_direct_fat_ptr<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> bool {
+        match ty.kind() {
+            ty::Ref(_, inner, _) | ty::RawPtr(inner, _) => {
+                let tail =
+                    tcx.struct_tail_for_codegen(*inner, ty::TypingEnv::fully_monomorphized());
+                matches!(tail.kind(), ty::Str | ty::Slice(..) | ty::Dynamic(..))
+            }
+            _ => false,
         }
-        _ => false,
     }
+
+    if is_direct_fat_ptr(tcx, ty) {
+        return true;
+    }
+
+    let Some(layout) = mono_layout_of(tcx, ty) else {
+        return false;
+    };
+
+    let wrapper_field = match ty.kind() {
+        ty::Adt(def, args) if !def.is_enum() => def
+            .non_enum_variant()
+            .fields
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, field)| {
+                let field_ty = field.ty(tcx, args);
+                let field_size = type_size(tcx, field_ty).unwrap_or(0);
+                (field_size > 0).then_some((idx, field_ty, field_size))
+            })
+            .collect::<Vec<_>>(),
+        _ => return false,
+    };
+
+    let [(field_idx, field_ty, field_size)] = wrapper_field.as_slice() else {
+        return false;
+    };
+    if layout.fields.offset(*field_idx).bytes() != 0 || *field_size != layout.size.bytes() {
+        return false;
+    }
+
+    is_fat_ptr(tcx, *field_ty)
 }

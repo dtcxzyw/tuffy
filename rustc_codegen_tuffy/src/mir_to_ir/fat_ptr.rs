@@ -573,14 +573,12 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     None
                 }
             }
-            // Multi-field Aggregate: second field becomes the fat component,
-            // but ONLY when the aggregate type is a fat pointer (e.g.
-            // NonNull<[T]>, &str wrapper struct).  Plain tuples and
-            // non-fat-pointer structs must not have their second field
-            // treated as metadata — doing so causes a spurious store at
-            // slot+8 that overflows the stack slot.
+            // Fat-pointer aggregates propagate metadata either from an
+            // explicit metadata operand (raw pointer scalar-pair construction)
+            // or from the one non-ZST field that carries the wrapped fat
+            // pointer (e.g. NonNull/Unique/Box wrappers).
             Rvalue::Aggregate(box kind, operands)
-                if operands.len() >= 2 && !matches!(kind, mir::AggregateKind::Array(_)) =>
+                if !operands.is_empty() && !matches!(kind, mir::AggregateKind::Array(_)) =>
             {
                 // Determine the aggregate's result type to check if it's
                 // actually a fat pointer.
@@ -599,8 +597,59 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     _ => None,
                 };
                 if agg_ty.is_some_and(|t| is_fat_ptr(self.tcx, t)) {
-                    let second_op = operands.iter().nth(1).unwrap();
-                    self.translate_operand(second_op)
+                    match kind {
+                        mir::AggregateKind::RawPtr(..) => operands
+                            .iter()
+                            .nth(1)
+                            .and_then(|op| self.translate_operand(op)),
+                        mir::AggregateKind::Adt(def_id, _, args, _, _) => {
+                            let adt_def = self.tcx.adt_def(*def_id);
+                            let fat_field = adt_def
+                                .non_enum_variant()
+                                .fields
+                                .iter()
+                                .enumerate()
+                                .filter_map(|(idx, field)| {
+                                    let field_ty = self.monomorphize(field.ty(self.tcx, args));
+                                    let field_size = type_size(self.tcx, field_ty).unwrap_or(0);
+                                    (field_size > 0).then_some((idx, field_ty, field_size))
+                                })
+                                .collect::<Vec<_>>();
+                            let [(field_idx, _, _)] = fat_field.as_slice() else {
+                                return None;
+                            };
+                            operands
+                                .iter()
+                                .nth(*field_idx)
+                                .and_then(|op| self.find_fat_metadata_for_operand(op))
+                        }
+                        mir::AggregateKind::Tuple => {
+                            let tuple_ty = agg_ty.unwrap();
+                            let ty::Tuple(fields) = tuple_ty.kind() else {
+                                return None;
+                            };
+                            let fat_field = fields
+                                .iter()
+                                .enumerate()
+                                .filter_map(|(idx, field_ty)| {
+                                    let field_ty = self.monomorphize(field_ty);
+                                    let field_size = type_size(self.tcx, field_ty).unwrap_or(0);
+                                    (field_size > 0).then_some((idx, field_ty, field_size))
+                                })
+                                .collect::<Vec<_>>();
+                            let [(field_idx, _, _)] = fat_field.as_slice() else {
+                                return None;
+                            };
+                            operands
+                                .iter()
+                                .nth(*field_idx)
+                                .and_then(|op| self.find_fat_metadata_for_operand(op))
+                        }
+                        _ => {
+                            let first_op = operands.iter().next().unwrap();
+                            self.find_fat_metadata_for_operand(first_op)
+                        }
+                    }
                 } else {
                     None
                 }

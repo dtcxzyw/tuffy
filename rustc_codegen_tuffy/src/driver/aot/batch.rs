@@ -27,6 +27,7 @@ impl<'tcx> AotCodegen<'tcx> {
         let optimize_elapsed = optimize_start.elapsed();
         if self.config.run_tuffy_opt {
             self.append_optimized_module_dump(batch);
+            self.write_module_dump();
         }
         let verify_start = Instant::now();
         if let Err(err) = verify_ir_batch(batch, "IR verification failed") {

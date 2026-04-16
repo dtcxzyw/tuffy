@@ -24,25 +24,35 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     ) -> bool {
         let dest_ty = self.monomorphize(self.mir.local_decls[place.local].ty);
         if !place.projection.is_empty()
+            || self.stack_locals.is_stack(place.local)
             || !self.local_only_used_as_option_discriminant_and_payload(place.local)
         {
             return false;
         }
-        let Some(payload_ty) = self.simple_option_scalar_payload_ty(dest_ty) else {
+        let Some((payload_ty, payload_variant, _)) = self.simple_option_scalar_info(dest_ty) else {
             return false;
         };
 
-        let (is_some, payload) = match rvalue {
+        let (discriminant, payload) = match rvalue {
             Rvalue::Aggregate(
                 box mir::AggregateKind::Adt(def_id, variant_idx, args, _, _),
                 operands,
             ) => {
                 let adt_def = self.tcx.adt_def(*def_id);
-                if !adt_def.is_enum() || operands.len() > 1 {
+                if !adt_def.is_enum() {
                     return false;
                 }
                 let variant = adt_def.variant(*variant_idx);
-                if variant.fields.len() == 1 && operands.len() == 1 {
+                let Some(discr) = self.enum_variant_discriminant(dest_ty, *variant_idx) else {
+                    return false;
+                };
+                let discriminant =
+                    self.builder
+                        .iconst(discr, 64, IntSignedness::Unsigned, Origin::synthetic());
+                if *variant_idx == payload_variant {
+                    if variant.fields.len() != 1 || operands.len() != 1 {
+                        return false;
+                    }
                     let Some(field) = variant.fields.iter().next() else {
                         return false;
                     };
@@ -56,16 +66,18 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     let Some(payload) = self.translate_operand(operand) else {
                         return false;
                     };
-                    (
-                        self.builder.bconst(true, Origin::synthetic()).raw(),
-                        payload,
-                    )
-                } else if variant.fields.is_empty() && operands.is_empty() {
+                    (discriminant.raw(), payload)
+                } else if operands.is_empty()
+                    && variant.fields.iter().all(|field| {
+                        let field_ty = self.monomorphize(field.ty(self.tcx, args));
+                        type_size(self.tcx, field_ty).unwrap_or(0) == 0
+                    })
+                {
                     let zero = self
                         .builder
                         .iconst(0, 64, IntSignedness::Unsigned, Origin::synthetic())
                         .raw();
-                    (self.builder.bconst(false, Origin::synthetic()).raw(), zero)
+                    (discriminant.raw(), zero)
                 } else {
                     return false;
                 }
@@ -74,8 +86,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         };
 
         self.option_scalar_locals.clear(place.local);
-        self.option_scalar_locals
-            .set(place.local, OptionScalarLocal { is_some, payload });
+        self.option_scalar_locals.set(
+            place.local,
+            OptionScalarLocal {
+                discriminant,
+                payload_variant,
+                payload,
+            },
+        );
         true
     }
 

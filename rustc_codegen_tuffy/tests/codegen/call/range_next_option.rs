@@ -77,18 +77,30 @@
 // CHECK:     v19: int:i64 = iconst 1
 // CHECK:     v20: int:u64 = add v18:u64, v19:u64
 // CHECK:     v21: mem = store.8 v20, v1, v17
-// CHECK:     v22: bool = bconst true
-// CHECK:     v23: mem = store.8 v18, v2, v21
-// CHECK:     br bb3(v23)
+// CHECK:     v22: int:i64 = iconst 0
+// CHECK:     v23: mem = store.8 v22, v3, v21
+// CHECK:     v24: int:i64 = iconst 8
+// CHECK:     v25: ptr = ptradd v3, v24
+// CHECK:     v26: mem = store.8 v22, v25, v23
+// CHECK:     v27: int:i64 = iconst 8
+// CHECK:     v28: ptr = ptradd v3, v27
+// CHECK:     v29: mem = store.8 v18, v28, v26
+// CHECK:     v30: int:i64 = iconst 1
+// CHECK:     v31: mem = store.8 v30, v3, v29
+// CHECK:     v32: int:i64 = iconst 8
+// CHECK:     v33: ptr = ptradd v3, v32
+// CHECK:     v34: int:i64 = load.8 v33, v31
+// CHECK:     v35: mem = store.8 v34, v2, v31
+// CHECK:     br bb3(v35)
 // CHECK:
-// CHECK:   bb2(v25: mem):
-// CHECK:     v26: int:i64 = iconst 0
-// CHECK:     v27: mem = store.8 v26, v2, v25
-// CHECK:     br bb3(v27)
+// CHECK:   bb2(v37: mem):
+// CHECK:     v38: int:i64 = iconst 0
+// CHECK:     v39: mem = store.8 v38, v2, v37
+// CHECK:     br bb3(v39)
 // CHECK:
-// CHECK:   bb3(v29: mem):
-// CHECK:     v30: int:u64 = load.8 v2, v29
-// CHECK:     ret v30, v29
+// CHECK:   bb3(v41: mem):
+// CHECK:     v42: int:u64 = load.8 v2, v41
+// CHECK:     ret v42, v41
 // CHECK: }
 // CHECK:
 

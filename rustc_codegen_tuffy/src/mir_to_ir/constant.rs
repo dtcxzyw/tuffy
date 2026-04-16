@@ -424,6 +424,18 @@ pub(super) fn translate_const<'tcx>(
                 alloc_cache.insert(alloc_id, sym);
                 let base = builder.symbol_addr(sym_id, Origin::synthetic());
 
+                if is_fat_ptr(tcx, ty) {
+                    let loaded = builder.load(
+                        base.raw().into(),
+                        8,
+                        Type::Ptr(0),
+                        (*current_mem).into(),
+                        None,
+                        Origin::synthetic(),
+                    );
+                    return Some(loaded);
+                }
+
                 let typing_env = ty::TypingEnv::fully_monomorphized();
                 if let Ok(layout) = tcx.layout_of(typing_env.as_query_input(ty))
                     && let BackendRepr::Scalar(scalar) = layout.backend_repr
