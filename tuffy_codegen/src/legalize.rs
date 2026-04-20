@@ -87,6 +87,9 @@ impl VMap {
     ///
     /// May panic if internal IR invariants are violated.
     fn set_parts(&mut self, old: ValueRef, parts: Vec<ValueRef>) {
+        // Keep the common one-part and exact-double-width cases canonical so
+        // later helpers can cheaply distinguish direct legal values from
+        // general multi-part rewrites.
         match parts.as_slice() {
             [v] => self.set(old, Mapped::One(*v)),
             [lo, hi] => self.set(old, Mapped::Pair(*lo, *hi)),
@@ -520,6 +523,8 @@ pub fn legalize(
     legality: &impl LegalityInfo,
     symbols: &mut SymbolTable,
 ) -> Option<Function> {
+    // The pass rebuilds the function with a legalized signature and CFG
+    // shape, so skip the rewrite entirely when every value is already legal.
     if !has_wide_values(func, legality) {
         return None;
     }
@@ -580,6 +585,8 @@ fn build_new_func(old: &Function, legality: &impl LegalityInfo) -> (Function, St
             || is_wide_int_with_annotation_limit(ty, &ann, legality.max_int_width())
             || matches!(ty, Type::Float(FloatType::F128));
         if param_is_wide {
+            // Split signature-level wide values up front so later rewrites only
+            // remap uses instead of mutating parameter lists in place.
             let lo_idx = params.len() as u32;
             params.push(Type::Int);
             param_anns.push(Some(Annotation::Int(IntAnnotation {
@@ -614,6 +621,9 @@ fn build_new_func(old: &Function, legality: &impl LegalityInfo) -> (Function, St
             )
             || matches!(ty, Type::Float(FloatType::F128))
         {
+            // Wide semantic returns keep their original type, but the single
+            // wide annotation disappears because the legalized form exposes
+            // the upper lane through `ret2`/`call_ret2`.
             None
         } else {
             old.ret_annotation.clone()
@@ -725,7 +735,8 @@ fn collect_wide_values(old: &Function, legality: &impl LegalityInfo) -> HashSet<
         }
     }
 
-    // Scan branches to find wide block args.
+    // Block arg arity is fixed before rewriting starts, so any edge carrying a
+    // wide value must mark the destination block arg as wide during pre-scan.
     for (_, inst) in old.inst_pool.iter_insts() {
         let check_args =
             |target: BlockRef, args: &[Operand], wide: &HashSet<u32>, out: &mut HashSet<u32>| {
@@ -762,6 +773,8 @@ fn collect_wide_values(old: &Function, legality: &impl LegalityInfo) -> HashSet<
 ///
 /// May panic if internal IR invariants are violated.
 fn is_wide(s: &State, v: ValueRef) -> bool {
+    // After rewriting begins, some values are known to be wide only because
+    // they already map to split legal parts.
     s.wide.contains(&v.raw()) || matches!(s.vmap.get(v), Mapped::Pair(_, _) | Mapped::Parts(_))
 }
 
@@ -866,6 +879,9 @@ fn precreate_region_tree(
                     let ba_ann = old.block_args[old_ba_idx as usize].annotation.clone();
 
                     if s.wide.contains(&old_ba_ref.raw()) {
+                        // Branch remapping only expands operands, so the new
+                        // block args have to exist in legalized part form
+                        // before we start walking instructions.
                         let lo = b.add_block_arg(new_blk, I64_TYPE, Some(Annotation::Int(I64)));
                         let hi = b.add_block_arg(new_blk, I64_TYPE, Some(Annotation::Int(I64)));
                         s.vmap.set(old_ba_ref, Mapped::Pair(lo, hi));
@@ -928,7 +944,9 @@ fn walk_block_insts(
     let new_blk = s.bmap[&old_blk.index()];
     b.switch_to_block(new_blk);
 
-    // Initialize current_old_mem from this block's Mem-typed argument, if any.
+    // Seed the old mem chain for this block before rewriting instructions.
+    // Pure old ops like wide div/rem may lower to libcalls that need to splice
+    // themselves into this chain even though the original op had no mem input.
     let old_bb = old.block(old_blk);
     for i in 0..old_bb.arg_count {
         let old_ba_idx = old_bb.arg_start + i;
@@ -2778,6 +2796,10 @@ fn operand_parts64(
     op: &Operand,
     bits: u32,
 ) -> Vec<ValueRef> {
+    // Exact double-width ABI/libcall paths need a fixed number of legal
+    // parts even for values that were never materialized as `Mapped::Pair`.
+    // Reuse existing parts when available, otherwise synthesize the missing
+    // high lanes from the operand's signedness or original constant.
     if matches!(s.vmap.get(op.value), Mapped::Parts(_) | Mapped::Pair(_, _)) {
         let mut parts = s.vmap.parts(op.value);
         parts.resize(
@@ -2815,6 +2837,10 @@ fn split_parts64_to_limbs32(
     parts: &[ValueRef],
     limb_count: usize,
 ) -> Vec<ValueRef> {
+    // Exact double-width paths stay in `part_bits` lanes because that matches
+    // direct ABI/legal value handling. Multi-limb algorithms convert those
+    // lanes into smaller unsigned limbs so carry/borrow logic can run on a
+    // fixed per-limb width.
     let mut limbs = Vec::with_capacity(limb_count);
     let shift = b.iconst(
         s.limb_bits as i64,
@@ -7072,6 +7098,9 @@ fn leg_div_rem_wide(
 ) {
     let bits = result_bits(s, old, old_vref);
     let limb_count = num_limbs32(bits, s.limb_bits);
+    // Truly wider-than-double-width division runs on normalized unsigned
+    // limbs. Signed division is handled by taking absolute values up front
+    // and restoring the final quotient/remainder signs afterward.
     let a_limbs_raw = operand_limbs32(old, s, b, a, bits);
     let a_limbs = normalize_limbs32(s, b, &a_limbs_raw, bits);
     let b_limbs_raw = operand_limbs32(old, s, b, op_b, bits);
@@ -7098,6 +7127,8 @@ fn leg_div_rem_wide(
     };
 
     let poison = poison_limbs32(s, b, limb_count);
+    // Match the rest of wide legalization: divide-by-zero yields poison
+    // instead of selecting an arbitrary quotient or remainder.
     let result_limbs = select_limbs32(s, b, div_zero, &poison, &result_limbs);
     s.vmap
         .set_parts(old_vref, limbs32_to_parts64(s, b, &result_limbs));
@@ -7130,6 +7161,9 @@ fn leg_div_rem_double_width(
     symbols: &mut SymbolTable,
 ) {
     debug_assert_eq!(result_bits(s, old, old_vref), s.part_bits * 2);
+    // Exact double-width div/rem stays in legal parts and defers to
+    // compiler-rt so the result can keep flowing through the target's direct
+    // integer-lane ABI path instead of switching to limb algorithms.
     let signed = is_signed_annotation(a.annotation.as_ref());
     let name = div_rem_double_width_libcall_name(s.part_bits * 2, is_div, signed);
     let sym_id = symbols.intern(&name);
@@ -7148,7 +7182,8 @@ fn leg_div_rem_double_width(
         Operand::new(b_hi),
     ];
 
-    // Inject the call into the mem chain using the most recent mem token.
+    // The old Div/Rem is pure SSA, but the replacement libcall is not. Splice
+    // it into whichever old mem token is currently in scope for this block.
     let old_mem = s
         .current_old_mem
         .expect("wide div/rem requires a mem token in scope");
@@ -7663,6 +7698,9 @@ fn leg_ret(
                 .raw();
             (lo, hi)
         };
+        // The legalized IR still emits one `ret`, but exact double-width ABI
+        // returns consume its primary operand as the low lane and its optional
+        // second operand as the high lane.
         let ret_inst = b.ret(
             Some(Operand::new(lo)),
             Some(Operand::new(hi)),
@@ -7725,6 +7763,10 @@ fn leg_call(
         inst.secondary_ty.as_ref(),
         Some(Type::Float(FloatType::F128))
     );
+    // Exact double-width calls keep the same semantic "one value" surface in
+    // the old IR, but the legalized backend contract returns the low lane as
+    // normal call data and recovers the upper lane immediately with
+    // `call_ret2`, mirroring `leg_ret`.
     let ret_ty = if double_width_ret {
         I64_TYPE
     } else {
