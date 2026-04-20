@@ -23,51 +23,51 @@ const INLINE_SINGLE_CALLER_SIMPLE_CFG_THRESHOLD: u32 = 128;
 const INLINE_MEMORY_WRAPPER_THRESHOLD: u32 = 96;
 /// Internal data structure `InlineResult`.
 pub(crate) struct InlineResult {
-    /// Stats.
+    /// Aggregate inlining statistics for this module pass.
     pub(crate) stats: PeepholeStats,
-    /// Changed functions.
+    /// Flags marking which caller bodies were rebuilt.
     pub(crate) changed_functions: Vec<bool>,
 }
 
 #[derive(Clone)]
 /// Internal data structure `Ret2Spec`.
 struct Ret2Spec {
-    /// Ty.
+    /// Secondary-result type expected at the call site.
     ty: Type,
     /// Annotation.
     annotation: Option<Annotation>,
-    /// Users.
+    /// Call-site users that consume the secondary result.
     users: Vec<u32>,
 }
 
 #[derive(Clone)]
 /// Internal data structure `InlineSite`.
 struct InlineSite {
-    /// Caller idx.
+    /// Index of the caller function in the module.
     caller_idx: usize,
-    /// Callee idx.
+    /// Index of the callee function in the module.
     callee_idx: usize,
-    /// Call instruction index.
+    /// Call instruction to replace.
     call_idx: u32,
-    /// Call block.
+    /// Block containing the call.
     call_block: BlockRef,
-    /// Ret2.
+    /// Secondary-result wiring expected by the caller, when present.
     ret2: Option<Ret2Spec>,
 }
 
 /// Internal data structure `ModuleAnalysis`.
 struct ModuleAnalysis {
-    /// Func by symbol.
+    /// Same-module functions indexed by symbol name.
     func_by_symbol: HashMap<SymbolId, usize>,
-    /// Scc ids.
+    /// SCC identifier for each function in the local call graph.
     scc_ids: Vec<usize>,
-    /// Scc sizes.
+    /// Number of functions in each SCC.
     scc_sizes: Vec<usize>,
-    /// Inline scores.
+    /// Heuristic inline scores for candidate callees.
     inline_scores: Vec<Option<u32>>,
-    /// Call site counts.
+    /// Number of direct same-module call sites per callee.
     call_site_counts: Vec<usize>,
-    /// Local callee counts.
+    /// Number of direct same-module callees each function reaches.
     local_callee_counts: Vec<usize>,
 }
 
@@ -535,21 +535,21 @@ fn direct_call_symbol(func: &Function, value: ValueRef) -> Option<SymbolId> {
 fn compute_sccs(adjacency: &[Vec<usize>]) -> (Vec<usize>, Vec<usize>) {
     /// Internal data structure `Tarjan`.
     struct Tarjan<'a> {
-        /// Adjacency.
+        /// Call-graph adjacency list.
         adjacency: &'a [Vec<usize>],
-        /// Index.
+        /// Next discovery index.
         index: usize,
-        /// Indices.
+        /// Discovery index per node.
         indices: Vec<Option<usize>>,
-        /// Lowlinks.
+        /// Lowest reachable discovery index per node.
         lowlinks: Vec<usize>,
-        /// Stack.
+        /// Active DFS stack.
         stack: Vec<usize>,
-        /// On stack.
+        /// Whether a node is currently on the DFS stack.
         on_stack: Vec<bool>,
-        /// Scc ids.
+        /// Assigned SCC identifier per node.
         scc_ids: Vec<usize>,
-        /// Scc sizes.
+        /// Size of each discovered SCC.
         scc_sizes: Vec<usize>,
     }
 

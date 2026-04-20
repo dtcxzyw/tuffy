@@ -1,3 +1,5 @@
+//! Legacy range-analysis-based compare and branch folding for Tuffy IR.
+
 use std::collections::{HashMap, VecDeque};
 
 use num_bigint::BigInt;
@@ -9,25 +11,41 @@ use tuffy_ir::value::{BlockRef, ValueRef};
 use crate::cfg::{CfgInfo, collect_block_refs};
 use crate::peephole::PeepholeStats;
 
+/// Maximum fixpoint rounds when repeatedly simplifying one function.
 const MAX_SIMPLIFY_ITERATIONS: usize = 16;
+/// Maximum times a block entry fact set may widen before falling back to annotations.
 const MAX_BLOCK_ENV_UPDATES: usize = 256;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// Integer range facts tracked in both signed and unsigned domains.
 struct IntRange {
+    /// Whether this lattice element is known to be impossible.
     is_bottom: bool,
+    /// Proven signed lower bound, when available.
     signed_min: Option<BigInt>,
+    /// Proven signed upper bound, when available.
     signed_max: Option<BigInt>,
+    /// Proven unsigned lower bound, when available.
     unsigned_min: Option<BigInt>,
+    /// Proven unsigned upper bound, when available.
     unsigned_max: Option<BigInt>,
 }
 
+/// Per-value range facts keyed by raw SSA value index.
 type FactMap = HashMap<u32, IntRange>;
 
 #[derive(Clone)]
+/// Forward dataflow result storing block-entry range environments.
 struct RangeAnalysis {
+    /// Entry facts for each block after merging predecessor flows.
     entry: Vec<Option<FactMap>>,
 }
 
+/// Run the legacy range pass until no compare or branch folding opportunity remains.
+///
+/// # Panics
+///
+/// May panic if internal IR invariants are violated.
 pub(crate) fn optimize_function(func: &mut Function) -> PeepholeStats {
     let mut stats = PeepholeStats::default();
 
@@ -97,6 +115,11 @@ pub(crate) fn optimize_function(func: &mut Function) -> PeepholeStats {
 }
 
 impl RangeAnalysis {
+    /// Compute block-entry range environments with forward propagation over the CFG.
+    ///
+    /// # Panics
+    ///
+    /// May panic if internal IR invariants are violated.
     fn compute(func: &Function) -> Self {
         let cfg = CfgInfo::compute(func);
         let mut entry = vec![None; func.blocks.len()];
@@ -138,6 +161,8 @@ impl RangeAnalysis {
                 if changed {
                     update_counts[target_idx] = update_counts[target_idx].saturating_add(1);
                     if update_counts[target_idx] > MAX_BLOCK_ENV_UPDATES {
+                        // If the edge facts keep widening, fall back to annotation-derived facts
+                        // so the pass stays terminating and conservative.
                         entry[target_idx] = Some(annotation_only_env(func, target));
                     }
                     worklist.push_back(target);
@@ -148,11 +173,14 @@ impl RangeAnalysis {
         Self { entry }
     }
 
+    /// Return the propagated entry environment for `block`, if the block is reachable.
     fn entry_env(&self, block: BlockRef) -> Option<&FactMap> {
         self.entry[block.index() as usize].as_ref()
     }
 }
 
+/// Seed a block environment from block-argument annotations when propagation has not
+/// already produced a tighter fact.
 fn seed_block_args(func: &Function, block: BlockRef, env: &mut FactMap) {
     for (arg_ref, block_arg) in func
         .block_arg_values(block)
@@ -173,6 +201,7 @@ fn seed_block_args(func: &Function, block: BlockRef, env: &mut FactMap) {
     }
 }
 
+/// Compute successor-specific environments for the current terminator.
 fn successor_envs(
     func: &Function,
     cfg: &CfgInfo,
@@ -207,6 +236,7 @@ fn successor_envs(
     }
 }
 
+/// Apply edge refinements and branch arguments to the environment entering `target`.
 fn successor_env(
     func: &Function,
     env: &FactMap,
@@ -243,6 +273,7 @@ fn successor_env(
     next
 }
 
+/// Join incoming predecessor facts into an existing block-entry environment.
 fn merge_env(existing: &mut FactMap, incoming: &FactMap) -> bool {
     let original = existing.clone();
     if original.is_empty() {
@@ -273,6 +304,7 @@ fn merge_env(existing: &mut FactMap, incoming: &FactMap) -> bool {
     changed
 }
 
+/// Compute the range fact defined by `inst` when the instruction is transparent to this pass.
 fn transfer_inst(func: &Function, env: &FactMap, inst: &Instruction) -> Option<IntRange> {
     if !matches!(inst.ty, Type::Int) {
         return None;
@@ -296,6 +328,7 @@ fn transfer_inst(func: &Function, env: &FactMap, inst: &Instruction) -> Option<I
 }
 
 #[allow(dead_code)]
+/// Approximate multiplication when at least one operand is a known integer constant.
 fn mul_range(func: &Function, env: &FactMap, lhs: &Operand, rhs: &Operand) -> Option<IntRange> {
     let lhs_const = bound_int_constant(func, lhs.value);
     let rhs_const = bound_int_constant(func, rhs.value);
@@ -312,6 +345,7 @@ fn mul_range(func: &Function, env: &FactMap, lhs: &Operand, rhs: &Operand) -> Op
 }
 
 #[allow(dead_code)]
+/// Approximate bitwise-and against a non-negative mask.
 fn and_range(func: &Function, _env: &FactMap, lhs: &Operand, rhs: &Operand) -> Option<IntRange> {
     let lhs_const = bound_int_constant(func, lhs.value);
     let rhs_const = bound_int_constant(func, rhs.value);
@@ -329,6 +363,7 @@ fn and_range(func: &Function, _env: &FactMap, lhs: &Operand, rhs: &Operand) -> O
     })
 }
 
+/// Refine one compared operand along a specific branch edge when the other side is constant.
 fn branch_refinement(
     func: &Function,
     cond_value: ValueRef,
@@ -353,6 +388,7 @@ fn branch_refinement(
     None
 }
 
+/// Normalize a boolean condition into an integer comparison plus an optional inversion.
 fn decode_condition(
     func: &Function,
     value: ValueRef,
@@ -370,6 +406,8 @@ fn decode_condition(
         Op::ICmp(op, lhs, rhs) => {
             let lhs_value = lhs.clone().raw().value;
             let rhs_value = rhs.clone().raw().value;
+            // Fold integer encodings of booleans back to the underlying comparison so edge
+            // refinement reasons about the original domain instead of the `{0, 1}` wrapper.
             if let Some(constant) = bound_int_constant(func, rhs_value)
                 && let Some(decoded) = decode_intified_bool_compare(func, *op, lhs_value, constant)
             {
@@ -400,6 +438,7 @@ fn decode_condition(
     }
 }
 
+/// Recover the source comparison from `icmp` against `0` or `1` on an intified boolean.
 fn decode_intified_bool_compare(
     func: &Function,
     pred: ICmpOp,
@@ -428,6 +467,7 @@ fn decode_intified_bool_compare(
     Some((cmp_op, lhs, rhs, invert ^ source_invert))
 }
 
+/// Peel common integer encodings of booleans back to the source condition.
 fn decode_intified_bool(func: &Function, value: ValueRef) -> Option<(ValueRef, bool)> {
     if value.is_block_arg() || value.is_secondary_result() {
         return None;
@@ -474,6 +514,7 @@ fn decode_intified_bool(func: &Function, value: ValueRef) -> Option<(ValueRef, b
     }
 }
 
+/// Evaluate a boolean value when current facts make it constant.
 fn evaluate_bool(func: &Function, env: &FactMap, value: ValueRef) -> Option<bool> {
     if let Some(value) = bound_bool_constant(func, value) {
         return Some(value);
@@ -483,6 +524,7 @@ fn evaluate_bool(func: &Function, env: &FactMap, value: ValueRef) -> Option<bool
     Some(if invert { !result } else { result })
 }
 
+/// Evaluate an integer comparison from current operand ranges.
 fn evaluate_icmp(
     func: &Function,
     env: &FactMap,
@@ -555,6 +597,7 @@ fn evaluate_icmp(
     }
 }
 
+/// Intersect `current` with the constraint implied by a comparison's truth value.
 fn refine_compare(
     mut current: IntRange,
     op: ICmpOp,
@@ -587,6 +630,7 @@ fn refine_compare(
     (!current.is_bottom).then_some(current)
 }
 
+/// Flip a comparison when moving the constant operand from left to right.
 fn flip_cmp(op: ICmpOp) -> ICmpOp {
     match op {
         ICmpOp::Eq => ICmpOp::Eq,
@@ -598,6 +642,7 @@ fn flip_cmp(op: ICmpOp) -> ICmpOp {
     }
 }
 
+/// Resolve the best known range for an operand from propagated facts, constants, or annotations.
 fn operand_range(func: &Function, env: &FactMap, operand: &Operand) -> Option<IntRange> {
     if let Some(range) = env.get(&operand.value.raw()) {
         let mut range = range.clone();
@@ -618,6 +663,7 @@ fn operand_range(func: &Function, env: &FactMap, operand: &Operand) -> Option<In
     range_from_operand_annotation_or_def(func, operand)
 }
 
+/// Read the range implied by an operand annotation or its defining value annotation.
 fn range_from_operand_annotation_or_def(func: &Function, operand: &Operand) -> Option<IntRange> {
     if let Some(annotation) = &operand.annotation {
         return range_from_annotation(annotation);
@@ -644,6 +690,7 @@ fn range_from_operand_annotation_or_def(func: &Function, operand: &Operand) -> O
         .and_then(range_from_annotation)
 }
 
+/// Convert a block-argument annotation into an `IntRange`.
 fn range_from_block_arg(block_arg: &BlockArg) -> Option<IntRange> {
     block_arg
         .annotation
@@ -651,6 +698,7 @@ fn range_from_block_arg(block_arg: &BlockArg) -> Option<IntRange> {
         .and_then(range_from_annotation)
 }
 
+/// Convert an integer annotation into the corresponding signed and unsigned bounds.
 fn range_from_annotation(annotation: &Annotation) -> Option<IntRange> {
     let Annotation::Int(ann) = annotation else {
         return None;
@@ -672,6 +720,7 @@ fn range_from_annotation(annotation: &Annotation) -> Option<IntRange> {
     Some(range)
 }
 
+/// Return the payload of an integer constant result.
 fn bound_int_constant(func: &Function, value: ValueRef) -> Option<&BigInt> {
     if value.is_block_arg() || value.is_secondary_result() {
         return None;
@@ -683,6 +732,7 @@ fn bound_int_constant(func: &Function, value: ValueRef) -> Option<&BigInt> {
     Some(int)
 }
 
+/// Return the payload of a boolean constant result.
 fn bound_bool_constant(func: &Function, value: ValueRef) -> Option<bool> {
     if value.is_block_arg() || value.is_secondary_result() {
         return None;
@@ -694,10 +744,12 @@ fn bound_bool_constant(func: &Function, value: ValueRef) -> Option<bool> {
     Some(*value)
 }
 
+/// Report whether `value` is a non-negative odd integer mask.
 fn is_non_negative_odd_int(value: &BigInt) -> bool {
     value.sign() != num_bigint::Sign::Minus && (value & BigInt::from(1u8)) == BigInt::from(1u8)
 }
 
+/// Replace an `icmp` instruction with a boolean constant result.
 fn rewrite_icmp_to_const(func: &mut Function, root_idx: u32, value: bool) {
     let origin = func.inst(root_idx).origin.clone();
     let new_idx = func.insert_inst_before(
@@ -718,6 +770,7 @@ fn rewrite_icmp_to_const(func: &mut Function, root_idx: u32, value: bool) {
     let _ = func.remove_inst(root_idx);
 }
 
+/// Rewrite a conditional branch to an unconditional branch to the chosen successor.
 fn rewrite_brif_to_br(
     func: &mut Function,
     root_idx: u32,
@@ -739,6 +792,7 @@ fn rewrite_brif_to_br(
     let _ = func.remove_inst(root_idx);
 }
 
+/// Recursively remove dead pure producers exposed by a rewrite.
 fn cleanup_dead_value(func: &mut Function, value: ValueRef) {
     if value.is_block_arg() || value.is_secondary_result() || func.has_uses(value) {
         return;
@@ -756,12 +810,14 @@ fn cleanup_dead_value(func: &mut Function, value: ValueRef) {
     }
 }
 
+/// Rebuild the conservative environment for `block` from annotations only.
 fn annotation_only_env(func: &Function, block: BlockRef) -> FactMap {
     let mut env = FactMap::new();
     seed_block_args(func, block, &mut env);
     env
 }
 
+/// Return whether a dead producer can be erased without observable side effects.
 fn is_cleanup_pure_op(op: &Op) -> bool {
     matches!(
         op,
@@ -779,6 +835,7 @@ fn is_cleanup_pure_op(op: &Op) -> bool {
 }
 
 impl IntRange {
+    /// Return the empty lattice element.
     fn bottom() -> Self {
         Self {
             is_bottom: true,
@@ -786,6 +843,7 @@ impl IntRange {
         }
     }
 
+    /// Return the singleton range containing `value`.
     fn exact(value: BigInt) -> Self {
         Self {
             is_bottom: false,
@@ -796,6 +854,7 @@ impl IntRange {
         }
     }
 
+    /// Return whether no useful bounds are currently known.
     fn is_unknown(&self) -> bool {
         !self.is_bottom
             && self.signed_min.is_none()
@@ -804,10 +863,12 @@ impl IntRange {
             && self.unsigned_max.is_none()
     }
 
+    /// Return whether the range is exactly `value`.
     fn is_exact(&self, value: &BigInt) -> bool {
         self.signed_min.as_ref() == Some(value) && self.signed_max.as_ref() == Some(value)
     }
 
+    /// Join two predecessor facts by widening each known bound.
     fn join(&self, other: &Self) -> Self {
         if self.is_bottom {
             return other.clone();
@@ -836,6 +897,7 @@ impl IntRange {
         }
     }
 
+    /// Intersect two range facts and detect contradictory bounds.
     fn intersect(&self, other: &Self) -> Self {
         if self.is_bottom || other.is_bottom {
             return Self::bottom();
@@ -847,6 +909,8 @@ impl IntRange {
             unsigned_min: max_bound(&self.unsigned_min, &other.unsigned_min),
             unsigned_max: min_bound(&self.unsigned_max, &other.unsigned_max),
         };
+        // Each domain is intersected independently; any contradiction in either domain means the
+        // value set is empty.
         if result
             .signed_min
             .as_ref()
@@ -864,6 +928,7 @@ impl IntRange {
     }
 
     #[allow(dead_code)]
+    /// Add two ranges conservatively using endpoint arithmetic.
     fn add(&self, other: &Self) -> Self {
         if self.is_bottom || other.is_bottom {
             return Self::bottom();
@@ -878,6 +943,7 @@ impl IntRange {
     }
 
     #[allow(dead_code)]
+    /// Subtract two ranges conservatively using endpoint arithmetic.
     fn sub(&self, other: &Self) -> Self {
         if self.is_bottom || other.is_bottom {
             return Self::bottom();
@@ -892,6 +958,7 @@ impl IntRange {
     }
 
     #[allow(dead_code)]
+    /// Multiply the range by a known constant.
     fn mul_const(&self, constant: &BigInt) -> Self {
         if self.is_bottom {
             return Self::bottom();
@@ -925,14 +992,17 @@ impl IntRange {
         }
     }
 
+    /// Return the best available arithmetic lower bound regardless of signedness.
     fn math_min(&self) -> Option<&BigInt> {
         self.signed_min.as_ref().or(self.unsigned_min.as_ref())
     }
 
+    /// Return the best available arithmetic upper bound regardless of signedness.
     fn math_max(&self) -> Option<&BigInt> {
         self.signed_max.as_ref().or(self.unsigned_max.as_ref())
     }
 
+    /// Tighten the arithmetic lower bound and the unsigned domain when that remains valid.
     fn refine_math_lower(&mut self, lower: BigInt) {
         self.signed_min = max_bound(&self.signed_min, &Some(lower.clone()));
         if lower >= BigInt::from(0u8) {
@@ -947,12 +1017,14 @@ impl IntRange {
         }
     }
 
+    /// Tighten the arithmetic upper bound and drop unsigned facts when the bound goes negative.
     fn refine_math_upper(&mut self, upper: BigInt) {
         self.signed_max = min_bound(&self.signed_max, &Some(upper.clone()));
         if upper >= BigInt::from(0u8) {
             self.unsigned_max = min_bound(&self.unsigned_max, &Some(upper));
         } else {
             if self.unsigned_min.is_some() {
+                // Unsigned facts cannot survive a negative upper bound.
                 *self = Self::bottom();
             }
         }
@@ -966,6 +1038,7 @@ impl IntRange {
     }
 }
 
+/// Return the larger of two optional lower bounds.
 fn max_bound(lhs: &Option<BigInt>, rhs: &Option<BigInt>) -> Option<BigInt> {
     match (lhs, rhs) {
         (Some(lhs), Some(rhs)) => Some(lhs.max(rhs).clone()),
@@ -975,6 +1048,7 @@ fn max_bound(lhs: &Option<BigInt>, rhs: &Option<BigInt>) -> Option<BigInt> {
     }
 }
 
+/// Return the smaller of two optional upper bounds.
 fn min_bound(lhs: &Option<BigInt>, rhs: &Option<BigInt>) -> Option<BigInt> {
     match (lhs, rhs) {
         (Some(lhs), Some(rhs)) => Some(lhs.min(rhs).clone()),
@@ -985,11 +1059,13 @@ fn min_bound(lhs: &Option<BigInt>, rhs: &Option<BigInt>) -> Option<BigInt> {
 }
 
 #[allow(dead_code)]
+/// Add two optional bounds when both are known.
 fn add_opt(lhs: &Option<BigInt>, rhs: &Option<BigInt>) -> Option<BigInt> {
     Some(lhs.as_ref()? + rhs.as_ref()?)
 }
 
 #[allow(dead_code)]
+/// Subtract two optional bounds when both are known.
 fn sub_opt(lhs: &Option<BigInt>, rhs: &Option<BigInt>) -> Option<BigInt> {
     Some(lhs.as_ref()? - rhs.as_ref()?)
 }

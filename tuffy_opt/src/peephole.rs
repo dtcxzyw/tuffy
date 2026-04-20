@@ -174,11 +174,11 @@ enum CanonicalBrIfMode {
 #[allow(dead_code, reason = "Required by the current implementation shape.")]
 /// Internal data structure `CanonicalBrIfMatch`.
 struct CanonicalBrIfMatch {
-    /// Cond.
+    /// Canonical boolean condition to branch on.
     cond: ValueRef,
-    /// Invert.
+    /// Whether the original branch sense must be inverted.
     invert: bool,
-    /// Matched insts.
+    /// Instructions that become dead after canonicalization.
     matched_insts: BTreeSet<u32>,
 }
 
@@ -510,11 +510,11 @@ fn parse_decimal_bigint(value: &str) -> BigInt {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 /// Internal data structure `IntFacts`.
 struct IntFacts {
-    /// Is bottom.
+    /// Whether this fact set is known to be impossible.
     is_bottom: bool,
-    /// Known zero.
+    /// Bits proven to be zero.
     known_zero: BigUint,
-    /// Known one.
+    /// Bits proven to be one.
     known_one: BigUint,
     /// Unsigned width upper bound.
     unsigned_width_upper_bound: Option<u32>,
@@ -900,11 +900,11 @@ enum TerminatorOpcode {
 #[allow(dead_code, reason = "Required by the current implementation shape.")]
 /// Internal data structure `ReplacementTerminator`.
 struct ReplacementTerminator {
-    /// Opcode.
+    /// Terminator opcode to emit.
     opcode: TerminatorOpcode,
-    /// Operands.
+    /// SSA operands consumed by the replacement terminator.
     operands: Vec<ValueRef>,
-    /// Successors.
+    /// Successor indices in generated-rule order.
     successors: Vec<usize>,
 }
 
@@ -912,9 +912,9 @@ struct ReplacementTerminator {
 #[allow(dead_code, reason = "Required by the current implementation shape.")]
 /// Internal data structure `MatchedSuccessor`.
 struct MatchedSuccessor {
-    /// Block.
+    /// Chosen successor block.
     block: BlockRef,
-    /// Args.
+    /// Block arguments forwarded to that successor.
     args: Vec<Operand>,
 }
 
@@ -1007,9 +1007,9 @@ enum ConstFoldKind {
 
 /// Internal data structure `ConstantFoldMatch`.
 struct ConstantFoldMatch {
-    /// Replacement.
+    /// Replacement value or expression emitted for the fold.
     replacement: ValueRewrite,
-    /// Matched insts.
+    /// Instructions that become dead after the fold.
     matched_insts: BTreeSet<u32>,
 }
 

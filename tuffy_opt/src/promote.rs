@@ -1,3 +1,5 @@
+//! Conservative stack-slot promotion for Tuffy IR.
+
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 use num_bigint::BigInt;
@@ -14,9 +16,9 @@ use crate::peephole::PeepholeStats;
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 /// Internal data structure `SliceKey`.
 struct SliceKey {
-    /// Offset.
+    /// Byte offset from the stack-slot base.
     offset: i64,
-    /// Size.
+    /// Slice width in bytes.
     size: u32,
 }
 
@@ -34,69 +36,69 @@ enum AccessKind {
 struct AccessInfo {
     /// Instruction index.
     inst_idx: u32,
-    /// Block.
+    /// Block containing the access.
     block: BlockRef,
-    /// Key.
+    /// Canonical slice reached by the access.
     key: SliceKey,
-    /// Ty.
+    /// SSA type reconstructed for the slice.
     ty: Type,
     /// Annotation.
     annotation: Option<Annotation>,
-    /// Kind.
+    /// Whether this access is a load or store.
     kind: AccessKind,
 }
 
 #[derive(Clone, Debug)]
 /// Internal data structure `SlicePlan`.
 struct SlicePlan {
-    /// Key.
+    /// Canonical byte range promoted as one SSA slice.
     key: SliceKey,
-    /// Ty.
+    /// SSA type used when materializing the slice value.
     ty: Type,
     /// Annotation.
     annotation: Option<Annotation>,
-    /// Accesses.
+    /// Loads and stores that belong to this slice.
     accesses: Vec<AccessInfo>,
-    /// Phi blocks.
+    /// Join blocks that need SSA merge values for this slice.
     phi_blocks: HashSet<BlockRef>,
 }
 
 #[derive(Clone, Debug)]
 /// Internal data structure `SlotPlan`.
 struct SlotPlan {
-    /// Slot.
+    /// Stack slot being promoted.
     slot: ValueRef,
-    /// Slice plans.
+    /// Non-overlapping slices promoted out of the slot.
     slices: Vec<SlicePlan>,
 }
 
 #[derive(Clone, Debug)]
 /// Internal data structure `FlattenedSlice`.
 struct FlattenedSlice {
-    /// Slot.
+    /// Source stack slot.
     slot: ValueRef,
-    /// Key.
+    /// Canonical byte range within the slot.
     key: SliceKey,
-    /// Ty.
+    /// SSA type used for the slice value.
     ty: Type,
     /// Annotation.
     annotation: Option<Annotation>,
-    /// Phi blocks.
+    /// Join blocks that need SSA merge values for this slice.
     phi_blocks: HashSet<BlockRef>,
 }
 
 #[derive(Clone, Debug, Default)]
 /// Internal data structure `PromotionPlan`.
 struct PromotionPlan {
-    /// Slots.
+    /// Per-slot promotion plans.
     slots: Vec<SlotPlan>,
-    /// Slice plans.
+    /// Flattened slice view used during function rebuilding.
     slices: Vec<FlattenedSlice>,
-    /// Load to slice.
+    /// Map from load instruction to the slice it reads.
     load_to_slice: HashMap<u32, usize>,
-    /// Store to slice.
+    /// Map from store instruction to the slice it writes.
     store_to_slice: HashMap<u32, usize>,
-    /// Promoted insts.
+    /// Instructions removed or rewritten as part of promotion.
     promoted_insts: HashSet<u32>,
     /// Promoted slot count or set.
     promoted_slots: HashSet<u32>,

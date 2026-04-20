@@ -1,3 +1,5 @@
+//! Bulk memory idiom formation for repeated loads and stores.
+
 use std::collections::{BTreeSet, HashMap};
 
 use num_bigint::BigInt;
@@ -15,9 +17,9 @@ const MIN_BULK_MEMORY_BYTES: usize = 32;
 #[derive(Clone)]
 /// Internal data structure `StaticInfo`.
 struct StaticInfo {
-    /// Data.
+    /// Raw bytes stored in the static object.
     data: Vec<u8>,
-    /// Relocations.
+    /// Byte offsets occupied by relocations and therefore not safe to fold as plain data.
     relocations: Vec<usize>,
 }
 
@@ -37,7 +39,7 @@ enum RootKind {
 struct PtrExpr {
     /// Root value.
     root: ValueRef,
-    /// Offset.
+    /// Constant byte offset from the root.
     offset: i64,
 }
 
@@ -59,7 +61,7 @@ struct StorePattern {
     mem_in: ValueRef,
     /// Outgoing memory value.
     mem_out: ValueRef,
-    /// Size.
+    /// Store width in bytes.
     size: u32,
     /// Destination operand.
     dst: PtrExpr,
@@ -84,7 +86,7 @@ enum BulkOpKind {
 #[derive(Clone)]
 /// Internal data structure `BulkCandidate`.
 struct BulkCandidate {
-    /// Block.
+    /// Block containing the matched store run.
     block: BlockRef,
     /// First store index.
     first_store: u32,
@@ -94,7 +96,7 @@ struct BulkCandidate {
     mem_in: ValueRef,
     /// Outgoing memory value.
     mem_out: ValueRef,
-    /// Dst root.
+    /// Root destination pointer shared by the store run.
     dst_root: ValueRef,
     /// Total byte count.
     total_bytes: usize,

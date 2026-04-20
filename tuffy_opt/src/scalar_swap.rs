@@ -1,3 +1,5 @@
+//! Scalar-swap formation over memcpy and memmove idioms.
+
 use std::collections::BTreeSet;
 
 use num_bigint::BigInt;
@@ -15,14 +17,14 @@ use crate::peephole::PeepholeStats;
 struct PtrExpr {
     /// Root value.
     root: ValueRef,
-    /// Offset.
+    /// Constant byte offset from the root.
     offset: i64,
 }
 
 #[derive(Clone)]
 /// Internal data structure `MemcpyCall`.
 struct MemcpyCall {
-    /// Call instruction index.
+    /// Call instruction implementing the memcpy.
     call_idx: u32,
     /// Incoming memory value.
     mem_in: ValueRef,
@@ -32,7 +34,7 @@ struct MemcpyCall {
     dst: Operand,
     /// Source operand.
     src: Operand,
-    /// Size.
+    /// Copy width in bytes.
     size: u32,
     /// Matched instruction ids.
     matched: BTreeSet<u32>,
@@ -51,7 +53,7 @@ struct MemmoveOp {
     dst: Operand,
     /// Source operand.
     src: Operand,
-    /// Size.
+    /// Move width in bytes.
     size: u32,
     /// Matched instruction ids.
     matched: BTreeSet<u32>,
@@ -71,7 +73,7 @@ struct PreludeStore {
 #[derive(Clone)]
 /// Internal data structure `SwapCandidate`.
 struct SwapCandidate {
-    /// Size.
+    /// Swap width in bytes.
     size: u32,
     /// Left pointer operand.
     left_ptr: Operand,

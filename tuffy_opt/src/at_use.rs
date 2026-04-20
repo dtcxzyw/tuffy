@@ -1,3 +1,5 @@
+//! Context-sensitive integer fact propagation used by generated peephole transforms.
+
 use std::collections::{HashMap, VecDeque};
 
 use num_bigint::{BigInt, BigUint, Sign};
@@ -45,30 +47,30 @@ pub(super) struct AtUseTransformDescriptor {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 /// Internal data structure `AtUseFacts`.
 struct AtUseFacts {
-    /// Is bottom.
+    /// Whether this fact set is known to be impossible.
     is_bottom: bool,
-    /// Known zero.
+    /// Bits proven to be zero.
     known_zero: BigUint,
-    /// Known one.
+    /// Bits proven to be one.
     known_one: BigUint,
-    /// Demanded.
+    /// Bits that downstream uses still demand precisely.
     demanded: BigUint,
-    /// Signed min.
+    /// Proven signed lower bound, when available.
     signed_min: Option<BigInt>,
-    /// Signed max.
+    /// Proven signed upper bound, when available.
     signed_max: Option<BigInt>,
-    /// Unsigned min.
+    /// Proven unsigned lower bound, when available.
     unsigned_min: Option<BigInt>,
-    /// Unsigned max.
+    /// Proven unsigned upper bound, when available.
     unsigned_max: Option<BigInt>,
-    /// Dontcare width upper bound.
+    /// Tightest width bound when signedness is intentionally left unconstrained.
     dontcare_width_upper_bound: Option<u32>,
 }
 
 #[derive(Clone)]
 /// Internal data structure `AtUseAnalysis`.
 struct AtUseAnalysis {
-    /// Entry block.
+    /// Entry facts for each block after merging predecessor flows.
     entry: Vec<Option<FactMap>>,
 }
 
@@ -411,6 +413,8 @@ impl AtUseAnalysis {
                 if changed {
                     update_counts[target_idx] = update_counts[target_idx].saturating_add(1);
                     if update_counts[target_idx] > MAX_BLOCK_ENV_UPDATES {
+                        // Widening eventually falls back to annotation-only facts so the solver
+                        // stays conservative even on oscillating control-flow joins.
                         entry[target_idx] = Some(annotation_only_env(func, target));
                     }
                     worklist.push_back(target);
@@ -1371,6 +1375,8 @@ fn branch_refinement(
     let lhs_facts = facts_from_operand_annotation_or_def(func, &lhs_operand)?;
     let rhs_facts = facts_from_operand_annotation_or_def(func, &rhs_operand)?;
 
+    // Only refine the non-constant side; that keeps the edge fact local to one SSA value and
+    // matches the rest of the at-use lattice operations.
     if let Some(constant) = bound_int_constant(func, rhs_operand.value) {
         let refined = refine_compare(lhs_facts, cmp_op, constant.clone(), truth)?;
         return Some((lhs_operand.value, refined));
@@ -1405,6 +1411,7 @@ fn decode_condition(
         Op::ICmp(op, lhs, rhs) => {
             let lhs_value = lhs.clone().raw().value;
             let rhs_value = rhs.clone().raw().value;
+            // Generated rules reason about the source boolean, not its integerized wrapper.
             if let Some(constant) = bound_int_constant(func, rhs_value)
                 && let Some(decoded) = decode_intified_bool_compare(func, *op, lhs_value, constant)
             {

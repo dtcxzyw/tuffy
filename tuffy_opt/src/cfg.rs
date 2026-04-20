@@ -1,3 +1,5 @@
+//! CFG analysis helpers shared by optimization passes.
+
 use std::collections::HashSet;
 
 use tuffy_ir::function::Function;
@@ -10,13 +12,13 @@ pub(crate) struct CfgInfo {
     pub(crate) preds: Vec<Vec<BlockRef>>,
     /// Successor lists.
     pub(crate) succs: Vec<Vec<BlockRef>>,
-    /// Reachable.
+    /// Reachability from the function entry block.
     pub(crate) reachable: Vec<bool>,
-    /// Dom children.
+    /// Children in the immediate-dominator tree.
     pub(crate) dom_children: Vec<Vec<BlockRef>>,
     /// Dominance frontier.
     pub(crate) dominance_frontier: Vec<HashSet<BlockRef>>,
-    /// Loop header.
+    /// Enclosing loop header reached by a `continue`, when one exists.
     pub(crate) loop_header: Vec<Option<BlockRef>>,
 }
 
