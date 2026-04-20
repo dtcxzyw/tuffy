@@ -183,6 +183,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     if self.stack_locals.is_stack(local) {
                         continue;
                     }
+                    // This is a conservative repair for locals that are read
+                    // before the block where translation first synthesizes
+                    // their SSA value. Materializing them in a slot gives all
+                    // paths a stable address without having to reconstruct
+                    // cross-block SSA joins in the pre-scan.
                     if let Some(def_bb) = assign_bb[local.as_usize()]
                         && bb < def_bb
                     {

@@ -706,6 +706,9 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     /// When the place has a Subslice projection, adjusts the metadata
     /// by subtracting the `from` and `to` indices.
     pub(super) fn find_fat_metadata_for_place(&mut self, place: &Place<'tcx>) -> Option<ValueRef> {
+        // `split_at_mut` results are cached as tuple locals whose MIR type is
+        // the pair, not either fat-pointer field, so consult that cache before
+        // asking whether the base local itself is a fat pointer.
         if let Some((_, meta)) = self.split_pair_field(place) {
             return Some(meta);
         }

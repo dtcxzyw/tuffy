@@ -210,6 +210,11 @@ pub(super) fn translate_const<'tcx>(
                         base.raw()
                     };
                     if is_fat_ptr(tcx, ty) {
+                        // Fat-pointer constants follow the same split
+                        // representation as runtime fat locals: callers keep
+                        // the metadata separately via `extract_fat_component`,
+                        // so the main constant value here must be just the data
+                        // pointer loaded from the backing allocation.
                         let loaded = builder.load(
                             addr.into(),
                             8,
@@ -532,6 +537,10 @@ pub(super) fn extract_alloc_relocs<'tcx>(
                 relocs.push((rel_offset, sym_name));
             }
             rustc_middle::mir::interpret::GlobalAlloc::Memory(target_alloc) => {
+                // Relocations always point at a symbol naming the nested
+                // allocation root. Reuse an existing emitted symbol whenever
+                // possible so two pointers into identical constants do not
+                // duplicate static-data payloads.
                 if let Some(existing_name) = alloc_cache.get(&target_alloc_id) {
                     relocs.push((rel_offset, existing_name.clone()));
                 } else {

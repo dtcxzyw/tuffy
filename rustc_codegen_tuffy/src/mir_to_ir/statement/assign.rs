@@ -211,6 +211,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 ) || matches!(ty.kind(),
                     ty::RawPtr(inner, _) if inner.is_sized(self.tcx, typing_env)
                 ) || matches!(ty.kind(), ty::FnPtr(..));
+                // Some scalar constants are lowered as `symbol_addr` pointing
+                // at compiler-emitted bytes. For scalar destinations we want
+                // to store that scalar payload into the slot, not treat the
+                // pointer as the base of an aggregate copy.
                 let scalar_const_symbol = matches!(val_ty.as_ref(), Some(Type::Ptr(_)))
                     && bytes <= 8
                     && self.builder.is_symbol_addr(val)
@@ -362,6 +366,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             fat_src.or_else(|| self.extract_fat_component(rvalue))
                         };
                         if let Some(fat_val) = fat_src {
+                            // Stack-local operands are ambiguous here:
+                            // `translate_operand` returns a slot address for
+                            // fat / aggregate locals, but it already loaded the
+                            // pointer value for thin pointer locals living in
+                            // a slot. Reload only in the first case.
                             // Stack locals are split here:
                             // - thin pointer locals: translate_operand already loaded the
                             //   pointer value from the slot, so reloading would dereference

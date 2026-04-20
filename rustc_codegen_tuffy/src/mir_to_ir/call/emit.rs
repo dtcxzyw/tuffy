@@ -183,6 +183,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         destination: &Place<'tcx>,
         target: BasicBlock,
     ) -> bool {
+        // This fast path keeps the destination `Option<usize>` entirely in
+        // `option_scalar_locals`. It is only sound while the local never has
+        // to exist as an addressable enum value, so stack-backed destinations
+        // and arbitrary consumers are rejected up front.
         if args.len() != 1
             || !destination.projection.is_empty()
             || self.stack_locals.is_stack(destination.local)
@@ -446,6 +450,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             if !this.stack_locals.is_stack(destination.local) {
                 this.locals.clear(destination.local);
                 this.fat_locals.clear(destination.local);
+                // Keep the tuple destructured in SSA until some later use
+                // requires an actual tuple address. Place translation consults
+                // `split_pair_locals` to answer `.0` / `.1` projections
+                // without materializing the four-word aggregate in memory.
                 this.split_pair_locals.set(
                     destination.local,
                     SplitPairLocal {
@@ -456,6 +464,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     },
                 );
             } else {
+                // Stack-backed destinations must hold the concrete tuple
+                // layout because later field projections and references load
+                // from slot offsets rather than consulting the split-pair
+                // cache.
                 let dest_ty = this.monomorphize(this.mir.local_decls[destination.local].ty);
                 let dest_size = type_size(this.tcx, dest_ty).unwrap_or(32) as u32;
                 let dest_align = type_align(this.tcx, dest_ty).unwrap_or(8) as u32;
