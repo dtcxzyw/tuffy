@@ -1,6 +1,6 @@
 use rustc_hir::attrs::Linkage;
 
-use super::batch::{is_weak_linkage, optimize_ir_batch, verify_ir_batch};
+use super::batch::{is_local_linkage, is_weak_linkage, optimize_ir_batch, verify_ir_batch};
 use super::{IrModuleBatch, format_post_opt_module_dump, merge_translation_result};
 use crate::mir_to_ir::TranslationResult;
 use tuffy_ir::instruction::Op;
@@ -24,7 +24,7 @@ fn parse_result(input: &str) -> TranslationResult<'static> {
 fn merge_results(results: Vec<TranslationResult<'static>>) -> IrModuleBatch {
     let mut batch = IrModuleBatch::new("test");
     for result in results {
-        merge_translation_result(&mut batch, result, false);
+        merge_translation_result(&mut batch, result, false, false);
     }
     batch
 }
@@ -117,7 +117,7 @@ ret v0
         .insert("extern_weak_sym".to_string());
 
     let mut batch = IrModuleBatch::new("merged");
-    merge_translation_result(&mut batch, result, true);
+    merge_translation_result(&mut batch, result, true, false);
 
     assert!(verify_ir_batch(&batch, "merged batch should verify").is_ok());
     assert_eq!(
@@ -147,6 +147,7 @@ ret v0
     assert_eq!(batch.target_static_data[0].align, 8);
     assert!(batch.weak_undefined_symbols.contains("extern_weak_sym"));
     assert!(batch.function_meta[0].weak);
+    assert!(!batch.function_meta[0].local);
 }
 
 #[test]
@@ -169,4 +170,11 @@ fn internal_linkage_is_not_treated_as_weak() {
     assert!(!is_weak_linkage(Linkage::Internal));
     assert!(is_weak_linkage(Linkage::WeakAny));
     assert!(is_weak_linkage(Linkage::WeakODR));
+}
+
+#[test]
+fn internal_linkage_is_treated_as_local() {
+    assert!(is_local_linkage(Linkage::Internal));
+    assert!(!is_local_linkage(Linkage::External));
+    assert!(!is_local_linkage(Linkage::WeakODR));
 }

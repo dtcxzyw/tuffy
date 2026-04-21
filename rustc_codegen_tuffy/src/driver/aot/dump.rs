@@ -19,8 +19,12 @@ impl<'tcx> AotCodegen<'tcx> {
     /// # Panics
     ///
     /// Panics if formatting into the in-memory dump buffer fails.
-    pub(super) fn append_translation_dump(&mut self, result: &mir_to_ir::TranslationResult<'tcx>) {
-        if self.config.dump_ir {
+    pub(super) fn append_translation_dump(
+        &mut self,
+        result: &mir_to_ir::TranslationResult<'tcx>,
+        dump_ir: bool,
+    ) {
+        if self.config.dump_ir && dump_ir {
             for (sym_id, data, relocs, _align) in &result.static_data {
                 let name = result.symbols.resolve(*sym_id);
                 let reloc_strs: Vec<(usize, &str)> = relocs

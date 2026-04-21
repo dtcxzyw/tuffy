@@ -35,7 +35,9 @@ mod merge;
 #[cfg(test)]
 mod tests;
 
-use batch::{format_post_opt_module_dump, is_weak_linkage, verify_translation_result};
+use batch::{
+    format_post_opt_module_dump, is_local_linkage, is_weak_linkage, verify_translation_result,
+};
 use merge::merge_translation_result;
 
 /// Opaque payload handed back to rustc between codegen and join.
@@ -54,7 +56,7 @@ struct AotCodegen<'tcx> {
     config: BackendOptions,
     /// Object modules emitted so far.
     modules: Vec<CompiledModule>,
-    /// Symbol names already queued or emitted, used to deduplicate inline shims.
+    /// Non-local symbol names already queued or emitted, used to deduplicate inline shims.
     compiled_symbols: HashSet<String>,
     /// Additional instances discovered during translation that need on-demand codegen.
     pending_instances: Vec<Instance<'tcx>>,
@@ -88,6 +90,8 @@ struct ObjectArtifacts {
 struct PendingFunction {
     /// Whether the compiled function should be emitted with weak linkage.
     weak: bool,
+    /// Whether the compiled function should be emitted with local scope.
+    local: bool,
 }
 
 /// One batch of IR and static data that is optimized and verified together.
@@ -178,6 +182,7 @@ impl<'tcx> AotCodegen<'tcx> {
                     MonoItem::Fn(instance) => self.codegen_fn_item(
                         *instance,
                         is_weak_linkage(item_data.linkage),
+                        is_local_linkage(item_data.linkage),
                         &mut ir_batch,
                         &mut caches,
                     ),
@@ -225,6 +230,7 @@ impl<'tcx> AotCodegen<'tcx> {
         &mut self,
         instance: Instance<'tcx>,
         weak: bool,
+        local: bool,
         batch: &mut IrModuleBatch,
         caches: &mut TranslationCaches,
     ) {
@@ -235,9 +241,11 @@ impl<'tcx> AotCodegen<'tcx> {
             return;
         }
 
-        self.compiled_symbols
-            .insert(self.tcx.symbol_name(instance).name.to_string());
-        self.translate_instance_into_batch(instance, weak, true, batch, caches);
+        if !local {
+            self.compiled_symbols
+                .insert(self.tcx.symbol_name(instance).name.to_string());
+        }
+        self.translate_instance_into_batch(instance, weak, local, true, batch, caches);
     }
 
     /// Lowers one static item into target static-data records.
@@ -323,6 +331,7 @@ impl<'tcx> AotCodegen<'tcx> {
         &mut self,
         instance: Instance<'tcx>,
         weak: bool,
+        local: bool,
         dump_mir: bool,
         batch: &mut IrModuleBatch,
         caches: &mut TranslationCaches,
@@ -357,11 +366,11 @@ impl<'tcx> AotCodegen<'tcx> {
 
         self.pending_instances
             .extend(result.referenced_instances.iter().copied());
-        self.append_translation_dump(&result);
+        self.append_translation_dump(&result, dump_mir);
         if let Err(err) = verify_translation_result(&result) {
             self.fatal_instance(instance, &err);
         }
-        merge_translation_result(batch, result, weak);
+        merge_translation_result(batch, result, weak, local);
     }
 
     /// Emits any inline shim instances discovered during earlier translation.
@@ -390,6 +399,7 @@ impl<'tcx> AotCodegen<'tcx> {
                 self.translate_instance_into_batch(
                     instance,
                     true,
+                    false,
                     false,
                     &mut ir_batch,
                     &mut caches,

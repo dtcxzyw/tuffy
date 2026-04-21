@@ -2,7 +2,7 @@
 
 use crate::inst::{MInst, OpSize};
 use crate::reg::Gpr;
-use object::{Object, ObjectSection};
+use object::{Object, ObjectSection, ObjectSymbol, SymbolScope};
 use tuffy_ir::debug::{
     DebugSource, DebugVariable, DebugVariableKind, FunctionDebugInfo, SourceLocation,
 };
@@ -42,8 +42,10 @@ use crate::encode;
 use crate::isel;
 use crate::legality::X86LegalityInfo;
 use tuffy_target::backend::Backend;
+use tuffy_target::reloc::{RelocKind, Relocation};
 use tuffy_target::types::{
     CompiledDebugInfo, CompiledFunction, DebugLineRecord, DebugLocation, DebugVariableRange,
+    StaticData,
 };
 
 #[test]
@@ -497,6 +499,51 @@ fn backend_compile_function_propagates_isel_error() {
     };
     assert!(err.contains("instruction selection failed"));
     assert!(err.contains("Continue"));
+}
+
+#[test]
+fn emit_elf_with_data_reuses_local_function_symbol_for_static_relocation() {
+    let elf = crate::emit::emit_elf_with_data(
+        &[CompiledFunction {
+            name: "local_target".to_string(),
+            code: vec![0xc3],
+            relocations: vec![],
+            debug: None,
+            weak: false,
+            local: true,
+            has_frame_pointer: false,
+            call_site_table: vec![],
+            callee_saved_dwarf_regs: vec![],
+            sub_amount: 0,
+        }],
+        &[StaticData {
+            name: ".Lvtable.0".to_string(),
+            data: vec![0; 8],
+            relocations: vec![Relocation {
+                offset: 0,
+                symbol: "local_target".to_string(),
+                kind: RelocKind::Abs64,
+            }],
+            writable: false,
+            used: false,
+            weak_undefined: false,
+            align: 8,
+            thread_local: false,
+        }],
+    );
+
+    let obj = object::File::parse(&*elf).expect("emitted ELF should parse");
+    let target_symbols: Vec<_> = obj
+        .symbols()
+        .filter(|symbol| symbol.name().ok() == Some("local_target"))
+        .collect();
+    assert_eq!(
+        target_symbols.len(),
+        1,
+        "local target should not leave behind an undefined placeholder symbol"
+    );
+    assert_eq!(target_symbols[0].scope(), SymbolScope::Compilation);
+    assert!(!target_symbols[0].is_undefined());
 }
 
 #[test]

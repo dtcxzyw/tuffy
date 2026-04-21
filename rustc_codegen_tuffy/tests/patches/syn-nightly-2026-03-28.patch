@@ -13,3 +13,50 @@ index afdba57..4b2d15b 100644
                  true $(&& SpanlessEq::eq($this, $other))*
              }
          }
+diff --git a/tests/repo/mod.rs b/tests/repo/mod.rs
+index 8cbb83b..03a8dd2 100644
+--- a/tests/repo/mod.rs
++++ b/tests/repo/mod.rs
+@@ -530,11 +530,42 @@ pub fn base_dir_filter(entry: &DirEntry) -> bool {
+ pub fn edition(path: &Path) -> &'static str {
+     if path.ends_with("dyn-2015-no-warnings-without-lints.rs") {
+         "2015"
++    } else if let Some(edition) = edition_from_manifest(path) {
++        edition
+     } else {
+         "2021"
+     }
+ }
+
++fn edition_from_manifest(path: &Path) -> Option<&'static str> {
++    let test_root = Path::new("tests/rust");
++    for dir in path.ancestors().skip(1) {
++        if !dir.starts_with(test_root) {
++            break;
++        }
++        let manifest = dir.join("Cargo.toml");
++        let Ok(contents) = fs::read_to_string(manifest) else {
++            continue;
++        };
++        for line in contents.lines() {
++            let Some((key, value)) = line.split_once('=') else {
++                continue;
++            };
++            if key.trim() != "edition" {
++                continue;
++            }
++            return match value.trim().trim_matches('"') {
++                "2015" => Some("2015"),
++                "2018" => Some("2018"),
++                "2021" => Some("2021"),
++                "2024" => Some("2024"),
++                _ => None,
++            };
++        }
++    }
++    None
++}
++
+ #[allow(dead_code)]
+ pub fn abort_after() -> usize {
+     match env::var("ABORT_AFTER_FAILURE") {

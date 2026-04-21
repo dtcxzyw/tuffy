@@ -68,6 +68,7 @@ impl<'tcx> AotCodegen<'tcx> {
             }
             artifacts.functions.push(CompiledFunction {
                 weak: meta.weak,
+                local: meta.local,
                 ..compiled
             });
         }
@@ -183,4 +184,9 @@ pub(super) fn is_weak_linkage(linkage: Linkage) -> bool {
         linkage,
         Linkage::LinkOnceODR | Linkage::WeakODR | Linkage::LinkOnceAny | Linkage::WeakAny
     )
+}
+
+/// Returns whether rustc linkage should be emitted with local object-file scope.
+pub(super) fn is_local_linkage(linkage: Linkage) -> bool {
+    matches!(linkage, Linkage::Internal)
 }

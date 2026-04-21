@@ -5,6 +5,7 @@ pub(super) fn merge_translation_result(
     batch: &mut IrModuleBatch,
     mut result: mir_to_ir::TranslationResult<'_>,
     weak: bool,
+    local: bool,
 ) {
     let symbol_remap = build_symbol_remap(&result.symbols, &mut batch.module);
     remap_function_symbols(&mut result.func, &symbol_remap);
@@ -49,7 +50,7 @@ pub(super) fn merge_translation_result(
     batch
         .weak_undefined_symbols
         .extend(result.weak_undefined_symbols.drain());
-    batch.function_meta.push(PendingFunction { weak });
+    batch.function_meta.push(PendingFunction { weak, local });
 }
 
 /// Builds a symbol-id remap from a per-function symbol table into `module`.

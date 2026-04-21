@@ -64,12 +64,21 @@ fn set_shf_group(obj: &mut Object, section: SectionId, flags: u64) {
 /// Panics if object-file or DWARF emission encounters internally inconsistent
 /// relocation or debug data.
 pub fn emit_elf_with_data(functions: &[CompiledFunction], statics: &[StaticData]) -> Vec<u8> {
+    struct PendingStaticRelocation {
+        section: SectionId,
+        offset: u64,
+        symbol: String,
+        kind: RelocKind,
+        addend: i64,
+    }
+
     let mut obj = Object::new(BinaryFormat::Elf, Architecture::X86_64, Endianness::Little);
     let text = obj.section_id(object::write::StandardSection::Text);
 
     // Track symbol name → SymbolId so relocations can reference local data
     // symbols defined in this same object file.
     let mut sym_map: HashMap<String, SymbolId> = HashMap::new();
+    let mut pending_static_relocations: Vec<PendingStaticRelocation> = Vec::new();
 
     // Emit static data into appropriate sections based on mutability and relocations.
     if !statics.is_empty() {
@@ -164,44 +173,11 @@ pub fn emit_elf_with_data(functions: &[CompiledFunction], statics: &[StaticData]
             });
             sym_map.insert(sd.name.clone(), sid);
 
-            // Add relocations for function pointers within static data (e.g. vtables).
+            // Static data may reference functions that are defined later in this object
+            // (e.g. vtables pointing at local method shims). Queue the relocations until
+            // after we have created all function symbols so they resolve to the final
+            // local/weak symbol entries instead of placeholder undefined globals.
             for reloc in &sd.relocations {
-                let target_sid = if let Some(&existing) = sym_map.get(&reloc.symbol) {
-                    existing
-                } else {
-                    let s = obj.add_symbol(Symbol {
-                        name: reloc.symbol.as_bytes().to_vec(),
-                        value: 0,
-                        size: 0,
-                        kind: SymbolKind::Text,
-                        scope: SymbolScope::Unknown,
-                        weak: false,
-                        section: SymbolSection::Undefined,
-                        flags: SymbolFlags::None,
-                    });
-                    sym_map.insert(reloc.symbol.clone(), s);
-                    s
-                };
-                let flags = match reloc.kind {
-                    RelocKind::Abs64 => RelocationFlags::Generic {
-                        kind: RelocationKind::Absolute,
-                        encoding: RelocationEncoding::Generic,
-                        size: 64,
-                    },
-                    RelocKind::Call => RelocationFlags::Generic {
-                        kind: RelocationKind::PltRelative,
-                        encoding: RelocationEncoding::X86Branch,
-                        size: 32,
-                    },
-                    RelocKind::PcRel => RelocationFlags::Generic {
-                        kind: RelocationKind::Relative,
-                        encoding: RelocationEncoding::Generic,
-                        size: 32,
-                    },
-                    RelocKind::TlsGotTpOff => RelocationFlags::Elf {
-                        r_type: object::elf::R_X86_64_GOTTPOFF,
-                    },
-                };
                 let addend = match reloc.kind {
                     RelocKind::Abs64 => {
                         // Read existing bytes at reloc site as the addend.
@@ -217,16 +193,13 @@ pub fn emit_elf_with_data(functions: &[CompiledFunction], statics: &[StaticData]
                     }
                     _ => -4,
                 };
-                obj.add_relocation(
+                pending_static_relocations.push(PendingStaticRelocation {
                     section,
-                    ObjRelocation {
-                        offset: offset + reloc.offset as u64,
-                        symbol: target_sid,
-                        addend,
-                        flags,
-                    },
-                )
-                .expect("failed to add static data relocation");
+                    offset: offset + reloc.offset as u64,
+                    symbol: reloc.symbol.clone(),
+                    kind: reloc.kind,
+                    addend,
+                });
             }
         }
     }
@@ -272,6 +245,55 @@ pub fn emit_elf_with_data(functions: &[CompiledFunction], statics: &[StaticData]
             flags: SymbolFlags::None,
         });
         sym_map.insert(func.name.clone(), func_sid);
+    }
+
+    for reloc in pending_static_relocations {
+        let target_sid = if let Some(&existing) = sym_map.get(&reloc.symbol) {
+            existing
+        } else {
+            let sid = obj.add_symbol(Symbol {
+                name: reloc.symbol.as_bytes().to_vec(),
+                value: 0,
+                size: 0,
+                kind: SymbolKind::Text,
+                scope: SymbolScope::Unknown,
+                weak: false,
+                section: SymbolSection::Undefined,
+                flags: SymbolFlags::None,
+            });
+            sym_map.insert(reloc.symbol, sid);
+            sid
+        };
+        let flags = match reloc.kind {
+            RelocKind::Abs64 => RelocationFlags::Generic {
+                kind: RelocationKind::Absolute,
+                encoding: RelocationEncoding::Generic,
+                size: 64,
+            },
+            RelocKind::Call => RelocationFlags::Generic {
+                kind: RelocationKind::PltRelative,
+                encoding: RelocationEncoding::X86Branch,
+                size: 32,
+            },
+            RelocKind::PcRel => RelocationFlags::Generic {
+                kind: RelocationKind::Relative,
+                encoding: RelocationEncoding::Generic,
+                size: 32,
+            },
+            RelocKind::TlsGotTpOff => RelocationFlags::Elf {
+                r_type: object::elf::R_X86_64_GOTTPOFF,
+            },
+        };
+        obj.add_relocation(
+            reloc.section,
+            ObjRelocation {
+                offset: reloc.offset,
+                symbol: target_sid,
+                addend: reloc.addend,
+                flags,
+            },
+        )
+        .expect("failed to add static data relocation");
     }
 
     // Pass 2: Add relocations now that all symbols are defined.
