@@ -401,30 +401,73 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             .set_inst_origins(start_index, end_index, Origin::from_source(source));
     }
 
+    /// Resolve a debuginfo place to an already-existing IR SSA value without
+    /// emitting any additional instructions.
+    fn resolve_debug_place_value(&mut self, place: &mir::Place<'tcx>) -> Option<ValueRef> {
+        if place.projection.is_empty() {
+            return self.locals.get(place.local);
+        }
+
+        if let Some(payload) = self.simple_option_scalar_payload(place) {
+            return Some(payload);
+        }
+
+        if !self.stack_locals.is_stack(place.local)
+            && place.projection.len() == 1
+            && matches!(place.projection[0], mir::PlaceElem::Field(idx, _) if idx.as_usize() <= 1)
+        {
+            let local_ty = self.monomorphize(self.mir.local_decls[place.local].ty);
+            let is_checked_op = matches!(local_ty.kind(), ty::Tuple(fields)
+                if fields.len() == 2 && fields[1].is_bool()
+                   && !fields[0].is_bool());
+            if is_checked_op && let mir::PlaceElem::Field(idx, _) = place.projection[0] {
+                return if idx.as_usize() == 0 {
+                    self.locals.get(place.local)
+                } else {
+                    self.overflow_locals.get(place.local)
+                };
+            }
+        }
+
+        None
+    }
+
     /// Collects debuginfo variable and binding records from the MIR body.
     pub(super) fn collect_debug_variables(&mut self) {
         use rustc_middle::mir::VarDebugInfoContents;
 
+        let mut variables = HashMap::new();
         for info in &self.mir.var_debug_info {
+            let declaration = self.source_location_from_span(info.source_info.span);
+            let kind = if info.argument_index.is_some() {
+                DebugVariableKind::Parameter
+            } else {
+                DebugVariableKind::Local
+            };
+            let key = (
+                info.name.as_str().to_string(),
+                kind,
+                info.argument_index,
+                declaration.clone(),
+            );
+            let variable = *variables.entry(key).or_insert_with(|| {
+                let variable = self.function_debug.variables.len() as u32;
+                self.function_debug.variables.push(DebugVariable {
+                    name: info.name.as_str().to_string(),
+                    kind,
+                    declaration: Some(declaration.clone()),
+                });
+                variable
+            });
+
             if info.composite.is_some() {
                 continue;
             }
 
-            let variable = self.function_debug.variables.len() as u32;
-            self.function_debug.variables.push(DebugVariable {
-                name: info.name.as_str().to_string(),
-                kind: if info.argument_index.is_some() {
-                    DebugVariableKind::Parameter
-                } else {
-                    DebugVariableKind::Local
-                },
-                declaration: Some(self.source_location_from_span(info.source_info.span)),
-            });
-
             let value = match &info.value {
-                VarDebugInfoContents::Place(place) if place.projection.is_empty() => {
-                    self.locals.get(place.local).map(DebugValue::IrValue)
-                }
+                VarDebugInfoContents::Place(place) => self
+                    .resolve_debug_place_value(place)
+                    .map(DebugValue::IrValue),
                 _ => None,
             };
             let Some(value) = value else {

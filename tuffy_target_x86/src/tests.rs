@@ -2,6 +2,10 @@
 
 use crate::inst::{MInst, OpSize};
 use crate::reg::Gpr;
+use object::{Object, ObjectSection};
+use tuffy_ir::debug::{
+    DebugSource, DebugVariable, DebugVariableKind, FunctionDebugInfo, SourceLocation,
+};
 use tuffy_ir::types::Annotation;
 
 #[test]
@@ -38,6 +42,9 @@ use crate::encode;
 use crate::isel;
 use crate::legality::X86LegalityInfo;
 use tuffy_target::backend::Backend;
+use tuffy_target::types::{
+    CompiledDebugInfo, CompiledFunction, DebugLineRecord, DebugLocation, DebugVariableRange,
+};
 
 #[test]
 fn legality_uses_expand_for_divrem_wider_than_double_width() {
@@ -364,6 +371,110 @@ fn emit_elf_valid() {
 
     // Verify ELF magic number.
     assert_eq!(&elf[..4], b"\x7fELF");
+}
+
+#[test]
+fn encode_function_deduplicates_line_records() {
+    let insts = vec![
+        MInst::MovRI {
+            size: OpSize::S64,
+            dst: Gpr::Rax,
+            imm: 1,
+        },
+        MInst::MovRI {
+            size: OpSize::S64,
+            dst: Gpr::Rcx,
+            imm: 2,
+        },
+        MInst::Ret,
+    ];
+    let encoded = encode::encode_function(&insts, &[Some(11), Some(11), Some(12)]);
+
+    assert_eq!(
+        encoded.line_records.len(),
+        2,
+        "adjacent instructions with the same source should share one line record"
+    );
+    assert_eq!(encoded.line_records[0].offset, 0);
+    assert_eq!(encoded.line_records[0].source, 11);
+    assert!(
+        encoded.line_records[1].offset > encoded.line_records[0].offset,
+        "a new source should start at a later machine-code offset"
+    );
+    assert_eq!(encoded.line_records[1].source, 12);
+}
+
+#[test]
+fn emit_elf_uses_loclists_for_multi_range_variables() {
+    let debug = CompiledDebugInfo {
+        function: FunctionDebugInfo {
+            declaration: Some(SourceLocation {
+                file: "src/lib.rs".to_string(),
+                line: 1,
+                column: 1,
+            }),
+            sources: vec![DebugSource {
+                location: SourceLocation {
+                    file: "src/lib.rs".to_string(),
+                    line: 1,
+                    column: 1,
+                },
+            }],
+            variables: vec![DebugVariable {
+                name: "value".to_string(),
+                kind: DebugVariableKind::Local,
+                declaration: Some(SourceLocation {
+                    file: "src/lib.rs".to_string(),
+                    line: 1,
+                    column: 5,
+                }),
+            }],
+            bindings: vec![],
+        },
+        lines: vec![DebugLineRecord {
+            offset: 0,
+            source: 0,
+        }],
+        variables: vec![tuffy_target::types::CompiledDebugVariable {
+            variable: 0,
+            ranges: vec![
+                DebugVariableRange {
+                    start: 0,
+                    end: 1,
+                    location: DebugLocation::Register(0),
+                },
+                DebugVariableRange {
+                    start: 1,
+                    end: 3,
+                    location: DebugLocation::FrameOffset(-8),
+                },
+            ],
+        }],
+    };
+    let elf = crate::emit::emit_elf_multi(&[CompiledFunction {
+        name: "debug_ranges".to_string(),
+        code: vec![0x90, 0x90, 0xc3],
+        relocations: vec![],
+        debug: Some(debug),
+        weak: false,
+        local: false,
+        has_frame_pointer: true,
+        call_site_table: vec![],
+        callee_saved_dwarf_regs: vec![],
+        sub_amount: 0,
+    }]);
+
+    let obj = object::File::parse(&*elf).expect("emitted ELF should parse");
+    let loclists = obj
+        .section_by_name(".debug_loclists")
+        .expect("multi-range debuginfo should emit .debug_loclists");
+    assert!(
+        !loclists
+            .data()
+            .expect("debug loclists section should be readable")
+            .is_empty(),
+        ".debug_loclists should contain encoded variable ranges"
+    );
 }
 
 #[test]

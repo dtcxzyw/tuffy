@@ -293,8 +293,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 }
                 None
             }
-            Rvalue::UnaryOp(mir::UnOp::PtrMetadata, _) => {
-                unimplemented!("MIR rvalue: UnaryOp::PtrMetadata")
+            Rvalue::UnaryOp(mir::UnOp::PtrMetadata, operand) => {
+                self.extract_fat_component(&Rvalue::Use(operand.clone()))
             }
             Rvalue::UnaryOp(mir::UnOp::Neg, operand) => {
                 let v = self.translate_operand(operand)?;
@@ -499,6 +499,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         .raw(),
                 )
             }
+            Rvalue::WrapUnsafeBinder(operand, _) => self.translate_operand(operand),
             _ => None,
         }
     }

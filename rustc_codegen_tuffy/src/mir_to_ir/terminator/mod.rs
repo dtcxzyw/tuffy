@@ -141,6 +141,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     term.source_info,
                 );
             }
+            TerminatorKind::TailCall { .. } => {
+                // Tuffy IR currently has no tail-call terminator, and lowering this as
+                // a normal call would silently change stack semantics.
+                self.builder.trap(Origin::synthetic());
+            }
             TerminatorKind::InlineAsm {
                 template,
                 operands,
@@ -148,6 +153,14 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 ..
             } => {
                 self.translate_inline_asm(template, operands, targets);
+            }
+            TerminatorKind::Yield { .. } => {
+                // Coroutine yield points should have been eliminated before runtime MIR
+                // reaches codegen. Trap rather than pretending this is a normal branch.
+                self.builder.trap(Origin::synthetic());
+            }
+            TerminatorKind::CoroutineDrop => {
+                self.translate_return();
             }
             TerminatorKind::UnwindResume => {
                 // Resume unwinding: load the exception pointer from the
@@ -203,12 +216,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         Origin::synthetic(),
                     );
                 }
-                self.builder.trap(Origin::synthetic());
-            }
-            _ => {
-                // For any unhandled terminator (including Resume, Yield, etc.),
-                // treat as a trap since we don't support exception handling
-                // or async/generator constructs yet.
                 self.builder.trap(Origin::synthetic());
             }
         }

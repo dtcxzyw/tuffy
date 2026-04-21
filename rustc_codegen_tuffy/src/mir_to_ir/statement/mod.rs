@@ -223,7 +223,16 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     }
                 }
             }
-            StatementKind::StorageLive(_) | StatementKind::StorageDead(_) | StatementKind::Nop => {}
+            StatementKind::FakeRead(_)
+            | StatementKind::StorageLive(_)
+            | StatementKind::StorageDead(_)
+            | StatementKind::Retag(_, _)
+            | StatementKind::PlaceMention(_)
+            | StatementKind::AscribeUserType(_, _)
+            | StatementKind::Coverage(_)
+            | StatementKind::ConstEvalCounter
+            | StatementKind::Nop
+            | StatementKind::BackwardIncompatibleDropHint { .. } => {}
             StatementKind::SetDiscriminant {
                 box place,
                 variant_index,
@@ -282,9 +291,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         // Runtime assumption — no codegen needed.
                     }
                 }
-            }
-            _ => {
-                unimplemented!("MIR statement: {:?}", stmt.kind);
             }
         }
     }

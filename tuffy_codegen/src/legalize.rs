@@ -7927,6 +7927,10 @@ fn leg_region_yield(s: &mut State, b: &mut Builder, old_vref: ValueRef, args: &[
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tuffy_ir::debug::{
+        DebugBinding, DebugSource, DebugValue, DebugVariable, DebugVariableKind, FunctionDebugInfo,
+        SourceLocation,
+    };
     use tuffy_ir::function::RegionKind;
     use tuffy_ir::module::Module;
     use tuffy_ir_interp::{ExecMode, InterpResult, Interpreter, Value};
@@ -9241,5 +9245,113 @@ mod tests {
             InterpResult::Ok(Some(Value::Bool(true))) => {}
             other => panic!("unexpected result: {other}"),
         }
+    }
+
+    #[test]
+    fn legalize_remaps_debug_bindings_for_wide_values() {
+        let mut symbols = SymbolTable::new();
+        let name = symbols.intern("debug_binding_remap");
+        let wide_ann = IntAnnotation {
+            bit_width: 128,
+            signedness: IntSignedness::Unsigned,
+        };
+        let mut func = Function::new(name, vec![], vec![], vec![], Some(Type::Int), None);
+        let mut b = Builder::new(&mut func);
+        let root = b.create_region(RegionKind::Function);
+        b.enter_region(root);
+        let bb = b.create_block();
+        b.switch_to_block(bb);
+        let mem0 = b.add_block_arg(bb, Type::Mem, None);
+        let lhs = b.iconst(BigInt::from(1u8) << 96, 128, IntSignedness::Unsigned, o());
+        let rhs = b.iconst(7i64, 128, IntSignedness::Unsigned, o());
+        let source = 0;
+        let sum = b.add(
+            Operand::annotated(lhs.raw(), Annotation::Int(wide_ann)).into(),
+            Operand::annotated(rhs.raw(), Annotation::Int(wide_ann)).into(),
+            wide_ann,
+            Origin::from_source(source),
+        );
+        b.ret(Some(sum.into()), None, mem0.into(), o());
+        b.exit_region();
+
+        let old_value = sum.raw();
+        func.debug = FunctionDebugInfo {
+            declaration: Some(SourceLocation {
+                file: "debug_binding_remap.rs".to_string(),
+                line: 1,
+                column: 1,
+            }),
+            sources: vec![DebugSource {
+                location: SourceLocation {
+                    file: "debug_binding_remap.rs".to_string(),
+                    line: 1,
+                    column: 1,
+                },
+            }],
+            variables: vec![DebugVariable {
+                name: "sum".to_string(),
+                kind: DebugVariableKind::Local,
+                declaration: Some(SourceLocation {
+                    file: "debug_binding_remap.rs".to_string(),
+                    line: 1,
+                    column: 1,
+                }),
+            }],
+            bindings: vec![DebugBinding {
+                source,
+                variable: 0,
+                value: DebugValue::IrValue(old_value),
+            }],
+        };
+
+        let legalized = legalize(&func, &X86LegalityInfo, &mut symbols).expect("legalized");
+        let DebugValue::IrValue(remapped) = legalized.debug.bindings[0].value;
+        assert_ne!(
+            remapped, old_value,
+            "wide legalization should remap debug bindings away from removed values"
+        );
+        assert!(
+            legalized.value_type(remapped).is_some(),
+            "remapped debug binding should refer to a value that still exists"
+        );
+    }
+
+    #[test]
+    fn legalize_preserves_source_origins_for_wide_expansions() {
+        let mut symbols = SymbolTable::new();
+        let name = symbols.intern("wide_origin_preserve");
+        let wide_ann = IntAnnotation {
+            bit_width: 128,
+            signedness: IntSignedness::Unsigned,
+        };
+        let mut func = Function::new(name, vec![], vec![], vec![], Some(Type::Int), None);
+        let mut b = Builder::new(&mut func);
+        let root = b.create_region(RegionKind::Function);
+        b.enter_region(root);
+        let bb = b.create_block();
+        b.switch_to_block(bb);
+        let mem0 = b.add_block_arg(bb, Type::Mem, None);
+        let lhs = b.iconst(BigInt::from(1u8) << 96, 128, IntSignedness::Unsigned, o());
+        let rhs = b.iconst(7i64, 128, IntSignedness::Unsigned, o());
+        let source = 42;
+        let sum = b.add(
+            Operand::annotated(lhs.raw(), Annotation::Int(wide_ann)).into(),
+            Operand::annotated(rhs.raw(), Annotation::Int(wide_ann)).into(),
+            wide_ann,
+            Origin::from_source(source),
+        );
+        b.ret(Some(sum.into()), None, mem0.into(), o());
+        b.exit_region();
+
+        let legalized = legalize(&func, &X86LegalityInfo, &mut symbols).expect("legalized");
+        let sourced_insts = legalized
+            .inst_pool
+            .iter_insts()
+            .filter(|(_, inst)| inst.origin.sources.contains(&source))
+            .count();
+        assert!(
+            sourced_insts > 1,
+            "wide legalization should preserve the original source across the expanded instruction sequence"
+        );
     }
 }

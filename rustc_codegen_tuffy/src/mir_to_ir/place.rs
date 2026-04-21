@@ -79,7 +79,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     }
 
     /// Returns the cached payload for a simple scalar `Option<T>` projection.
-    fn simple_option_scalar_payload(&mut self, place: &Place<'tcx>) -> Option<ValueRef> {
+    pub(super) fn simple_option_scalar_payload(&mut self, place: &Place<'tcx>) -> Option<ValueRef> {
         if place.projection.len() != 2
             || self.stack_locals.is_stack(place.local)
             || !matches!(place.projection[1], PlaceElem::Field(idx, _) if idx.as_usize() == 0)
@@ -444,6 +444,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     // variant-specific field offsets.
                     downcast_variant = Some(variant_idx);
                 }
+                PlaceElem::OpaqueCast(ty) | PlaceElem::UnwrapUnsafeBinder(ty) => {
+                    // These projections only refine the static type carried by the
+                    // place. The underlying address remains unchanged.
+                    cur_ty = self.monomorphize(ty);
+                }
                 PlaceElem::ConstantIndex {
                     offset, from_end, ..
                 } => {
@@ -548,9 +553,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         // Slice: result is still a slice
                         cur_ty
                     };
-                }
-                _ => {
-                    unimplemented!("MIR place projection: {:?}", elem);
                 }
             }
         }

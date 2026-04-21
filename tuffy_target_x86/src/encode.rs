@@ -594,9 +594,9 @@ pub fn encode_function(insts: &[PInst], inst_sources: &[Option<u32>]) -> EncodeR
         encode_inst(inst, &mut ctx);
         if let Some(source) = source
             && ctx.pos > start
-            && line_records.last().is_none_or(|last: &DebugLineRecord| {
-                last.offset != start as u32 || last.source != source
-            })
+            && line_records
+                .last()
+                .is_none_or(|last: &DebugLineRecord| last.source != source)
         {
             line_records.push(DebugLineRecord {
                 offset: start as u32,

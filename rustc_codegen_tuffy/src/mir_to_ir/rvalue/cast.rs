@@ -11,6 +11,25 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     ) -> Option<ValueRef> {
         let val = self.translate_operand(operand)?;
         match kind {
+            CastKind::PointerExposeProvenance => {
+                let target_ty_m = self.monomorphize(*target_ty);
+                if target_ty_m.is_integral() {
+                    Some(self.coerce_to_int(val))
+                } else {
+                    Some(val)
+                }
+            }
+            CastKind::PointerWithExposedProvenance => {
+                let target_ty_m = self.monomorphize(*target_ty);
+                if matches!(
+                    target_ty_m.kind(),
+                    ty::RawPtr(..) | ty::Ref(..) | ty::FnPtr(..)
+                ) {
+                    Some(self.coerce_to_ptr(val))
+                } else {
+                    Some(val)
+                }
+            }
             CastKind::IntToInt => {
                 // Use projected type so field accesses like
                 // _struct.field resolve to the field type, not
@@ -571,6 +590,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     .fp_convert(val.into(), dst_ft, Origin::synthetic());
                 Some(converted.raw())
             }
+            CastKind::Subtype => Some(val),
             // Pointer casts and transmutes are bitwise moves.
             _ => {
                 let target_ty_mono = self.monomorphize(*target_ty);

@@ -4,8 +4,9 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use gimli::write::{
-    Address, AttributeValue, Dwarf, EndianVec, Expression, LineProgram, LineString, RelocateWriter,
-    Relocation as DwarfRelocation, RelocationTarget as DwarfRelocationTarget, Sections,
+    Address, AttributeValue, Dwarf, EndianVec, Expression, LineProgram, LineString, Location,
+    LocationList, RelocateWriter, Relocation as DwarfRelocation,
+    RelocationTarget as DwarfRelocationTarget, Sections,
 };
 use gimli::{Encoding, Format, LineEncoding, Register, SectionId as DwarfSectionId};
 use object::write::{
@@ -417,6 +418,25 @@ fn debug_expr(location: &DebugLocation) -> Expression {
     expr
 }
 
+/// Build a DWARF location list for one variable that moves across machine ranges.
+fn debug_location_list(symbol_index: usize, ranges: &[DebugVariableRange]) -> Option<LocationList> {
+    let mut locations = Vec::new();
+    for range in ranges {
+        if range.start >= range.end {
+            continue;
+        }
+        locations.push(Location::StartLength {
+            begin: Address::Symbol {
+                symbol: symbol_index,
+                addend: i64::from(range.start),
+            },
+            length: u64::from(range.end - range.start),
+            data: debug_expr(&range.location),
+        });
+    }
+    (!locations.is_empty()).then_some(LocationList(locations))
+}
+
 /// Build the DWARF frame-base expression used for stack-relative locations.
 fn frame_base_expr() -> Expression {
     let mut expr = Expression::new();
@@ -588,17 +608,6 @@ fn build_dwarf_unit(
         let Some(variable) = debug.function.variables.get(compiled.variable as usize) else {
             continue;
         };
-        if compiled.ranges.len() != 1 {
-            continue;
-        }
-        let DebugVariableRange {
-            start,
-            end,
-            location,
-        } = &compiled.ranges[0];
-        if *start != 0 || *end != func.code.len() as u32 {
-            continue;
-        }
         let tag = match variable.kind {
             tuffy_ir::debug::DebugVariableKind::Parameter => gimli::DW_TAG_formal_parameter,
             tuffy_ir::debug::DebugVariableKind::Local => gimli::DW_TAG_variable,
@@ -612,6 +621,22 @@ fn build_dwarf_unit(
             );
             (file_id, decl.line, decl.column)
         });
+        let location_attr = match compiled.ranges.as_slice() {
+            [
+                DebugVariableRange {
+                    start,
+                    end,
+                    location,
+                },
+            ] if *start == 0 && *end == func.code.len() as u32 => {
+                AttributeValue::Exprloc(debug_expr(location))
+            }
+            ranges => {
+                let loc_list = debug_location_list(symbol_index, ranges)?;
+                let loc_id = unit.locations.add(loc_list);
+                AttributeValue::LocationListRef(loc_id)
+            }
+        };
         let entry_id = unit.add(subprogram, tag);
         let entry = unit.get_mut(entry_id);
         entry.set(
@@ -632,10 +657,7 @@ fn build_dwarf_unit(
                 AttributeValue::Udata(u64::from(column)),
             );
         }
-        entry.set(
-            gimli::DW_AT_location,
-            AttributeValue::Exprloc(debug_expr(location)),
-        );
+        entry.set(gimli::DW_AT_location, location_attr);
     }
 
     Some(unit)

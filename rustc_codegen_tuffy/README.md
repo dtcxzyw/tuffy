@@ -149,7 +149,8 @@ Compiles and runs `tests/fixtures/hello.rs`, verifying that `println!("Hello, wo
 `-C debuginfo` now emits embedded DWARF into the generated object files.
 Source locations are derived from MIR `SourceInfo`, attached to IR instruction
 origins, preserved through legalization, and lowered into x86 machine-code line
-records plus best-effort parameter/local variable locations.
+records plus parameter/local variable locations, including DWARF location lists
+when a variable moves across multiple machine-code ranges.
 
 ### UI Tests
 

@@ -21,7 +21,7 @@ pub struct DebugSource {
 }
 
 /// The kind of source-level variable being described.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DebugVariableKind {
     /// Function parameter.
     Parameter,
