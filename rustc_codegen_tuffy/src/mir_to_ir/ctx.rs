@@ -728,6 +728,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 ptr: ValueRef,
                 slot: ValueRef,
                 sz: u64,
+                align: u32,
             },
             /// Two-register aggregate → store lo and hi halves.
             TwoReg {
@@ -803,19 +804,19 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                     self.stack_locals.mark(local);
                 } else if sz > part_bytes {
                     // Larger memory aggregates are passed indirectly.
+                    let ty_align = type_align(self.tcx, ty).unwrap_or(8) as u32;
                     let ptr =
                         self.builder
                             .param(param_idx, Type::Ptr(0), None, Origin::synthetic());
                     param_idx += 1;
-                    let local_slot = self.builder.stack_slot(
-                        sz as u32,
-                        type_align(self.tcx, ty).unwrap_or(8) as u32,
-                        Origin::synthetic(),
-                    );
+                    let local_slot =
+                        self.builder
+                            .stack_slot(sz as u32, ty_align, Origin::synthetic());
                     deferred.push(Deferred::LargeCopy {
                         ptr,
                         slot: local_slot,
                         sz,
+                        align: ty_align,
                     });
                     self.locals.set(local, local_slot);
                     self.stack_locals.mark(local);
@@ -883,20 +884,20 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
 
                 if is_large {
                     // Large parameter: receive pointer from caller
+                    let ty_align = type_align(self.tcx, ty).unwrap_or(8) as u32;
                     let ptr =
                         self.builder
                             .param(param_idx, Type::Ptr(0), None, Origin::synthetic());
 
                     // Allocate local stack space
-                    let local_slot = self.builder.stack_slot(
-                        sz as u32,
-                        type_align(self.tcx, ty).unwrap_or(8) as u32,
-                        Origin::synthetic(),
-                    );
+                    let local_slot =
+                        self.builder
+                            .stack_slot(sz as u32, ty_align, Origin::synthetic());
                     deferred.push(Deferred::LargeCopy {
                         ptr,
                         slot: local_slot,
                         sz,
+                        align: ty_align,
                     });
 
                     // Use the local slot, not the parameter pointer
@@ -928,14 +929,18 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         // --- Phase 2: emit stores and mem_copy after all params are received ---
         for action in deferred {
             match action {
-                Deferred::LargeCopy { ptr, slot, sz } => {
+                Deferred::LargeCopy {
+                    ptr,
+                    slot,
+                    sz,
+                    align,
+                } => {
                     let size_val = self.builder.iconst(
                         sz as i64,
                         64,
                         IntSignedness::DontCare,
                         Origin::synthetic(),
                     );
-                    let align = 8;
                     let slot_annotated = Operand::annotated(slot, Annotation::Align(align));
                     let ptr_annotated = Operand::annotated(ptr, Annotation::Align(align));
                     let new_mem = self.builder.mem_copy(

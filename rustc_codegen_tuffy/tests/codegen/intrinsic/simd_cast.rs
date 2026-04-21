@@ -14,7 +14,7 @@
 // CHECK:     v2: ptr = param 1
 // CHECK:     v3: ptr = stack_slot 16 align 16
 // CHECK:     v4: int:i64 = iconst 16
-// CHECK:     v5: mem = memcopy v3:align8, v2:align8, v4, v0
+// CHECK:     v5: mem = memcopy v3:align16, v2:align16, v4, v0
 // CHECK:     v6: int:i64 = load.8 v3, v5
 // CHECK:     v7: mem = store.8 v6, v1, v5
 // CHECK:     v8: int:i64 = iconst 8
@@ -160,9 +160,9 @@
 // CHECK:     v4: ptr = param 2
 // CHECK:     v5: ptr = stack_slot 16 align 16
 // CHECK:     v6: int:i64 = iconst 16
-// CHECK:     v7: mem = memcopy v3:align8, v2:align8, v6, v0
+// CHECK:     v7: mem = memcopy v3:align16, v2:align16, v6, v0
 // CHECK:     v8: int:i64 = iconst 16
-// CHECK:     v9: mem = memcopy v5:align8, v4:align8, v8, v7
+// CHECK:     v9: mem = memcopy v5:align16, v4:align16, v8, v7
 // CHECK:     v10: ptr = stack_slot 32 align 32
 // CHECK:     v11: ptr = stack_slot 16 align 16
 // CHECK:     v12: ptr = stack_slot 32 align 32
@@ -649,9 +649,9 @@
 // CHECK:     v4: ptr = param 2
 // CHECK:     v5: ptr = stack_slot 16 align 16
 // CHECK:     v6: int:i64 = iconst 16
-// CHECK:     v7: mem = memcopy v3:align8, v2:align8, v6, v0
+// CHECK:     v7: mem = memcopy v3:align16, v2:align16, v6, v0
 // CHECK:     v8: int:i64 = iconst 16
-// CHECK:     v9: mem = memcopy v5:align8, v4:align8, v8, v7
+// CHECK:     v9: mem = memcopy v5:align16, v4:align16, v8, v7
 // CHECK:     v10: ptr = stack_slot 16
 // CHECK:     v11: int:i64 = iconst 16
 // CHECK:     v12: mem = memcopy v10:align16, v3:align16, v11, v9

@@ -30,7 +30,7 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                 IntSignedness::DontCare,
                 Origin::synthetic(),
             );
-            let align = 8; // TODO: compute proper alignment
+            let align = type_align(self.tcx, ret_mir_ty).unwrap_or(8) as u32;
             let sret_annotated =
                 tuffy_ir::instruction::Operand::annotated(sret, Annotation::Align(align));
             let local_annotated =

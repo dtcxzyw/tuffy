@@ -20,19 +20,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             .map(|sz| sz * 8)
             .unwrap_or(64);
 
-        let mut discr_val = match self.translate_operand(discr) {
-            Some(v) => v,
-            None => {
-                // The discriminant local has no value yet (e.g. defined in a
-                // later MIR block that hasn't been translated).  Use zero as
-                // a conservative default — this is correct for the common
-                // case of `is_val_statically_known` (always false/0).
-                // TODO: process blocks in reverse post-order to avoid this.
-                self.builder
-                    .iconst(0, 64, IntSignedness::DontCare, Origin::synthetic())
-                    .raw()
-            }
-        };
+        // Basic blocks are translated in reverse post-order and mutated locals
+        // are stack-promoted before block translation, so a SwitchInt operand
+        // should always have a materialized runtime value by the time we lower
+        // the terminator.
+        let mut discr_val = self
+            .translate_operand(discr)
+            .expect("SwitchInt discriminant should be available before lowering");
 
         // If the discriminant is a pointer, it may be:
         // (a) an integer type > 8 bytes whose address was returned by

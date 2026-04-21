@@ -25,11 +25,11 @@
 // CHECK:     v6: ptr = param 3
 // CHECK:     v7: ptr = stack_slot 16 align 16
 // CHECK:     v8: int:i64 = iconst 16
-// CHECK:     v9: mem = memcopy v3:align8, v2:align8, v8, v0
+// CHECK:     v9: mem = memcopy v3:align16, v2:align16, v8, v0
 // CHECK:     v10: int:i64 = iconst 16
-// CHECK:     v11: mem = memcopy v5:align8, v4:align8, v10, v9
+// CHECK:     v11: mem = memcopy v5:align16, v4:align16, v10, v9
 // CHECK:     v12: int:i64 = iconst 16
-// CHECK:     v13: mem = memcopy v7:align8, v6:align8, v12, v11
+// CHECK:     v13: mem = memcopy v7:align16, v6:align16, v12, v11
 // CHECK:     v14: ptr = stack_slot 16
 // CHECK:     v15: f32 = load.4 v3, v13
 // CHECK:     v16: f32 = load.4 v5, v13
