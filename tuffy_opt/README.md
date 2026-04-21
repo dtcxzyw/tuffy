@@ -7,6 +7,11 @@ This crate hosts IR-level optimization passes operating on `tuffy_ir::Module` / 
 ## Status
 
 - Conservative stack-slot `sroa/mem2reg` runs before peephole cleanup.
+- Conservative dead-store elimination now removes overwritten private stack-slot
+  stores that are proven unobserved before a later overwrite, especially in
+  functions where the slot still escapes and therefore cannot be promoted.
+- Local dead-code elimination now removes dead pure instruction chains exposed by
+  promotion, DSE, peepholes, and CFG cleanup.
 - Module optimization now includes a direct same-module inliner for eligible
   `symbol_addr` call sites, followed by a second cleanup round on changed
   callers.
@@ -21,6 +26,9 @@ This crate hosts IR-level optimization passes operating on `tuffy_ir::Module` / 
   narrower integer constants, by widening those constants to the slot slice
   shape during SSA reconstruction.
 - Promotion is intentionally conservative around escaping pointers, atomics, bulk memory ops, and unwind-cleanup calls.
+- DSE is intentionally conservative around alias ambiguity, calls, atomics, bulk
+  memory ops, and non-constant pointer arithmetic; it only reasons about
+  stack-slot roots plus constant-offset `ptradd` slices.
 - Lean-owned peephole framework is implemented.
 - Default peephole rules are exported from `lean/TuffyLean/Rewrites/Basic.lean`.
 - Constant folding is modeled as peephole rules and exported through the same Lean JSON pipeline.
@@ -50,7 +58,8 @@ This crate hosts IR-level optimization passes operating on `tuffy_ir::Module` / 
 `optimize_module` currently runs:
 
 1. function-local cleanup for every function:
-   promotion, peepholes, CFG cleanup, tail recursion loopification
+   promotion, dead-store elimination, peepholes, dead-code elimination, CFG
+   cleanup, tail recursion loopification
 2. module-level bulk memory and scalar-swap idiom formation
 3. direct same-module inlining across the module
 4. function-local cleanup again for callers changed by inlining

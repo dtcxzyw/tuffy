@@ -35,9 +35,9 @@ fn loads_default_rule_set() {
 
 #[test]
 fn loads_generated_cleanup_manifest() {
-    assert_eq!(generated_cleanup_pass_count(), 5);
+    assert_eq!(generated_cleanup_pass_count(), 7);
     assert_eq!(generated_verified_cleanup_pass_count(), 1);
-    assert_eq!(generated_legacy_cleanup_pass_count(), 4);
+    assert_eq!(generated_legacy_cleanup_pass_count(), 6);
 }
 
 #[test]
@@ -68,6 +68,140 @@ fn skips_expensive_peephole_fixpoint_for_large_functions() {
         output.contains(" = add "),
         "large function should remain largely untranslated by peepholes:\n{output}"
     );
+}
+
+#[test]
+fn eliminates_dead_pure_instruction_chains() {
+    let input = r#"
+func @dce_chain(int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    v2: int:s32 = iconst 4
+    v3: int:s32 = add v1, v2
+    ret v1, v0
+}
+"#;
+    let (output, stats) = optimize(input);
+    let expected = r#"func @dce_chain(int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    ret v1, v0
+}"#;
+    assert_eq!(normalize_ir(&output), normalize_ir(expected));
+    assert_eq!(stats.per_rule["dce_remove_dead_inst"], 2);
+}
+
+#[test]
+fn eliminates_dead_call_ret2_extracts() {
+    let input = r#"
+func @dead_call_ret2(int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: int:s32 = param 0
+    v2: ptr = symbol_addr @extern_pair
+    v3: mem, v4: int:s32 = call v2(v1), v0 -> int:s32
+    v5: int:s32 = call_ret2 v3
+    ret v4, v3
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        !output.contains(" = call_ret2 "),
+        "unused secondary call return should be removed:\n{output}"
+    );
+    assert_eq!(stats.per_rule["dce_remove_dead_inst"], 1);
+}
+
+#[test]
+fn eliminates_overwritten_private_store_before_escape() {
+    let input = r#"
+func @dse_before_escape(int:s32, int:s32) {
+  bb0(v0: mem):
+    v1: ptr = stack_slot 4
+    v2: int:s32 = param 0
+    v3: int:s32 = param 1
+    v4: mem = store.4 v2, v1, v0
+    v5: mem = store.4 v3, v1, v4
+    v6: ptr = symbol_addr @extern_sink
+    v7: mem = call v6(v1), v5
+    ret v7
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert!(
+        output.contains("stack_slot"),
+        "escaping slot must stay in memory:\n{output}"
+    );
+    assert_eq!(
+        output.matches("store.4").count(),
+        1,
+        "only one store should remain:\n{output}"
+    );
+    assert_eq!(stats.per_rule["dse_remove_dead_store"], 1);
+    assert_eq!(stats.eliminated_stores, 1);
+}
+
+#[test]
+fn keeps_private_store_observed_by_intervening_load() {
+    let input = r#"
+func @dse_respects_load(int:s32, int:s32) -> int:s32 {
+  bb0(v0: mem):
+    v1: ptr = stack_slot 4
+    v2: int:s32 = param 0
+    v3: int:s32 = param 1
+    v4: mem = store.4 v2, v1, v0
+    v5: int:s32 = load.4 v1, v4
+    v6: mem = store.4 v3, v1, v4
+    v7: ptr = symbol_addr @extern_sink
+    v8: mem = call v7(v1), v6
+    ret v5, v8
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert_eq!(
+        output.matches("store.4").count(),
+        2,
+        "intervening load should keep both stores:\n{output}"
+    );
+    assert!(!stats.per_rule.contains_key("dse_remove_dead_store"));
+}
+
+#[test]
+fn removes_dead_private_address_chain_after_dse() {
+    let input = r#"
+func @dse_dead_addr_chain(int:s32, int:s32) {
+  bb0(v0: mem):
+    v1: ptr = stack_slot 8
+    v2: int:s32 = param 0
+    v3: int:s32 = param 1
+    v4: int:s64 = iconst 4
+    v5: ptr = ptradd v1, v4
+    v6: mem = store.4 v2, v5, v0
+    v7: int:s64 = iconst 4
+    v8: ptr = ptradd v1, v7
+    v9: mem = store.4 v3, v8, v6
+    v10: ptr = symbol_addr @extern_sink
+    v11: mem = call v10(v1), v9
+    ret v11
+}
+"#;
+    let (output, stats) = optimize(input);
+    assert_eq!(
+        output.matches("store.4").count(),
+        1,
+        "dead store should vanish:\n{output}"
+    );
+    assert_eq!(
+        output.matches("ptradd").count(),
+        1,
+        "dead address chain should be cleaned up:\n{output}"
+    );
+    assert_eq!(
+        output.matches("iconst 4").count(),
+        1,
+        "dead offset constant should be cleaned up:\n{output}"
+    );
+    assert_eq!(stats.per_rule["dse_remove_dead_store"], 1);
+    assert_eq!(stats.per_rule["dce_remove_dead_inst"], 2);
 }
 
 #[test]
@@ -222,10 +356,6 @@ func @branch_and_mask_three(bool) {
     let expected = r#"func @branch_and_mask_three(bool) {
   bb0:
     v0: bool = param 0
-    v1: int:u1 = iconst 1
-    v2: int:u1 = iconst 0
-    v3: int:u1 = select v0, v1, v2
-    v4: int:u2 = add v3, v1
     unreachable
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
@@ -251,12 +381,6 @@ func @branch_and_mask_two(bool) {
     let expected = r#"func @branch_and_mask_two(bool) {
   bb0:
     v0: bool = param 0
-    v1: int:u1 = iconst 1
-    v2: int:u1 = iconst 0
-    v3: int:u1 = select v0, v1, v2
-    v4: int:u2 = iconst 2
-    v5: int:u2 = and v3, v4
-    v6: int:u2 = add v5, v1
     unreachable
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
@@ -322,10 +446,6 @@ func @mask_value(bool) {
     let expected = r#"func @mask_value(bool) {
   bb0:
     v0: bool = param 0
-    v1: int:u1 = iconst 1
-    v2: int:u1 = iconst 0
-    v3: int:u1 = select v0, v1, v2
-    v4: int:u2 = add v3, v1
     unreachable
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
@@ -712,15 +832,14 @@ func @range_refine(int:u64) {
     v1: int:u64 = param 0
     v2: int:u4 = iconst 10
     v3: bool = icmp.lt v1, v2
-    brif v3, bb1(v0), bb2(v0)
+    brif v3, bb3(v0), bb2(v0)
   bb1(v5: mem):
-    v6: int:u4 = iconst 12
     br bb3(v5)
-  bb2(v8: mem):
-    ret v8
-  bb3(v10: mem):
-    ret v10
-  bb4(v12: mem):
+  bb2(v7: mem):
+    ret v7
+  bb3(v9: mem):
+    ret v9
+  bb4(v11: mem):
     trap
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
@@ -756,11 +875,11 @@ func @ptr_heavy_range_refine(ptr, int:u64) {
         "pointer-heavy branch should fold:\n{output}"
     );
     assert!(
-        output.contains("ptrtoaddr"),
-        "pointer op should remain unrelated:\n{output}"
+        !output.contains("ptrtoaddr"),
+        "dead pointer op should be removed by DCE:\n{output}"
     );
     assert!(
-        output.contains("br bb3"),
+        output.contains("brif v4, bb3(v0), bb2(v0)"),
         "refined integer branch should fold in pointer-heavy function:\n{output}"
     );
 }
@@ -2489,7 +2608,6 @@ func @icmp_value_root(bool) {
     let expected = r#"func @icmp_value_root(bool) {
   bb0:
     v0: bool = param 0
-    v1: bool = bxor v0, v0
     unreachable
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
@@ -2512,7 +2630,6 @@ func @mask_i1(int:i1) {
     let expected = r#"func @mask_i1(int:i1) {
   bb0:
     v0: int:i1 = param 0
-    v1: int:i1 = add v0, v0
     unreachable
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
@@ -2535,9 +2652,6 @@ func @mask_s1(int:s1) {
     let expected = r#"func @mask_s1(int:s1) {
   bb0:
     v0: int:s1 = param 0
-    v1: int:u1 = iconst 1
-    v2: int:u1 = and v0, v1
-    v3: int:s1 = add v2, v0
     unreachable
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
@@ -2567,7 +2681,6 @@ func @fold_integer_chain() {
     let (output, stats) = optimize(input);
     let expected = r#"func @fold_integer_chain() {
   bb0:
-    v0: int:u5 = iconst 20
     unreachable
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
@@ -2593,7 +2706,6 @@ func @fold_select(int:s32) {
     let expected = r#"func @fold_select(int:s32) {
   bb0:
     v0: int:s32 = param 0
-    v1: int:u3 = iconst 7
     unreachable
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
@@ -2614,7 +2726,6 @@ func @fold_annotated_add() {
     let (output, stats) = optimize(input);
     let expected = r#"func @fold_annotated_add() {
   bb0:
-    v0: int:u1 = iconst 1
     unreachable
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
@@ -2661,7 +2772,6 @@ func @fold_bit_ops() {
     let (output, stats) = optimize(input);
     let expected = r#"func @fold_bit_ops() {
   bb0:
-    v0: int:u4 = iconst 9
     unreachable
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));
@@ -2684,9 +2794,6 @@ func @skip_div_zero() {
     let (output, stats) = optimize(input);
     let expected = r#"func @skip_div_zero() {
   bb0:
-    v0: int:s32 = iconst 1
-    v1: int:s32 = iconst 0
-    v2: int:s32 = div v0, v1
     unreachable
 }"#;
     assert_eq!(normalize_ir(&output), normalize_ir(expected));

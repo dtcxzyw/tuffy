@@ -34,11 +34,23 @@ def allCleanupPassFamilies : List CleanupPassFamily :=
       verification := .legacy
     },
     {
+      name := "dse"
+      stage := .local
+      runner := "dse"
+      verification := .legacy
+    },
+    {
       name := "peephole"
       stage := .local
       runner := "peephole"
       verification := .verified
       leanSource := some "TuffyLean.Rewrites.Basic"
+    },
+    {
+      name := "dce"
+      stage := .local
+      runner := "dce"
+      verification := .legacy
     },
     {
       name := "cfg_cleanup"

@@ -6,6 +6,10 @@ mod bulk_memory;
 mod cfg;
 /// Optimization module `cfg_cleanup`.
 mod cfg_cleanup;
+/// Optimization module `dce`.
+mod dce;
+/// Optimization module `dse`.
+mod dse;
 /// Optimization module `inline`.
 mod inline;
 /// Optimization module `peephole`.

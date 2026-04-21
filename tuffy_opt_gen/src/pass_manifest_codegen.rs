@@ -259,7 +259,9 @@ fn generate_module_dispatch(
 fn local_runner_expr(runner: &str) -> Result<&'static str, GenerateError> {
     match runner {
         "promote" => Ok("crate::promote::promote_function(func)"),
+        "dse" => Ok("crate::dse::optimize_function(func)"),
         "peephole" => Ok("crate::peephole::optimize_function(func)"),
+        "dce" => Ok("crate::dce::optimize_function(func)"),
         "range" => Ok("crate::range::optimize_function(func)"),
         "cfg_cleanup" => Ok("crate::cfg_cleanup::optimize_function(func)"),
         _ => Err(GenerateError::UnsupportedPassFamilyRunner(
