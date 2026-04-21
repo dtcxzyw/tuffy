@@ -181,10 +181,6 @@ pub(super) fn format_post_opt_module_dump(module: &IrModule) -> String {
 pub(super) fn is_weak_linkage(linkage: Linkage) -> bool {
     matches!(
         linkage,
-        Linkage::Internal
-            | Linkage::LinkOnceODR
-            | Linkage::WeakODR
-            | Linkage::LinkOnceAny
-            | Linkage::WeakAny
+        Linkage::LinkOnceODR | Linkage::WeakODR | Linkage::LinkOnceAny | Linkage::WeakAny
     )
 }

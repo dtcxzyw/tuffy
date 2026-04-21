@@ -1,4 +1,6 @@
-use super::batch::{optimize_ir_batch, verify_ir_batch};
+use rustc_hir::attrs::Linkage;
+
+use super::batch::{is_weak_linkage, optimize_ir_batch, verify_ir_batch};
 use super::{IrModuleBatch, format_post_opt_module_dump, merge_translation_result};
 use crate::mir_to_ir::TranslationResult;
 use tuffy_ir::instruction::Op;
@@ -160,4 +162,11 @@ ret v0
     let dump = format_post_opt_module_dump(&batch.module);
     assert!(dump.contains("; post-opt module test"));
     assert!(dump.contains("func @only()"));
+}
+
+#[test]
+fn internal_linkage_is_not_treated_as_weak() {
+    assert!(!is_weak_linkage(Linkage::Internal));
+    assert!(is_weak_linkage(Linkage::WeakAny));
+    assert!(is_weak_linkage(Linkage::WeakODR));
 }

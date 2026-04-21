@@ -1664,8 +1664,10 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
         // pointer type (e.g. &mut Formatter instead of &&mut Formatter).
         // Only apply when the argument is a Ptr (stack slot address) — if
         // it's already an Int/scalar, the extra indirection doesn't exist.
+        // Hidden pre-arguments like SRET occupy the front of `ir_args`, so
+        // the runtime Self argument starts at `pre_args_count`, not always 0.
         if needs_self_deref {
-            let self_idx = 0;
+            let self_idx = pre_args_count;
             if self_idx < ir_args.len() {
                 let arg_ty = self.builder.value_type(ir_args[self_idx].value);
                 if matches!(arg_ty, Some(Type::Ptr(_))) {
