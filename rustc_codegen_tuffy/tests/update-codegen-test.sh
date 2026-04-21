@@ -8,7 +8,7 @@ if [ $# -ne 1 ]; then
     exit 1
 fi
 
-TEST_FILE="$1"
+TEST_FILE="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
 
 if [ ! -f "$TEST_FILE" ]; then
     echo "ERROR: File not found: $TEST_FILE"

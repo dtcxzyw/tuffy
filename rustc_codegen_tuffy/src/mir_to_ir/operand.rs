@@ -57,61 +57,37 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         && let Some(slot) = val
                     {
                         let ty = self.monomorphize(self.mir.local_decls[place.local].ty);
-                        let size = type_size(self.tcx, ty).unwrap_or(8);
+                        let size = type_size(self.tcx, ty).unwrap_or(8) as u32;
                         let slot_size = self.builder.stack_slot_size(slot);
-                        let ir_ty = translate_ty(self.tcx, ty);
                         let is_slot_ptr =
                             matches!(self.builder.value_type(slot), Some(Type::Ptr(_)));
-                        let should_load_stack_int = matches!(ir_ty, Some(Type::Int))
-                            && is_slot_ptr
-                            && ((size <= 8 && slot_size.is_some_and(|sz| sz <= 8))
-                                || (size > 8
-                                    && ty.is_integral()
-                                    && slot_size.is_some_and(|sz| u64::from(sz) >= size)));
-                        let should_load_stack_ptr = matches!(ir_ty, Some(Type::Ptr(_)))
-                            && is_slot_ptr
-                            && size <= 8
-                            && slot_size.is_some_and(|sz| sz <= 8);
-                        let should_load_stack_scalar = is_slot_ptr
-                            && size <= 8
-                            && slot_size.is_some_and(|sz| sz <= 8)
-                            && matches!(ir_ty, Some(Type::Bool | Type::Float(_)));
-                        // Small aggregate types (closures, tuples, ADTs) where
-                        // translate_ty returns None but the value fits in a
-                        // register.  Without this, the stack slot address is
-                        // returned instead of the contained value.
-                        let should_load_stack_aggregate = ir_ty.is_none()
-                            && is_slot_ptr
-                            && size > 0
-                            && size <= 8
-                            && slot_size.is_some_and(|sz| sz <= 8);
-                        if should_load_stack_int
-                            || should_load_stack_ptr
-                            || should_load_stack_scalar
-                            || should_load_stack_aggregate
+                        if is_slot_ptr
+                            && let Some((load_ty, load_bytes, ann)) =
+                                scalar_value_info(self.tcx, ty)
+                            && slot_size.is_some_and(|sz| sz >= load_bytes)
                         {
-                            let load_ty = if should_load_stack_ptr {
-                                Type::Ptr(0)
-                            } else {
-                                ir_ty.unwrap_or(Type::Int)
-                            };
-                            let ann = translate_annotation(ty).or_else(|| {
-                                // Aggregate types have no annotation from
-                                // translate_annotation.  When we load them as
-                                // Type::Int, supply a width annotation to
-                                // satisfy the IR verifier.
-                                if should_load_stack_aggregate {
-                                    int_annotation_for_bytes(size as u32)
-                                } else {
-                                    None
-                                }
-                            });
                             let loaded = self.builder.load(
                                 slot.into(),
-                                size as u32,
+                                load_bytes,
                                 load_ty,
                                 self.current_mem.into(),
                                 ann,
+                                Origin::synthetic(),
+                            );
+                            return Some(loaded);
+                        }
+                        if is_slot_ptr
+                            && size > 0
+                            && size <= 8
+                            && slot_size.is_some_and(|sz| sz <= size)
+                            && translate_ty(self.tcx, ty).is_none()
+                        {
+                            let loaded = self.builder.load(
+                                slot.into(),
+                                size,
+                                Type::Int,
+                                self.current_mem.into(),
+                                int_annotation_for_bytes(size),
                                 Origin::synthetic(),
                             );
                             return Some(loaded);
@@ -129,15 +105,13 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         && self.builder.is_memory_address(v)
                     {
                         let ty = self.monomorphize(self.mir.local_decls[place.local].ty);
-                        let size = type_size(self.tcx, ty).unwrap_or(8);
-                        if matches!(translate_ty(self.tcx, ty), Some(Type::Int))
-                            && (size <= 8 || ty.is_integral())
+                        if let Some((load_ty, load_bytes, ann)) = scalar_value_info(self.tcx, ty)
+                            && !matches!(load_ty, Type::Ptr(_))
                         {
-                            let ann = translate_annotation(ty);
                             let loaded = self.builder.load(
                                 v.into(),
-                                size as u32,
-                                Type::Int,
+                                load_bytes,
+                                load_ty,
                                 self.current_mem.into(),
                                 ann,
                                 Origin::synthetic(),

@@ -130,6 +130,44 @@ pub(super) fn repr_kind<'tcx>(tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> ReprKind {
     }
 }
 
+/// Returns the IR load/store shape for a scalar-repr value, including scalar
+/// newtypes whose Rust type does not directly map to an IR scalar type.
+pub(super) fn scalar_value_info<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    ty: ty::Ty<'tcx>,
+) -> Option<(Type, u32, Option<Annotation>)> {
+    let layout = mono_layout_of(tcx, ty)?;
+    let BackendRepr::Scalar(scalar) = layout.backend_repr else {
+        return None;
+    };
+    let bytes = layout.size.bytes() as u32;
+    let load_ty = match translate_ty(tcx, ty) {
+        Some(Type::Bool) => Type::Bool,
+        Some(Type::Float(ft)) => Type::Float(ft),
+        Some(Type::Ptr(addr_space)) => Type::Ptr(addr_space),
+        Some(Type::Int) => Type::Int,
+        Some(Type::Unit) => return None,
+        Some(_) => return None,
+        None => match scalar.primitive() {
+            rustc_abi::Primitive::Pointer(_) => return None,
+            rustc_abi::Primitive::Float(float) => match float.size().bytes() {
+                2 => Type::Float(FloatType::F16),
+                4 => Type::Float(FloatType::F32),
+                8 => Type::Float(FloatType::F64),
+                16 => Type::Float(FloatType::F128),
+                _ => return None,
+            },
+            rustc_abi::Primitive::Int(_, _) => Type::Int,
+        },
+    };
+    let ann = if matches!(load_ty, Type::Int) {
+        translate_annotation(ty).or_else(|| int_annotation_for_bytes(bytes))
+    } else {
+        None
+    };
+    Some((load_ty, bytes, ann))
+}
+
 /// Maps a monomorphized Rust type to its direct Tuffy IR type when one exists.
 pub(super) fn translate_ty<'tcx>(_tcx: TyCtxt<'tcx>, ty: ty::Ty<'tcx>) -> Option<Type> {
     match ty.kind() {

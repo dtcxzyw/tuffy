@@ -58,11 +58,11 @@
 // CHECK:     v1: ptr = param 0
 // CHECK:     v2: ptr = stack_slot 8 align 8
 // CHECK:     v3: ptr = stack_slot 16 align 8
-// CHECK:     v4: int:i64 = load.8 v1, v0
+// CHECK:     v4: int:u64 = load.8 v1, v0
 // CHECK:     v5: int:i64 = iconst 8
 // CHECK:     v6: ptr = ptradd v1, v5
-// CHECK:     v7: int:i64 = load.8 v6, v0
-// CHECK:     v8: bool = icmp.lt v4:u64, v7:u64
+// CHECK:     v7: int:u64 = load.8 v6, v0
+// CHECK:     v8: bool = icmp.lt v4, v7
 // CHECK:     v9: int:u64 = iconst 1
 // CHECK:     v10: int:u64 = iconst 0
 // CHECK:     v11: int:u64 = select v8, v9, v10
@@ -73,9 +73,9 @@
 // CHECK:     brif v15, bb2(v0), bb1(v0)
 // CHECK:
 // CHECK:   bb1(v17: mem):
-// CHECK:     v18: int:i64 = load.8 v1, v17
+// CHECK:     v18: int:u64 = load.8 v1, v17
 // CHECK:     v19: int:i64 = iconst 1
-// CHECK:     v20: int:u64 = add v18:u64, v19:u64
+// CHECK:     v20: int:u64 = add v18, v19:u64
 // CHECK:     v21: mem = store.8 v20, v1, v17
 // CHECK:     v22: int:i64 = iconst 0
 // CHECK:     v23: mem = store.8 v22, v3, v21
@@ -89,7 +89,7 @@
 // CHECK:     v31: mem = store.8 v30, v3, v29
 // CHECK:     v32: int:i64 = iconst 8
 // CHECK:     v33: ptr = ptradd v3, v32
-// CHECK:     v34: int:i64 = load.8 v33, v31
+// CHECK:     v34: int:u64 = load.8 v33, v31
 // CHECK:     v35: mem = store.8 v34, v2, v31
 // CHECK:     br bb3(v35)
 // CHECK:

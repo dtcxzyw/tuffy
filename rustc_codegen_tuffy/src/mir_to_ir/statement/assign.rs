@@ -700,12 +700,6 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                             .raw();
                     } else {
                         let src_slot = match rvalue {
-                            Rvalue::Use(Operand::Copy(src_place) | Operand::Move(src_place))
-                                if src_place.projection.is_empty()
-                                    && self.stack_locals.is_stack(src_place.local) =>
-                            {
-                                self.locals.get(src_place.local)
-                            }
                             // &(*local) / &raw (*local) on a fat-pointer
                             // stack local: the slot holds the full fat
                             // pointer (data ptr + metadata) which must be

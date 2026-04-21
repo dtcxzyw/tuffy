@@ -38,11 +38,11 @@
 // CHECK:     v2: ptr = stack_slot 24 align 8
 // CHECK:     v3: int:i64 = iconst 24
 // CHECK:     v4: mem = memcopy v2:align8, v1:align8, v3, v0
-// CHECK:     v5: int:i64 = load.8 v2, v4
+// CHECK:     v5: int:u64 = load.8 v2, v4
 // CHECK:     v6: int:i64 = iconst 8
 // CHECK:     v7: ptr = ptradd v2, v6
-// CHECK:     v8: int:i64 = load.8 v7, v4
-// CHECK:     v9: int:u64, v10: bool = uadd_overflow.64 v5:u64, v8:u64
+// CHECK:     v8: int:u64 = load.8 v7, v4
+// CHECK:     v9: int:u64, v10: bool = uadd_overflow.64 v5, v8
 // CHECK:     v11: int:u64 = iconst 1
 // CHECK:     v12: int:u64 = iconst 0
 // CHECK:     v13: int:u64 = select v10, v11, v12
@@ -53,8 +53,8 @@
 // CHECK:   bb1(v17: mem):
 // CHECK:     v18: int:i64 = iconst 16
 // CHECK:     v19: ptr = ptradd v2, v18
-// CHECK:     v20: int:i64 = load.8 v19, v17
-// CHECK:     v21: int:u64, v22: bool = uadd_overflow.64 v9, v20:u64
+// CHECK:     v20: int:u64 = load.8 v19, v17
+// CHECK:     v21: int:u64, v22: bool = uadd_overflow.64 v9, v20
 // CHECK:     v23: int:u64 = iconst 1
 // CHECK:     v24: int:u64 = iconst 0
 // CHECK:     v25: int:u64 = select v22, v23, v24

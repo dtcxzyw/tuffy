@@ -1066,7 +1066,7 @@
 // CHECK:     br bb25(v235)
 // CHECK:
 // CHECK:   bb25(v237: mem):
-// CHECK:     v238: int:i32 = load.4 v10, v237
+// CHECK:     v238: int:u32 = load.4 v10, v237
 // CHECK:     v239: int:i64 = iconst 4
 // CHECK:     v240: ptr = ptradd v10, v239
 // CHECK:     v241: bool = load.1 v240, v237

@@ -15,36 +15,8 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
     ) -> bool {
         // Translate intrinsic arguments to IR values.
         let mut intrinsic_args: Vec<ValueRef> = Vec::new();
-        let direct_abi_bytes = self.target_direct_abi_bytes();
         for arg in args {
             if let Some(v) = self.translate_operand(&arg.node) {
-                // For large scalar types (e.g. i128, 16 bytes) translate_operand
-                // returns a stack-slot pointer rather than the value.  Load the
-                // integer bits so intrinsics (bswap, ctlz, bitreverse, …) receive
-                // the actual value, not an address.
-                let v = if matches!(self.builder.value_type(v), Some(Type::Ptr(_))) {
-                    let arg_ty = self.monomorphize(arg.node.ty(&self.mir.local_decls, self.tcx));
-                    if let Some(sz) = type_size(self.tcx, arg_ty) {
-                        if sz <= direct_abi_bytes
-                            && matches!(translate_ty(self.tcx, arg_ty), Some(Type::Int))
-                        {
-                            self.builder.load(
-                                v.into(),
-                                sz as u32,
-                                Type::Int,
-                                self.current_mem.into(),
-                                translate_annotation(arg_ty),
-                                Origin::synthetic(),
-                            )
-                        } else {
-                            v
-                        }
-                    } else {
-                        v
-                    }
-                } else {
-                    v
-                };
                 intrinsic_args.push(v);
                 // Also push fat pointer metadata for intrinsics that
                 // need it (e.g. size_of_val on unsized types).

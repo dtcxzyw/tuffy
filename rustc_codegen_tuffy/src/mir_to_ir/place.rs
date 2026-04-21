@@ -635,15 +635,11 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
             );
             return Some(data);
         }
-        // Wide integral scalars (e.g. i128): load as a full-width
-        // Type::Int value so downstream code sees a value, not an
-        // address. The legalizer lowers wide integer values later.
-        if bytes > 8 && projected_ty.is_integral() {
-            let ann = translate_annotation(projected_ty);
+        if let Some((load_ty, load_bytes, ann)) = scalar_value_info(self.tcx, projected_ty) {
             let data = self.builder.load(
                 addr.into(),
-                bytes,
-                Type::Int,
+                load_bytes,
+                load_ty,
                 self.current_mem.into(),
                 ann,
                 Origin::synthetic(),

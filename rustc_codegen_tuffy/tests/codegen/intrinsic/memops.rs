@@ -1735,7 +1735,7 @@
 // CHECK:     v38: mem = store.8 v37, v6, v36
 // CHECK:     v39: int:i64 = iconst 8
 // CHECK:     v40: ptr = ptradd v6, v39
-// CHECK:     v41: int:i64 = load.8 v40, v38
+// CHECK:     v41: int:u64 = load.8 v40, v38
 // CHECK:     v42: bool = icmp.lt v7, v8
 // CHECK:     v43: int:u64 = iconst 1
 // CHECK:     v44: int:u64 = iconst 0
@@ -1760,7 +1760,7 @@
 // CHECK:
 // CHECK:   bb6(v61: mem):
 // CHECK:     v62: int:u64 = load.8 v5, v61
-// CHECK:     v63: bool = icmp.ge v62, v41:u64
+// CHECK:     v63: bool = icmp.ge v62, v41
 // CHECK:     ret v63, v61
 // CHECK: }
 // CHECK:
