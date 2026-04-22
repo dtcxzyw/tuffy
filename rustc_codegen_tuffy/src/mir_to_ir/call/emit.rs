@@ -1296,9 +1296,34 @@ impl<'a, 'tcx> TranslationCtx<'a, 'tcx> {
                         );
                         ir_args.push(loaded.into());
                     } else {
+                        let abi_scalar_aggregate = translate_ty(self.tcx, arg_ty).is_none()
+                            && matches!(repr_kind(self.tcx, arg_ty), ReprKind::Scalar)
+                            && arg_size > 0
+                            && arg_size <= part_bytes;
+                        let v = if abi_scalar_aggregate {
+                            match self.builder.value_type(v).cloned() {
+                                Some(Type::Int) => v,
+                                Some(Type::Float(_)) => self.builder.bitcast(
+                                    v.into(),
+                                    Type::Int,
+                                    int_annotation_for_bytes(arg_size as u32),
+                                    Origin::synthetic(),
+                                ),
+                                Some(Type::Bool) | Some(Type::Ptr(_)) => self.coerce_to_int(v),
+                                _ => v,
+                            }
+                        } else {
+                            v
+                        };
                         // Push value with type annotation so the legalizer
                         // can identify wide integer values.
-                        if let Some(ann) = translate_annotation(arg_ty) {
+                        if abi_scalar_aggregate {
+                            ir_args.push(IrOperand::annotated(
+                                v,
+                                int_annotation_for_bytes(arg_size as u32)
+                                    .expect("non-zero scalar aggregate arg must have int ann"),
+                            ));
+                        } else if let Some(ann) = translate_annotation(arg_ty) {
                             ir_args.push(IrOperand::annotated(v, ann));
                         } else {
                             ir_args.push(v.into());

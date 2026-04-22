@@ -102,6 +102,7 @@ run_test "trait_sret_self_deref" "$FIXTURE_DIR/trait_sret_self_deref.rs" "14"
 run_test "box_dyn_from_raw" "$FIXTURE_DIR/box_dyn_from_raw.rs" "ok"
 run_test "generic_fat_field" "$FIXTURE_DIR/generic_fat_field.rs" "9"
 run_test "zst_closure_rust_call" "$FIXTURE_DIR/zst_closure_rust_call.rs" "foobar"
+run_test "float_array_sum_identity" "$FIXTURE_DIR/float_array_sum_identity.rs" "ok"
 
 echo ""
 echo "=== Results: $pass passed, $fail failed ==="
