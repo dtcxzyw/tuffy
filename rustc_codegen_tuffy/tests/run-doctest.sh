@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Extract and compile Rust stdlib doctests using the tuffy codegen backend.
 # Usage: ./run-doctest.sh [library-dir] [--run]
-#   library-dir: path to scratch/rust/library (default: ../../scratch/rust/library)
+#   library-dir: path to scratch/rust/library (default: <repo>/scratch/rust/library)
 #   --run: also execute compiled binaries (default: compile-only)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CRATE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$CRATE_DIR/.." && pwd)"
 TOOLCHAIN="${TOOLCHAIN:-nightly-2026-03-28}"
 export RUSTUP_TOOLCHAIN="$TOOLCHAIN"
 
@@ -19,12 +20,17 @@ else
     BACKEND="$CRATE_DIR/target/debug/librustc_codegen_tuffy.so"
 fi
 
-LIBRARY_DIR="${1:-$CRATE_DIR/../../scratch/rust/library}"
-LIBRARY_DIR="$(cd "$LIBRARY_DIR" && pwd)"
 RUN_MODE=0
+LIBRARY_DIR_ARG=""
 for arg in "$@"; do
-    [[ "$arg" == "--run" ]] && RUN_MODE=1
+    if [[ "$arg" == "--run" ]]; then
+        RUN_MODE=1
+    else
+        LIBRARY_DIR_ARG="$arg"
+    fi
 done
+LIBRARY_DIR="${LIBRARY_DIR_ARG:-$REPO_ROOT/scratch/rust/library}"
+LIBRARY_DIR="$(cd "$LIBRARY_DIR" && pwd)"
 
 OUTDIR="/tmp/tuffy_doctest"
 rm -rf "$OUTDIR"

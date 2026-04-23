@@ -195,7 +195,7 @@ tests/run-doctest.sh [library-dir] [--run]
 ```
 
 Arguments:
-- `library-dir`: Path to `scratch/rust/library` (default: `../../scratch/rust/library`)
+- `library-dir`: Path to `scratch/rust/library` (default: `<repo>/scratch/rust/library`)
 - `--run`: Execute compiled binaries (default: compile-only)
 
 Extracts code blocks from doc comments, wraps them in `fn main()` if needed, and compiles with tuffy backend. Requires a full clone of rust-lang/rust (not sparse).
