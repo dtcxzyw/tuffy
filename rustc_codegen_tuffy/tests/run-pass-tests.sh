@@ -101,8 +101,6 @@ for test_file in "${tests[@]}"; do
     # support the runner does not provide.
     if grep -q 'rust_test_helpers' "$test_file" 2>/dev/null \
         || grep -q 'minisimd\.rs' "$test_file" 2>/dev/null \
-        || { grep -q '^//@ rustc-env:' "$test_file" 2>/dev/null \
-            && grep -qE '\b(option_)?env!\(' "$test_file" 2>/dev/null; } \
         || grep -qE 'extern "(thiscall|fastcall)"' "$test_file" 2>/dev/null \
         || [[ "$rel_path" == darwin-objc/* ]] \
         || grep -q 'std::os::darwin::objc' "$test_file" 2>/dev/null; then
@@ -128,9 +126,17 @@ for test_file in "${tests[@]}"; do
         test_edition="${raw_edition:-2021}"
     fi
 
+    rustc_env=()
+    while IFS= read -r env_line; do
+        parsed=$(echo "$env_line" | sed -E 's|^//@ rustc-env:[[:space:]]*([^=[:space:]]+)[[:space:]]*=(.*)$|\1=\2|')
+        if [ "$parsed" != "$env_line" ]; then
+            rustc_env+=("$parsed")
+        fi
+    done < <(grep '^//@ rustc-env:' "$test_file" 2>/dev/null || true)
+
     # Step 1: Compile and link as binary
     set +e
-    compile_out=$(timeout 30 rustc --edition "$test_edition" \
+    compile_out=$(timeout 30 env "${rustc_env[@]}" rustc --edition "$test_edition" \
         -Z codegen-backend="$BACKEND" \
         -o "$bin_path" \
         "$test_file" 2>&1)
