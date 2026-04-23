@@ -97,6 +97,19 @@ for test_file in "${tests[@]}"; do
         continue
     fi
 
+    # Skip tests that require harness features or host-specific frontend
+    # support the runner does not provide.
+    if grep -q 'rust_test_helpers' "$test_file" 2>/dev/null \
+        || grep -q 'minisimd\.rs' "$test_file" 2>/dev/null \
+        || { grep -q '^//@ rustc-env:' "$test_file" 2>/dev/null \
+            && grep -qE '\b(option_)?env!\(' "$test_file" 2>/dev/null; } \
+        || grep -qE 'extern "(thiscall|fastcall)"' "$test_file" 2>/dev/null \
+        || [[ "$rel_path" == darwin-objc/* ]] \
+        || grep -q 'std::os::darwin::objc' "$test_file" 2>/dev/null; then
+        skip=$((skip + 1))
+        continue
+    fi
+
     bin_path="$OUT_DIR/test_bin"
     rm -f "$bin_path"
 

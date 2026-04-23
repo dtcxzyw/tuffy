@@ -1,31 +1,5 @@
 #
-abi/anon-extern-mod.rs
-abi/cabi-int-widening.rs
-abi/c-stack-as-value.rs
 abi/custom.rs
-abi/extern/extern-call-deep2.rs
-abi/extern/extern-call-indirect.rs
-abi/extern/extern-call-scrub.rs
-abi/extern/extern-pass-char.rs
-abi/extern/extern-pass-double.rs
-abi/extern/extern-pass-FiveU16s.rs
-abi/extern/extern-pass-TwoU16s.rs
-abi/extern/extern-pass-TwoU32s.rs
-abi/extern/extern-pass-TwoU64s.rs
-abi/extern/extern-pass-TwoU8s.rs
-abi/extern/extern-pass-u32.rs
-abi/extern/extern-pass-u64.rs
-abi/extern/extern-return-FiveU16s.rs
-abi/extern/extern-return-TwoU16s.rs
-abi/extern/extern-return-TwoU32s.rs
-abi/extern/extern-return-TwoU64s.rs
-abi/extern/extern-return-TwoU8s.rs
-abi/foreign/foreign-fn-with-byval.rs
-abi/issues/issue-62350-sysv-neg-reg-counts.rs
-abi/issues/issue-97463-broken-abi-leaked-uninit-data.rs
-abi/mir/mir_codegen_calls_variadic.rs
-abi/statics/static-mut-foreign.rs
-abi/union/union-c-interop.rs
 array-slice-vec/driftsort-off-by-one-issue-136103.rs
 async-await/for-await-passthrough.rs
 async-await/for-await.rs
@@ -36,15 +10,9 @@ const_prop/dont-propagate-generic-instance.rs
 consts/zst_no_llvm_alloc.rs
 c-variadic/naked.rs
 c-variadic/same-program-multiple-abis-x86_64.rs
-darwin-objc/darwin-objc-class.rs
-darwin-objc/darwin-objc-class-selector.rs
-darwin-objc/darwin-objc-selector.rs
 derives/derive-partial-ord-discriminant.rs
 enum-discriminant/get_discr.rs
 enum-discriminant/repr128.rs
-env-macro/env-not-env.rs
-extern/extern-methods.rs
-extern/extern-thiscall.rs
 foreign/foreign2.rs
 foreign/foreign-mod-src/inner.rs
 foreign/foreign-src/foreign.rs
@@ -60,7 +28,6 @@ issues/issue-25757.rs
 issues/issue-33387.rs
 # Lines starting with # are comments.
 loop-match/unwind.rs
-macros/macros-in-extern.rs
 mir/mir_codegen_calls.rs
 numbers-arithmetic/f16-f128-lit.rs
 packed/dyn-trait.rs
@@ -75,9 +42,6 @@ rfcs/rfc-2091-track-caller/tracked-closure.rs
 rfcs/rfc-2091-track-caller/tracked-trait-obj.rs
 # Run-pass tests excluded from tuffy codegen backend testing.
 runtime/stdout-before-main.rs
-simd/generics.rs
-simd/intrinsic/ptr-cast.rs
-simd/issue-89193.rs
 structs-enums/align-struct.rs
 structs-enums/enum-discr.rs
 structs-enums/enum-disr-val-pretty.rs

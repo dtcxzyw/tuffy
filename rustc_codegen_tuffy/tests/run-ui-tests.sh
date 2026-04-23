@@ -133,6 +133,20 @@ for test_file in "${tests[@]}"; do
         continue
     fi
 
+    # Skip tests that depend on runner infrastructure we do not currently
+    # provide (native helper archives, rustc-env injection, or missing sparse
+    # checkout auxiliary files), plus target-specific frontend rejects.
+    if grep -q 'rust_test_helpers' "$test_file" 2>/dev/null \
+        || grep -q 'minisimd\.rs' "$test_file" 2>/dev/null \
+        || { grep -q '^//@ rustc-env:' "$test_file" 2>/dev/null \
+            && grep -qE '\b(option_)?env!\(' "$test_file" 2>/dev/null; } \
+        || grep -qE 'extern "(thiscall|fastcall)"' "$test_file" 2>/dev/null \
+        || [[ "$rel_path" == darwin-objc/* ]] \
+        || grep -q 'std::os::darwin::objc' "$test_file" 2>/dev/null; then
+        skip=$((skip + 1))
+        continue
+    fi
+
     # Parse //@ edition: directive (default: 2021)
     edition="2021"
     edition_line=$(grep -m1 '^//@ edition:' "$test_file" 2>/dev/null || true)

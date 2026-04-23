@@ -5,30 +5,6 @@
 # Format: one relative path per line (relative to tests/ui/).
 # Lines starting with # are comments.
 
-abi/anon-extern-mod.rs
-abi/c-stack-as-value.rs
-abi/cabi-int-widening.rs
-abi/extern/extern-call-indirect.rs
-abi/extern/extern-pass-FiveU16s.rs
-abi/extern/extern-pass-TwoU16s.rs
-abi/extern/extern-pass-TwoU32s.rs
-abi/extern/extern-pass-TwoU64s.rs
-abi/extern/extern-pass-TwoU8s.rs
-abi/extern/extern-pass-char.rs
-abi/extern/extern-pass-double.rs
-abi/extern/extern-pass-u32.rs
-abi/extern/extern-pass-u64.rs
-abi/extern/extern-return-FiveU16s.rs
-abi/extern/extern-return-TwoU16s.rs
-abi/extern/extern-return-TwoU32s.rs
-abi/extern/extern-return-TwoU64s.rs
-abi/extern/extern-return-TwoU8s.rs
-abi/foreign/foreign-fn-with-byval.rs
-abi/issues/issue-62350-sysv-neg-reg-counts.rs
-abi/issues/issue-97463-broken-abi-leaked-uninit-data.rs
-abi/mir/mir_codegen_calls_variadic.rs
-abi/statics/static-mut-foreign.rs
-abi/union/union-c-interop.rs
 abi/unsized-args-in-c-abi-issues-94223-115845.rs
 associated-consts/issue-110933.rs
 associated-type-bounds/duplicate-bound.rs
@@ -39,9 +15,6 @@ const-generics/mgca/concrete-expr-with-generics-in-env.rs
 consts/const-eval/no_lint_for_statically_known_error.rs
 consts/const-promoted-opaque.rs
 consts/underscore_const_names.rs
-env-macro/env-not-env.rs
-extern/extern-methods.rs
-extern/extern-thiscall.rs
 foreign/foreign-mod-src/inner.rs
 foreign/foreign-src/foreign.rs
 foreign/foreign2.rs
@@ -81,7 +54,6 @@ lint/non-snake-case/non-snake-ffi-issue-31924.rs
 lint/unused/const-local-var.rs
 lint/unused/issue-104397.rs
 macros/macro-export-inner-module.rs
-macros/macros-in-extern.rs
 modules/module-polymorphism3-files/float-template/inst_float.rs
 non_modrs_mods/foors_mod/inner_foors_mod.rs
 non_modrs_mods/modrs_mod/inner_foors_mod.rs
@@ -90,10 +62,7 @@ process/env-null-vars.rs
 reachable/unreachable-by-call-arguments-issue-139627.rs
 resolve/multiple_definitions_attribute_merging.rs
 resolve/proc_macro_generated_packed.rs
-simd/generics.rs
 simd/intrinsic/inlining-issue67557-ice.rs
-simd/intrinsic/ptr-cast.rs
-simd/issue-89193.rs
 type-alias-enum-variants/issue-63151-dead-code-lint-fields-in-patterns.rs
 type-alias-impl-trait/imply_bounds_from_bounds_param.rs
 
@@ -109,16 +78,9 @@ lint/unknown-lints-at-crate-level.rs
 # Tests for invalid compiler flags (expected to fail).
 
 # Missing auxiliary/minisimd.rs (not in sparse checkout).
-simd/intrinsic/generic-bswap-byte.rs
-simd/intrinsic/generic-cast-pass.rs
-simd/intrinsic/generic-cast-pointer-width.rs
-simd/intrinsic/generic-comparison-pass.rs
-simd/intrinsic/generic-elements-pass.rs
-simd/simd-bitmask.rs
 
 # MIR opt level / polonius flags cause expected compilation errors in lib mode.
 nll/polonius/array-literal-index-oob-2024.rs
-simd/intrinsic/inlining-issue67557.rs
 
 # -Znext-solver opaque type region constraint failure.
 
