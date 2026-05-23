@@ -3,6 +3,16 @@
 
 An experimental optimizing compiler written by LLM
 
+> **Status (2026-05-24):** I have decided to pause the development of this project until sufficiently powerful and affordable models become available. Although the flagship models from various vendors have initially demonstrated their impressive capabilities in this project, I believe now is still not the best time to continue.
+>
+> Over the past few months of development, I found that the models consistently opt for the simplest solutions, or forcibly apply their LLVM knowledge onto Tuffy IR. This forced me to adjust Tuffy IR's design as a compromise.
+>
+> From my perspective, it is not only ruining my ideas but also burning through my wallet. I feel this state is somewhat affecting my physical and mental well-being, prompting me to pause exploration in order to maintain my active participation in the LLVM community.
+>
+> I firmly believe this is not an issue with how I interact with LLMs — I have used LLMs to develop small services to aid LLVM development, and I have also built several production-ready programs with tens of millions of end users entirely using LLMs at my employer.
+>
+> The projects I developed at my employer are not as complex as tuffy, but I needed to spend roughly $1,000/day on token consumption. Based on this estimate, the token consumption required to develop tuffy is clearly beyond what I can personally afford.
+
 > **Note:** This project is currently in an experimental stage. External pull requests are not accepted at this time.
 
 ## Experiments
